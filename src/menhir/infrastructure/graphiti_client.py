@@ -7,6 +7,7 @@ import contextlib
 import inspect
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime
@@ -67,6 +68,7 @@ from menhir.infrastructure.graphiti_edge_invalidation import (  # noqa: E402
     invalidation_guard_state,
     invalidation_hook_kwargs,
     record_kept_conflicts,
+    record_kept_conflicts_in_tx,
 )
 from menhir.infrastructure.graphiti_extraction_policy import (  # noqa: E402
     MenhirEdgeExpiryHook,
@@ -79,6 +81,7 @@ from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
 )
 from menhir.infrastructure.model_profiles import resolve_model_profile  # noqa: E402
 from menhir.infrastructure.openai_calls import ResilientChatClient  # noqa: E402
+from menhir.infrastructure.publish_fence import MenhirPublishFence  # noqa: E402
 from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
     MenhirCandidateFilterHook,
     MenhirIdentityGateHook,
@@ -606,8 +609,17 @@ class GraphitiClient:
         episode_uuid: str | None = None,
         attempt: int = 1,
         group_id: str = "",
+        new_episode_uuid: str | None = None,
+        publish_fence: MenhirPublishFence | None = None,
     ) -> Any:
-        """Delegate episode ingestion to Graphiti."""
+        """Delegate episode ingestion to Graphiti.
+
+        ``new_episode_uuid`` names the :Episodic Graphiti mints (the claim's reserved twin uuid) and
+        ``publish_fence`` runs inside Graphiti's publish transaction. Both are forwarded only when
+        the installed native ``add_episode`` accepts them; a fence it cannot accept fails closed.
+        With a fence, the anchored-time persist and the kept-conflict records run inside that
+        transaction (as fence extras) instead of after it.
+        """
         from menhir.infrastructure.graphiti_extraction_policy import (
             AnchoredTimeSlot,
             anchored_time_owner,
@@ -615,6 +627,7 @@ class GraphitiClient:
             get_extraction_receipt,
         )
 
+        native_publish_kwargs = self._native_publish_kwargs(new_episode_uuid, publish_fence)
         receipt = get_extraction_receipt()
         # Only a report this invocation produced may be persisted: a reused receipt can hold an
         # earlier call's report, and a receipt shared by a concurrent call can hold that call's.
@@ -626,17 +639,95 @@ class GraphitiClient:
         state = InvalidationGuardState(owner=owner, source=source_description)
         guard_binding = invalidation_guard_state.set(state)
         try:
+            fenced = publish_fence is not None
+            if publish_fence is not None:
+                native_publish_kwargs["publish_fence"] = publish_fence.with_extras(
+                    self._anchored_time_extra(receipt, owner, group_id, reference_time),
+                    self._kept_conflicts_extra(state),
+                )
+            owned_extra: dict[str, Any] = (
+                {"native_publish_kwargs": native_publish_kwargs, "fenced": fenced}
+                if native_publish_kwargs or fenced
+                else {}
+            )
             result = await self._add_episode_owned(
                 receipt, owner,
                 name=name, episode_body=episode_body, source_description=source_description,
                 reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
+                **owned_extra,
             )
-            await self._record_kept_conflicts(state)
+            if not fenced:
+                await self._record_kept_conflicts(state)
             return result
         finally:
             invalidation_guard_state.reset(guard_binding)
             anchored_time_slot.reset(slot_binding)
             anchored_time_owner.reset(owner_binding)
+
+    def _native_publish_kwargs(
+        self, new_episode_uuid: str | None, publish_fence: MenhirPublishFence | None
+    ) -> dict[str, Any]:
+        """Fence kwargs the installed native ``add_episode`` accepts; fail closed on a fence it cannot."""
+        if new_episode_uuid is None and publish_fence is None:
+            return {}
+        try:
+            params = inspect.signature(self.client.add_episode).parameters
+        except (TypeError, ValueError):
+            params = {}
+        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+        def accepts(name: str) -> bool:
+            return name in params or accepts_kwargs
+
+        if publish_fence is not None and not accepts("publish_fence"):
+            raise RuntimeError(
+                "A publish fence was requested but the installed graphiti_core add_episode has no "
+                "publish_fence parameter (archolith-graphiti-core>=0.31.2.post3 is required); "
+                "refusing to publish unfenced."
+            )
+        kwargs: dict[str, Any] = {}
+        if new_episode_uuid is not None and accepts("new_episode_uuid"):
+            kwargs["new_episode_uuid"] = new_episode_uuid
+        if publish_fence is not None:
+            kwargs["publish_fence"] = publish_fence
+        return kwargs
+
+    def _anchored_time_extra(
+        self, receipt: Any, owner: str, group_id: str, reference_time: datetime
+    ) -> Any:
+        """Fence extra: persist this call's anchored-time contract inside the publish transaction."""
+
+        async def extra(tx: Any, *, episode_uuid: str, entity_edge_uuids: Sequence[str]) -> None:
+            from menhir.infrastructure.anchored_time import _utc_date
+            from menhir.infrastructure.anchored_time_persist import persist_anchored_time_in_tx
+            from menhir.infrastructure.graphiti_extraction_policy import owned_anchored_time_report
+            from menhir.infrastructure.publish_fence import _tx_run
+
+            report = owned_anchored_time_report(receipt, owner)
+            if report is None or report.status != "ok":
+                return
+            await persist_anchored_time_in_tx(
+                partial(_tx_run, tx),
+                report,
+                episode_uuid=episode_uuid,
+                group_id=group_id,
+                edge_uuids=entity_edge_uuids,
+                # UTC, like Graphiti's stored valid_at, so rendering can compare them exactly.
+                speech_date=_utc_date(reference_time),
+            )
+
+        return extra
+
+    def _kept_conflicts_extra(self, state: InvalidationGuardState) -> Any:
+        """Fence extra: record the edges the invalidation guard kept, inside the publish transaction."""
+
+        async def extra(tx: Any, *, episode_uuid: str, entity_edge_uuids: Sequence[str]) -> None:
+            from menhir.infrastructure.publish_fence import _tx_run
+
+            if state.kept:
+                await record_kept_conflicts_in_tx(partial(_tx_run, tx), state.kept)
+
+        return extra
 
     async def _record_kept_conflicts(self, state: InvalidationGuardState) -> None:
         """Record unresolved conflicts for edges the guard kept; never fails the episode."""
@@ -658,6 +749,8 @@ class GraphitiClient:
         reference_time: datetime,
         episode_uuid: str | None,
         group_id: str,
+        native_publish_kwargs: dict[str, Any] | None = None,
+        fenced: bool = False,
     ) -> Any:
         if receipt is not None and str(receipt.self_bind_mode) == "enforce":
             # A partial construction must not reopen probabilistic self resolution.
@@ -681,9 +774,9 @@ class GraphitiClient:
                 details={"name": name, "task": task, "child_task_id": child_task_id},
             )
         )
-        # graphiti_core.Graphiti.add_episode() does not currently accept a caller-supplied
-        # external episode ID. We use episode_uuid for telemetry correlation here, then
-        # reconcile by anchor name if a local timeout may have hidden a remote success.
+        # ``episode_uuid`` is Menhir's queue-node uuid, used here for telemetry correlation. The
+        # :Episodic (twin) Graphiti mints is named by ``new_episode_uuid`` (the claim's reserved
+        # twin uuid) when the fork accepts it; otherwise Graphiti picks the uuid itself.
         result = await self._llm_breaker.call(
             lambda: self._await_add_episode_request(
                 awaitable=self.client.add_episode(
@@ -692,6 +785,7 @@ class GraphitiClient:
                     source_description=source_description,
                     reference_time=reference_time,
                     group_id=group_id,
+                    **(native_publish_kwargs or {}),
                 ),
             )
         )
@@ -718,7 +812,7 @@ class GraphitiClient:
         from menhir.infrastructure.graphiti_extraction_policy import owned_anchored_time_report
 
         report = owned_anchored_time_report(receipt, owner)
-        if report is not None and report.status == "ok":
+        if not fenced and report is not None and report.status == "ok":
             from menhir.infrastructure.anchored_time import _utc_date
             from menhir.infrastructure.anchored_time_persist import persist_anchored_time
 

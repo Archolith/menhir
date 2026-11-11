@@ -161,7 +161,7 @@ def _graph_hits(repo, sentinel: str) -> int:
     rows = repo.execute(
         """
         MATCH (n)
-        WITH n, [k IN keys(n) WHERE toString(n[k]) CONTAINS $s] AS bad
+        WITH n, [k IN keys(n) WHERE toStringOrNull(n[k]) CONTAINS $s] AS bad
         WHERE size(bad) > 0
         RETURN count(n) AS c
         """,

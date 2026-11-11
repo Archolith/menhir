@@ -456,7 +456,6 @@ def _turn_seed(repo: Any, ns: str, canary: str) -> dict:
     return ids
 
 
-@P0
 def test_t23a_typed_assertion_written_after_erase_does_not_keep_the_text(test_neo4j_repo, tmp_path):
     """T23 (typed-assertion half). Perception read the turn, the erase ran, then the stale
     perceiver persists a TypedAssertion whose ``stated_span`` is the turn's words. Fails if
@@ -502,7 +501,6 @@ class _ProjectAfterClosure:
         return getattr(self._inner, name)
 
 
-@P0
 def test_t23b_projection_minted_inside_erase_window_does_not_survive(test_neo4j_repo, tmp_path):
     """T23 (projection half). Pass 3 projects the turn between the erase's closure read and its
     delete. The projection copies the turn text, is not in the closure, and survives as an orphan.
@@ -520,7 +518,6 @@ def test_t23b_projection_minted_inside_erase_window_does_not_survive(test_neo4j_
 
 
 # ------------------------------------------------------------------ T6
-@P0
 def test_t6_stale_summary_save_after_erase_scrub_is_refused(test_neo4j_repo, tmp_path):
     """T6 (A-1). M1 and M2 share entity E. Worker W2 reads E (summary holds M1's words), erase of M1
     scrubs E, then W2 saves the summary it read. Drives the real ``GraphitiClient.add_episode``
@@ -534,11 +531,29 @@ def test_t6_stale_summary_save_after_erase_scrub_is_refused(test_neo4j_repo, tmp
     from datetime import datetime, timezone
 
     from menhir.infrastructure.graphiti_client import GraphitiClient
+    from menhir.infrastructure.publish_fence import (
+        ClaimFence, MenhirPublishFence, read_gate_fence)
 
     repo = test_neo4j_repo
     ns, canary = f"t6-{_u()}", _canary("T6")
     ids = _seed_memory(repo, ns, canary)
     _adapter, coord, _db = _adapter_and_coordinator(repo, tmp_path)
+
+    # W2's own claim on a second queue node, as the worker holds it after gate entry. Seeded
+    # directly (P4 setup realignment: the fence is the fork's before_write/after_write protocol,
+    # driven from a claim and a gate epoch, not a zero-arg callable).
+    q2, twin2, worker = _u(), _u(), "t6-w2"
+    started = repo.execute(
+        """
+        CREATE (q:Episodic {uuid:$q, namespace:$ns, processing_state:'ENRICHING',
+                            processing_owner:$w, processing_started_at:datetime(),
+                            reserved_twin_uuids:[$t], publish_protocol:2,
+                            content:'a surviving memory'})
+        RETURN toString(q.processing_started_at) AS started
+        """, params={"q": q2, "ns": ns, "w": worker, "t": twin2})[0]["started"]
+    claim = ClaimFence(q_uuid=q2, worker_id=worker, claim_started_at=started,
+                       namespace_key=ns, reserved_twin_uuid=twin2)
+    gate = read_gate_fence(repo, ns)  # W2 entered the gate before the erase
 
     class _NativeGraphiti:
         driver = None
@@ -549,17 +564,25 @@ def test_t6_stale_summary_save_after_erase_scrub_is_refused(test_neo4j_repo, tmp
             assert canary in stale, "harness: W2 must read the pre-erase summary"
             coord.erase_memory(ids["queue"])  # M1 erased between W2's read and W2's save
             fence = kwargs.get("publish_fence")
-            if fence is not None:
-                fence()  # assumed contract: raises when the namespace was sealed meanwhile
-            repo.execute("MATCH (e:Entity {uuid:$e}) SET e.summary = $s",
-                         params={"e": ids["shared"], "s": stale})
+            loop = asyncio.get_running_loop()
+
+            def work(tx: Any) -> None:
+                if fence is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        fence.before_write(tx, episode_uuid=kwargs.get("new_episode_uuid") or twin2,
+                                           previous_episode_uuids=[]), loop).result(30)
+                tx.execute("MATCH (e:Entity {uuid:$e}) SET e.summary = $s",
+                           {"e": ids["shared"], "s": stale})
+
+            await asyncio.to_thread(repo.execute_write, work)
             return SimpleNamespace(episode=None, nodes=[], edges=[])
 
     client = GraphitiClient(client=_NativeGraphiti())
     try:
         asyncio.run(client.add_episode(
             name="w2", episode_body="a surviving memory", source_description="test",
-            reference_time=datetime.now(timezone.utc), episode_uuid=ids["live"], group_id=ns))
+            reference_time=datetime.now(timezone.utc), episode_uuid=q2, group_id=ns,
+            new_episode_uuid=twin2, publish_fence=MenhirPublishFence(claim, gate)))
     except AssertionError:
         raise
     except Exception:  # noqa: BLE001 - a fenced abort after the fix is the expected outcome

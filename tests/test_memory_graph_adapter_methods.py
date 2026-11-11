@@ -587,54 +587,39 @@ def test_delete_memory_returns_true_for_a_surfaced_assertion() -> None:
 
 
 @pytest.mark.unit
-def test_find_completed_episode_artifact_returns_existing_graphiti_episode() -> None:
-    neo4j = _StubNeo4jRepository(
-        responses=[
-            [{"resolved_episode_uuid": "episode-existing-1", "entity_uuids": ["entity-1", "entity-2"]}],
-            [{"edge_uuids": ["edge-episode-1"]}],
-            [{"edge_uuids": ["edge-entity-1", "edge-entity-2"]}],
-        ]
-    )
-    adapter = MemoryGraphAdapter(neo4j=neo4j)
-
-    result = adapter.find_completed_episode_artifact(
-        anchor_uuid="pending-1",
-        anchor_name="episode-session-1-pending-1",
-    )
-
-    assert result == {
-        "resolved_episode_uuid": "episode-existing-1",
-        "entity_uuids": ["entity-1", "entity-2"],
-        "edge_uuids": ["edge-episode-1", "edge-entity-1", "edge-entity-2"],
-    }
-    assert neo4j.calls[0]["params"] == {
-        "anchor_uuid": "pending-1",
-        "anchor_name": "episode-session-1-pending-1",
-    }
-
-
-@pytest.mark.unit
-def test_find_completed_episode_artifact_logs_and_skips_name_collisions(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_linked_twin_artifact_returns_the_linked_twin_set() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
             [
-                {"resolved_episode_uuid": "episode-existing-1", "entity_uuids": ["entity-1"]},
-                {"resolved_episode_uuid": "episode-existing-2", "entity_uuids": ["entity-2"]},
+                {
+                    "resolved_episode_uuid": "episode-existing-1",
+                    "entity_uuids": ["entity-1", "entity-2", "entity-1"],
+                    "edge_uuids": ["edge-1"],
+                    "namespace": "ns-1",
+                    "fence_namespace_key": "ns-1",
+                }
             ],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
-    with caplog.at_level("WARNING"):
-        result = adapter.find_completed_episode_artifact(
-            anchor_uuid="pending-1",
-            anchor_name="episode-session-1-pending-1",
-        )
+    result = adapter.linked_twin_artifact("pending-1")
 
-    assert result is None
-    assert "Multiple completed episode artifacts found" in caplog.text
+    assert result == {
+        "resolved_episode_uuid": "episode-existing-1",
+        "entity_uuids": ["entity-1", "entity-2"],
+        "edge_uuids": ["edge-1"],
+        "namespace": "ns-1",
+        "fence_namespace_key": "ns-1",
+    }
+    assert neo4j.calls[0]["params"] == {"episode_uuid": "pending-1"}
+
+
+@pytest.mark.unit
+def test_linked_twin_artifact_is_none_without_a_live_link() -> None:
+    adapter = MemoryGraphAdapter(neo4j=_StubNeo4jRepository(responses=[[]]))
+
+    assert adapter.linked_twin_artifact("pending-1") is None
 
 
 @pytest.mark.unit

@@ -168,6 +168,65 @@ def _namespace_of(group_id: str) -> str:
     return group_id or DEFAULT_NAMESPACE
 
 
+def persist_statement(
+    report: Any,
+    *,
+    episode_uuid: str | None,
+    group_id: str,
+    edge_uuids: Iterable[str],
+    speech_date: date | None,
+) -> tuple[str, dict[str, Any], bool] | None:
+    """``(cypher, params, expiry)`` for this call's contract write, or None when there is nothing
+    to write (``report.persist`` is then set to ``no_episode`` / ``no_rows``)."""
+    if not episode_uuid:
+        report.persist = "no_episode"
+        return None
+    rows = contract_rows(report, edge_uuids, speech_date)
+    if not rows:
+        report.persist = "no_rows"
+        return None
+    params = {
+        "rows": rows,
+        "group_id": group_id,
+        "episode_uuid": episode_uuid,
+        "tenant_namespaces": namespace_spellings(_namespace_of(group_id)),
+    }
+    expiry = any("time_world_end_s" in row for row in rows)
+    return (EXPIRY_PERSIST_CYPHER if expiry else PERSIST_CYPHER), params, expiry
+
+
+async def persist_anchored_time_in_tx(
+    run: Any,
+    report: Any,
+    *,
+    episode_uuid: str | None,
+    group_id: str,
+    edge_uuids: Iterable[str],
+    speech_date: date | None,
+) -> None:
+    """Same write inside an open publish transaction.
+
+    ``run`` is ``async (cypher, params) -> list[dict]`` bound to that transaction. Unlike
+    ``persist_anchored_time`` it cannot swallow a Cypher error: a failed statement poisons the
+    transaction, so the error propagates and the publish rolls back and is retried.
+    """
+    prepared = persist_statement(
+        report,
+        episode_uuid=episode_uuid,
+        group_id=group_id,
+        edge_uuids=edge_uuids,
+        speech_date=speech_date,
+    )
+    if prepared is None:
+        return
+    statement, params, expiry = prepared
+    records = await run(statement, params)
+    report.persisted = int(records[0]["written"]) if records else 0
+    if expiry and records:
+        report.stamped = int(records[0]["stamped"] or 0)
+    report.persist = "ok"
+
+
 async def persist_anchored_time(
     driver: Any,
     report: Any,
@@ -179,21 +238,17 @@ async def persist_anchored_time(
 ) -> None:
     """Write the contract for this call's new edges. Sets ``report.persist``; never raises
     except on cancellation."""
-    if not episode_uuid:
-        report.persist = "no_episode"
+    prepared = persist_statement(
+        report,
+        episode_uuid=episode_uuid,
+        group_id=group_id,
+        edge_uuids=edge_uuids,
+        speech_date=speech_date,
+    )
+    if prepared is None:
         return
-    rows = contract_rows(report, edge_uuids, speech_date)
-    if not rows:
-        report.persist = "no_rows"
-        return
-    params = {
-        "rows": rows,
-        "group_id": group_id,
-        "episode_uuid": episode_uuid,
-        "tenant_namespaces": namespace_spellings(_namespace_of(group_id)),
-    }
-    expiry = any("time_world_end_s" in row for row in rows)
-    statement = EXPIRY_PERSIST_CYPHER if expiry else PERSIST_CYPHER
+    statement, params, expiry = prepared
+    rows = params["rows"]
     try:
         result = await asyncio.wait_for(
             driver.execute_query(statement, params=params, routing_="w"),

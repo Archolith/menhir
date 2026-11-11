@@ -11,14 +11,15 @@ import asyncio
 import logging
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable
 
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 
-from menhir.domain.models import FreshnessState, ProcessingState
+from menhir.domain.models import FreshnessState
 from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
@@ -41,6 +42,13 @@ from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
     EvidencePublicationIntentRepository,
     PublicationDispatchSuppressed,
+)
+from menhir.infrastructure.publish_fence import (
+    ClaimFence,
+    GateFence,
+    MenhirPublishFence,
+    check_fence,
+    read_gate_fence,
 )
 from menhir.infrastructure.telemetry import (
     record_failure_event,
@@ -125,6 +133,11 @@ class EnrichmentContext:
     #: Source-memory lane: embed the episode content at ingest. On by default since #168 freeze;
     #: kept as a per-context knob.
     source_memories_enabled: bool = True
+    #: The claim this worker holds (owner, claim instant, fence key, reserved twin uuid). None only for
+    #: callers that predate publish protocol 2 (legacy ingest paths, tests); no fence runs then.
+    claim_fence: ClaimFence | None = None
+    #: The namespace erasure epoch read right after gate entry; set by the gate-entering step.
+    gate_fence: GateFence | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -242,22 +255,6 @@ def build_episode_preflight_rejection(
     }
 
 
-def still_owns_episode(
-    graph_adapter: MemoryGraphAdapter,
-    episode_uuid: str,
-    worker_id: str,
-) -> bool:
-    """Check whether this worker still holds the enrichment lease."""
-
-    row = graph_adapter.fetch_episode_processing(episode_uuid)
-    if row is None:
-        return False
-    return (
-        row.get("processing_state") == ProcessingState.ENRICHING
-        and str(row.get("processing_owner") or "") == worker_id
-    )
-
-
 def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) -> None:
     """Erase the Graphiti twin when the queue node was erased mid-enrichment."""
     try:
@@ -276,87 +273,53 @@ def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) ->
 
 
 # ---------------------------------------------------------------------------
-# Pipeline step 1 — try to reconcile an already-completed Graphiti result
+# Pipeline step 1 — finalize-from-link (replaces the by-name reconcile)
 # ---------------------------------------------------------------------------
 
-async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
-    """Check for an existing Graphiti completion and mark ready. Returns True if handled."""
+async def finalize_from_link(ctx: EnrichmentContext) -> bool:
+    """Finish an episode whose claim already carries a twin link. Returns True if handled.
 
-    existing_completion = ctx.graph_adapter.find_completed_episode_artifact(
-        anchor_uuid=ctx.episode_uuid,
-        anchor_name=str(ctx.claimed.get("name") or ctx.episode_uuid),
+    The publish transaction linked the queue node to its twin atomically, so a claim that returns a
+    ``resolved_episode_uuid`` skips preflight, extraction and ``add_episode`` and only needs the
+    post-publish steps. The artifact set is read back from the linked twin; when the read returns
+    nothing (queue node marked, or twin gone) the job stops without writing anything.
+    """
+
+    if not ctx.claimed.get("resolved_episode_uuid"):
+        return False
+    artifact = await asyncio.to_thread(
+        ctx.graph_adapter.linked_twin_artifact, ctx.episode_uuid
     )
-    if existing_completion is not None:
-        resolved_episode_uuid = str(existing_completion.get("resolved_episode_uuid") or "")
-        entity_uuids = [str(uuid) for uuid in (existing_completion.get("entity_uuids") or []) if str(uuid)]
-        edge_uuids = [str(uuid) for uuid in (existing_completion.get("edge_uuids") or []) if str(uuid)]
-        stamp_kwargs: dict[str, object] = {}
-        if ctx.claimed.get("bootstrap_scope") is not None:
-            stamp_kwargs["bootstrap_scope"] = ctx.claimed.get("bootstrap_scope")
-        stamped = ctx.graph_adapter.stamp_ingest_metadata(
-            node_uuids=[resolved_episode_uuid] + entity_uuids,
-            edge_uuids=edge_uuids,
-            session_id=str(ctx.claimed.get("session_id") or ""),
-            user_id=str(ctx.claimed.get("user_id") or ""),
-            source=str(ctx.claimed.get("source") or "claude-code"),
-            source_confidence=source_confidence_for(str(ctx.claimed.get("source") or "claude-code")),
-            namespace=str(ctx.claimed.get("namespace") or "default"),
-            **stamp_kwargs,
-        )
-        record_retention_sources(
-            ctx.graph_adapter,
-            entity_uuids,
-            source_episode_uuid=ctx.episode_uuid,
-            namespace=str(ctx.claimed.get("namespace") or "default"),
-        )
-        marked_ready = ctx.graph_adapter.mark_episode_ready(
+    if artifact is None:
+        logger.info(
+            "Finalize-from-link found no live linked twin; stopping without writes episode_id=%s",
             ctx.episode_uuid,
-            worker_id=ctx.worker_id,
-            resolved_episode_uuid=resolved_episode_uuid,
-            nodes_touched=stamped.nodes_touched,
-            edges_touched=stamped.edges_touched,
-            claim_started_at=ctx.claimed.get("processing_started_at"),
-        )
-        if not marked_ready:
-            logger.info(
-                "Skipping completion reconciliation after ownership lost episode_id=%s worker=%s",
-                ctx.episode_uuid,
-                ctx.worker_id,
-            )
-            _compensate_if_erased(ctx, resolved_episode_uuid)
-            return True
-        record_lifecycle_event(
-            component="ingest_worker",
-            event="episode_ready",
-            state="completed",
-            episode_uuid=ctx.episode_uuid,
-            details={
-                "resolved_episode_uuid": resolved_episode_uuid,
-                "nodes_touched": stamped.nodes_touched,
-                "edges_touched": stamped.edges_touched,
-                "reconciled_existing_completion": True,
-            },
-        )
-        duration_ms = int((perf_counter() - ctx.started) * 1000)
-        record_mcp_event(
-            kind="background",
-            operation="episode_enrichment",
-            payload={
-                "episode_uuid": ctx.episode_uuid,
-                "processing_attempts": ctx.processing_attempts,
-                "queue_depth": ctx.get_queue_depth(),
-            },
-            result={
-                "resolved_episode_uuid": resolved_episode_uuid,
-                "nodes_touched": stamped.nodes_touched,
-                "edges_touched": stamped.edges_touched,
-                "reconciled_existing_completion": True,
-            },
-            duration_ms=duration_ms,
-            success=True,
         )
         return True
-    return False
+    from menhir.domain.namespace import namespace_to_group_id
+
+    namespace = str(ctx.claimed.get("namespace") or "default")
+    group_id = namespace_to_group_id(namespace if namespace != "default" else None)
+    result = SimpleNamespace(
+        episode=SimpleNamespace(uuid=str(artifact["resolved_episode_uuid"])),
+        nodes=[
+            SimpleNamespace(uuid=str(u), name="", content="")
+            for u in (artifact.get("entity_uuids") or [])
+        ],
+        edges=[
+            SimpleNamespace(uuid=str(u), fact="", name="")
+            for u in (artifact.get("edge_uuids") or [])
+        ],
+        episodic_edges=[],
+    )
+    async with ctx.ingest_gate.acquire(group_id):
+        if ctx.claim_fence is not None:
+            gate = await asyncio.to_thread(
+                read_gate_fence, ctx.graph_adapter.neo4j, ctx.claim_fence.namespace_key
+            )
+            ctx = replace(ctx, gate_fence=gate)
+        await stamp_and_finalize(ctx, result, from_link=True)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +498,13 @@ async def run_graphiti_extraction(
         episode_uuid=ctx.episode_uuid,
     )
     async with ctx.ingest_gate.acquire(group_id):
+        if ctx.claim_fence is not None:
+            # G-publish needs the erasure epoch as seen at gate entry; the fence compares it again
+            # inside the publish transaction. ctx is frozen, so the stamped copy is local.
+            gate_fence = await asyncio.to_thread(
+                read_gate_fence, ctx.graph_adapter.neo4j, ctx.claim_fence.namespace_key
+            )
+            ctx = replace(ctx, gate_fence=gate_fence)
         logger.info("Episode enrichment acquired ingest gate episode_id=%s group_id=%s", ctx.episode_uuid, group_id)
         record_lifecycle_event(
             component="ingest_worker",
@@ -561,25 +531,36 @@ async def run_graphiti_extraction(
             turn_evidence_uuid = str(
                 ctx.claimed.get("turn_evidence_uuid") or ""
             ).strip()
-            relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None
+            relationless_repair_context_loader: (
+                Callable[[], tuple[tuple[str, str], ...]] | None
+            ) = None
             if turn_evidence_uuid:
                 repair_namespace = normalize_logical_namespace(ctx.claimed.get("namespace"))
 
-                def _load_relationless_repair_context() -> tuple[str, ...]:
+                def _load_relationless_repair_context() -> tuple[tuple[str, str], ...]:
                     # turn_evidence_uuid is caller-supplied. Scoping the read to THIS episode's
                     # namespace is what stops a foreign turn's text entering this extraction
                     # (CF-236); the admission gate governs trust tier, not this path.
-                    rows = ctx.graph_adapter.load_preceding_turn_evidence_context(
+                    # (turn_id, text) pairs: the receipt records the ids so the publish fence can
+                    # write the repair turns' READ_CONTEXT edges. The pairs carry no role, so the
+                    # roles are read back by turn id to keep the "role: text" prompt format.
+                    pairs = ctx.graph_adapter.load_preceding_turn_evidence_context_with_ids(
                         turn_evidence_uuid,
                         namespace=repair_namespace,
                         limit=2,
                     )
+                    roles = {
+                        str(r.get("turn_id")): str(r.get("role") or "").strip().lower()
+                        for r in ctx.graph_adapter.neo4j.execute(
+                            "MATCH (t:TurnEvidence) WHERE t.turn_id IN $ids "
+                            "RETURN t.turn_id AS turn_id, t.role AS role",
+                            params={"ids": [turn_id for turn_id, _ in pairs]},
+                        )
+                    }
                     return tuple(
-                        f"{str(row.get('role') or '').strip().lower()}: "
-                        f"{str(row.get('text') or '').strip()}"
-                        for row in rows
-                        if str(row.get("role") or "").strip()
-                        and str(row.get("text") or "").strip()
+                        (turn_id, f"{roles[turn_id]}: {str(text or '').strip()}")
+                        for turn_id, text in pairs
+                        if roles.get(turn_id) and str(text or "").strip()
                     )
 
                 relationless_repair_context_loader = _load_relationless_repair_context
@@ -648,6 +629,11 @@ async def run_graphiti_extraction(
                 turn_role=turn_role,
                 inferred_subject_endpoint=inferred_subject_endpoint,
                 inferred_bind_mode=inferred_mode,
+                **(
+                    {"claim_fence": ctx.claim_fence, "gate_fence": ctx.gate_fence}
+                    if ctx.claim_fence is not None
+                    else {}
+                ),
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -979,11 +965,31 @@ def _anchor_to_structural_entities(
 # Pipeline step 4 — stamp metadata, rehydrate, and finalize
 # ---------------------------------------------------------------------------
 
+def _fence_check(ctx: EnrichmentContext) -> None:
+    """G-fenced read check before a post-publish step that cannot join one transaction.
+
+    No-op for a context without a claim fence (legacy paths). Raises ``FenceLost``; the worker
+    requeues on it, so callers must not catch it (``_repair``/anchoring/correlation swallow
+    ``Exception``, which is why the check sits before their ``try`` blocks).
+    """
+    if ctx.claim_fence is not None:
+        check_fence(ctx.graph_adapter.neo4j, ctx.claim_fence, ctx.gate_fence)
+
+
 async def stamp_and_finalize(
     ctx: EnrichmentContext,
     graphiti_result: Any,
+    *,
+    from_link: bool = False,
 ) -> None:
     """Stamp metadata, rehydrate compressed nodes, and mark episode ready."""
+
+    def _compensate(resolved_episode_uuid: str) -> None:
+        # Protocol 2: the twin was linked inside the publish transaction and the erase's closure
+        # covers it, so compensation is neither needed nor reachable from finalize-from-link.
+        if from_link or ctx.claim_fence is not None:
+            return
+        _compensate_if_erased(ctx, resolved_episode_uuid)
 
     stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
@@ -1029,14 +1035,8 @@ async def stamp_and_finalize(
         and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
     )
 
-    if not still_owns_episode(ctx.graph_adapter, ctx.episode_uuid, ctx.worker_id):
-        logger.info(
-            "Skipping enrichment completion after ownership lost episode_id=%s worker=%s",
-            ctx.episode_uuid,
-            ctx.worker_id,
-        )
-        _compensate_if_erased(ctx, resolved_episode_uuid)
-        return
+    # Replaces the old ownership read: owner, claim instant, ENRICHING, no marker, epoch unmoved.
+    _fence_check(ctx)
 
     if receipt is not None and resolve_inferred_mode(
         getattr(ctx, "inferred_self_mode", None)
@@ -1047,6 +1047,7 @@ async def stamp_and_finalize(
         # Best-effort two-tier self link; never fails the episode.
         link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
         if link_self_tiers is not None:
+            _fence_check(ctx)  # check-only: link_self_tiers issues its own statements
             try:
                 link_self_tiers(str(ctx.claimed.get("namespace") or "default"))
             except Exception:
@@ -1142,7 +1143,7 @@ async def stamp_and_finalize(
                 ctx.episode_uuid,
                 ctx.worker_id,
             )
-            _compensate_if_erased(ctx, resolved_episode_uuid)
+            _compensate(resolved_episode_uuid)
             return
         duration_ms = int((perf_counter() - ctx.started) * 1000)
         # Record as successful empty extraction with a reason receipt
@@ -1176,6 +1177,7 @@ async def stamp_and_finalize(
     stamp_kwargs: dict[str, object] = {}
     if ctx.claimed.get("bootstrap_scope") is not None:
         stamp_kwargs["bootstrap_scope"] = ctx.claimed.get("bootstrap_scope")
+    _fence_check(ctx)  # check-only: stamp_ingest_metadata issues its own statements
     stamped = ctx.graph_adapter.stamp_ingest_metadata(
         node_uuids=node_uuids,
         edge_uuids=edge_uuids,
@@ -1186,6 +1188,7 @@ async def stamp_and_finalize(
         namespace=str(ctx.claimed.get("namespace") or "default"),
         **stamp_kwargs,
     )
+    _fence_check(ctx)  # check-only: record_retention_sources issues its own statements
     record_retention_sources(
         ctx.graph_adapter,
         [node.uuid for node in extracted_nodes],
@@ -1229,10 +1232,12 @@ async def stamp_and_finalize(
             ctx.worker_id,
         )
     # Best-effort LLM repair of synthetic edge facts
+    _fence_check(ctx)
     await _repair_synthetic_edge_facts(
         ctx, extracted_edges, compose_episode_body(ctx.claimed),
     )
     # Best-effort structural anchoring
+    _fence_check(ctx)
     _anchor_to_structural_entities(
         ctx, [node.uuid for node in extracted_nodes], compose_episode_body(ctx.claimed),
     )
@@ -1241,6 +1246,7 @@ async def stamp_and_finalize(
     # Correlations create RELATES_TO edges (0.7–0.85 sim) or trigger merge (>0.95 sim).
     # Conflict-range pairs (0.85–0.95) are returned for the lifecycle service to flag.
     correlation_conflicts = 0
+    _fence_check(ctx)
     try:
         from menhir.services.correlation_service import CorrelationService
         correlation_service = CorrelationService(
@@ -1271,6 +1277,7 @@ async def stamp_and_finalize(
     except Exception:
         logger.warning("Correlation check failed (best-effort)", exc_info=True)
     if ctx.lifecycle_service is not None:
+        _fence_check(ctx)
         entity_uuids = [node.uuid for node in extracted_nodes]
         freshness_map = ctx.graph_adapter.fetch_node_freshness(entity_uuids)
         episode_content = compose_episode_body(ctx.claimed)
@@ -1363,7 +1370,7 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
-        _compensate_if_erased(ctx, resolved_episode_uuid)
+        _compensate(resolved_episode_uuid)
         return
     record_lifecycle_event(
         component="ingest_worker",
@@ -1508,6 +1515,8 @@ async def add_episode_with_timeout(
     turn_role: str = "unknown",
     inferred_subject_endpoint: Any | None = None,
     inferred_bind_mode: SelfBindMode = SelfBindMode.OFF,
+    claim_fence: ClaimFence | None = None,
+    gate_fence: GateFence | None = None,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1588,7 +1597,7 @@ async def add_episode_with_timeout(
     # both the wait_for child and Graphiti's own child task inherit the same object and
     # mutate it in place, which the parent then reads. (episode_body is the current-
     # episode text used to gate endpoint synthesis.)
-    begin_extraction_receipt(
+    receipt = begin_extraction_receipt(
         receipt_episode_key or name,
         episode_body,
         source_description=source_description,
@@ -1600,6 +1609,18 @@ async def add_episode_with_timeout(
         inferred_subject_endpoint=inferred_subject_endpoint,
         inferred_bind_mode=inferred_bind_mode,
     )
+    fence_kwargs: dict[str, Any] = {}
+    if claim_fence is not None:
+        # Built here so the repair-turn provider closes over the live receipt: the extraction
+        # fills ``receipt.repair_turn_ids`` and the fence reads it in ``after_write``.
+        fence_kwargs = {
+            "new_episode_uuid": claim_fence.reserved_twin_uuid,
+            "publish_fence": MenhirPublishFence(
+                claim_fence,
+                gate_fence if gate_fence is not None else GateFence(epoch=0),
+                repair_turn_ids_provider=lambda: receipt.repair_turn_ids,
+            ),
+        }
     try:
         record_lifecycle_event(
             component="ingest_worker",
@@ -1620,6 +1641,7 @@ async def add_episode_with_timeout(
                 episode_uuid=episode_uuid,
                 attempt=attempt,
                 group_id=group_id,
+                **fence_kwargs,
             ),
             timeout_s=timeout_s,
         )

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import logging
 import re
 from typing import Any, Callable
@@ -126,10 +126,14 @@ class CombinedExtractionReceipt:
     #: ``previous_episodes`` contains only enriched episodes, while context-only assistant turns
     #: live exclusively as ``:TurnEvidence``. The loader is called only after an entity-bearing,
     #: edge-empty first pass, so the successful path pays no graph read and sees no extra context.
-    relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None
+    relationless_repair_context_loader: Callable[[], tuple[str | tuple[str, str], ...]] | None = None
     #: The exact adjacent turns supplied to the corrective pass. Kept on the receipt so endpoint
     #: closure may ground a repair-emitted endpoint in the same context the model saw.
     relationless_repair_context_texts: tuple[str, ...] = ()
+    #: ``TurnEvidence`` ids of the repair-context turns actually kept, recorded when the loader
+    #: returns ``(turn_id, text)`` pairs (a texts-only loader records nothing). The publish fence
+    #: reads them in ``after_write``; the worker passes ``lambda: receipt.repair_turn_ids``.
+    repair_turn_ids: list[str] = field(default_factory=list)
     #: Repair edges rejected because none of their fact/relation/endpoint tokens were grounded in
     #: CURRENT MESSAGES. Native previous-episode context improves recall but can prime the model to
     #: copy a preceding claim; this count makes that deterministic precision guard auditable.
@@ -380,7 +384,7 @@ def begin_extraction_receipt(
     episode_text: str,
     *,
     source_description: str = "",
-    relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
+    relationless_repair_context_loader: Callable[[], tuple[str | tuple[str, str], ...]] | None = None,
     self_identity: SelfIdentityContext | None = None,
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
@@ -1315,14 +1319,25 @@ def _load_relationless_repair_context(
 
     remaining = _RELATIONLESS_REPAIR_CONTEXT_MAX_CHARS
     bounded_reversed: list[str] = []
-    for raw_text in reversed(tuple(loaded or ())):
+    kept_turn_ids_reversed: list[str] = []
+    for raw_item in reversed(tuple(loaded or ())):
+        # Old loader shape: texts only. New shape: (turn_id, text) pairs.
+        if isinstance(raw_item, (tuple, list)) and len(raw_item) == 2:
+            turn_id, raw_text = raw_item
+        else:
+            turn_id, raw_text = None, raw_item
         text = str(raw_text or "").strip()
         if not text or remaining <= 0:
             continue
         if len(text) > remaining:
             text = text[-remaining:]
         bounded_reversed.append(text)
+        if turn_id:
+            kept_turn_ids_reversed.append(str(turn_id))
         remaining -= len(text)
+    for turn_id in reversed(kept_turn_ids_reversed):
+        if turn_id not in receipt.repair_turn_ids:
+            receipt.repair_turn_ids.append(turn_id)
     return tuple(reversed(bounded_reversed))
 
 

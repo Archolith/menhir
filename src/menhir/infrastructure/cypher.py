@@ -7,8 +7,10 @@ repository modules without pulling in a full OGM.
 from __future__ import annotations
 
 from menhir.domain.recall_visibility import view_live_provenance_cypher
+from menhir.infrastructure.erasure_fence import marker_absent_cypher
 
 __all__ = [
+    "EPISODE_NOT_MARKED",
     "Cypher",
     "MEMORY_RETURN_FIELDS",
     "ENTITY_METADATA_FIELDS",
@@ -359,6 +361,10 @@ EPISODE_NOT_ERASED = (
     "n['erased_at'] IS NULL AND coalesce(n.processing_substage, '') <> 'deleted_by_user'"
 )
 
+# G-q: no ErasureMarker exists for the queue node. Over variable `n`. Added next to
+# EPISODE_NOT_ERASED (P4 does not replace it).
+EPISODE_NOT_MARKED = marker_absent_cypher("n")
+
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
@@ -537,7 +543,7 @@ def build_reset_or_fail_query(
     """
     return (Cypher()
         .match(match)
-        .where(*where)
+        .where(*where, EPISODE_NOT_MARKED)
         .with_clause(
             "n, coalesce(toInteger(n.processing_attempts), 0)"
             " >= $max_attempts AS exhausted"

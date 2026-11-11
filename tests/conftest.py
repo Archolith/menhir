@@ -426,7 +426,7 @@ class StubMemoryGraphAdapter:
     )
     flagged_nodes: list[str] = field(default_factory=list)
     deleted_nodes: list[str] = field(default_factory=list)
-    completed_episode_artifacts: dict[tuple[str, str], dict[str, object]] = field(default_factory=dict)
+    completed_episode_artifacts: dict[str, dict[str, object]] = field(default_factory=dict)
     weighted_edges: list[str] = field(default_factory=list)
     candidate_metadata: list[dict[str, object]] = field(default_factory=list)
     candidate_provenance_rows: list[dict[str, object]] = field(default_factory=list)
@@ -764,13 +764,8 @@ class StubMemoryGraphAdapter:
         ]
         return rows[:limit]
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, object] | None:
-        artifact = self.completed_episode_artifacts.get((anchor_uuid, anchor_name))
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
+        artifact = self.completed_episode_artifacts.get(episode_uuid)
         if artifact is None:
             return None
         return dict(artifact)

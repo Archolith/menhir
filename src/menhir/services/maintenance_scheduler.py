@@ -15,7 +15,12 @@ from typing import Awaitable, Callable
 from uuid import uuid4
 
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
-from menhir.services.scheduler_lease import SchedulerLeaseStore, _utc_now_iso
+from menhir.services.scheduler_lease import (
+    SchedulerLeaseStore,
+    _utc_now_iso,
+    clear_local_scheduler,
+    register_local_scheduler,
+)
 from menhir.services.scheduler_protocols import (
     SchedulerGraphAdapter,
     SchedulerIngestService,
@@ -350,6 +355,7 @@ class MaintenanceScheduler:
         # The acquire is itself a proof of ownership; without stamping it here the first
         # job of the run would be refused for want of a renewal that has not happened yet.
         self._stamp_lease_deadline(acquire_started)
+        register_local_scheduler(self.lease_name, self._owner_id, self._lease_is_provable)
         self._lease_lost_event.clear()
         self._stop_event.clear()
         self._task = asyncio.create_task(
@@ -392,6 +398,9 @@ class MaintenanceScheduler:
                 with contextlib.suppress(asyncio.CancelledError):
                     await standby
             task = self._task
+            # Withdraw the registration first: enrichment must stop claiming as soon as the stop
+            # begins, not after the loop has drained.
+            clear_local_scheduler(self.lease_name, self._owner_id)
             if task is None:
                 if self._lease_acquired:
                     self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
@@ -551,6 +560,7 @@ class MaintenanceScheduler:
         self._lease_acquired = False
         self._lease_valid_until = 0.0
         self._lease_blocked_reason = "lease_lost"
+        clear_local_scheduler(self.lease_name, self._owner_id)
         self._lease_lost_event.set()
         # Wake the job loop so it stops before starting more work. A forced takeover
         # (bug FC-02) must not let the displaced owner keep mutating shared state.

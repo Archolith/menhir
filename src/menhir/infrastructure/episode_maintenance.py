@@ -9,6 +9,7 @@ from menhir.domain.secret_scrub import ensure_scrubbed, non_refusing_policy
 from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     EPISODE_NOT_ERASED,
+    EPISODE_NOT_MARKED,
     Cypher,
     EPISODE_PROCESSING_FIELDS,
     LLM_RESET_SET,
@@ -80,6 +81,7 @@ class EpisodeMaintenanceRepository:
             .where(
                 "n.processing_state = 'PENDING'",
                 "coalesce(toInteger(n.processing_attempts), 0) >= $max_attempts",
+                EPISODE_NOT_MARKED,
             )
             .set(
                 (
@@ -113,7 +115,7 @@ class EpisodeMaintenanceRepository:
         query = (
             Cypher()
             .match("(n:Episodic {uuid: $uuid})")
-            .where("n.processing_state IN ['FAILED', 'PENDING']", EPISODE_NOT_ERASED)
+            .where("n.processing_state IN ['FAILED', 'PENDING']", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
             .set(
                 (
                     "n.processing_state = 'PENDING'",
@@ -251,6 +253,7 @@ class EpisodeMaintenanceRepository:
                 " AND n.extraction_skipped_for IS NOT NULL)",
                 # Store-only episodes are never extracted; resetting one would loop forever.
                 "coalesce(n.extraction_mode, '') <> 'store_only'",
+                EPISODE_NOT_MARKED,
             )
             .set(
                 (

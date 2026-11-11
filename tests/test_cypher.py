@@ -1127,5 +1127,7 @@ class TestExports:
             "non_derived_view_cypher",
             "memory_timestamp_cypher",
             "memory_recency_cypher",
+            # Erasure rebuild P4: the shared "no ErasureMarker for this episode" gate (G-q).
+            "EPISODE_NOT_MARKED",
         }
         assert set(cypher.__all__) == expected

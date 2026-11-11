@@ -119,12 +119,16 @@ def test_record_retention_sources_rejects_missing_provenance(result: dict[str, A
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_does_not_publish_ready_without_retention_links() -> None:
-    from menhir.services.enrichment_steps import try_reconcile_existing
+async def test_finalize_from_link_does_not_publish_ready_without_retention_links() -> None:
+    from menhir.services.enrichment_steps import finalize_from_link
+    from menhir.services.ingest_gate import IngestGate
 
     class MissingLinkAdapter:
-        def find_completed_episode_artifact(self, **_: object) -> dict[str, object]:
+        def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object]:
             return {"resolved_episode_uuid": "resolved", "entity_uuids": ["entity"], "edge_uuids": []}
+
+        def update_episode_processing(self, *_: object, **__: object) -> bool:
+            return True
 
         def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(nodes_touched=1, edges_touched=0)
@@ -138,11 +142,18 @@ async def test_reconciliation_does_not_publish_ready_without_retention_links() -
     ctx = SimpleNamespace(
         graph_adapter=MissingLinkAdapter(),
         episode_uuid="source",
-        claimed={"name": "source", "namespace": "default"},
+        claimed={"name": "source", "namespace": "default", "resolved_episode_uuid": "resolved"},
         worker_id="worker",
+        ingest_gate=IngestGate(1),
+        claim_fence=None,
+        gate_fence=None,
+        processing_steps_total=5,
+        settings_record_revisions=False,
+        lifecycle_service=None,
+        llm=None,
     )
     with pytest.raises(ValueError, match="Retention provenance missing"):
-        await try_reconcile_existing(ctx)
+        await finalize_from_link(ctx)
 
 
 @pytest.mark.asyncio
@@ -150,7 +161,7 @@ async def test_scheduler_continues_after_incomplete_retention_provenance() -> No
     from menhir.services.scheduler_tasks import retry_process_candidate
 
     class MissingLinkAdapter:
-        def find_completed_episode_artifact(self, **_: object) -> dict[str, object]:
+        def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object]:
             return {"resolved_episode_uuid": "resolved", "entity_uuids": ["entity"], "edge_uuids": []}
 
         def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:

@@ -97,7 +97,7 @@ class _StubGraphAdapter:
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
         return []
 
-    def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+    def linked_twin_artifact(self, episode_uuid: str) -> None:
         return None
 
     def stamp_ingest_metadata(self, **kwargs: object) -> object:

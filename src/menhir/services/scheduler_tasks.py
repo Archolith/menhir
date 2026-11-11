@@ -254,16 +254,19 @@ async def retry_process_candidate(
 ) -> str:
     """Decide what to do with one failed enrichment candidate. Returns the action taken."""
     episode_uuid = str(row.get("uuid") or "")
-    anchor_name = str(row.get("name") or "")
     processing_attempts = int(row.get("processing_attempts") or 0)
 
-    if episode_uuid and anchor_name:
+    if episode_uuid:
+        # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
+        # match) says a completion exists. The retry row carries no namespace; the artifact does.
         existing_completion = await asyncio.to_thread(
-            graph_adapter.find_completed_episode_artifact,
-            anchor_uuid=episode_uuid,
-            anchor_name=anchor_name,
+            graph_adapter.linked_twin_artifact,
+            episode_uuid,
         )
         if existing_completion is not None:
+            link_namespace = str(
+                existing_completion.get("namespace") or row.get("namespace") or "default"
+            )
             resolved_episode_uuid = str(existing_completion.get("resolved_episode_uuid") or "")
             entity_uuids = [str(u) for u in (existing_completion.get("entity_uuids") or []) if str(u)]
             edge_uuids = [str(u) for u in (existing_completion.get("edge_uuids") or []) if str(u)]
@@ -278,7 +281,7 @@ async def retry_process_candidate(
                 user_id=str(row.get("user_id") or ""),
                 source=str(row.get("source") or "claude-code"),
                 source_confidence=source_confidence_for(str(row.get("source") or "claude-code")),
-                namespace=str(row.get("namespace") or "default"),
+                namespace=link_namespace,
                 **stamp_kwargs,
             )
             try:
@@ -286,7 +289,7 @@ async def retry_process_candidate(
                     graph_adapter,
                     entity_uuids,
                     source_episode_uuid=episode_uuid,
-                    namespace=str(row.get("namespace") or "default"),
+                    namespace=link_namespace,
                 )
             except ValueError as exc:
                 logger.warning(

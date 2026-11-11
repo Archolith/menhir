@@ -1191,6 +1191,8 @@ def _fake_ctx() -> SimpleNamespace:
         processing_steps_total=3,
         started=0.0,
         claimed={},
+        claim_fence=None,
+        gate_fence=None,
     )
 
 
@@ -1208,7 +1210,6 @@ async def test_stamp_and_finalize_raises_collapse_when_raw_nonempty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raw extraction non-empty but zero persisted -> CombinedExtractionCollapsedError."""
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
     receipt = patches.begin_extraction_receipt("ep-collapse", "user: Alice owns 37 coins.")
     receipt.raw_entity_count = 1
@@ -1227,7 +1228,6 @@ async def test_stamp_and_finalize_treats_genuinely_empty_as_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Acceptance #8: raw extraction empty stays an empty-extraction success (no collapse)."""
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
     patches.begin_extraction_receipt("ep-collapse", "user: ok thanks")  # raw counts stay 0
 
@@ -1244,7 +1244,6 @@ async def test_stamp_and_finalize_labels_the_ready_row_with_the_policy_empty_rea
     """The READY write carries the clause that decided the empty; a log line is not durable."""
     patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION, turn_role="user")
     await _run_two_pass_extraction(monkeypatch, "ep-collapse", [_TOPIC_ONLY, _EMPTY])
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
 
     await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
@@ -1260,7 +1259,6 @@ async def test_stamp_and_finalize_leaves_a_genuinely_empty_row_unlabelled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No raw content means no policy decision: the row stays eligible for the zero-extraction reset."""
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
     patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION)  # raw counts stay 0
 
@@ -1399,7 +1397,6 @@ async def test_relationless_extraction_after_bounded_repair_is_non_retryable(
     combined-extraction wrapper repairs it once. Only a second relationless response reaches this
     terminal visibility path.
     """
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
     receipt = patches.begin_extraction_receipt("ep-collapse", "user: some names")
     receipt.raw_entity_count = 7
@@ -1424,7 +1421,6 @@ async def test_a_real_linkage_collapse_is_still_reported_as_retryable(
 ) -> None:
     """The inverse shape (edges present, endpoints lost) IS a linkage failure and must keep its
     original classification -- the relationless carve-out must not swallow it."""
-    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
     ctx = _fake_ctx()
     receipt = patches.begin_extraction_receipt("ep-collapse", "user: something")
     receipt.raw_entity_count = 0

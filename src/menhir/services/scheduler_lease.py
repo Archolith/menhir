@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,53 @@ from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
+# Process-local registration of THIS process's maintenance scheduler: (owner_id, provable).
+# Keyed by lease name; guarded by a lock because the gate is read from worker threads.
+_local_schedulers: dict[str, tuple[str, Callable[[], bool]]] = {}
+_local_schedulers_lock = threading.Lock()
 
+
+def register_local_scheduler(lease_name: str, owner_id: str, provable: Callable[[], bool]) -> None:
+    """Record that this process's scheduler holds `lease_name` as `owner_id`."""
+    with _local_schedulers_lock:
+        _local_schedulers[lease_name] = (owner_id, provable)
+
+
+def clear_local_scheduler(lease_name: str, owner_id: str) -> None:
+    """Forget the registration, but only if it is still this owner's."""
+    with _local_schedulers_lock:
+        current = _local_schedulers.get(lease_name)
+        if current is not None and current[0] == owner_id:
+            del _local_schedulers[lease_name]
+
+
+def enrichment_allowed(
+    *,
+    strict: bool,
+    store: SchedulerLeaseStore | None = None,
+    lease_name: str = "maintenance_scheduler",
+) -> bool:
+    """Whether this process may run enrichment workers right now (single-process rule).
+
+    A live lease owned by this process's registered scheduler, with ownership still provable,
+    allows it. A live lease held by anyone else (or ours but unprovable) forbids it. With no live
+    lease the answer is `not strict`. Read at call time; a store error is `not strict` too.
+    """
+    try:
+        lease = (store or SchedulerLeaseStore()).fetch(lease_name=lease_name)
+        if lease is None or lease.get("expired"):
+            return not strict
+        with _local_schedulers_lock:
+            local = _local_schedulers.get(lease_name)
+        if local is None or str(lease.get("owner_id")) != local[0]:
+            return False
+        return bool(local[1]())
+    except Exception:
+        logger.warning(
+            "Scheduler lease read failed; enrichment %s (strict=%s)",
+            "refused" if strict else "allowed", strict, exc_info=True,
+        )
+        return not strict
 
 
 @dataclass

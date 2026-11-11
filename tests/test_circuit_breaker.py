@@ -229,7 +229,7 @@ async def test_ingest_service_requeues_on_circuit_open():
     mock_graph_adapter.update_episode_processing = MagicMock(return_value=True)
     mock_graph_adapter.increment_episode_llm_usage = MagicMock(return_value=True)
     mock_graph_adapter.fetch_relevant_pending_episodes = MagicMock(return_value=[])
-    mock_graph_adapter.find_completed_episode_artifact = MagicMock(return_value=None)
+    mock_graph_adapter.linked_twin_artifact = MagicMock(return_value=None)
     mock_graph_adapter.touch_episode_processing_heartbeat = MagicMock(return_value=True)
 
     svc = IngestService(
@@ -244,7 +244,7 @@ async def test_ingest_service_requeues_on_circuit_open():
     )
 
     with patch("menhir.services.ingest_worker.run_graphiti_extraction", new_callable=AsyncMock, side_effect=circuit_error), \
-         patch("menhir.services.ingest_worker.try_reconcile_existing", new_callable=AsyncMock, return_value=False), \
+         patch("menhir.services.ingest_worker.finalize_from_link", new_callable=AsyncMock, return_value=False), \
          patch("menhir.services.ingest_worker.run_preflight_rejection", new_callable=AsyncMock, return_value=False), \
          patch("menhir.services.ingest_worker.record_lifecycle_event"), \
          patch("menhir.services.ingest_worker.set_llm_usage_callback", return_value="token"), \

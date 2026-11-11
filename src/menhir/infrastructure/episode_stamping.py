@@ -8,7 +8,7 @@ from typing import Any
 from menhir.domain.namespace import stamped_namespace, tenant_scope_cypher, tenant_scope_params
 from menhir.domain.retention import RETENTION_SOURCE_RELATIONSHIP, same_tenant_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
-from menhir.infrastructure.cypher import Cypher
+from menhir.infrastructure.cypher import EPISODE_NOT_MARKED, Cypher
 from menhir.infrastructure.schema import EDGE_LABELS
 
 
@@ -312,6 +312,7 @@ class EpisodeStampingRepository:
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id))",
                 # The worker_id=None form is unfenced; it must still never restamp an erase.
                 "n['erased_at'] IS NULL",
+                EPISODE_NOT_MARKED,
             )
             .set(sets)
             .return_raw("count(n) AS updated")
@@ -350,6 +351,7 @@ class EpisodeStampingRepository:
                     "n.uuid = $episode_uuid",
                     "n.processing_state = 'ENRICHING'",
                     "n.processing_owner = $worker_id",
+                    EPISODE_NOT_MARKED,
                     "n.processing_started_at IS NOT NULL AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond",
                 )
                 .set(
@@ -380,6 +382,7 @@ class EpisodeStampingRepository:
             .where(
                 "n.uuid = $episode_uuid",
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id))",
+                EPISODE_NOT_MARKED,
             )
             .set("n.processing_heartbeat_at = datetime()")
             .return_raw("count(n) AS updated")
@@ -446,7 +449,7 @@ class EpisodeStampingRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where("n.uuid = $episode_uuid", "n['erased_at'] IS NULL")
+            .where("n.uuid = $episode_uuid", "n['erased_at'] IS NULL", EPISODE_NOT_MARKED)
             .set(sets)
             .return_raw("count(n) AS updated")
             .build()

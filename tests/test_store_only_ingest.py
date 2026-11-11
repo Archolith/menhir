@@ -124,6 +124,7 @@ class _Adapter:
 
 class _Svc(IngestWorkerMixin, IngestQueueMixin):
     def __init__(self, adapter: _Adapter) -> None:
+        self.require_scheduler_lease = False  # the pre-claim single-process gate reads it
         self.graph_adapter = adapter
         self._worker_id = "worker-A"
         self._max_enrichment_attempts = 3
@@ -191,7 +192,7 @@ def steps(monkeypatch):
 
     monkeypatch.setattr(iw, "EnrichmentContext", lambda **kw: SimpleNamespace(**kw))
     monkeypatch.setattr(iw, "embed_episode_content", embed)
-    monkeypatch.setattr(iw, "try_reconcile_existing", reconcile)
+    monkeypatch.setattr(iw, "finalize_from_link", reconcile)
     monkeypatch.setattr(iw, "run_preflight_rejection", preflight)
     monkeypatch.setattr(iw, "run_graphiti_extraction", extraction)
     monkeypatch.setattr(iw, "handle_enrichment_failure", failure)

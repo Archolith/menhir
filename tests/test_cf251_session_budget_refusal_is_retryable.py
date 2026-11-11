@@ -105,7 +105,7 @@ def test_a_non_budget_failure_is_not_swept_into_the_session_class() -> None:
 
 @dataclass
 class _Adapter:
-    def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+    def linked_twin_artifact(self, episode_uuid: str) -> None:
         return None
 
 

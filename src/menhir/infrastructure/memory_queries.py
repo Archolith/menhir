@@ -1993,18 +1993,22 @@ class MemoryQueryRepository:
                      (prior_resolved IS NOT NULL AND NOT prior_resolved IN $erased_uuids
                       AND EXISTS { MATCH (lt:Episodic {uuid: prior_resolved}) })
                          AS late_twin,
-                     (prior_erased AND prior_resolved IS NULL) AS unlinked_tombstone
-                WITH n, late_twin,
+                     (prior_erased AND prior_resolved IS NULL) AS unlinked_tombstone,
+                     (prior_resolved IS NOT NULL AND prior_resolved IN $erased_uuids)
+                         AS drop_link
+                WITH n, late_twin, drop_link,
                      (prior_state IN ['PENDING', 'ENRICHING'] OR unlinked_tombstone OR late_twin)
                          AS keep_tombstone
                 CALL {
-                    WITH n, late_twin, keep_tombstone
+                    WITH n, late_twin, keep_tombstone, drop_link
                     WITH n WHERE n:Entity
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n, late_twin, keep_tombstone
-                    WITH n, late_twin WHERE n:Episodic AND keep_tombstone
+                    WITH n, late_twin, keep_tombstone, drop_link
+                    WITH n, late_twin, drop_link WHERE n:Episodic AND keep_tombstone
+                    FOREACH (_ IN CASE WHEN drop_link THEN [1] ELSE [] END |
+                        REMOVE n.resolved_episode_uuid)
                     SET n.erasure_compensation_pending = CASE
                             WHEN late_twin THEN true ELSE n.erasure_compensation_pending END,
                         n.processing_state = 'FAILED',

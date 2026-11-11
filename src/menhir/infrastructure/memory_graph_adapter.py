@@ -518,15 +518,9 @@ class MemoryGraphAdapter:
         """Return FAILED episodes grouped by error text, most common first."""
         return self._episodes.fetch_failed_error_signatures(limit)
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, Any] | None:
-        return self._episodes.find_completed_episode_artifact(
-            anchor_uuid=anchor_uuid, anchor_name=anchor_name
-        )
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, Any] | None:
+        """See EpisodeLifecycleRepository.linked_twin_artifact (finalize-from-link read)."""
+        return self._episodes.linked_twin_artifact(episode_uuid)
 
     def claim_pending_episode(
         self,
@@ -748,7 +742,7 @@ class MemoryGraphAdapter:
         EpisodeLifecycleRepository.lookup_entities_by_normalized_names)."""
         return self._episodes.lookup_entities_by_normalized_names(namespace, spellings)
 
-    def ensure_self_entity(self, namespace: str) -> str:
+    def ensure_self_entity(self, namespace: str) -> str | None:
         """Idempotently MERGE the canonical per-namespace self :Entity and return its (deterministic)
         uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self).
 
@@ -2014,6 +2008,23 @@ class MemoryGraphAdapter:
         return self._turn_evidence.load_preceding_context(
             turn_id, namespace=namespace, limit=limit
         )
+
+    def load_preceding_turn_evidence_context_with_ids(
+        self,
+        turn_id: str,
+        *,
+        namespace: str,
+        limit: int = 2,
+    ) -> list[tuple[str, str]]:
+        """Same selection and order as `load_preceding_turn_evidence_context`, as (turn_id, text).
+
+        The publish fence records these turn ids so the repair context's READ_CONTEXT edges can be
+        written in the publish transaction.
+        """
+        rows = self._turn_evidence.load_preceding_context(
+            turn_id, namespace=namespace, limit=limit
+        )
+        return [(str(row["turn_id"]), str(row["text"])) for row in rows]
 
     def turn_evidence_stats(self) -> dict[str, Any]:
         return self._turn_evidence.evidence_stats()

@@ -1,3 +1,25 @@
+## 2026-11-11 - Erasure rebuild, fence foundation: an erase fences in-flight enrichment
+
+- An erase now seals before it deletes. One transaction locks the memory's namespace, records a
+  permanent `ErasureMarker` for every id it will remove, and moves a per-namespace erasure epoch.
+  It then reads the closure under that lock: the queue node, its twins (linked, reserved or
+  back-linked), its turns and their projections. The seal is released after the delete whatever
+  the outcome, and an orphaned seal is released on replay.
+- Every claim reserves the uuid of the episode it will publish, and the publish links the queue
+  node to it inside Graphiti's own save transaction (needs the fork's `publish_fence` hook,
+  `archolith-graphiti-core` 0.31.2.post3, not yet released or pinned). A publish whose claim was
+  reaped, whose memory was erased, or whose namespace saw an erase after it entered the ingest
+  gate is rolled back and requeued without burning an attempt.
+- Every queue-node write, the claim, the reaper and the retry scans skip a marked node. Projection
+  and self-entity creation refuse while a namespace is erasing and stamp `created_epoch`; a
+  typed assertion for an erased episode is not written.
+- A claim that finds its queue node already linked finishes from the link instead of publishing
+  again. The by-name reconcile, which could adopt another namespace's episode, is gone.
+- Only the process holding the scheduler lease runs enrichment workers.
+- An erase that meets an in-flight claim from a process without the fence replies
+  `erased_incomplete` with `incomplete_reasons: ["unfenced_inflight"]`; every `erased_incomplete`
+  reply now lists its reasons.
+
 ## 2026-11-10 - Erasure rebuild, first steps: strict targets, scoped merge-audit scrub, sidecar physical erasure
 
 - `delete_memory` accepts only a canonical uuid. Anything else is refused as `invalid_target`

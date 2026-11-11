@@ -27,7 +27,7 @@ from menhir.services.enrichment_steps import (
     handle_enrichment_failure,
     run_preflight_rejection,
     stamp_and_finalize,
-    try_reconcile_existing,
+    finalize_from_link,
 )
 
 pytestmark = pytest.mark.unit
@@ -199,15 +199,18 @@ def _only_call_kwargs(mock: MagicMock) -> dict[str, Any]:
 
 
 def test_reconcile_ready_write_passes_the_claim_instant() -> None:
-    """Fails if try_reconcile_existing stops passing claimed["processing_started_at"]."""
+    """Fails if finalize_from_link stops passing claimed["processing_started_at"]."""
     instant = object()
     adapter = _adapter()
-    adapter.find_completed_episode_artifact.return_value = {
+    adapter.linked_twin_artifact.return_value = {
         "resolved_episode_uuid": "resolved", "entity_uuids": [], "edge_uuids": [],
     }
-    ctx = _ctx(adapter, {"processing_started_at": instant, "name": "n"})
+    ctx = _ctx(
+        adapter,
+        {"processing_started_at": instant, "name": "n", "resolved_episode_uuid": "resolved"},
+    )
 
-    assert asyncio.run(try_reconcile_existing(ctx)) is True
+    assert asyncio.run(finalize_from_link(ctx)) is True
 
     kwargs = _only_call_kwargs(adapter.mark_episode_ready)
     assert kwargs["claim_started_at"] is instant

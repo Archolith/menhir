@@ -301,15 +301,35 @@ def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
     return list(rows.values())
 
 
-async def record_kept_conflicts(driver: Any, kept: list[KeptEdge]) -> int:
-    """Write unresolved conflict records for ``kept``; returns the number of rows sent."""
+def kept_conflict_statement(kept: list[KeptEdge]) -> tuple[str, dict[str, Any]] | None:
+    """``(cypher, params)`` recording ``kept``, or None when there is nothing to record."""
     rows = kept_conflict_rows(kept)
     if not rows:
+        return None
+    return KEPT_CONFLICT_CYPHER, {"rows": rows}
+
+
+async def record_kept_conflicts_in_tx(run: Any, kept: list[KeptEdge]) -> int:
+    """Same write inside an open publish transaction; ``run`` is ``async (cypher, params) -> rows``.
+
+    A Cypher error propagates (it poisons the transaction), rolling the publish back.
+    """
+    statement = kept_conflict_statement(kept)
+    if statement is None:
         return 0
-    await asyncio.wait_for(
-        driver.execute_query(KEPT_CONFLICT_CYPHER, rows=rows), timeout=_RECORD_TIMEOUT_S
-    )
-    return len(rows)
+    cypher, params = statement
+    await run(cypher, params)
+    return len(params["rows"])
+
+
+async def record_kept_conflicts(driver: Any, kept: list[KeptEdge]) -> int:
+    """Write unresolved conflict records for ``kept``; returns the number of rows sent."""
+    statement = kept_conflict_statement(kept)
+    if statement is None:
+        return 0
+    cypher, params = statement
+    await asyncio.wait_for(driver.execute_query(cypher, **params), timeout=_RECORD_TIMEOUT_S)
+    return len(params["rows"])
 
 
 #: Edge properties the guard reads that must survive duplicate resolution. A paraphrased

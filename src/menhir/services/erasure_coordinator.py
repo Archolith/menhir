@@ -17,6 +17,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from menhir.infrastructure.erasure_fence import (
+    SealResult,
+    release_memory,
+    release_orphaned_erasing_ops,
+    seal_memory,
+    seal_namespace,
+)
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
@@ -152,9 +159,12 @@ class ErasureCoordinator:
                      "caller_namespace": caller_namespace},
             target_uuid=node_uuid,
             target_key=None,
-            delete_graph=lambda: self._delete_memory_targets(targets, derived),
+            delete_graph=lambda closure=(): self._delete_memory_targets(
+                list(dict.fromkeys([*targets, *closure])), derived
+            ),
             dry_run=dry_run,
             derived=derived,
+            seal=self._seal_for(lambda neo4j, op_id: seal_memory(neo4j, op_id, targets)),
         )
         # A twin linked after the targets were resolved keeps the queue node as a flagged
         # tombstone (B-1). Erase it now; the sweep's pending retry covers a crash before this.
@@ -169,6 +179,10 @@ class ErasureCoordinator:
             outcome = {**outcome, "late_twin_erased": follow.get("reason")}
             if follow.get("reason") not in DELETION_SUCCEEDED_REASONS | {ERASED_INCOMPLETE}:
                 outcome["reason"] = ERASED_INCOMPLETE
+                outcome["incomplete_reasons"] = [
+                    *outcome.get("incomplete_reasons", []),
+                    "late_twin_erase_failed",
+                ]
         return outcome
 
     def erase_namespace(
@@ -210,8 +224,13 @@ class ErasureCoordinator:
             },
             target_uuid=None,
             target_key=f"erasure:namespace:{group_id}",
-            delete_graph=lambda: self._delete_namespace_graph(group_id, namespace=namespace),
+            delete_graph=lambda closure=(): self._delete_namespace_graph(
+                group_id, namespace=namespace
+            ),
             dry_run=dry_run,
+            seal=self._seal_for(
+                lambda neo4j, op_id: seal_namespace(neo4j, op_id, str(namespace or group_id))
+            ),
         )
 
     # ------------------------------------------------------------------ saga body
@@ -226,6 +245,7 @@ class ErasureCoordinator:
         delete_graph: Any,
         dry_run: bool,
         derived: dict[str, Any] | None = None,
+        seal: Any = None,
     ) -> dict[str, Any]:
         if dry_run:
             with self._connect() as conn:
@@ -247,6 +267,7 @@ class ErasureCoordinator:
                 "would_purge": preview.rows_affected,
                 "unaddressable": sorted({*preview.skipped_unaddressable, *stranded}),
                 "unaddressable_rows": stranded,
+                **({"incomplete_reasons": ["unaddressable_content"]} if stranded else {}),
             }
 
         op_id = uuidlib.uuid4().hex
@@ -282,7 +303,27 @@ class ErasureCoordinator:
                 purge=purge,
                 delete_graph=delete_graph,
                 derived=derived,
+                seal=seal,
             )
+
+    def _fence_neo4j(self) -> Any:
+        """The graph repository the erasure fence runs on, or None when the adapter has none."""
+        neo4j = getattr(self.graph_adapter, "neo4j", None)
+        return neo4j if callable(getattr(neo4j, "execute_write", None)) else None
+
+    def _seal_for(self, seal_fn: Any) -> Any:
+        """Bind ``seal_fn(neo4j, op_id)`` to this coordinator's repository (None without one)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return None
+        return lambda op_id: seal_fn(neo4j, op_id)
+
+    def release_orphaned_erasing_ops(self) -> list[str]:
+        """Release fence entries whose journal row is terminal or absent (scheduler sweep)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return []
+        return release_orphaned_erasing_ops(neo4j, self.journal)
 
     def _erase_and_verify(
         self,
@@ -291,12 +332,34 @@ class ErasureCoordinator:
         purge: ErasureSubjects,
         delete_graph: Any,
         derived: dict[str, Any] | None = None,
+        seal: Any = None,
+        release_fence: bool = False,
     ) -> dict[str, Any]:
-        """Delete graph state, purge the sidecar, verify, then transition."""
+        """Seal, delete graph state, release, purge the sidecar, verify, then transition."""
         if derived is None:
             derived = _new_derived()
+        incomplete_reasons: list[str] = []
+        sealed: SealResult | None = None
         try:
-            graph_deleted = int(delete_graph() or 0)
+            if seal is not None:
+                result_seal = seal(op_id)
+                sealed = result_seal if isinstance(result_seal, SealResult) else None
+            closure: list[str] = []
+            if sealed is not None:
+                closure = [u for u in sealed.closure_uuids if u not in purge.node_uuids]
+                if closure:
+                    # Durable before the deletes: a replay must reach what the seal found.
+                    with self._connect() as conn:
+                        self.subjects.record_subjects(
+                            op_id, [("NODE_UUID", u) for u in closure], conn=conn
+                        )
+                        conn.commit()
+                    purge = _subjects_for_uuids(
+                        set(purge.node_uuids) | set(closure), namespaces=frozenset(purge.namespaces)
+                    )
+                if sealed.unfenced_inflight:
+                    incomplete_reasons.append("unfenced_inflight")
+            graph_deleted = int(delete_graph(closure) or 0)
         except Exception as exc:  # noqa: BLE001
             self.journal.record_attempt(
                 op_id,
@@ -304,6 +367,16 @@ class ErasureCoordinator:
                 owner_token=oo.process_owner_token(),
             )
             raise
+        finally:
+            if sealed is not None or release_fence:
+                neo4j = self._fence_neo4j()
+                if neo4j is not None:
+                    try:
+                        release_memory(neo4j, op_id)
+                    except Exception:  # noqa: BLE001
+                        # Markers stay and the orphan sweep releases the epoch later.
+                        logger.warning("erasure %s: fence release failed", op_id, exc_info=True)
+                        incomplete_reasons.append("fence_release_failed")
 
         # Derived/merge uuids found during the graph delete join the purge set. They exist only in
         # memory and the graph delete already removed what found them, so record them before
@@ -417,18 +490,22 @@ class ErasureCoordinator:
             "merge_audits_tombstoned": int(derived["merge_audits_tombstoned"]),
             "merge_audits_unscrubbed": int(derived["merge_audits_unscrubbed"]),
         }
-        if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (
-            stranded
-            or not stranded_known
-            or derived_summary["unknown_provenance"] > 0
+        for flag, why in (
+            (stranded, "unaddressable_content"),
+            (not stranded_known, "unaddressable_census_failed"),
+            (derived_summary["unknown_provenance"] > 0, "unknown_provenance"),
             # An unparseable merge_audit entry naming the target may still hold its text.
-            or derived_summary["merge_audits_unscrubbed"] > 0
-            or derived_summary["twin_missing"]
-            or not wal_checkpoint_complete
+            (derived_summary["merge_audits_unscrubbed"] > 0, "merge_audits_unscrubbed"),
+            (derived_summary["twin_missing"], "twin_missing"),
+            (not wal_checkpoint_complete, "wal_checkpoint_incomplete"),
         ):
+            if flag and reason in (ERASED, GRAPH_ALREADY_ABSENT):
+                incomplete_reasons.append(why)
+        if incomplete_reasons:
             reason = ERASED_INCOMPLETE
 
         return {
+            **({"incomplete_reasons": incomplete_reasons} if reason == ERASED_INCOMPLETE else {}),
             "wal_checkpoint_complete": wal_checkpoint_complete,
             "derived": derived_summary,
             "reason": reason,
@@ -508,11 +585,18 @@ class ErasureCoordinator:
             result = self._erase_and_verify(
                 op_id=op_id,
                 purge=purge,
-                delete_graph=lambda: self._replay_graph_deletes(
+                delete_graph=lambda closure=(): self._replay_graph_deletes(
                     namespaces, node_uuids, derived=derived
                 ),
                 derived=derived,
+                release_fence=True,
             )
+        neo4j = self._fence_neo4j()
+        if neo4j is not None:
+            try:
+                release_orphaned_erasing_ops(neo4j, self.journal)
+            except Exception:  # noqa: BLE001
+                logger.warning("orphaned erasing-op release failed", exc_info=True)
         if result.get("reason") == RESIDUAL_CONTENT:
             return DRIFTED, {
                 "observed_error": (

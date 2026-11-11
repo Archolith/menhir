@@ -361,7 +361,6 @@ def _set_receipt_nonempty() -> None:
 
 # ------------------------------------------------------------------ T1
 @pytest.mark.online
-@p0("T1/B-F1: a twin published before a collapsed attempt stays behind after erase of the unlinked FAILED queue node")
 async def test_t1_erase_after_collapsed_attempt_leaves_no_twin(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once erase resolves the twin from a durable pre-publish link or marker instead
     of from ``resolved_episode_uuid``, which a failed ``stamp_and_finalize`` never wrote."""
@@ -379,9 +378,12 @@ async def test_t1_erase_after_collapsed_attempt_leaves_no_twin(test_neo4j_repo, 
         row = rig.q_row(q)
         _require(rig.fork.calls and rig.fork.calls[0].published, "the fake never committed the twin")
         _require(row and row["state"] in ("FAILED", "PENDING"), f"attempt did not fail back: {row}")
-        _require(row["resolved"] is None, f"queue node unexpectedly linked: {row}")
+        # P4 setup realignment: the protocol-2 publish links q to its twin inside the publish
+        # transaction, so a collapsed attempt now leaves a LINKED FAILED q (the fix for B-F1). The
+        # erase must still remove the twin; whether q is linked is no longer a precondition.
         before = rig.carriers()
-        _require(any(c.startswith("Episodic:" + rig.tag + "-twin") for c in before), f"twin not committed: {before}")
+        # P4 setup realignment: the twin is named by the claim's reserved uuid, not a tag prefix.
+        _require(f"Episodic:{rig.fork.calls[0].twin_uuid}" in before, f"twin not committed: {before}")
 
         out = await rig.erase(q)
 
@@ -396,7 +398,6 @@ async def test_t1_erase_after_collapsed_attempt_leaves_no_twin(test_neo4j_repo, 
 
 # ------------------------------------------------------------------ T2
 @pytest.mark.online
-@p0("T2: an attempt-1 twin that predates the attempt-2 claim survives an erase during attempt 2 (no sweep)")
 async def test_t2_erase_during_second_attempt_removes_first_attempt_twin(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once erase covers twins of EARLIER attempts (reserved uuids / marker), not only
     the link a finished attempt would write."""
@@ -406,7 +407,11 @@ async def test_t2_erase_during_second_attempt_removes_first_attempt_twin(test_ne
         q = rig.seed_q()
 
         async def attempt1(fork: FakeFork, call: SimpleNamespace) -> Any:
-            # Twin with NO entity neighbour: attempt 2's reconcile (which needs one) does not adopt it.
+            # Twin with NO entity neighbour. P4 setup realignment: published WITHOUT the fence (a
+            # twin named by the reserved uuid but never linked, e.g. a publish whose link was not
+            # written), so attempt 2 does not finalize from a link and the erase can only find the
+            # attempt-1 twin through the reservation list.
+            call.kw = {k: v for k, v in call.kw.items() if k != "publish_fence"}
             await fork.publish(call, entities=False)
             raise TimeoutError("graphiti add_episode timed out after 1.0s; remote completion status unknown")
 
@@ -445,7 +450,6 @@ async def test_t2_erase_during_second_attempt_removes_first_attempt_twin(test_ne
 
 # ------------------------------------------------------------------ T3
 @pytest.mark.online
-@p0("T3/A-4: a worker whose claim was reaped and whose queue node was then erased still publishes a twin")
 async def test_t3_reaped_then_erased_then_late_publish_leaves_no_twin(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once the late publish is refused (or compensated) although the queue node it
     belonged to is already gone."""
@@ -482,7 +486,6 @@ async def test_t3_reaped_then_erased_then_late_publish_leaves_no_twin(test_neo4j
 
 # ------------------------------------------------------------------ T4a
 @pytest.mark.online
-@p0("T4a/B-1: a publish whose claim was sealed by an erase between Graphiti's reads and its commit still commits")
 async def test_t4a_publish_after_seal_aborts(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once the worker passes a G-publish fence into ``add_episode`` that aborts the
     publish transaction when the claim has been sealed."""
@@ -520,7 +523,6 @@ async def test_t4a_publish_after_seal_aborts(test_neo4j_repo, tmp_path) -> None:
 
 # ------------------------------------------------------------------ T4b
 @pytest.mark.online
-@p0("T4b: a twin committed by Graphiti but not yet linked is invisible to an erase that lands next")
 async def test_t4b_erase_after_publish_commit_sees_the_twin(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once the link (or reservation) is durable inside the publish transaction, so an
     erase that lands after the commit resolves and removes the twin."""
@@ -554,7 +556,6 @@ async def test_t4b_erase_after_publish_commit_sees_the_twin(test_neo4j_repo, tmp
 
 # ------------------------------------------------------------------ T5
 @pytest.mark.online
-@p0("T5/B-F6: a worker resumed after an erase still dispatches the erased text and publishes it (embedding re-stamp checked, see docstring)")
 async def test_t5_worker_resuming_after_erase_writes_nothing_back(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once every post-claim write (``set_episode_content_embedding``, the dispatch to
     Graphiti) is fenced on the claim. NOTE: the plan says "pause after publish"; the pause here is at
@@ -575,9 +576,10 @@ async def test_t5_worker_resuming_after_erase_writes_nothing_back(test_neo4j_rep
         async def handler(fork: FakeFork, call: SimpleNamespace) -> Any:
             row_now = rig.q_row(q)
             snaps["entry"] = {"embedding": bool(row_now and row_now["has_embedding"])}
-            published = await fork.publish(call)
-            snaps["after_publish"] = rig.carriers()  # before the worker's own compensation runs
-            return published
+            try:
+                return await fork.publish(call)
+            finally:  # P4 setup realignment: a fenced publish raises; snapshot either way
+                snaps["after_publish"] = rig.carriers()  # before the worker's own compensation runs
 
         rig.fork.handler = handler
         task = rig.start_worker(q)
@@ -605,7 +607,6 @@ async def test_t5_worker_resuming_after_erase_writes_nothing_back(test_neo4j_rep
 
 # ------------------------------------------------------------------ T11
 @pytest.mark.online
-@p0("T11/B-F7: a stale FAILED retry row reconciles onto a sealed (deleted_by_user) tombstone and flips it READY")
 async def test_t11_stale_retry_row_cannot_resurrect_a_sealed_queue_node(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once ``mark_episode_ready(required_state='FAILED')`` (and the finalize-from-link
     that replaces it) refuses an erased / marked queue node."""
@@ -672,7 +673,6 @@ async def test_t11_stale_retry_row_cannot_resurrect_a_sealed_queue_node(test_neo
 
 # ------------------------------------------------------------------ T12
 @pytest.mark.online
-@p0("T12/bypass 1: reconcile in namespace Y adopts (links and re-stamps) a same-name twin of namespace X")
 async def test_t12_reconcile_does_not_cross_namespaces(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once ``find_completed_episode_artifact`` is scoped to the claimant's namespace."""
     from menhir.domain.namespace import namespace_to_group_id
@@ -697,15 +697,22 @@ async def test_t12_reconcile_does_not_cross_namespaces(test_neo4j_repo, tmp_path
     try:
         rig.fork.handler = never_publish
 
-        # Control: same namespace, same name -> the worker adopts the twin (the machinery works here).
+        # Control: a queue node already linked to its twin is finalized from the link without a
+        # publish (the machinery works here). P4 setup realignment: name reconcile is deleted, so
+        # adoption now needs the durable link, not a same-name twin.
         ctl_name, ctl_twin = f"{rig.tag}-ctl-name", f"{rig.tag}-ctl-twin"
         seed_twin(ctl_twin, ctl_name, namespace_to_group_id(ns_x))
         qc = rig.seed_q(namespace=ns_x, name=ctl_name)
+        test_neo4j_repo.execute(
+            "MATCH (q:Episodic {uuid:$q}) SET q.resolved_episode_uuid = $t", params={"q": qc, "t": ctl_twin}
+        )
         await rig.run_worker(qc)
         crow = rig.q_row(qc)
         _require(crow and crow["state"] == "READY" and crow["resolved"] == ctl_twin, f"control not adopted: {crow}")
 
-        # The counterexample: X owns the only same-name twin; the claimant lives in Y.
+        # The counterexample: X owns the only same-name twin; the claimant lives in Y and publishes
+        # its own episode (no link to adopt).
+        rig.fork.handler = None
         name, twin_x = f"{rig.tag}-shared-name", f"{rig.tag}-x-twin"
         seed_twin(twin_x, name, namespace_to_group_id(ns_x))
         qy = rig.seed_q(namespace=ns_y, name=name)
@@ -727,7 +734,6 @@ async def test_t12_reconcile_does_not_cross_namespaces(test_neo4j_repo, tmp_path
 
 # ------------------------------------------------------------------ T16
 @pytest.mark.online
-@p0("T16: an erase that meets a claim without publish_protocol=2 replies success instead of erased_incomplete{unfenced_inflight}")
 async def test_t16_unfenced_inflight_claim_is_reported_incomplete(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once the erase reply distinguishes a sealed ENRICHING claim that cannot be
     fenced. Invented reply key: ``incomplete_reasons`` (falls back to ``reasons``); the plan names the
@@ -744,7 +750,13 @@ async def test_t16_unfenced_inflight_claim_is_reported_incomplete(test_neo4j_rep
         rig.fork.handler = handler
         rig.start_worker(q)
         await gate.wait_reached()
-        row = await rig.wait_enriching(q, attempts=1)
+        await rig.wait_enriching(q, attempts=1)
+        # P4 setup realignment: today's claim always sets publish_protocol=2, so a claim made by a
+        # pre-protocol process (restart overlap) is simulated by removing it.
+        test_neo4j_repo.execute(
+            "MATCH (n:Episodic {uuid:$u}) REMOVE n.publish_protocol", params={"u": q}
+        )
+        row = rig.q_row(q)
         _require(row["publish_protocol"] is None, f"claim already carries publish_protocol: {row}")
 
         out = await rig.erase(q)
@@ -813,7 +825,9 @@ async def test_t18_late_twin_does_not_survive_and_reply_is_honest(test_neo4j_rep
         rig.coord.graph_adapter = _InterleavingAdapter(rig.adapter, hook)
         out = await rig.erase(q)
 
-        _require(rig.fork.calls and rig.fork.calls[0].published, "the worker never published inside the window")
+        # P4 setup realignment: the seal precedes the first delete, so the worker's publish inside
+        # the window is now fenced (it may never commit). Require only that it was attempted.
+        _require(rig.fork.calls, "the worker never reached add_episode inside the window")
         left = rig.carriers()
         assert not left or out.get("reason") not in SUCCESS_REASONS, (
             f"reply reason={out.get('reason')!r} (late_twin_erased={out.get('late_twin_erased')!r}) "
@@ -827,7 +841,6 @@ async def test_t18_late_twin_does_not_survive_and_reply_is_honest(test_neo4j_rep
 
 # ------------------------------------------------------------------ T19
 @pytest.mark.online
-@p0("T19: a runtime that does not hold the scheduler lease still claims and publishes")
 async def test_t19_only_the_scheduler_lease_holder_claims(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once ``_ensure_enrichment_worker`` / lease recovery run only in the process that
     holds the scheduler lease. Uses only existing entry points (``_ensure_enrichment_worker``,
@@ -867,7 +880,6 @@ async def test_t19_only_the_scheduler_lease_holder_claims(test_neo4j_repo, tmp_p
 
 # ------------------------------------------------------------------ T25
 @pytest.mark.online
-@p0("T25/Adv F5: an erase in the namespace does not fence an in-flight publish of another memory (it completes READY)")
 async def test_t25_erase_fences_inflight_publish_without_burning_attempts(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once an erase bumps the namespace erasure epoch, the in-flight publish of the
     other memory aborts with ``PublishFenced``, and the requeue undoes the claim's attempt increment."""
@@ -905,7 +917,6 @@ async def test_t25_erase_fences_inflight_publish_without_burning_attempts(test_n
 
 # ------------------------------------------------------------------ T26
 @pytest.mark.online
-@p0("T26: a publish into the default namespace (group_id '') is not fenced by an erase of a default-namespace memory")
 async def test_t26_default_namespace_publish_is_fenced_under_default_key(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once G-publish locks the fence keyed ``'default'`` for the physical group_id
     ``''`` (the normalisation the cascade does at memory_queries.py:1351-1355). The default namespace
