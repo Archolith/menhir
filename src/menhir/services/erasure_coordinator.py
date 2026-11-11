@@ -529,6 +529,7 @@ class ErasureCoordinator:
             "edges_deleted": len(derived["edges_deleted"]),
             "edges_flagged": len(derived["edges_flagged"]),
             "unknown_provenance": int(derived["unknown_provenance"]),
+            "conflicts_deleted": int(derived["conflicts_deleted"]),
             "twin_missing": bool(derived["twin_missing"]),
             "merge_audits_tombstoned": int(derived["merge_audits_tombstoned"]),
             "merge_audits_unscrubbed": int(derived["merge_audits_unscrubbed"]),
@@ -777,6 +778,7 @@ def _new_derived() -> dict[str, Any]:
         "edges_deleted": [],
         "edges_flagged": [],
         "unknown_provenance": 0,
+        "conflicts_deleted": 0,
         "twin_missing": False,
         "merge_audits_tombstoned": 0,
         "merge_audits_unscrubbed": 0,
@@ -813,6 +815,7 @@ def _fold_derived(derived: dict[str, Any], result: Mapping[str, Any]) -> None:
             if item and item not in derived[key]:
                 derived[key].append(str(item))
     derived["unknown_provenance"] += int(result.get("derived_unknown_provenance") or 0)
+    derived["conflicts_deleted"] += int(result.get("derived_conflicts_deleted") or 0)
     # Deleted derived items must be in the purge set, whether or not the preview saw them.
     derived["extra_uuids"].update(
         str(u)

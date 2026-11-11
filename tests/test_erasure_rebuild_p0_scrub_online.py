@@ -117,7 +117,7 @@ def _seed_memory(repo: Any, ns: str, canary: str, *, live_text: str = "a survivi
 
 
 # ------------------------------------------------------------------ T27a
-@P0
+# R2 CF-331 made this pass (the cascade deletes conflicts on deleted or scrubbed edges).
 def test_t27a_edge_invalidation_conflict_text_is_gone_after_erase(test_neo4j_repo, tmp_path):
     """T27 (Adv F2a). An :EdgeInvalidationConflict written by the production writer copies a
     closure edge's fact into ``kept_fact``. Erasing the memory deletes the edge but today leaves the

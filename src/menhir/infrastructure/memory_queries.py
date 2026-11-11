@@ -1357,7 +1357,19 @@ class MemoryQueryRepository:
                           rr.created_at = datetime()
         )
         FOREACH (x IN dead_edges | DELETE x)
-        RETURN edges_deleted_uuids, edges_flagged_uuids
+        // CF-331: a conflict record copies its kept and cause facts. It goes when either edge
+        // was deleted or scrubbed, or when an erased episode caused it (the cause edge may never
+        // have persisted).
+        WITH edges_deleted_uuids, edges_flagged_uuids
+        OPTIONAL MATCH (c:EdgeInvalidationConflict)
+        WHERE (c.kept_edge_uuid IN edges_deleted_uuids + edges_flagged_uuids
+               OR c.cause_edge_uuid IN edges_deleted_uuids + edges_flagged_uuids
+               OR any(u IN coalesce(c.cause_episode_uuids, []) WHERE u IN $erased_uuids))
+          __CONFLICT_NS_FILTER__
+        WITH edges_deleted_uuids, edges_flagged_uuids,
+             [x IN collect(DISTINCT c) WHERE x IS NOT NULL] AS conflicts
+        FOREACH (x IN conflicts | DETACH DELETE x)
+        RETURN edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted
         """
     ).replace("__EDGE_TIME_PROPS__", _EDGE_ANCHORED_TIME_PROPS)
     _DERIVED_EDGE_NS_FILTER = (
@@ -1367,16 +1379,18 @@ class MemoryQueryRepository:
                  ELSE trim(toString(coalesce(fe.namespace, fe.group_id)))
              END = $namespace_key"""
     )
-    _DERIVED_EDGE_CALL = (
-        "\n            CALL {"
-        + _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER)
-        + "}\n"
+    _DERIVED_CONFLICT_NS_FILTER = _DERIVED_EDGE_NS_FILTER.replace(
+        "coalesce(fe.namespace, fe.group_id", "coalesce(c.group_id"
     )
-    _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "")
-    # Target gone, caller scoped: only edges in the caller's namespace (review F4).
-    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_BODY.replace(
+    _DERIVED_EDGE_SCOPED_BODY = _DERIVED_EDGE_BODY.replace(
         "__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER
+    ).replace("__CONFLICT_NS_FILTER__", _DERIVED_CONFLICT_NS_FILTER)
+    _DERIVED_EDGE_CALL = "\n            CALL {" + _DERIVED_EDGE_SCOPED_BODY + "}\n"
+    _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "").replace(
+        "__CONFLICT_NS_FILTER__", ""
     )
+    # Target gone, caller scoped: only edges in the caller's namespace (review F4).
+    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_SCOPED_BODY
     # Entities reached from the target episode; views/artifacts/structure/TEMPORAL are skipped.
     _DERIVED_ENTITY_MATCH = (
         """
@@ -1731,6 +1745,7 @@ class MemoryQueryRepository:
             result["derived_edges_flagged_uuids"] = list(edge_row.get("edges_flagged_uuids") or [])
             result["derived_edges_deleted"] = len(result["derived_edges_deleted_uuids"])
             result["derived_edges_flagged"] = len(result["derived_edges_flagged_uuids"])
+            result["derived_conflicts_deleted"] = int(edge_row.get("conflicts_deleted") or 0)
             return result
         if len(namespace_keys) != 1:
             raise RuntimeError(
@@ -1753,6 +1768,7 @@ class MemoryQueryRepository:
             "derived_entities_deleted": 0,
             "derived_entities_flagged": 0,
             "derived_unknown_provenance": 0,
+            "derived_conflicts_deleted": 0,
             "derived_edges_deleted_uuids": [],
             "derived_edges_flagged_uuids": [],
             "derived_entities_deleted_uuids": [],
@@ -2082,7 +2098,7 @@ class MemoryQueryRepository:
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
                  event_assertions_deleted, event_heads_deleted,
-                 edges_deleted_uuids, edges_flagged_uuids,
+                 edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
                  entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
@@ -2091,7 +2107,7 @@ class MemoryQueryRepository:
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
                  event_assertions_deleted, event_heads_deleted,
-                 edges_deleted_uuids, edges_flagged_uuids,
+                 edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
                  entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
@@ -2099,7 +2115,7 @@ class MemoryQueryRepository:
                    dependent_views_retired, dependent_views_scrubbed,
                    view_repairs_created, watermarks_reset,
                    event_assertions_deleted, event_heads_deleted,
-                   edges_deleted_uuids, edges_flagged_uuids,
+                   edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
                    entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             """,
             params={
@@ -2131,6 +2147,7 @@ class MemoryQueryRepository:
             "derived_entities_deleted": len(row.get("entities_deleted_uuids") or []),
             "derived_entities_flagged": len(row.get("entities_flagged_uuids") or []),
             "derived_unknown_provenance": int(row.get("derived_unknown_provenance", 0) or 0),
+            "derived_conflicts_deleted": int(row.get("conflicts_deleted", 0) or 0),
             "derived_edges_deleted_uuids": list(row.get("edges_deleted_uuids") or []),
             "derived_edges_flagged_uuids": list(row.get("edges_flagged_uuids") or []),
             "derived_entities_deleted_uuids": list(row.get("entities_deleted_uuids") or []),

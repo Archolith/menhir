@@ -156,18 +156,22 @@ class DeleteMemoryTool(BaseTextTool):
             entities_flagged = int(derived.get("entities_flagged") or 0)
             edges_flagged = int(derived.get("edges_flagged") or 0)
             merge_audits_tombstoned = int(derived.get("merge_audits_tombstoned") or 0)
+            conflicts_deleted = int(derived.get("conflicts_deleted") or 0)
             if (
                 entities_deleted
                 + edges_deleted
                 + entities_flagged
                 + edges_flagged
                 + merge_audits_tombstoned
+                + conflicts_deleted
             ) > 0:
                 message += (
                     f" Derived data: {entities_deleted} entit(ies) and {edges_deleted} fact(s) "
                     f"removed; {entities_flagged + edges_flagged} shared item(s) hidden pending "
                     f"re-derivation; {merge_audits_tombstoned} merge(s) made non-reversible."
                 )
+                if conflicts_deleted:
+                    message += f" {conflicts_deleted} fact-conflict record(s) quoting it removed."
             unaddressable = outcome.get("unaddressable") or []
             if unaddressable:
                 # Never let an erasure claim a completeness it does not have.

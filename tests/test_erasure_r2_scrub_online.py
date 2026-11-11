@@ -90,6 +90,73 @@ def test_cf330_scrub_removes_original_content_custom_attributes_and_time_express
     assert not {"time_expression", "time_kind", "time_contract"} & set(edge), edge
 
 
+def _record_conflict(repo: Any, *, kept_edge: str, cause_edge: str, group_id: str, fact: str,
+                     cause_episode: str | None = None) -> None:
+    import asyncio
+
+    from menhir.infrastructure.graphiti_edge_invalidation import KeptEdge, record_kept_conflicts
+
+    class _Driver:
+        async def execute_query(self, cypher: str, **params: Any) -> None:
+            repo.execute(cypher, params=params)
+
+    asyncio.run(record_kept_conflicts(_Driver(), [KeptEdge(
+        reason="newer_candidate", kept_edge_uuid=kept_edge, kept_group_id=group_id,
+        kept_fact="kept side", cause_edge_uuid=cause_edge, cause_fact=fact, cause_source="agent",
+    )], cause_episode_uuid=cause_episode))
+
+
+def _conflicts(repo: Any, group_id: str) -> int:
+    return repo.execute(
+        "MATCH (c:EdgeInvalidationConflict {group_id:$g}) RETURN count(c) AS c",
+        params={"g": group_id},
+    )[0]["c"]
+
+
+def test_cf331_conflict_caused_by_the_erased_episode_is_deleted_and_counted(
+    test_neo4j_repo, tmp_path
+) -> None:
+    """CF-331: the cause edge never persisted (it was kept against), so only the recorded cause
+    episode links the conflict to the erased memory. The cascade deletes it and the reply counts it.
+    Fails if the cascade stops matching ``cause_episode_uuids``, or the writer stops recording it."""
+    repo = test_neo4j_repo
+    ns, canary = f"r2-331-{_u()}", new_canary("CF331")
+    ids = _seed_memory(repo, ns, canary)
+    other_ns = f"r2-331o-{_u()}"
+    _record_conflict(repo, kept_edge=_u(), cause_edge=_u(), group_id=ns, fact=canary,
+                     cause_episode=ids["twin"])
+    # Another namespace's record naming the same episode uuid is out of this erase's scope.
+    _record_conflict(repo, kept_edge=_u(), cause_edge=_u(), group_id=other_ns, fact="other ns",
+                     cause_episode=ids["twin"])
+    _, coord, db = _adapter_and_coordinator(repo, tmp_path)
+
+    out = coord.erase_memory(ids["queue"])
+
+    assert out["reason"] == "erased", out
+    assert out["derived"]["conflicts_deleted"] == 1, out["derived"]
+    assert _conflicts(repo, ns) == 0
+    assert _conflicts(repo, other_ns) == 1
+    assert all_hits(repo, db, canary) == []
+
+
+def test_cf331_conflict_on_a_scrubbed_live_edge_is_deleted(test_neo4j_repo, tmp_path) -> None:
+    """The kept edge survives (another episode still supports it) but is scrubbed; a conflict
+    quoting its old fact must go. Fails if the cascade matches only deleted edges."""
+    repo = test_neo4j_repo
+    ns, canary = f"r2-331b-{_u()}", new_canary("CF331B")
+    ids = _seed_memory(repo, ns, canary)
+    _record_conflict(repo, kept_edge=ids["edge"], cause_edge=_u(), group_id=ns, fact="cause")
+    repo.execute(
+        "MATCH (c:EdgeInvalidationConflict {kept_edge_uuid:$e}) SET c.kept_fact = $c",
+        params={"e": ids["edge"], "c": canary},
+    )
+    _, coord, db = _adapter_and_coordinator(repo, tmp_path)
+    coord.erase_memory(ids["queue"])
+    assert _edge(repo, ids["edge"]).get("rederive_pending") is True
+    assert _conflicts(repo, ns) == 0
+    assert all_hits(repo, db, canary) == []
+
+
 def test_cf330_scrub_leaves_an_unrelated_entity_untouched(test_neo4j_repo, tmp_path) -> None:
     """The key removal is bound to the shared set: an entity the erased memory never mentioned
     keeps its custom attribute. Fails if the REMOVE loop escapes the ``shared`` list."""

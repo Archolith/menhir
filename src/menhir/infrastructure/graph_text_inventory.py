@@ -146,7 +146,7 @@ GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (
         "Entity", "node", ENTITY_KNOWN_TEXT_PROPERTIES,
         (HolderSelector.PROVENANCE_EDGE, HolderSelector.PROVENANCE_LIST),
         EraseAction.SOLE_SOURCE_DELETE_ELSE_SCRUB,
-        finding="CF-330 original_content/custom attributes not scrubbed; CF-332 absorbed_from",
+        finding="CF-332 absorbed_from",
         open_ended=True,
     ),
     TextHolder(
@@ -160,7 +160,6 @@ GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (
         # timestamps, an edge uuid (time_anchor_ref) and a schema/model tag (time_contract).
         ("fact", "fact_embedding", "name", "time_expression"),
         (HolderSelector.EPISODES_LIST,), EraseAction.DEAD_DELETE_LIVE_SCRUB,
-        finding="CF-330 time_expression and anchored-time props not scrubbed",
     ),
     TextHolder(
         "TurnEvidence", "node", ("text",), (HolderSelector.UUID, HolderSelector.CLOSURE),
@@ -172,8 +171,8 @@ GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (
     ),
     TextHolder(
         "EdgeInvalidationConflict", "node", ("kept_fact", "cause_fact"),
-        (HolderSelector.EDGE_UUID_REF,), EraseAction.DELETE_WITH_OP,
-        finding="CF-331 conflict nodes not deleted by the cascade",
+        # cause_episode_uuids (CF-331): the cause edge may never have persisted.
+        (HolderSelector.EDGE_UUID_REF, HolderSelector.PROVENANCE_LIST), EraseAction.DELETE_WITH_OP,
     ),
     TextHolder(
         "Entity", "node", ("merge_audit",), (HolderSelector.NEEDLE,), EraseAction.SCRUB,

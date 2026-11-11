@@ -657,7 +657,9 @@ class GraphitiClient:
                 **owned_extra,
             )
             if not fenced:
-                await self._record_kept_conflicts(state)
+                await self._record_kept_conflicts(
+                    state, getattr(getattr(result, "episode", None), "uuid", None) or episode_uuid
+                )
             return result
         finally:
             invalidation_guard_state.reset(guard_binding)
@@ -725,16 +727,22 @@ class GraphitiClient:
             from menhir.infrastructure.publish_fence import _tx_run
 
             if state.kept:
-                await record_kept_conflicts_in_tx(partial(_tx_run, tx), state.kept)
+                await record_kept_conflicts_in_tx(
+                    partial(_tx_run, tx), state.kept, cause_episode_uuid=episode_uuid
+                )
 
         return extra
 
-    async def _record_kept_conflicts(self, state: InvalidationGuardState) -> None:
+    async def _record_kept_conflicts(
+        self, state: InvalidationGuardState, cause_episode_uuid: str | None = None
+    ) -> None:
         """Record unresolved conflicts for edges the guard kept; never fails the episode."""
         if not state.kept:
             return
         try:
-            await record_kept_conflicts(self.client.driver, state.kept)
+            await record_kept_conflicts(
+                self.client.driver, state.kept, cause_episode_uuid=cause_episode_uuid
+            )
         except Exception:
             logger.exception("Recording kept-edge conflicts failed; edges stay kept")
 
