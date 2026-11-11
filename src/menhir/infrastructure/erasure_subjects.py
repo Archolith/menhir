@@ -80,7 +80,9 @@ def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
                     str(r[0])
                     for r in conn.execute(
                         "SELECT DISTINCT subject_value FROM erasure_subjects "
-                        "WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID') "
+                        # CF-335: a flagged live item's node-keyed rows quote the
+                        # erased text until its column purge finishes.
+                        "WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID', 'FLAGGED_UUID') "
                         f"AND purged_at IS NULL AND subject_value IN ({placeholders})",
                         wanted,
                     ).fetchall()

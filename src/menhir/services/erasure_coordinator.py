@@ -361,6 +361,18 @@ class ErasureCoordinator:
         )
         return {str(r["uuid"]) for r in rows if r.get("uuid")}
 
+    def _rederive_flagged_uuids(self, erased: set[str]) -> set[str]:
+        """Items an erase of ``erased`` flagged for rederive (their repair keys name the erased uuid)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None or not erased:
+            return set()
+        rows = neo4j.execute(
+            "UNWIND $uuids AS u MATCH (rr:DerivedRederiveRepair) "
+            "WHERE rr.repair_key STARTS WITH u + $sep RETURN DISTINCT rr.item_uuid AS uuid",
+            params={"uuids": sorted(erased), "sep": "\x1f"},
+        )
+        return {str(r["uuid"]) for r in rows if r.get("uuid")} - erased
+
     def release_orphaned_erasing_ops(self) -> list[str]:
         """Release fence entries whose journal row is terminal or absent (scheduler sweep)."""
         neo4j = self._fence_neo4j()
@@ -434,6 +446,18 @@ class ErasureCoordinator:
             purge = _subjects_for_uuids(
                 set(purge.node_uuids) | extra, namespaces=frozenset(purge.namespaces)
             )
+        # CF-335: live items the cascade scrubbed or flagged keep their rows, but their node-keyed
+        # sidecar content (memory_revisions, ...) can quote the erased text. FLAGGED_UUID is purged
+        # by column and never denylisted. Replay recovers these from DerivedRederiveRepair keys.
+        flagged = (
+            set(derived["entities_flagged"]) | set(derived["edges_flagged"])
+        ) - set(purge.node_uuids)
+        if flagged:
+            with self._connect() as conn:
+                self.subjects.record_subjects(
+                    op_id, [("FLAGGED_UUID", u) for u in sorted(flagged)], conn=conn
+                )
+                conn.commit()
 
         try:
             # #527: a queued observability row for this subject must land before the purge,
@@ -623,6 +647,14 @@ class ErasureCoordinator:
                 op_id, [("NODE_UUID", u) for u in sorted(sealed_closure)]
             )
             node_uuids |= sealed_closure
+        # CF-335: the cascade's flagged items are known only to the graph once it commits; a
+        # crash before the first attempt recorded them leaves their repair nodes, keyed by the
+        # erased uuid, as the durable fact.
+        repaired = self._rederive_flagged_uuids(node_uuids | derived_uuids)
+        if repaired:
+            self.subjects.record_subjects(
+                op_id, [("FLAGGED_UUID", u) for u in sorted(repaired)]
+            )
         purge = _subjects_for_uuids(
             node_uuids | derived_uuids, namespaces=frozenset(namespaces)
         )
