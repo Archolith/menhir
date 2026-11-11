@@ -44,15 +44,12 @@ def _gap(table: str, columns: str, reason: str) -> dict[tuple[str, str], str]:
     return {(table, c): reason for c in columns.split()}
 
 
-_R2_CF329 = "R2 CF-329: pending_actions is created outside schema_migrations and never classified"
 
-KNOWN_UNCLASSIFIED: dict[tuple[str, str], str] = {
-    # LIKELY REAL CONTENT: `context` holds the episode text rehydrate passed (CF-329);
-    # `failure_reason` is exception text and can embed it. R2 moves both to a uuid reference.
-    **_gap("pending_actions", "context failure_reason", _R2_CF329 + " (possible content)"),
-}
 
-KNOWN_UNCLASSIFIED_SEED_COUNT = 2
+# R2 CF-329 classified pending_actions.context/failure_reason as CONTENT; nothing is left.
+KNOWN_UNCLASSIFIED: dict[tuple[str, str], str] = {}
+
+KNOWN_UNCLASSIFIED_SEED_COUNT = 0  # seeded at 2 by R1; R2 CF-329 closed both
 
 _CREATE_RE = re.compile(
     r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\{?\w+\}?)\s*(?:\(|USING)"

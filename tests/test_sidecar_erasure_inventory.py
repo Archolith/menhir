@@ -34,6 +34,10 @@ def _build_sidecar(tmp_path) -> sqlite3.Connection:
     # the erasure subject inventory were invisible to this guard.
     GraphOperationsJournal(db_path=store.db_path)._ensure_ready()
     ErasureSubjectStore(db_path=store.db_path)._ensure_ready()
+    # R2 CF-329: pending_actions is classified now, so its table must exist here too.
+    from menhir.infrastructure.pending_actions import PendingActionStore
+
+    PendingActionStore(db_path=store.db_path)._ensure_ready()
     return sqlite3.connect(store.db_path)
 
 

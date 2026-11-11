@@ -990,7 +990,8 @@ async def test_rehydrate_node_queues_pending_when_llm_fails(
     assert len(pending) == 1
     assert pending[0]["node_uuid"] == "compressed-1"
     assert pending[0]["action"] == "rehydrate"
-    assert pending[0]["context"] == "fresh detail"
+    # R2 CF-329: the episode is named by source_uuid; its text is never persisted.
+    assert pending[0]["context"] is None
     assert pending[0]["source_uuid"] == "episode-1"
     assert pending[0]["failure_reason"] == "llm_failed"
 
@@ -1046,7 +1047,7 @@ async def test_rehydrate_node_marks_pending_failure_when_graph_update_fails(
         {
             "node_uuid": "compressed-1",
             "action": "rehydrate",
-            "context": "fresh detail",
+            "context": None,  # R2 CF-329: never the episode text
             "source_uuid": "episode-1",
             "failure_reason": "complete_rehydration_failed",
         }

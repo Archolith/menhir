@@ -82,7 +82,27 @@ _GRAPH_OPS_INDEX_NOTE = (
     "Addressed through graph_operation_subjects, which indexes every uuid the row mentions."
 )
 
+_PENDING_ACTIONS_NOTE = (
+    "R2 CF-329: rehydrate no longer writes episode text here (it records the episode uuid in "
+    "source_uuid), but legacy rows hold it; failure_reason is a fixed label today and was "
+    "classified as possible exception text in R1. Addressed by the node or the source episode."
+)
+
 CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
+    ContentColumn(
+        table="pending_actions",
+        column="context",
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "source_uuid"),
+        note=_PENDING_ACTIONS_NOTE,
+    ),
+    ContentColumn(
+        table="pending_actions",
+        column="failure_reason",
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "source_uuid"),
+        note=_PENDING_ACTIONS_NOTE,
+    ),
     ContentColumn(
         table="memory_revisions",
         column="old_value",
@@ -343,8 +363,8 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
     {
         # R1.2 (erasure audit remediation): stores whose tables were created outside this
         # inventory. Classified from their writers; each group says why it holds no memory text.
-        # pending_actions: ids, the action enum and timestamps. Its `context` and
-        # `failure_reason` columns are NOT here: they can hold memory text (CF-329, R2).
+        # pending_actions: ids, the action enum and timestamps. `context` and
+        # `failure_reason` are CONTENT_COLUMNS (R2 CF-329).
         ("pending_actions", "node_uuid"),
         ("pending_actions", "source_uuid"),
         ("pending_actions", "action"),

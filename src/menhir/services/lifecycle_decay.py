@@ -172,12 +172,13 @@ class LifecycleDecayMixin:
                 )
             return updated
 
+        # R2 CF-329: pending rows name the context's episode by source_uuid and never store its
+        # text; a later rehydrate gets fresh episode content from its caller.
         if self.llm is None:
             await asyncio.to_thread(
                 self.pending_actions.upsert,
                 node_uuid,
                 "rehydrate",
-                context=context_text,
                 source_uuid=source_uuid,
                 failure_reason="no_llm",
             )
@@ -204,7 +205,6 @@ class LifecycleDecayMixin:
                 self.pending_actions.upsert,
                 node_uuid,
                 "rehydrate",
-                context=context_text,
                 source_uuid=source_uuid,
                 failure_reason="missing_existing_content",
             )
@@ -216,7 +216,6 @@ class LifecycleDecayMixin:
                 self.pending_actions.upsert,
                 node_uuid,
                 "rehydrate",
-                context=context_text,
                 source_uuid=source_uuid,
                 failure_reason="llm_failed",
             )
@@ -251,7 +250,6 @@ class LifecycleDecayMixin:
                 self.pending_actions.upsert,
                 node_uuid,
                 "rehydrate",
-                context=context_text,
                 source_uuid=source_uuid,
                 failure_reason="complete_rehydration_failed",
             )

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.infrastructure.telemetry.erasure_denylist import ensure_erasure_denylist
 from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,9 @@ class PendingActionStore:
                     ON pending_actions (action)
                     """
                 )
+                # R2 CF-329: this table is created outside schema_migrations, so the erasure
+                # denylist triggers (which skip absent tables) must be installed here too.
+                ensure_erasure_denylist(conn)
                 conn.commit()
             type(self)._initialized_paths.add(key)
 
