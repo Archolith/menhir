@@ -85,8 +85,9 @@ COPIERS: tuple[CopierEntry, ...] = (
     # ------------------------------------------------------------------ R2 / P5 violators
     CopierEntry(
         _I + "episode_maintenance", "EpisodeMaintenanceRepository.create_raw_capture_entity",
-        "episode content read before the seal", Gate.UNFENCED,
-        "R2 CF-327 (lane G G-1): bare MERGE, no marker/lock/erasing_ops/created_epoch",
+        "episode content read before the seal", Gate.G_COPY,
+        "R2 CF-327: one MERGE+MENTIONS statement under execute_copy_fenced (source = episode "
+        "uuid; epoch from the exhausted fetch, else read at call); episode must exist untombstoned",
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.compress_node",

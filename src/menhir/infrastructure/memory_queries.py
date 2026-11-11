@@ -1480,6 +1480,19 @@ class MemoryQueryRepository:
                           rr.created_at = datetime()
         )
         FOREACH (e IN doomed | DETACH DELETE e)
+        // CF-327: a raw capture is the erased episode's full text; delete it even when its
+        // MENTIONS link is missing (legacy two-statement writer).
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
+        OPTIONAL MATCH (rc:Entity)
+        WHERE rc.raw_capture_for IN $erased_uuids AND NOT rc.uuid IN entities_deleted_uuids
+          __RC_NS_FILTER__
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids,
+             [x IN collect(DISTINCT rc) WHERE x IS NOT NULL] AS rcs
+        WITH unknown_n, rcs, entities_deleted_uuids + [x IN rcs | x.uuid] AS entities_deleted_uuids,
+             [u IN entities_flagged_uuids WHERE NOT u IN [x IN rcs | x.uuid]]
+                 AS entities_flagged_uuids
+        FOREACH (x IN rcs | DETACH DELETE x)
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
         // CF-332: conflict resolution appended an erased memory's content to a kept entity, as a
         // block headed by the marker below. Cut those blocks out (the holder keeps its own text),
         // blank the summary that may restate them and flag the holder. Legacy holders have no
@@ -1527,7 +1540,7 @@ class MemoryQueryRepository:
         + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)
         + _DERIVED_ENTITY_WRITE.replace(
             "__HOLDER_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER.replace("e.", "h.")
-        )
+        ).replace("__RC_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER.replace("e.", "rc."))
         + "}\n"
     )
 

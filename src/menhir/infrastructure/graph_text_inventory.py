@@ -154,7 +154,7 @@ GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (
     ),
     TextHolder(
         "Entity", "node", ("content", "name"), (HolderSelector.SOURCE_UUID,),
-        EraseAction.DELETE, finding="CF-327 raw capture not in closure or cascade",
+        EraseAction.DELETE,
         discriminator="raw_capture_for",
     ),
     TextHolder(

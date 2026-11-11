@@ -416,7 +416,7 @@ def test_t15_merge_snapshot_taken_before_erase_does_not_resurrect_text(test_neo4
 
 
 # ------------------------------------------------------------------ T22
-@P0
+# R2 CF-327 made this pass (the raw-capture write runs under G-copy on the episode uuid).
 def test_t22_raw_capture_after_erase_does_not_recreate_the_erased_text(test_neo4j_repo, tmp_path):
     """T22 (G-create). The erase completes for queue node Q, then a stale failure handler for the
     same episode calls ``create_raw_capture_entity`` with Q's text (the exhausted-retry path, which

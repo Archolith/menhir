@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
+from menhir.infrastructure.erasure_fence import fence_key_cypher
 from menhir.domain.secret_scrub import ensure_scrubbed, non_refusing_policy
 from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
@@ -366,6 +367,8 @@ class EpisodeMaintenanceRepository:
         session_id: str,
         user_id: str,
         source: str,
+        *,
+        read_epoch: int | None = None,
     ) -> str | None:
         """Create a degraded raw-capture Entity for a failed episode with memorable content.
 
@@ -381,17 +384,35 @@ class EpisodeMaintenanceRepository:
             user_id: User ID for stamping.
             source: Source for stamping.
 
+            read_epoch: the namespace fence epoch read together with ``content`` (G-copy,
+                CF-327). ``None`` reads it here, after the content: the episode's erase marker
+                and the tombstone check still refuse a copy of an erased episode, but a
+                namespace erase that completed in between is then not detected by the epoch.
+
         Returns:
-            UUID of the created raw-capture Entity, or None if creation failed.
-            (Idempotent on re-failure: MERGE on raw_capture_for = episode_uuid.)
+            UUID of the created raw-capture Entity, or None if creation failed or the erasure
+            fence refused it. (Idempotent on re-failure: MERGE on raw_capture_for = episode_uuid.)
         """
         from uuid import uuid4
+
+        from menhir.infrastructure.publish_fence import (
+            CopyFenced,
+            execute_copy_fenced,
+            read_copy_epoch,
+        )
 
         name = ensure_scrubbed(name, policy=non_refusing_policy())
         content = ensure_scrubbed(content, policy=non_refusing_policy())
         entity_uuid = str(uuid4())
+        # One statement (CF-327): the entity and its MENTIONS provenance exist together or not at
+        # all, and only while the episode exists and is not an erase tombstone.
         query = (
             Cypher()
+            .match("(ep:Episodic { uuid: $episode_uuid })")
+            .where(
+                "ep.erased_at IS NULL",
+                "coalesce(ep.processing_substage, '') <> 'deleted_by_user'",
+            )
             .merge(
                 "(n:Entity { raw_capture_for: $episode_uuid })"
             )
@@ -419,41 +440,43 @@ class EpisodeMaintenanceRepository:
                     "n.freshness = 'ACTIVE'",
                 )
             )
+            .merge("(ep)-[:MENTIONS]->(n)")
             .return_raw("n.uuid AS entity_uuid")
             .build()
         )
+        params = {
+            "episode_uuid": episode_uuid,
+            "entity_uuid": entity_uuid,
+            "name": name,
+            "content": content,
+            "namespace": namespace,
+            "group_id": namespace_to_group_id(namespace),
+            "session_id": session_id,
+            "user_id": user_id,
+            "source": source,
+        }
+        import logging
+
+        log = logging.getLogger(__name__)
+        fence_key = str(namespace or "").strip() or "default"
         try:
-            rows = self.neo4j.execute(
-                query,
-                params={
-                    "episode_uuid": episode_uuid,
-                    "entity_uuid": entity_uuid,
-                    "name": name,
-                    "content": content,
-                    "namespace": namespace,
-                    "group_id": namespace_to_group_id(namespace),
-                    "session_id": session_id,
-                    "user_id": user_id,
-                    "source": source,
-                },
+            epoch = read_copy_epoch(self.neo4j, fence_key) if read_epoch is None else read_epoch
+            rows = execute_copy_fenced(
+                self.neo4j, fence_key, epoch, [episode_uuid],
+                lambda tx: tx.execute(query, params),
             )
             if rows:
                 captured_uuid = rows[0].get("entity_uuid")
-                # Link episode to raw-capture entity for provenance
-                self.neo4j.execute(
-                    """
-                    MATCH (ep:Episodic {uuid: $episode_uuid})
-                    MATCH (entity:Entity {uuid: $entity_uuid})
-                    MERGE (ep)-[:MENTIONS]->(entity)
-                    """,
-                    params={"episode_uuid": episode_uuid, "entity_uuid": captured_uuid},
-                )
                 return str(captured_uuid) if captured_uuid else None
+        except CopyFenced as fenced:
+            log.info(
+                "Raw capture for episode %s refused by the erasure fence (%s)",
+                episode_uuid,
+                fenced.reason,
+            )
         except (OSError, RuntimeError) as e:
             # Capture failure must not break the failure handling itself
-            import logging
-
-            logging.getLogger(__name__).warning(
+            log.warning(
                 "Failed to create raw-capture entity for episode %s: %s",
                 episode_uuid,
                 e,
@@ -504,11 +527,16 @@ class EpisodeMaintenanceRepository:
             .where(
                 "n.processing_state = 'PENDING'",
                 "coalesce(toInteger(n.processing_attempts), 0) >= $max_attempts",
+                EPISODE_NOT_MARKED,
             )
+            # The fence epoch is read with the content it guards (G-copy, CF-327).
             .return_raw(
                 "n.uuid AS episode_uuid, n.content AS content, "
                 "n.session_id AS session_id, n.user_id AS user_id, "
-                "n.source AS source, n.namespace AS namespace"
+                "n.source AS source, n.namespace AS namespace, "
+                "head(COLLECT { MATCH (f:EvidenceNamespaceFence) WHERE f.namespace_key = "
+                + fence_key_cypher("n")
+                + " RETURN coalesce(f.erasure_epoch, 0) }) AS fence_epoch"
             )
             .order_by("coalesce(n.queued_at, n.created_at) ASC, n.uuid")
             .limit()

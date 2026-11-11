@@ -29,6 +29,10 @@ class _RecordingNeo4j:
         self.calls.append((query, params or {}))
         return list(self._rows)
 
+    def execute_write(self, work: Any) -> Any:
+        # G-copy writers (R2 CF-327) run their statements in a transaction; record them alike.
+        return work(self)
+
 
 # ---------------------------------------------------------------------------
 # CF-126 -- query_blast_radius leaked cross-namespace memory previews
@@ -273,7 +277,7 @@ def test_cf215_raw_captures_are_stamped_with_group_id() -> None:
         source="claude-code",
     )
 
-    query, params = neo4j.calls[0]
+    query, params = next(c for c in neo4j.calls if "raw_capture_for" in c[0])
     assert "n.group_id = $group_id" in query
     assert params["group_id"] == "tenant-a"
     assert params["namespace"] == "tenant-a"
@@ -295,7 +299,7 @@ def test_cf215_default_namespace_capture_gets_the_empty_group_id() -> None:
         source="claude-code",
     )
 
-    _query, params = neo4j.calls[0]
+    _query, params = next(c for c in neo4j.calls if "raw_capture_for" in c[0])
     assert params["group_id"] == ""
 
 

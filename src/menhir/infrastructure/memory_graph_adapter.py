@@ -622,6 +622,8 @@ class MemoryGraphAdapter:
         session_id: str,
         user_id: str,
         source: str,
+        *,
+        read_epoch: int | None = None,
     ) -> str | None:
         """Create a raw-capture entity for a failed episode with memorable content.
 
@@ -639,6 +641,7 @@ class MemoryGraphAdapter:
             session_id=session_id,
             user_id=user_id,
             source=source,
+            read_epoch=read_epoch,
         )
         if entity_uuid:
             # Stamp through the standard choke point to ensure trust metadata flows correctly
@@ -704,6 +707,7 @@ class MemoryGraphAdapter:
                         session_id=row.get("session_id") or "",
                         user_id=row.get("user_id") or "",
                         source=row.get("source") or "claude-code",
+                        read_epoch=int(row.get("fence_epoch") or 0),
                     )
                 except Exception as e:
                     logger.debug(

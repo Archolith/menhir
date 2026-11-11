@@ -112,8 +112,8 @@ _LOCK_QUEUE_NODES_CYPHER = _fill(
 )
 
 #: Step 3b: the closure, read under the locks taken above. Queue nodes, their ADMITTED_ON turns, the
-#: turns' evidence projections, and for every queue node and projection its link, reserved twins and
-#: back-linked twins. Only nodes whose fence key is one of the locked keys are followed.
+#: turns' evidence projections, and for every queue node and projection its link, reserved twins,
+#: back-linked twins and raw-capture entity. Only nodes whose fence key is one of the locked keys are followed.
 SEAL_CLOSURE_CYPHER = _fill(
     """
     MATCH (q:Episodic) WHERE q.uuid IN $qs AND @KQ@ IN $keys
@@ -141,7 +141,12 @@ SEAL_CLOSURE_CYPHER = _fill(
                   WHERE x IS NOT NULL]
         }) AS twin_groups
     }
+    // CF-327: a failed episode's raw-capture entity holds its full text.
+    OPTIONAL MATCH (rc:Entity)
+    WHERE rc.raw_capture_for IN [b IN bases | b.uuid] AND @KRC@ IN $keys
+    WITH qnodes, turns, projs, twin_groups, collect(DISTINCT rc) AS rcs
     RETURN [q IN qnodes | {uuid: q.uuid, key: @KQ2@}] AS queues,
+           [r IN rcs | {uuid: r.uuid, key: @KRC2@}] AS raw_captures,
            [t IN turns | {uuid: t.turn_id, key: @KT2@}] AS turns,
            [p IN projs | {uuid: p.uuid, key: @KP2@}] AS projections,
            twin_groups,
@@ -160,6 +165,8 @@ SEAL_CLOSURE_CYPHER = _fill(
     KQ2=fence_key_cypher("q"),
     KT2=fence_key_cypher("t"),
     KP2=fence_key_cypher("p"),
+    KRC=fence_key_cypher("rc"),
+    KRC2=fence_key_cypher("r"),
 )
 
 #: Link/reserved uuids that exist as nodes in a namespace we did not lock are not ours to mark.
@@ -233,7 +240,7 @@ def seal_memory(
         rows = tx.execute(SEAL_CLOSURE_CYPHER, {"qs": qs, "keys": keys})
         row = rows[0] if rows else {}
         items: dict[str, str] = dict(target_key)
-        for group in ("queues", "turns", "projections"):
+        for group in ("queues", "turns", "projections", "raw_captures"):
             for entry in row.get(group) or []:
                 if entry.get("uuid"):
                     items.setdefault(str(entry["uuid"]), str(entry["key"]))
