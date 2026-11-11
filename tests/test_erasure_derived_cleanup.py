@@ -35,22 +35,29 @@ US = "\x1f"  # repair_key separator
 
 
 # ------------------------------------------------------------------ helpers
-def _ids(tag: str) -> dict[str, str]:
+def _ids(tag: str, *, canonical: bool = False) -> dict[str, str]:
+    # canonical=True: real uuids, as production mints them. The merge-audit scrub ignores any
+    # needle that is not a canonical uuid (rebuild plan v2 §3.4).
+    def node(suffix: str) -> str:
+        return str(uuidlib.uuid4()) if canonical else f"{tag}-{suffix}"
+
     return {
         "tag": tag,
         "ns": f"{tag}-ns",
-        "queue": f"{tag}-queue",
-        "twin": f"{tag}-graphiti",
-        "entity": f"{tag}-entity",
-        "entity2": f"{tag}-entity2",
-        "edge": f"{tag}-edge",
-        "other": f"{tag}-other",
+        "queue": node("queue"),
+        "twin": node("graphiti"),
+        "entity": node("entity"),
+        "entity2": node("entity2"),
+        "edge": node("edge"),
+        "other": node("other"),
     }
 
 
-def _seed_base(repo: Any, tag: str, edge_episodes: list[str] | None = None) -> dict[str, str]:
+def _seed_base(
+    repo: Any, tag: str, edge_episodes: list[str] | None = None, *, canonical: bool = False
+) -> dict[str, str]:
     """Queue node Q + twin T + entity E (mentioned by T) + fact edge E->E2 (E2 not mentioned)."""
-    ids = _ids(tag)
+    ids = _ids(tag, canonical=canonical)
     episodes = [ids["twin"]] if edge_episodes is None else edge_episodes
     repo.execute(
         """
@@ -304,7 +311,7 @@ def test_merge_audit_entry_tombstoned_and_survivor_marked_irreversible(
     repo = test_neo4j_repo
     tag = f"test-dcl-audit-{uuidlib.uuid4()}"
     try:
-        ids = _seed_base(repo, tag)
+        ids = _seed_base(repo, tag, canonical=True)
         survivor, absorbed = f"{tag}-survivor", f"{tag}-absorbed"
         unrelated_ep = f"{tag}-unrelated-ep"
         first = json.dumps(

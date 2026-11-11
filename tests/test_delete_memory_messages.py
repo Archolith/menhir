@@ -14,7 +14,8 @@ from menhir.mcp.tools.ingest.delete_memory import DeleteMemoryTool
 
 pytestmark = [pytest.mark.unit]
 
-NODE = "node-uuid-1"
+# A canonical uuid: delete_memory now refuses any other target as invalid_target before erasing.
+NODE = "0b8f6a2e-4c1d-4e7a-9f3b-2d5c8e1a7b40"
 
 
 class _Backend:

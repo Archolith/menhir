@@ -282,9 +282,11 @@ class TestBackendRoundTrip:
     @pytest.mark.asyncio
     async def test_delete_memory(self, backend_client):
         bc, ctx = backend_client
-        result = await bc.delete_memory("node-uuid-2")
+        # A canonical uuid: the backend refuses any other target as invalid_target.
+        node = "4b6d8f02-1a3c-4e5b-9d7f-3b5d7f9a1c53"
+        result = await bc.delete_memory(node)
         assert result is True
-        ctx.built.graph_adapter.delete_memory.assert_called_once_with("node-uuid-2")
+        ctx.built.graph_adapter.delete_memory.assert_called_once_with(node)
 
     @pytest.mark.unit
     @pytest.mark.asyncio

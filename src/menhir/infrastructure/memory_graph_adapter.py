@@ -454,11 +454,15 @@ class MemoryGraphAdapter:
         return self._episodes.erasure_derived_preview(erased_uuids, twin_found=twin_found)
 
     def scrub_merge_audit_for_episodes(
-        self, erased_uuids: list[str], deleted_entity_uuids: list[str] | None = None
+        self,
+        erased_uuids: list[str],
+        deleted_entity_uuids: list[str] | None = None,
+        *,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         """See MemoryQueries.scrub_merge_audit_for_episodes."""
         return self._memory_queries.scrub_merge_audit_for_episodes(
-            erased_uuids, deleted_entity_uuids or [])
+            erased_uuids, deleted_entity_uuids or [], namespace=namespace)
 
     def list_episodes_missing_content_embedding(
         self,

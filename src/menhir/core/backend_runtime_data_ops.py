@@ -171,10 +171,17 @@ class RuntimeProviderDataOpsMixin:
         The pin, else the caller's namespace, bounds the cleanup when the target is absent
         everywhere: the ownership guard lets an absent uuid through (review F4).
         """
-        await self._require_own_memory(node_uuid)
+        from menhir.domain.erase_target import INVALID_TARGET, normalize_erase_target
+
+        # Strict canonical-uuid gate, before any lookup, PREPARE or sidecar purge: the scrubs
+        # downstream match by value, so a short id would match unrelated content.
+        target = normalize_erase_target(node_uuid)
+        if target is None:
+            return {"reason": INVALID_TARGET, "purged": {}}
+        await self._require_own_memory(target)
         scope = pinned_namespace() or (namespace or "").strip() or None
         outcome = await self._off_loop(
-            self._erasure().erase_memory, node_uuid, caller_namespace=scope
+            self._erasure().erase_memory, target, caller_namespace=scope
         )
         return dict(outcome or {})
 

@@ -173,6 +173,12 @@ class _Backend:
         return True
 
 
+# Canonical uuids: delete_memory refuses any other target as invalid_target, which would
+# make the namespace-guard assertions below pass for the wrong reason.
+_UUID_1 = "3c9e1f20-6a4b-4d8e-b2f1-5a7c9e0d1b31"
+_UUID_GONE = "9a2d4f61-0c8e-4b3a-a5d7-2e6f8b1c3d42"
+
+
 def _tool_with_backend(tool, backend):
     tool.get_backend = lambda: backend  # type: ignore[method-assign]
     return tool
@@ -185,7 +191,7 @@ async def test_cf64_pinned_caller_cannot_erase_another_silos_node() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    result = await tool.endpoint("uuid-1", namespace="tenant-a")
+    result = await tool.endpoint(_UUID_1, namespace="tenant-a")
 
     assert "Refused" in result
     assert backend.erased == []
@@ -198,9 +204,9 @@ async def test_cf64_pinned_caller_can_erase_its_own_node() -> None:
     backend = _Backend(node_namespace="tenant-a")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-1", namespace="tenant-a")
+    await tool.endpoint(_UUID_1, namespace="tenant-a")
 
-    assert backend.erased == ["uuid-1"]
+    assert backend.erased == [_UUID_1]
 
 
 @pytest.mark.asyncio
@@ -213,9 +219,9 @@ async def test_cf64_guard_does_not_block_erasing_residual_content_of_an_absent_n
     backend = _Backend(node_namespace=None)  # not in the graph at all
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-gone", namespace="tenant-a")
+    await tool.endpoint(_UUID_GONE, namespace="tenant-a")
 
-    assert backend.erased == ["uuid-gone"]
+    assert backend.erased == [_UUID_GONE]
 
 
 @pytest.mark.asyncio
@@ -225,9 +231,9 @@ async def test_cf64_unpinned_caller_is_unaffected() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-1")
+    await tool.endpoint(_UUID_1)
 
-    assert backend.erased == ["uuid-1"]
+    assert backend.erased == [_UUID_1]
 
 
 @pytest.mark.asyncio

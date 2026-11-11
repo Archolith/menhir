@@ -41,6 +41,15 @@ class DeleteMemoryTool(BaseTextTool):
         Returns:
             Confirmation or failure message.
         """
+        from menhir.domain.erase_target import normalize_erase_target
+
+        normalized = normalize_erase_target(node_uuid)
+        if normalized is None:
+            return (
+                f"Refused: {node_uuid!r} is not a valid memory uuid (expected the full "
+                "36-character form). Nothing was erased."
+            )
+        node_uuid = normalized
         backend = self.get_backend()
         # Ownership guard. Without the `namespace` parameter above, the pin cannot reach
         # this tool at all: _apply_pinned_namespace injects only into endpoints whose
@@ -64,6 +73,11 @@ class DeleteMemoryTool(BaseTextTool):
         reason = outcome.get("reason")
         purged = sum((outcome.get("purged") or {}).values())
 
+        if reason == "invalid_target":
+            return (
+                f"Refused: {node_uuid!r} is not a valid memory uuid (expected the full "
+                "36-character form). Nothing was erased."
+            )
         if reason == "nothing_to_erase":
             return f"No memory found with uuid={node_uuid}, and no stored content for it."
         if reason == "graph_already_absent":

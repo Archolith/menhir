@@ -308,7 +308,6 @@ def _seed_foreign_merge_audit(repo: Any, ns_x: str) -> tuple[str, list[str]]:
     return survivor, [entry]
 
 
-@P0
 def test_t8_pinned_short_id_does_not_touch_other_namespaces_merge_audit(test_neo4j_repo, tmp_path):
     """T8 (A-7). A caller pinned to namespace Y erases the one-letter id ``"e"``. The merge_audit
     scrub matches by substring over ALL entities, so namespace X's merge_audit (whose JSON contains
@@ -333,7 +332,6 @@ def test_t8_pinned_short_id_does_not_touch_other_namespaces_merge_audit(test_neo
     assert row["irr"] is None
 
 
-@P0
 def test_t8_pinned_short_id_is_invalid_target_and_purges_no_sidecar_rows(test_neo4j_repo, tmp_path):
     """T8 reply half (bypass 8). The same erase of ``"e"`` must answer ``invalid_target`` and purge
     nothing. Today any string proceeds to PREPARE and the sidecar purge (reply ``graph_already_absent``).

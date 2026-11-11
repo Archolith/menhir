@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import timezone
 from typing import Any
 from uuid import uuid4
@@ -2109,35 +2109,78 @@ class MemoryQueryRepository:
         self,
         erased_uuids: Sequence[str],
         deleted_entity_uuids: Sequence[str] = (),
+        *,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Tombstone merge_audit entries that copied erased content; such merges become irreversible."""
+        """Tombstone merge_audit entries that copied erased content; such merges become irreversible.
+
+        Survivors are matched inside ``namespace`` only (``None`` is the legacy unscoped
+        behaviour). Needles must be canonical uuids; an entry is tombstoned only when one of its
+        parsed JSON string leaves EQUALS a needle. An entry that mentions a needle but cannot be
+        parsed is left in place and counted in ``merge_audits_unscrubbed``.
+        """
         import json
 
-        needles = list(dict.fromkeys(str(u) for u in [*erased_uuids, *deleted_entity_uuids] if u))
-        result: dict[str, Any] = {"merge_audits_tombstoned": 0, "merge_absorbed_uuids": []}
+        from menhir.domain.erase_target import canonical_uuid_needles
+
+        needles = canonical_uuid_needles([*erased_uuids, *deleted_entity_uuids])
+        result: dict[str, Any] = {
+            "merge_audits_tombstoned": 0,
+            "merge_absorbed_uuids": [],
+            "merge_audits_unscrubbed": 0,
+        }
         if not needles:
             return result
+        needle_set = set(needles)
+
+        def _leaves(node: Any) -> Iterator[str]:
+            if isinstance(node, str):
+                yield node
+            elif isinstance(node, dict):
+                for key, val in node.items():
+                    yield str(key)
+                    yield from _leaves(val)
+            elif isinstance(node, (list, tuple)):
+                for val in node:
+                    yield from _leaves(val)
+
+        def _classify(entry: str) -> str:
+            """'keep' (no needle), 'match' (exact leaf hit) or 'unparseable' (mentions a needle)."""
+            try:
+                parsed = json.loads(entry)
+            except (TypeError, ValueError):
+                return "unparseable" if any(u in entry for u in needles) else "keep"
+            return "match" if any(leaf in needle_set for leaf in _leaves(parsed)) else "keep"
+
+        # CONTAINS is only a candidate prefilter over validated uuids; the exact decision is made
+        # per parsed entry in Python.
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (s:Entity)
-            WHERE any(entry IN coalesce(s.merge_audit, [])
+            WHERE {tenant_scope_cypher("s")}
+              AND any(entry IN coalesce(s.merge_audit, [])
                       WHERE any(u IN $all WHERE entry CONTAINS u))
             RETURN s.uuid AS uuid, s.merge_audit AS merge_audit
             """,
-            params={"all": needles},
+            params={"all": needles, **tenant_scope_params(namespace)},
         )
         absorbed: list[str] = []
         for row in rows or []:
             suuid = row.get("uuid")
             if not suuid:
                 continue
+            row_unparseable = 0
             for attempt in range(2):
                 old = [str(e) for e in (row.get("merge_audit") or [])]
                 new: list[str] = []
                 tombstoned = 0
+                unparseable = 0
                 found: list[str] = []
                 for entry in old:
-                    if not any(u in entry for u in needles):
+                    kind = _classify(entry)
+                    if kind == "unparseable":
+                        unparseable += 1
+                    if kind != "match":
                         new.append(entry)
                         continue
                     try:
@@ -2155,6 +2198,7 @@ class MemoryQueryRepository:
                         "reason": "source_erased",
                     }))
                     tombstoned += 1
+                row_unparseable = unparseable
                 if not tombstoned:
                     break
                 written = self.neo4j.execute(
@@ -2182,7 +2226,8 @@ class MemoryQueryRepository:
                         "merge_audit scrub lost a compare-and-set twice for %s; entry left in place",
                         suuid,
                     )
-                    result["merge_audits_unscrubbed"] = result.get("merge_audits_unscrubbed", 0) + 1
+                    result["merge_audits_unscrubbed"] += 1
+            result["merge_audits_unscrubbed"] += row_unparseable
         result["merge_absorbed_uuids"] = list(dict.fromkeys(absorbed))
         return result
 
