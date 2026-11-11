@@ -492,7 +492,9 @@ class EpisodeLifecycleRepository:
             params={"episode_uuid": episode_uuid, "outcome": outcome},
         )
 
-    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+    def erasure_evidence_uuids(
+        self, node_uuid: str, *, caller_namespace: str | None = None
+    ) -> list[str]:
         """The captured evidence that carries an erased memory's words (read-only).
 
         For an `:Episodic`: the turns it is `ADMITTED_ON`. For a `:TurnEvidence` (addressed by
@@ -503,6 +505,9 @@ class EpisodeLifecycleRepository:
         Without these, erasing a memory left its turn behind and the next Phase 3 pass re-perceived
         it, so the deleted claim came back (#170 item 5). A turn admitted by several memories is
         erased with any of them: the cascade already retracts that turn's assertions in that case.
+
+        ``caller_namespace`` (CF-326): when set and the target's home is another namespace, nothing
+        is returned, so a scoped caller never expands into a foreign silo.
         """
         rows = self.neo4j.execute(
             """
@@ -527,8 +532,11 @@ class EpisodeLifecycleRepository:
 
         turn_ids: list[str] = []
         projections: list[str] = []
+        scope = (caller_namespace or "").strip()
         for row in rows:
             home = silo(row.get("n_namespace"), row.get("n_group_id"))
+            if scope and home != normalize_namespace(scope):
+                return []
             turn_id = row.get("turn_id")
             if not turn_id or silo(row.get("t_namespace")) != home:
                 continue
@@ -1117,6 +1125,10 @@ class EpisodeLifecycleRepository:
                     "n.reserved_twin_uuids = coalesce(n.reserved_twin_uuids, [])"
                     " + $reserved_twin_uuid",
                     "n.publish_protocol = 2",
+                    # CF-336: binds the protocol flag to this claim. datetime() is the statement
+                    # clock, so it equals processing_started_at above; a later old-code claim
+                    # changes processing_started_at only, and the seal then counts it unfenced.
+                    "n.publish_protocol_claimed_at = datetime()",
                 )
             )
             .with_clause(

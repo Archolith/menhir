@@ -975,6 +975,17 @@ async def erasure_twin_compensation(graph_adapter: object, *, limit: int = 50) -
     )
 
 
+async def erasure_fence_orphans(graph_adapter: object) -> dict[str, object]:
+    """Release ``erasing_ops`` an erase left behind when its own fence release failed (CF-324)."""
+    from menhir.services.erasure_coordinator import ErasureCoordinator
+
+    def _run() -> dict[str, object]:
+        released = ErasureCoordinator(graph_adapter=graph_adapter).release_orphaned_erasing_ops()
+        return {"released": list(released)}
+
+    return await asyncio.to_thread(_run)
+
+
 async def sidecar_compaction() -> dict[str, object]:
     """VACUUM + wal_checkpoint(TRUNCATE) the telemetry sidecar and stamp compacted erasure ops.
 

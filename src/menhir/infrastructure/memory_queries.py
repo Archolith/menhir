@@ -1628,23 +1628,13 @@ class MemoryQueryRepository:
         )
         return str(rows[0]["status"]) if rows else None
 
-    def delete_memory_with_scalar_cascade(
-        self,
-        node_uuid: str,
-        *,
-        operation_id: str,
-        erased_uuids: Sequence[str] | None = None,
-        deletable_entity_uuids: Sequence[str] | None = None,
-        scope_namespace: str | None = None,
-    ) -> dict[str, Any]:
-        """Delete one memory/observation and its authoritative scalar assertions atomically.
+    def erase_target_namespace_keys(self, node_uuid: str) -> list[str]:
+        """The canonical namespace keys of every node an erase of ``node_uuid`` addresses.
 
-        A surfaced observation is addressed by ``assertion_id``; an Entity/Episodic deletion also
-        removes assertions bound to or grounded on that node.  A pending repair receipt is created
-        for every affected subject+namespace in the SAME Neo4j transaction as the deletion.  Thus a
-        crash can delay View repair, but can never make the work undiscoverable (G15/G20).
+        Entity/Episodic by uuid, TurnEvidence by turn_id, TypedAssertion by its ids. Empty when the
+        target is absent. The cascade and the coordinator's scope check share this (CF-326).
         """
-        namespace_rows = self.neo4j.execute(
+        rows = self.neo4j.execute(
             """
             OPTIONAL MATCH (target)
             WHERE ((target:Entity OR target:Episodic) AND target.uuid = $node_uuid)
@@ -1666,11 +1656,37 @@ class MemoryQueryRepository:
             """,
             params={"node_uuid": node_uuid},
         )
-        namespace_keys = [
+        return [
             str(value) for value in (
-                namespace_rows[0].get("namespace_keys", []) if namespace_rows else []
+                rows[0].get("namespace_keys", []) if rows else []
             ) if value is not None and str(value).strip()
         ]
+
+    def delete_memory_with_scalar_cascade(
+        self,
+        node_uuid: str,
+        *,
+        operation_id: str,
+        erased_uuids: Sequence[str] | None = None,
+        deletable_entity_uuids: Sequence[str] | None = None,
+        scope_namespace: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete one memory/observation and its authoritative scalar assertions atomically.
+
+        A surfaced observation is addressed by ``assertion_id``; an Entity/Episodic deletion also
+        removes assertions bound to or grounded on that node.  A pending repair receipt is created
+        for every affected subject+namespace in the SAME Neo4j transaction as the deletion.  Thus a
+        crash can delay View repair, but can never make the work undiscoverable (G15/G20).
+        """
+        namespace_keys = self.erase_target_namespace_keys(node_uuid)
+        scope = (scope_namespace or "").strip()
+        if scope and namespace_keys and namespace_keys != [normalize_namespace(scope)]:
+            # CF-326: a scoped caller never cascades into another namespace, even when it names
+            # an existing foreign node (e.g. a TurnEvidence turn_id the ownership guard missed).
+            raise PermissionError(
+                f"erase target resolves to namespace(s) {namespace_keys}, outside {scope!r}; "
+                "refusing a cross-namespace cascade"
+            )
         erased = list(dict.fromkeys(str(u) for u in (erased_uuids or [node_uuid]) if u))
         if not namespace_keys:
             result = self._empty_memory_erasure_result()

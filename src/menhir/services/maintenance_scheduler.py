@@ -29,6 +29,7 @@ from menhir.services.scheduler_protocols import (
 )
 from menhir.services.scheduler_tasks import (
     derived_rederive,
+    erasure_fence_orphans,
     erasure_twin_compensation,
     prune_telemetry_tables,
     auto_resolve_conflicts,
@@ -235,6 +236,8 @@ class MaintenanceScheduler:
             )
         # Erasure completeness: erase Graphiti twins orphaned by an erase racing enrichment.
         self._jobs["erasure_twin_compensation"] = _JobState(interval_s=600.0)
+        # CF-324: an erase whose fence release failed leaves its op in erasing_ops.
+        self._jobs["erasure_fence_orphans"] = _JobState(interval_s=300.0)
         # Rewrite or drop facts/entities an erasure flagged rederive_pending.
         self._jobs["derived_rederive"] = _JobState(interval_s=900.0)
         if self.sidecar_compaction_interval_s > 0:
@@ -613,11 +616,26 @@ class MaintenanceScheduler:
         )
         try:
             while not self._stop_event.is_set():
-                if self._lease_lost or not self._renew_lease():
+                try:
+                    renewed: bool | None = (not self._lease_lost) and self._renew_lease()
+                except Exception:
+                    # CF-328: a store error is "not renewed this tick", not a lost lease (same
+                    # rule as _heartbeat_loop). Letting it escape killed this task for good, and
+                    # with it the provable lease the strict enrichment gate depends on.
+                    logger.warning(
+                        "Maintenance scheduler lease renewal errored in the job loop; "
+                        "ownership unproven until it succeeds owner_id=%s",
+                        self._owner_id,
+                        exc_info=True,
+                    )
+                    renewed = None
+                if renewed is False:
                     self._mark_lease_lost()
                     logger.warning("Maintenance scheduler lease lost; stopping loop owner_id=%s", self._owner_id)
                     break
-                await self._run_due_jobs()
+                if renewed:
+                    # Jobs self-gate on _lease_is_provable; an errored tick runs none.
+                    await self._run_due_jobs()
                 try:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=self.tick_interval_s)
                 except asyncio.TimeoutError:
@@ -695,6 +713,12 @@ class MaintenanceScheduler:
                     job,
                     "scheduler_erasure_twin_compensation",
                     erasure_twin_compensation(self.graph_adapter),
+                )
+            elif name == "erasure_fence_orphans":
+                await self._run_job(
+                    job,
+                    "scheduler_erasure_fence_orphans",
+                    erasure_fence_orphans(self.graph_adapter),
                 )
             elif name == "derived_rederive":
                 await self._run_job(

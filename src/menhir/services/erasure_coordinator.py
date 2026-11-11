@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from menhir.domain.namespace import normalize_namespace
 from menhir.infrastructure.erasure_fence import (
+    ERASURE_MARKER_LABEL,
     SealResult,
     release_memory,
     release_orphaned_erasing_ops,
@@ -123,13 +125,31 @@ class ErasureCoordinator:
         node_uuid = (node_uuid or "").strip()
         if not node_uuid:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
+        scope = (caller_namespace or "").strip()
+        if scope:
+            # CF-326: the transport guards look up Entity/Episodic only, so a scoped caller holding
+            # a foreign TurnEvidence turn_id got through. This check sits below every transport;
+            # nothing is prepared, sealed or purged for a foreign target.
+            keys_lookup = getattr(self.graph_adapter, "erase_target_namespace_keys", None)
+            keys = list(keys_lookup(node_uuid) or []) if callable(keys_lookup) else []
+            if keys and keys != [normalize_namespace(scope)]:
+                return {
+                    "reason": ERASED_INCOMPLETE,
+                    "incomplete_reasons": ["foreign_target"],
+                    "purged": {},
+                }
         twin_lookup = getattr(self.graph_adapter, "episodic_twin_uuids", None)
         twins = [str(t) for t in (twin_lookup(node_uuid) if callable(twin_lookup) else []) if t]
         evidence_lookup = getattr(self.graph_adapter, "erasure_evidence_uuids", None)
         evidence: list[str] = []
         if callable(evidence_lookup):
             for base in [node_uuid, *twins]:
-                evidence.extend(str(u) for u in (evidence_lookup(base) or []) if u)
+                found = (
+                    evidence_lookup(base, caller_namespace=scope)
+                    if scope
+                    else evidence_lookup(base)
+                )
+                evidence.extend(str(u) for u in (found or []) if u)
         targets: list[str] = []
         for target in [node_uuid, *twins, *evidence]:
             if target not in targets:
@@ -164,7 +184,11 @@ class ErasureCoordinator:
             ),
             dry_run=dry_run,
             derived=derived,
-            seal=self._seal_for(lambda neo4j, op_id: seal_memory(neo4j, op_id, targets)),
+            seal=self._seal_for(
+                lambda neo4j, op_id: seal_memory(
+                    neo4j, op_id, targets, caller_namespace=scope or None
+                )
+            ),
         )
         # A twin linked after the targets were resolved keeps the queue node as a flagged
         # tombstone (B-1). Erase it now; the sweep's pending retry covers a crash before this.
@@ -177,12 +201,19 @@ class ErasureCoordinator:
             if callable(clear):
                 clear(node_uuid)
             outcome = {**outcome, "late_twin_erased": follow.get("reason")}
-            if follow.get("reason") not in DELETION_SUCCEEDED_REASONS | {ERASED_INCOMPLETE}:
+            # CF-325: a follow-up that is itself erased_incomplete left residue; the outer reply
+            # must not stay a success class over it.
+            if follow.get("reason") not in DELETION_SUCCEEDED_REASONS:
                 outcome["reason"] = ERASED_INCOMPLETE
-                outcome["incomplete_reasons"] = [
-                    *outcome.get("incomplete_reasons", []),
-                    "late_twin_erase_failed",
-                ]
+                outcome["incomplete_reasons"] = list(
+                    dict.fromkeys(
+                        [
+                            *outcome.get("incomplete_reasons", []),
+                            "late_twin_erase_failed",
+                            *(follow.get("incomplete_reasons") or []),
+                        ]
+                    )
+                )
         return outcome
 
     def erase_namespace(
@@ -317,6 +348,18 @@ class ErasureCoordinator:
         if neo4j is None:
             return None
         return lambda op_id: seal_fn(neo4j, op_id)
+
+    def _sealed_closure_uuids(self, op_id: str) -> set[str]:
+        """Every subject this op's seal marked (empty without a fence repository)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return set()
+        rows = neo4j.execute(
+            f"MATCH (m:{ERASURE_MARKER_LABEL} {{op_id: $op_id}}) "
+            "RETURN DISTINCT m.subject_uuid AS uuid",
+            params={"op_id": op_id},
+        )
+        return {str(r["uuid"]) for r in rows if r.get("uuid")}
 
     def release_orphaned_erasing_ops(self) -> list[str]:
         """Release fence entries whose journal row is terminal or absent (scheduler sweep)."""
@@ -571,6 +614,14 @@ class ErasureCoordinator:
         derived_uuids = {
             str(r["subject_value"]) for r in pending if r["subject_type"] == "DERIVED_UUID"
         }
+        # CF-334: the seal commits before its closure is recorded here, so a crash in between
+        # leaves closure-only twins known only to their markers. Read them back by op id.
+        sealed_closure = self._sealed_closure_uuids(op_id) - node_uuids - derived_uuids
+        if sealed_closure:
+            self.subjects.record_subjects(
+                op_id, [("NODE_UUID", u) for u in sorted(sealed_closure)]
+            )
+            node_uuids |= sealed_closure
         purge = _subjects_for_uuids(
             node_uuids | derived_uuids, namespaces=frozenset(namespaces)
         )

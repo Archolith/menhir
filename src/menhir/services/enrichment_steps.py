@@ -505,6 +505,11 @@ async def run_graphiti_extraction(
                 read_gate_fence, ctx.graph_adapter.neo4j, ctx.claim_fence.namespace_key
             )
             ctx = replace(ctx, gate_fence=gate_fence)
+            # CF-324: refuse before the paid extraction, not only at publish. A held erasing_op,
+            # a marker on q or a lost claim raises FenceLost; the worker requeues with backoff.
+            await asyncio.to_thread(
+                check_fence, ctx.graph_adapter.neo4j, ctx.claim_fence, gate_fence
+            )
         logger.info("Episode enrichment acquired ingest gate episode_id=%s group_id=%s", ctx.episode_uuid, group_id)
         record_lifecycle_event(
             component="ingest_worker",

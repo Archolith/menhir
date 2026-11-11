@@ -418,9 +418,15 @@ class MemoryGraphAdapter:
         """See EpisodeLifecycleRepository.episodic_twin_uuids."""
         return self._episodes.episodic_twin_uuids(node_uuid)
 
-    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+    def erasure_evidence_uuids(
+        self, node_uuid: str, *, caller_namespace: str | None = None
+    ) -> list[str]:
         """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
-        return self._episodes.erasure_evidence_uuids(node_uuid)
+        return self._episodes.erasure_evidence_uuids(node_uuid, caller_namespace=caller_namespace)
+
+    def erase_target_namespace_keys(self, node_uuid: str) -> list[str]:
+        """See MemoryQueries.erase_target_namespace_keys."""
+        return self._memory_queries.erase_target_namespace_keys(node_uuid)
 
     # Erasure compensation for enrichment racing an erase (see services/erasure_compensation).
     def episode_erased_by_user(self, episode_uuid: str) -> bool:

@@ -146,7 +146,10 @@ SEAL_CLOSURE_CYPHER = _fill(
            [p IN projs | {uuid: p.uuid, key: @KP2@}] AS projections,
            twin_groups,
            [x IN qnodes + projs
-            WHERE x.processing_state = 'ENRICHING' AND coalesce(x.publish_protocol, 0) <> 2
+            WHERE x.processing_state = 'ENRICHING'
+              AND NOT (coalesce(x.publish_protocol, 0) = 2
+                       AND x.publish_protocol_claimed_at IS NOT NULL
+                       AND x.publish_protocol_claimed_at = x.processing_started_at)
             | x.uuid] AS unfenced
     """,
     KQ=fence_key_cypher("q"),
@@ -191,10 +194,20 @@ def _lock_and_bump(tx: Any, keys: list[str], op_id: str, nonce: str) -> int:
 
 
 def seal_memory(
-    neo4j: Any, op_id: str, target_uuids: list[str] | tuple[str, ...]
+    neo4j: Any,
+    op_id: str,
+    target_uuids: list[str] | tuple[str, ...],
+    *,
+    caller_namespace: str | None = None,
 ) -> SealResult:
-    """Seal the namespaces of ``target_uuids`` and mark the erase closure, in one transaction."""
+    """Seal the namespaces of ``target_uuids`` and mark the erase closure, in one transaction.
+
+    With ``caller_namespace`` set, a target whose fence key is another namespace raises
+    ``PermissionError`` before any fence is locked (CF-326, defense in depth).
+    """
     targets = [str(u) for u in dict.fromkeys(target_uuids) if u]
+    scope = (caller_namespace or "").strip()
+    scope_key = scope
 
     def work(tx: Any) -> SealResult:
         nonce = uuidlib.uuid4().hex
@@ -203,6 +216,10 @@ def seal_memory(
         keys = sorted({str(r["key"]) for r in found if r.get("key")})
         if not keys:
             return SealResult()
+        if scope_key and keys != [scope_key]:
+            raise PermissionError(
+                f"seal targets resolve to fence keys {keys}, outside {scope!r}; refusing"
+            )
         target_key: dict[str, str] = {}
         for r in found:
             target_key.setdefault(str(r["uuid"]), str(r["key"]))
@@ -313,10 +330,25 @@ def release_memory(neo4j: Any, op_id: str) -> list[str]:
 release_namespace = release_memory
 
 
-def release_orphaned_erasing_ops(neo4j: Any, journal: Any) -> list[str]:
-    """Release every ``erasing_ops`` entry whose journal row is terminal or absent.
+#: An op absent from this sidecar's journal may belong to another sidecar mid-erase (B-8); it is
+#: released only once its markers are older than this.
+ORPHAN_ABSENT_GRACE_S = 3600.0
 
-    A PREPARED row is left alone: its replay releases it. Returns the op ids released.
+_OP_MARKER_AGE_CYPHER = (
+    f"OPTIONAL MATCH (m:{ERASURE_MARKER_LABEL} {{op_id: $op_id}}) "
+    "RETURN count(m) AS markers, "
+    "min(duration.inSeconds(m.sealed_at, datetime()).seconds) AS age_s"
+)
+
+
+def release_orphaned_erasing_ops(
+    neo4j: Any, journal: Any, *, absent_grace_s: float = ORPHAN_ABSENT_GRACE_S
+) -> list[str]:
+    """Release ``erasing_ops`` entries whose journal row is terminal, or absent past the grace.
+
+    A PREPARED row is left alone: its replay releases it. An absent row is released only when the
+    op's markers were sealed more than ``absent_grace_s`` ago; with no markers (a namespace seal)
+    it is held and logged. Returns the op ids released.
     """
     rows = neo4j.execute(
         "MATCH (f:EvidenceNamespaceFence) UNWIND coalesce(f.erasing_ops, []) AS op "
@@ -327,6 +359,18 @@ def release_orphaned_erasing_ops(neo4j: Any, journal: Any) -> list[str]:
         row = journal.get(op_id)
         if row is not None and str(row.get("state") or "") == "PREPARED":
             continue
+        if row is None:
+            age = neo4j.execute(_OP_MARKER_AGE_CYPHER, params={"op_id": op_id})
+            markers = int(age[0].get("markers") or 0) if age else 0
+            age_s = age[0].get("age_s") if age else None
+            if not markers or age_s is None or float(age_s) < absent_grace_s:
+                logger.warning(
+                    "erasing op %s has no journal row here; held (markers=%d, age_s=%s)",
+                    op_id,
+                    markers,
+                    age_s,
+                )
+                continue
         release_memory(neo4j, op_id)
         released.append(op_id)
         logger.warning(

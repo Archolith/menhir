@@ -245,12 +245,14 @@ def test_replay_of_prepared_row_releases_a_crashed_seal(
 
 
 @pytest.mark.online
-def test_orphan_release_clears_terminal_and_absent_ops_but_not_prepared(
+def test_orphan_release_clears_terminal_ops_holds_prepared_and_fresh_absent_ops(
     test_neo4j_repo, tmp_path
 ) -> None:
+    """CF-324 / B-8: an op absent from this journal may be another sidecar's live erase, so it is
+    released only once its markers are older than the grace window; with no markers it is held."""
     rig = _Rig(test_neo4j_repo, tmp_path)
     try:
-        terminal, absent, prepared = (uuidlib.uuid4().hex for _ in range(3))
+        terminal, absent_ns, prepared, absent_mem = (uuidlib.uuid4().hex for _ in range(4))
         rig.prepare_row(terminal, None, [("NAMESPACE", rig.ns)])
         rig.prepare_row(prepared, None, [("NAMESPACE", rig.ns)])
         with connect_telemetry_db(rig.db) as conn:
@@ -259,14 +261,19 @@ def test_orphan_release_clears_terminal_and_absent_ops_but_not_prepared(
                 (terminal,),
             )
             conn.commit()
-        for op in (terminal, absent, prepared):
+        for op in (terminal, absent_ns, prepared):
             seal_namespace(test_neo4j_repo, op, rig.ns)
-        assert sorted(rig.fence()["ops"]) == sorted([terminal, absent, prepared])
+        seal_memory(test_neo4j_repo, absent_mem, [rig.seed_q()])  # markers, no journal row
+        assert sorted(rig.fence()["ops"]) == sorted([terminal, absent_ns, prepared, absent_mem])
+
         released = release_orphaned_erasing_ops(test_neo4j_repo, rig.journal)
-        assert (
-            terminal in released and absent in released and prepared not in released
-        ), released
-        assert rig.fence()["ops"] == [prepared]
+        assert released == [terminal], released
+        assert sorted(rig.fence()["ops"]) == sorted([absent_ns, prepared, absent_mem])
+
+        # Past the grace window the marked absent op goes; the unmarked one is still held.
+        released = release_orphaned_erasing_ops(test_neo4j_repo, rig.journal, absent_grace_s=0)
+        assert released == [absent_mem], released
+        assert sorted(rig.fence()["ops"]) == sorted([absent_ns, prepared])
     finally:
         rig.cleanup()
 

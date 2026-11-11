@@ -100,6 +100,13 @@ class DeleteMemoryTool(BaseTextTool):
                 "(another operation holds this memory, or saga writes are paused). Nothing "
                 "was erased; retry later."
             )
+        if reason == "erased_incomplete" and "foreign_target" in (
+            outcome.get("incomplete_reasons") or []
+        ):
+            # CF-326: refused before anything ran; "Erased ... INCOMPLETE" would be untrue.
+            return (
+                f"Refused: {node_uuid} belongs to another namespace. Nothing was erased."
+            )
         if reason == "erased_incomplete":
             # The purge ran but provably missed something. Enumerate what, so the caller can
             # tell a benign leftover from a real leak; only claim what we can prove.

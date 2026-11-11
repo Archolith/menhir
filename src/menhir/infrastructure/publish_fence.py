@@ -153,7 +153,9 @@ REQUEUE_CYPHER = (
     "MATCH (q:Episodic {uuid: $q_uuid}) "
     "WHERE q.processing_state = 'ENRICHING' AND q.processing_owner = $worker_id "
     f"AND {_INSTANT_OK} AND {marker_absent_for_param_cypher('q_uuid')} "
-    "SET q.processing_attempts = CASE WHEN coalesce(toInteger(q.processing_attempts), 0) > 0 "
+    # CF-324: back off 5s * 2^n, capped at 10 min; a fence veto never fails the episode.
+    "WITH q, coalesce(toInteger(q.fenced_requeues), 0) AS n "
+    "SET q.fenced_requeues = n + 1, q.processing_attempts = CASE WHEN coalesce(toInteger(q.processing_attempts), 0) > 0 "
     "THEN toInteger(q.processing_attempts) - 1 ELSE 0 END, "
     "q.processing_state = 'PENDING', q.processing_stage = 'queued', "
     "q.processing_substage = 'publish_fenced', q.processing_substage_started_at = datetime(), "
@@ -161,7 +163,8 @@ REQUEUE_CYPHER = (
     "q.processing_heartbeat_at = datetime(), q.processing_error = null, "
     "q.processing_llm_active_task = null, q.processing_llm_active_kind = null, "
     "q.processing_llm_active_model = null, q.processing_llm_active_endpoint = null, "
-    "q.retry_after = datetime() + duration({seconds: 5}) "
+    "q.retry_after = datetime() + duration({seconds: CASE WHEN n >= 7 THEN 600 "
+    "ELSE toInteger(5 * 2 ^ n) END}) "
     "RETURN count(q) AS requeued"
 )
 
@@ -360,7 +363,9 @@ def check_fence(neo4j: Any, claim: ClaimFence, gate: GateFence | None) -> None:
 
 
 def requeue_fenced(neo4j: Any, claim: ClaimFence, reason: str = "") -> bool:
-    """Undo a fenced attempt: back to PENDING, attempt refunded, retry in 5s.
+    """Undo a fenced attempt: back to PENDING, attempt refunded, retry after 5s * 2^n.
+
+    n counts prior fenced requeues (``q.fenced_requeues``); the delay is capped at 10 min.
 
     Writes only while the claim is still ours and unmarked. With an erase marker on the queue node
     nothing is written (the erased memory must not be touched) and False is returned. Logs a
