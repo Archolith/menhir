@@ -341,6 +341,53 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
 
 NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
     {
+        # R1.2 (erasure audit remediation): stores whose tables were created outside this
+        # inventory. Classified from their writers; each group says why it holds no memory text.
+        # pending_actions: ids, the action enum and timestamps. Its `context` and
+        # `failure_reason` columns are NOT here: they can hold memory text (CF-329, R2).
+        ("pending_actions", "node_uuid"),
+        ("pending_actions", "source_uuid"),
+        ("pending_actions", "action"),
+        ("pending_actions", "created_at"),
+        ("pending_actions", "failed_at"),
+        # migration_batches: the one-time Metric migration's manifest is a uuid list of
+        # instrumentation nodes plus its SHA and state (migration_batches.py module docstring).
+        ("migration_batches", "batch_id"),
+        ("migration_batches", "classifier_version"),
+        ("migration_batches", "manifest_sha256"),
+        ("migration_batches", "manifest_json"),
+        ("migration_batches", "state"),
+        ("migration_batches", "created_at"),
+        ("migration_batches", "approved_at"),
+        ("migration_batches", "applied_at"),
+        ("migration_batches", "menhir_commit"),
+        # metric_receipts: fold receipts. grouping_json holds {operation, error_type} or
+        # {node_uuid, field} (failure_counter_bridge.py, instability_counter_bridge.py);
+        # source_row_ids_json holds integer row ids.
+        ("metric_receipts", "op_id"),
+        ("metric_receipts", "metric_uuid"),
+        ("metric_receipts", "view_key"),
+        ("metric_receipts", "receipt_kind"),
+        ("metric_receipts", "source_table"),
+        ("metric_receipts", "grouping_json"),
+        ("metric_receipts", "query_version"),
+        ("metric_receipts", "previous_receipt_op_id"),
+        ("metric_receipts", "source_row_ids_json"),
+        ("metric_receipts", "input_digest"),
+        ("metric_receipts", "run_id"),
+        ("metric_receipts", "created_at"),
+        # erasure_residue_waiver: which column an operator accepted residue in, and their note
+        # (operator text about the waiver, never memory content).
+        ("erasure_residue_waiver", "table_name"),
+        ("erasure_residue_waiver", "column_name"),
+        ("erasure_residue_waiver", "accepted_at"),
+        ("erasure_residue_waiver", "note"),
+        # scheduler_leases: lease identity and heartbeats.
+        ("scheduler_leases", "lease_name"),
+        ("scheduler_leases", "owner_id"),
+        ("scheduler_leases", "hostname"),
+        ("scheduler_leases", "started_at"),
+        ("scheduler_leases", "heartbeat_at"),
         # mcp_events
         ("mcp_events", "started_at"),
         ("mcp_events", "completed_at"),

@@ -381,6 +381,66 @@ def requeue_fenced(neo4j: Any, claim: ClaimFence, reason: str = "") -> bool:
     return requeued
 
 
+# --------------------------------------------------------------------------- G-copy
+class CopyFenced(Exception):
+    """A text copy was refused by G-copy; ``reason`` names the failed check. Nothing was written."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+#: G-copy statement 2: re-read under the fence lock. ``$sources`` are the uuids the copier read.
+COPY_RECHECK_CYPHER = (
+    "MATCH (f:EvidenceNamespaceFence {namespace_key: $namespace_key}) "
+    "RETURN coalesce(f.erasure_epoch, 0) AS epoch, "
+    "size(coalesce(f.erasing_ops, [])) AS erasing_ops, "
+    "[u IN $sources WHERE EXISTS { MATCH (:ErasureMarker {subject_uuid: u}) }] AS marked"
+)
+
+
+def read_copy_epoch(neo4j: Any, namespace_key: str) -> int:
+    """The epoch a copier must read together with its sources (0 when the fence does not exist)."""
+    return read_gate_fence(neo4j, namespace_key).epoch
+
+
+def execute_copy_fenced(
+    neo4j: Any,
+    namespace_key: str,
+    read_epoch: int,
+    source_uuids: Iterable[str],
+    work: Callable[[Any], Any],
+) -> Any:
+    """G-copy (plan v2 section 2.2): copy text derived from ``source_uuids`` only if no erase
+    touched the namespace since ``read_epoch`` was read.
+
+    One write transaction: lock the namespace fence, re-read it, and require the epoch unchanged,
+    no ``erasing_ops`` in flight, and no ErasureMarker on any source; then ``work(tx)`` runs in the
+    same transaction, so a seal (which takes the same fence lock first) either precedes the check
+    and refuses the copy, or follows the commit and its closure sees the written text. Raises
+    ``CopyFenced``; returns ``work``'s result. ``execute_write`` may re-run this on a transient
+    error, so ``work`` must be idempotent.
+    """
+    sources = sorted({str(u) for u in source_uuids if u})
+    key = str(namespace_key or "").strip() or "default"
+
+    def tx_work(tx: Any) -> Any:
+        tx.execute(fence_lock_cypher("$namespace_key"), {
+            "namespace_key": key, "fence_nonce": uuid4().hex,
+        })
+        rows = tx.execute(COPY_RECHECK_CYPHER, {"namespace_key": key, "sources": sources})
+        row = dict(rows[0]) if rows else {}
+        if int(row.get("epoch") or 0) != int(read_epoch):
+            raise CopyFenced("epoch_moved")
+        if int(row.get("erasing_ops") or 0) > 0:
+            raise CopyFenced("erasing_ops")
+        if row.get("marked"):
+            raise CopyFenced("source_marked")
+        return work(tx)
+
+    return neo4j.execute_write(tx_work)
+
+
 def _log_publish_fenced(claim: ClaimFence, reason: str, state: str) -> None:
     logger.info(
         "publish_fenced episode=%s reason=%s outcome=%s", claim.q_uuid, reason, state

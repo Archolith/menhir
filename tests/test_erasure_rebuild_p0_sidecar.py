@@ -268,7 +268,8 @@ def test_t24_erase_own_journal_updates_survive_content_triggers(tmp_path):
 # ---------------------------------------------------------------------------------- T14
 
 
-@P0
+# R1.1 added graph_text_inventory, so this counterexample now passes; the full lint is
+# tests/test_erasure_text_writer_lint.py.
 def test_t14_text_inventory_lint():
     """The Neo4j text inventory must exist and the lint invariants hold. Breaks today on the
     find_spec assert: ``graph_text_inventory`` does not exist. The checks after it (no DELETE of
