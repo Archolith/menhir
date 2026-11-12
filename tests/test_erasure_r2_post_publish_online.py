@@ -148,3 +148,58 @@ def test_cf337_tenancy_error_after_a_fence_loss_is_a_fence_loss(
 
     with pytest.raises(FenceLost):
         enrichment_steps._record_retention_fenced(ctx, [e])
+
+
+def _self_pair(repo: Any, s: Seed) -> str:
+    from menhir.domain.namespace import namespace_to_group_id
+    from menhir.domain.self_identity import (
+        inferred_self_uuid_for_namespace,
+        self_uuid_for_namespace,
+    )
+
+    anchored = self_uuid_for_namespace(s.ns)
+    repo.execute(
+        """
+        CREATE (:Entity {uuid:$a, name:'me', group_id:$g, namespace:$ns, is_self:true})
+        CREATE (:Entity {uuid:$i, name:'me (inferred)', group_id:$g, namespace:$ns,
+                         entity_role:'inferred_self'})
+        """,
+        params={"a": anchored, "i": inferred_self_uuid_for_namespace(s.ns),
+                "g": namespace_to_group_id(s.ns), "ns": s.ns},
+    )
+    return anchored
+
+
+def _self_links(repo: Any, anchored: str) -> int:
+    return int(repo.execute(
+        "MATCH ({uuid:$a})-[r:INFERRED_VIEW_OF]->() RETURN count(r) AS c", params={"a": anchored}
+    )[0]["c"])
+
+
+@pytest.mark.parametrize("sealed", [True, False], ids=["sealed", "claim_holds"])
+def test_cf337_self_tier_link_is_fenced(test_neo4j_repo, seed, sealed) -> None:  # noqa: F811
+    """The self-tier link runs in the claim-fence transaction: a seal committed first refuses it
+    with FenceLost and no INFERRED_VIEW_OF edge; with the claim held it links (positive control).
+    Fails if link_self_tiers runs unfenced. The offline half
+    (test_erasure_r2_link_self_tiers.py) pins that stamp_and_finalize does not swallow FenceLost."""
+    repo = test_neo4j_repo
+    anchored = _self_pair(repo, seed)
+    if sealed:
+        repo.execute(
+            "CREATE (:ErasureMarker {namespace_key:$ns, subject_uuid:$q, op_id:$op})",
+            params={"ns": seed.ns, "q": seed.q, "op": f"{seed.tag}-op"},
+        )
+    ctx = _ctx(repo, seed)
+
+    def link() -> Any:
+        return enrichment_steps._fenced_write(
+            ctx, lambda ex: ctx.graph_adapter.link_self_tiers(seed.ns, executor=ex)
+        )
+
+    if sealed:
+        with pytest.raises(FenceLost):
+            link()
+        assert _self_links(repo, anchored) == 0
+    else:
+        assert link() is True
+        assert _self_links(repo, anchored) == 1
