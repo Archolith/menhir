@@ -12,7 +12,7 @@ import pytest
 
 from menhir.infrastructure.graph_text_inventory import ABSORBED_BLOCK_SEPARATOR
 from tests._erasure_canary import all_hits, new_canary
-from tests.test_erasure_rebuild_p0_scrub_online import _adapter_and_coordinator, _u
+from tests.test_erasure_rebuild_p0_scrub_online import _adapter_and_coordinator, _seed_memory, _u
 
 pytestmark = pytest.mark.online
 
@@ -146,3 +146,77 @@ def test_cf332_absorption_refused_when_an_erase_lands_between_read_and_write(
     a = _props(repo, ids["a"])
     assert "B body" not in (a.get("content") or ""), a  # the refused copy wrote nothing
     assert _props(repo, ids["b"]).get("freshness") == "GONE"  # resolution itself still ran
+
+
+def _block(source: str, text: str) -> str:
+    return f"{ABSORBED_BLOCK_SEPARATOR}{source}) on 2026-01-01 ---\n{text}"
+
+
+def _repair_keys(repo: Any, holder: str) -> list[str]:
+    return [r["k"] for r in repo.execute(
+        "MATCH (rr:DerivedRederiveRepair {item_uuid:$h}) RETURN rr.repair_key AS k",
+        params={"h": holder})]
+
+
+def test_cf332_holder_is_cut_when_the_erased_target_is_already_gone(test_neo4j_repo, tmp_path):
+    """The absorbed source no longer exists (its node was removed earlier), so the erase takes the
+    target-absent path. The holder in the caller's namespace still loses the block, is flagged with
+    a recoverable repair key, and a foreign holder is out of the scoped erase. Fails if the
+    target-absent statement stops running the holder scrub."""
+    repo = test_neo4j_repo
+    ns, canary = f"r2-332a-{_u()}", new_canary("CF332A")
+    gone, holder, foreign = _u(), _u(), _u()
+    content = "holder text" + _block(gone, f"gone said {canary}")
+    repo.execute(
+        """
+        CREATE (:Entity {uuid:$h, name:'holder', group_id:$ns, namespace:$ns, content:$c,
+                         summary:'restates it', absorbed_from:[$g]})
+        CREATE (:Entity {uuid:$f, name:'foreign', group_id:$ons, namespace:$ons, content:$c,
+                         absorbed_from:[$g]})
+        """,
+        params={"h": holder, "f": foreign, "g": gone, "ns": ns, "ons": f"{ns}-other", "c": content},
+    )
+    _, coord, db = _adapter_and_coordinator(repo, tmp_path)
+
+    out = coord.erase_memory(gone, caller_namespace=ns)
+
+    h = _props(repo, holder)
+    assert h["content"] == "holder text" and h["summary"] == "", h
+    assert h["rederive_pending"] is True and h["absorbed_from"] == [], h
+    assert _repair_keys(repo, holder) == [f"{gone}\u001f{holder}"]
+    assert out["derived"]["entities_flagged"] == 1, out
+    assert _props(repo, foreign)["content"] == content  # another namespace: out of scope
+    assert canary not in str(_props(repo, holder))
+
+
+@pytest.mark.parametrize("sole_source", [True, False], ids=["source_deleted", "source_scrubbed"])
+def test_cf332_block_of_an_entity_the_cascade_deleted_or_scrubbed_is_cut(
+    test_neo4j_repo, tmp_path, sole_source
+):
+    """Erasing an episode deletes (sole source) or scrubs (shared) a derived entity S. A holder that
+    absorbed S's text keeps a copy unless the cut covers the cascade's own deleted/flagged
+    entities, not just the erase targets. Fails if the holder cut keys on $erased_uuids alone."""
+    repo = test_neo4j_repo
+    ns, canary = f"r2-332c-{_u()}", new_canary("CF332C")
+    ids = _seed_memory(repo, ns, canary)
+    if sole_source:
+        repo.execute("MATCH ()-[r:RELATES_TO {uuid:$e}]->() SET r.episodes = [$t]",
+                     params={"e": ids["edge"], "t": ids["twin"]})
+        repo.execute("MATCH (l:Episodic {uuid:$l}) DETACH DELETE l", params={"l": ids["live"]})
+    holder = _u()
+    repo.execute(
+        "CREATE (:Entity {uuid:$h, name:'holder', group_id:$ns, namespace:$ns, content:$c, "
+        "absorbed_from:[$s]})",
+        params={"h": holder, "ns": ns, "s": ids["shared"],
+                "c": "holder text" + _block(ids["shared"], f"S said {canary}")},
+    )
+    _, coord, db = _adapter_and_coordinator(repo, tmp_path)
+
+    out = coord.erase_memory(ids["queue"])
+
+    assert out["reason"] == "erased", out
+    s_left = _props(repo, ids["shared"])
+    assert (s_left == {}) is sole_source, s_left  # the cascade deleted / scrubbed S as expected
+    h = _props(repo, holder)
+    assert h["content"] == "holder text" and h["rederive_pending"] is True, h
+    assert all_hits(repo, db, canary) == []

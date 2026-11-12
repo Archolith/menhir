@@ -65,11 +65,12 @@ ABSORBED_BLOCK_SEPARATOR_CYPHER = json.dumps(ABSORBED_BLOCK_SEPARATOR)
 
 
 def _absorbed_block_cut(expr: str) -> str:
-    """Cypher: ``expr`` with every absorbed block of an erased uuid removed (null stays null)."""
+    """Cypher: ``expr`` with every absorbed block whose source is in ``cut_uuids`` removed (null
+    stays null)."""
     sep = ABSORBED_BLOCK_SEPARATOR_CYPHER
     return (
         f"CASE WHEN {expr} IS NULL THEN null ELSE reduce(acc = head(split({expr}, {sep})), "
-        f"p IN tail(split({expr}, {sep})) | CASE WHEN any(u IN $erased_uuids "
+        f"p IN tail(split({expr}, {sep})) | CASE WHEN any(u IN cut_uuids "
         f"WHERE p STARTS WITH u + ')') THEN acc ELSE acc + {sep} + p END) END"
     )
 
@@ -1326,6 +1327,53 @@ class MemoryQueryRepository:
         f'"{p}"' for p in sorted(ENTITY_STRUCTURAL_PROPERTIES | {"summary"})
     ) + "]"
 
+    # CF-332: conflict resolution appended an erased memory's content to a kept entity, as a block
+    # headed by the marker below. Cut those blocks out (the holder keeps its own text), blank the
+    # summary that may restate them and flag the holder. Legacy holders have no absorbed_from, so
+    # the marker text is the fallback selector. A block is a copy of its source entity's text, so
+    # it goes whenever that text goes: the erase targets, and in the cascade also every entity it
+    # deleted or scrubbed (__CUT_SET__). Shared by the cascade and the target-absent path.
+    _HOLDER_SCRUB_FRAGMENT = (
+        """
+        WITH __CARRY__ __CUT_SET__ AS cut_uuids
+        OPTIONAL MATCH (h:Entity)
+        WHERE NOT h.uuid IN $erased_uuids AND NOT h.uuid IN __DELETED__
+          AND (any(u IN coalesce(h.absorbed_from, []) WHERE u IN cut_uuids)
+               OR any(u IN cut_uuids
+                      WHERE coalesce(h.content, '') CONTAINS __ABSORB_SEP__ + u + ')'
+                         OR coalesce(h.original_content, '') CONTAINS __ABSORB_SEP__ + u + ')'))
+          __HOLDER_NS_FILTER__
+        WITH __CARRY__ cut_uuids,
+             [x IN collect(DISTINCT h) WHERE x IS NOT NULL] AS holders
+        FOREACH (h IN holders |
+            SET h.content = __CUT__(h.content),
+                h.original_content = __CUT__(h.original_content),
+                h.summary = '',
+                h.absorbed_from = [u IN coalesce(h.absorbed_from, []) WHERE NOT u IN cut_uuids],
+                h.rederive_pending = true,
+                h.rederive_reason = 'source_erased',
+                h.rederive_flagged_at = datetime()
+            REMOVE h.content_embedding
+        )
+        FOREACH (h IN holders |
+            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + h.uuid})
+            ON CREATE SET rr.item_uuid = h.uuid,
+                          rr.item_kind = 'entity',
+                          rr.namespace = CASE
+                              WHEN trim(toString(coalesce(h.namespace, h.group_id, ''))) = ''
+                              THEN 'default'
+                              ELSE trim(toString(coalesce(h.namespace, h.group_id)))
+                          END,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        """
+    ).replace(
+        "__CUT__(h.content)", _absorbed_block_cut("h.content")
+    ).replace(
+        "__CUT__(h.original_content)", _absorbed_block_cut("h.original_content")
+    ).replace("__ABSORB_SEP__", ABSORBED_BLOCK_SEPARATOR_CYPHER)
+
     # Derived-fact cleanup (#423). Fact edges first: strip erased episodes, delete emptied edges,
     # flag survivors. The entity step reads the stripped edges, so this must run before it.
     _DERIVED_EDGE_BODY = (
@@ -1403,11 +1451,29 @@ class MemoryQueryRepository:
         "__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER
     ).replace("__CONFLICT_NS_FILTER__", _DERIVED_CONFLICT_NS_FILTER)
     _DERIVED_EDGE_CALL = "\n            CALL {" + _DERIVED_EDGE_SCOPED_BODY + "}\n"
+    # Target gone: its fact edges and its absorbed blocks (CF-332) can still carry the text. One
+    # statement, so the holder scrub commits with the edge scrub.
+    _DERIVED_EDGE_RETURN = (
+        "RETURN edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted"
+    )
+    _ABSENT_HOLDER_TAIL = (
+        "WITH edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted"
+        + _HOLDER_SCRUB_FRAGMENT.replace("__DELETED__", "[]").replace(
+            "__CARRY__", "edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,"
+        ).replace("__CUT_SET__", "$erased_uuids")
+        + "RETURN edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,\n"
+        "               [h IN holders | h.uuid] AS holders_flagged_uuids\n"
+    )
     _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "").replace(
         "__CONFLICT_NS_FILTER__", ""
+    ).replace(_DERIVED_EDGE_RETURN, _ABSENT_HOLDER_TAIL.replace("__HOLDER_NS_FILTER__", ""))
+    # Target gone, caller scoped: only edges and holders in the caller's namespace (review F4).
+    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_SCOPED_BODY.replace(
+        _DERIVED_EDGE_RETURN,
+        _ABSENT_HOLDER_TAIL.replace(
+            "__HOLDER_NS_FILTER__", _DERIVED_EDGE_NS_FILTER.replace("fe.", "h.")
+        ),
     )
-    # Target gone, caller scoped: only edges in the caller's namespace (review F4).
-    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_SCOPED_BODY
     # Entities reached from the target episode; views/artifacts/structure/TEMPORAL are skipped.
     _DERIVED_ENTITY_MATCH = (
         """
@@ -1493,48 +1559,24 @@ class MemoryQueryRepository:
                  AS entities_flagged_uuids
         FOREACH (x IN rcs | DETACH DELETE x)
         WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
-        // CF-332: conflict resolution appended an erased memory's content to a kept entity, as a
-        // block headed by the marker below. Cut those blocks out (the holder keeps its own text),
-        // blank the summary that may restate them and flag the holder. Legacy holders have no
-        // absorbed_from, so the marker text is the fallback selector.
-        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
-        OPTIONAL MATCH (h:Entity)
-        WHERE NOT h.uuid IN $erased_uuids AND NOT h.uuid IN entities_deleted_uuids
-          AND (any(u IN coalesce(h.absorbed_from, []) WHERE u IN $erased_uuids)
-               OR any(u IN $erased_uuids
-                      WHERE coalesce(h.content, '') CONTAINS __ABSORB_SEP__ + u + ')'
-                         OR coalesce(h.original_content, '') CONTAINS __ABSORB_SEP__ + u + ')'))
-          __HOLDER_NS_FILTER__
-        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids,
-             [x IN collect(DISTINCT h) WHERE x IS NOT NULL] AS holders
-        FOREACH (h IN holders |
-            SET h.content = __CUT__(h.content),
-                h.original_content = __CUT__(h.original_content),
-                h.summary = '',
-                h.absorbed_from = [u IN coalesce(h.absorbed_from, []) WHERE NOT u IN $erased_uuids],
-                h.rederive_pending = true,
-                h.rederive_reason = 'source_erased',
-                h.rederive_flagged_at = datetime()
-            REMOVE h.content_embedding
-        )
-        FOREACH (h IN holders |
-            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + h.uuid})
-            ON CREATE SET rr.item_uuid = h.uuid,
-                          rr.item_kind = 'entity',
-                          rr.namespace = $namespace_key,
-                          rr.status = 'pending',
-                          rr.created_at = datetime()
-        )
+        __HOLDER_SCRUB__
         RETURN unknown_n AS derived_unknown_provenance, entities_deleted_uuids,
                entities_flagged_uuids
                + [h IN holders WHERE NOT h.uuid IN entities_flagged_uuids | h.uuid]
                AS entities_flagged_uuids
         """
     ).replace("__ENTITY_KEEP_PROPS__", _ENTITY_KEEP_PROPS).replace(
-        "__CUT__(h.content)", _absorbed_block_cut("h.content")
-    ).replace(
-        "__CUT__(h.original_content)", _absorbed_block_cut("h.original_content")
-    ).replace("__ABSORB_SEP__", ABSORBED_BLOCK_SEPARATOR_CYPHER)
+        "__HOLDER_SCRUB__",
+        _HOLDER_SCRUB_FRAGMENT.replace("__DELETED__", "entities_deleted_uuids").replace(
+            "__CARRY__", "unknown_n, entities_deleted_uuids, entities_flagged_uuids,"
+        ).replace(
+            # toStringOrNull types the list as strings; Cypher's checker rejects `'...' + u`
+            # over the cascade's computed lists otherwise.
+            "__CUT_SET__",
+            "[x IN $erased_uuids + entities_deleted_uuids + entities_flagged_uuids"
+            " | toStringOrNull(x)]",
+        ),
+    )
     _DERIVED_ENTITY_CALL = (
         "\n            CALL {"
         + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)
@@ -1816,6 +1858,10 @@ class MemoryQueryRepository:
             result["derived_edges_deleted"] = len(result["derived_edges_deleted_uuids"])
             result["derived_edges_flagged"] = len(result["derived_edges_flagged_uuids"])
             result["derived_conflicts_deleted"] = int(edge_row.get("conflicts_deleted") or 0)
+            result["derived_entities_flagged_uuids"] = list(
+                edge_row.get("holders_flagged_uuids") or []
+            )
+            result["derived_entities_flagged"] = len(result["derived_entities_flagged_uuids"])
             return result
         if len(namespace_keys) != 1:
             raise RuntimeError(
