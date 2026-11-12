@@ -1,3 +1,23 @@
+## 2026-11-12 - v0.3.9: Delete default-namespace memories by id (#476); erasure fences in-flight enrichment; fence-lock hang fixes
+
+- `delete_memories` (operator) erases up to 100 memory, TurnEvidence or typed-assertion ids per
+  call through the same ownership guard and erase path as `delete_memory`. It previews by default,
+  refuses the whole call on an invalid id or more than 100, keeps going past a failing id, and
+  reports ids it had no time for as `not_run` after 90 s (#476).
+- `list_namespace_memories` (operator, read-only) pages a namespace's erasable ids, keyset on id.
+  `default` covers every stored spelling of it; Graphiti twins, structure rows, evidence
+  projections, erased records, entities and artifacts are never listed (#476).
+- `delete_namespace` still refuses `default` (including `' default '`) and points to the two tools.
+  `delete_memory(id, namespace='default')` no longer refuses a memory stored with `namespace=''`.
+- Tool catalog version 3. A v1/v2 client policy must decide both tools or startup fails; a v3
+  policy pinned below 3 withholds them. `scripts/update_client_policy.py` updates a policy and
+  prints its new digest.
+- The erase fence (seal, erasure markers, publish fence on Graphiti fork 0.31.2.post3) from the
+  2026-11-10 to 2026-11-12 entries below ships in this release.
+- The fence-lock event-loop fixes (stdio E2E hang, shutdown hang #601) from the entry below ship in
+  this release.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.9. No dependency changes in this commit.
+
 ## 2026-11-12 - Fence-lock writes no longer wait on the event loop (stdio E2E hang)
 
 - The publish fence holds a namespace's `EvidenceNamespaceFence` inside Graphiti's async publish
