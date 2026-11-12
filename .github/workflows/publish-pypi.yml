@@ -42,7 +42,7 @@ concurrency:
 jobs:
   resolve:
     name: resolve release inputs
-    # Pinned, not ubuntu-latest: ubuntu-26.04 broke the image SBOM identity check (v0.3.9).
+    # Pinned, not ubuntu-latest: ubuntu-26.04 broke the image SBOM identity check (#615).
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
