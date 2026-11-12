@@ -1,3 +1,10 @@
+## 2026-11-12 - v0.3.10: 0.3.9 with a release image (release workflows pinned to ubuntu-24.04)
+
+- Ships everything in v0.3.9 (#476 delete by id, the erase fence, the fence-lock hang fixes). v0.3.9
+  reached PyPI but has no release image, because its image build failed on ubuntu-26.04 runners.
+  Deploy 0.3.10, not 0.3.9.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.10. No dependency changes in this commit.
+
 ## 2026-11-12 - Release workflows pinned to ubuntu-24.04
 
 - `publish-pypi.yml`, `release-image.yml`: every job runs on `ubuntu-24.04`, not `ubuntu-latest`.
