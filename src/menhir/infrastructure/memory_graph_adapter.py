@@ -760,10 +760,10 @@ class MemoryGraphAdapter:
         reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
 
-    def link_self_tiers(self, namespace: str) -> bool:
+    def link_self_tiers(self, namespace: str, *, executor: Any = None) -> bool:
         """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
         exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
-        return self._episodes.link_self_tiers(namespace)
+        return self._episodes.link_self_tiers(namespace, executor=executor)
 
     def mark_episode_store_only(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
@@ -817,6 +817,7 @@ class MemoryGraphAdapter:
         bootstrap_scope: str | None = None,
         belief_commit: str | None = None,
         belief_branch: str | None = None,
+        executor: Any = None,
     ) -> PolicyStampResult:
         return self._episodes.stamp_ingest_metadata(
             node_uuids=node_uuids,
@@ -829,6 +830,7 @@ class MemoryGraphAdapter:
             bootstrap_scope=bootstrap_scope,
             belief_commit=belief_commit,
             belief_branch=belief_branch,
+            executor=executor,
         )
 
     def record_retention_sources(
@@ -837,11 +839,13 @@ class MemoryGraphAdapter:
         source_episode_uuid: str,
         entity_uuids: list[str],
         namespace: str | None = None,
+        executor: Any = None,
     ) -> int:
         return self._episodes.record_retention_sources(
             source_episode_uuid=source_episode_uuid,
             entity_uuids=entity_uuids,
             namespace=namespace,
+            executor=executor,
         )
 
     def count_namespace(self, group_id: str, *, namespace: str | None = None) -> int:

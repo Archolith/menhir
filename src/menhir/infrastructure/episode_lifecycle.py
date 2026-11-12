@@ -1835,7 +1835,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
             )
         return self_uuid
 
-    def link_self_tiers(self, namespace: str) -> bool:
+    def link_self_tiers(self, namespace: str, *, executor: Any = None) -> bool:
         """Link the anchored self to the inferred self with an INFERRED_VIEW_OF edge.
 
         Structural link only: created only when BOTH tiers already exist (MATCH-only, never
@@ -1843,7 +1843,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         link exists after the call."""
         if not namespace:
             raise ValueError("link_self_tiers requires a non-empty namespace")
-        rows = self.neo4j.execute(
+        rows = (executor or self.neo4j).execute(
             """
             MATCH (a:Entity {uuid: $anchored})
             WHERE a.group_id = $group_id AND coalesce(a.is_self, false)

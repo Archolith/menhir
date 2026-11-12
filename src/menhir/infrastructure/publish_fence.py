@@ -46,6 +46,7 @@ __all__ = [
     "read_gate_fence",
     "requeue_fenced",
     "run_fenced",
+    "run_fenced_call",
 ]
 
 #: An after_write extra: ``await extra(tx, episode_uuid=..., entity_edge_uuids=...)``. It runs its
@@ -351,6 +352,36 @@ def run_fenced(
         if reason is not None:
             raise FenceLost(reason)
         return [list(tx.execute(query, params)) for query, params in prepared]
+
+    return neo4j.execute_write(work)
+
+
+class _TxExecutor:
+    """``neo4j.execute``-shaped view of a transaction, for writers that issue their own statements."""
+
+    def __init__(self, tx: Any) -> None:
+        self._tx = tx
+
+    def execute(self, query: str, params: dict[str, Any] | None = None, **_kw: Any) -> list[Any]:
+        return list(self._tx.execute(query, dict(params or {})))
+
+
+def run_fenced_call(
+    neo4j: Any, claim: ClaimFence, gate: GateFence | None, call: Callable[[Any], Any]
+) -> Any:
+    """``run_fenced`` for a writer that builds its own statements (R2 CF-337).
+
+    ``call(executor)`` runs inside the same write transaction, after the lock and re-check; the
+    executor has ``neo4j.execute``'s shape. Raises ``FenceLost``; nothing is written then.
+    """
+
+    def work(tx: Any) -> Any:
+        tx.execute(LOCK_CYPHER, _lock_params(claim))
+        rows = tx.execute(RECHECK_CYPHER, _claim_params(claim))
+        reason = _failed_check(rows[0] if rows else None, claim, gate)
+        if reason is not None:
+            raise FenceLost(reason)
+        return call(_TxExecutor(tx))
 
     return neo4j.execute_write(work)
 

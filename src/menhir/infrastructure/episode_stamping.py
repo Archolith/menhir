@@ -36,6 +36,7 @@ class EpisodeStampingRepository:
         source_episode_uuid: str,
         entity_uuids: list[str],
         namespace: str | None = None,
+        executor: Any = None,
     ) -> int:
         """Idempotently record which source episode produced each semantic entity.
 
@@ -50,7 +51,7 @@ class EpisodeStampingRepository:
         if not source_episode_uuid or any(not uuid for uuid in entity_uuids):
             raise ValueError("Retention provenance requires nonempty source and entity UUIDs")
         unique_entity_uuids = list(dict.fromkeys(entity_uuids))
-        rows = self.neo4j.execute(
+        rows = (executor or self.neo4j).execute(
             f"""
             OPTIONAL MATCH (source:Episodic {{uuid: $source_episode_uuid}})
             WITH source, source IS NOT NULL AND ({tenant_scope_cypher("source")}) AS source_valid
@@ -101,7 +102,10 @@ class EpisodeStampingRepository:
         bootstrap_scope: str | None = None,
         belief_commit: str | None = None,
         belief_branch: str | None = None,
+        executor: Any = None,
     ) -> PolicyStampResult:
+        # R2 CF-337: ``executor`` is a fenced transaction (publish_fence.run_fenced_call).
+        neo4j = executor or self.neo4j
         ns = stamped_namespace(namespace)
         unique_node_uuids = list(dict.fromkeys(node_uuids))
         unique_edge_uuids = list(dict.fromkeys(edge_uuids))
@@ -148,7 +152,7 @@ class EpisodeStampingRepository:
                 .return_raw("count(DISTINCT n) AS nodes_touched")
                 .build()
             )
-            episodic_rows = self.neo4j.execute(episodic_query, params=episodic_params)
+            episodic_rows = neo4j.execute(episodic_query, params=episodic_params)
             if episodic_rows:
                 nodes_touched += int(episodic_rows[0].get("nodes_touched", 0))
 
@@ -194,7 +198,7 @@ class EpisodeStampingRepository:
                 .return_raw("count(DISTINCT n) AS nodes_touched")
                 .build()
             )
-            entity_rows = self.neo4j.execute(entity_query, params=entity_params)
+            entity_rows = neo4j.execute(entity_query, params=entity_params)
             if entity_rows:
                 nodes_touched += int(entity_rows[0].get("nodes_touched", 0))
 
@@ -214,7 +218,7 @@ class EpisodeStampingRepository:
                 .return_raw("count(DISTINCT r) AS edges_touched")
                 .build()
             )
-            edge_rows = self.neo4j.execute(
+            edge_rows = neo4j.execute(
                 edge_query,
                 params={
                     "uuids": unique_edge_uuids,

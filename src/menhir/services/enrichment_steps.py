@@ -45,10 +45,12 @@ from menhir.infrastructure.evidence_publication_intents import (
 )
 from menhir.infrastructure.publish_fence import (
     ClaimFence,
+    FenceLost,
     GateFence,
     MenhirPublishFence,
     check_fence,
     read_gate_fence,
+    run_fenced_call,
 )
 from menhir.infrastructure.telemetry import (
     record_failure_event,
@@ -159,6 +161,7 @@ def record_retention_sources(
     *,
     source_episode_uuid: str,
     namespace: str,
+    executor: Any = None,
 ) -> None:
     """Record source provenance without copying the source's mutable flag state."""
 
@@ -166,7 +169,13 @@ def record_retention_sources(
         source_episode_uuid=source_episode_uuid,
         entity_uuids=node_uuids,
         namespace=namespace,
+        **_executor_kw(executor),
     )
+
+
+def _executor_kw(executor: Any) -> dict[str, Any]:
+    """``executor=`` only when fenced, so adapters predating CF-337 keep their signature."""
+    return {} if executor is None else {"executor": executor}
 
 
 def compose_episode_body(claimed: dict[str, object]) -> str:
@@ -970,6 +979,36 @@ def _anchor_to_structural_entities(
 # Pipeline step 4 — stamp metadata, rehydrate, and finalize
 # ---------------------------------------------------------------------------
 
+def _fenced_write(ctx: EnrichmentContext, call: Callable[[Any], Any]) -> Any:
+    """G-fenced post-publish write (R2 CF-337): ``call(executor)`` runs in one transaction with
+    the claim re-check, so a seal landing after a check cannot precede the write. Without a claim
+    fence (legacy paths) ``call(None)`` runs unfenced. Raises ``FenceLost``; callers must not
+    catch it."""
+    if ctx.claim_fence is None:
+        return call(None)
+    return run_fenced_call(ctx.graph_adapter.neo4j, ctx.claim_fence, ctx.gate_fence, call)
+
+
+def _record_retention_fenced(ctx: EnrichmentContext, entity_uuids: list[str]) -> None:
+    """RETENTION_SOURCE edges under the claim fence (R2 CF-337).
+
+    A tenancy ``ValueError`` (missing or out-of-tenant source) raised once the fence is lost is
+    that fence loss -- requeue, not an enrichment failure -- so it is re-checked and becomes
+    ``FenceLost`` then; otherwise it propagates.
+    """
+    try:
+        _fenced_write(ctx, lambda ex: record_retention_sources(
+            ctx.graph_adapter,
+            entity_uuids,
+            source_episode_uuid=ctx.episode_uuid,
+            namespace=str(ctx.claimed.get("namespace") or "default"),
+            executor=ex,
+        ))
+    except ValueError:
+        _fence_check(ctx)
+        raise
+
+
 def _fence_check(ctx: EnrichmentContext) -> None:
     """G-fenced read check before a post-publish step that cannot join one transaction.
 
@@ -1052,9 +1091,11 @@ async def stamp_and_finalize(
         # Best-effort two-tier self link; never fails the episode.
         link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
         if link_self_tiers is not None:
-            _fence_check(ctx)  # check-only: link_self_tiers issues its own statements
+            namespace = str(ctx.claimed.get("namespace") or "default")
             try:
-                link_self_tiers(str(ctx.claimed.get("namespace") or "default"))
+                _fenced_write(ctx, lambda ex: link_self_tiers(namespace, **_executor_kw(ex)))
+            except FenceLost:
+                raise  # the worker requeues; never swallowed as a best-effort failure
             except Exception:
                 logger.debug(
                     "link_self_tiers failed episode_id=%s", ctx.episode_uuid, exc_info=True
@@ -1182,8 +1223,7 @@ async def stamp_and_finalize(
     stamp_kwargs: dict[str, object] = {}
     if ctx.claimed.get("bootstrap_scope") is not None:
         stamp_kwargs["bootstrap_scope"] = ctx.claimed.get("bootstrap_scope")
-    _fence_check(ctx)  # check-only: stamp_ingest_metadata issues its own statements
-    stamped = ctx.graph_adapter.stamp_ingest_metadata(
+    stamped = _fenced_write(ctx, lambda ex: ctx.graph_adapter.stamp_ingest_metadata(
         node_uuids=node_uuids,
         edge_uuids=edge_uuids,
         session_id=str(ctx.claimed.get("session_id") or ""),
@@ -1192,14 +1232,9 @@ async def stamp_and_finalize(
         source_confidence=source_confidence_for(str(ctx.claimed.get("source") or "claude-code")),
         namespace=str(ctx.claimed.get("namespace") or "default"),
         **stamp_kwargs,
-    )
-    _fence_check(ctx)  # check-only: record_retention_sources issues its own statements
-    record_retention_sources(
-        ctx.graph_adapter,
-        [node.uuid for node in extracted_nodes],
-        source_episode_uuid=ctx.episode_uuid,
-        namespace=str(ctx.claimed.get("namespace") or "default"),
-    )
+        **_executor_kw(ex),
+    ))
+    _record_retention_fenced(ctx, [node.uuid for node in extracted_nodes])
     # M6 Phase 5: Record scope assignment for extracted entity nodes
     if ctx.settings_record_revisions:
         for node in extracted_nodes:
