@@ -1,3 +1,11 @@
+## 2026-11-12 - Release workflows pinned to ubuntu-24.04
+
+- `publish-pypi.yml`, `release-image.yml`: every job runs on `ubuntu-24.04`, not `ubuntu-latest`.
+  `ubuntu-latest` moved to ubuntu-26.04, where the release image's Syft SBOM no longer matches the
+  candidate image ID, so the v0.3.9 image build failed after PyPI had published. v0.3.9 has no
+  release image; v0.3.10 ships the same code with one. Follow-ups: image dry-run before tagging
+  and the image-ID check on newer runners.
+
 ## 2026-11-12 - v0.3.9: Delete default-namespace memories by id (#476); erasure fences in-flight enrichment; fence-lock hang fixes
 
 - `delete_memories` (operator) erases up to 100 memory, TurnEvidence or typed-assertion ids per

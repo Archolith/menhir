@@ -94,7 +94,8 @@ jobs:
   validate:
     name: Build and seal candidate without publishing
     if: ${{ github.repository == 'Archolith/menhir' }}
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: ubuntu-26.04 broke the image SBOM identity check (#615).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -403,7 +404,7 @@ jobs:
     name: Publish approved sealed candidate
     needs: validate
     if: ${{ inputs.push && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: menhir-release-publication
     permissions:
