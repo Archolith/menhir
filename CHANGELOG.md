@@ -1,3 +1,93 @@
+## 2026-11-12 - Graphiti fork 0.31.2.post3: publish fence inside the add_episode publish transaction
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post3`, fork commit `420bebec`. Pins, docs and release checks updated.
+
+## 2026-11-11 - Erasure rebuild, fence foundation: an erase fences in-flight enrichment
+
+- An erase now seals before it deletes. One transaction locks the memory's namespace, records a
+  permanent `ErasureMarker` for every id it will remove, and moves a per-namespace erasure epoch.
+  It then reads the closure under that lock: the queue node, its twins (linked, reserved or
+  back-linked), its turns and their projections. The seal is released after the delete whatever
+  the outcome, and an orphaned seal is released on replay.
+- Every claim reserves the uuid of the episode it will publish, and the publish links the queue
+  node to it inside Graphiti's own save transaction (needs the fork's `publish_fence` hook,
+  `archolith-graphiti-core` 0.31.2.post3, not yet released or pinned). A publish whose claim was
+  reaped, whose memory was erased, or whose namespace saw an erase after it entered the ingest
+  gate is rolled back and requeued without burning an attempt.
+- Every queue-node write, the claim, the reaper and the retry scans skip a marked node. Projection
+  and self-entity creation refuse while a namespace is erasing and stamp `created_epoch`; a
+  typed assertion for an erased episode is not written.
+- A claim that finds its queue node already linked finishes from the link instead of publishing
+  again. The by-name reconcile, which could adopt another namespace's episode, is gone.
+- Only the process holding the scheduler lease runs enrichment workers.
+- An erase that meets an in-flight claim from a process without the fence replies
+  `erased_incomplete` with `incomplete_reasons: ["unfenced_inflight"]`; every `erased_incomplete`
+  reply now lists its reasons.
+
+## 2026-11-10 - Erasure rebuild, first steps: strict targets, scoped merge-audit scrub, sidecar physical erasure
+
+- `delete_memory` accepts only a canonical uuid. Anything else is refused as `invalid_target`
+  before any lookup or purge, so a short id like `"e"` can no longer reach the sidecar purge.
+- The merge-audit scrub runs inside the caller's namespace and matches exact uuid values in each
+  entry's JSON instead of substrings. An entry that names the target but cannot be parsed now
+  makes the erase report `erased_incomplete`.
+- Every sidecar connection runs with `secure_delete`. An erased subject goes on a permanent
+  denylist, and triggers drop later content writes for it, so a late failure or usage row cannot
+  bring erased text back. The journal tables are never triggered.
+- The purge reads subjects by subquery, so a namespace erase with tens of thousands of members
+  no longer fails with "too many SQL variables".
+- A new hourly `sidecar_compaction` job runs VACUUM and a TRUNCATE checkpoint, then stamps
+  `sidecar_compacted_at` on the erasures it covered. Deleted text is gone from the database
+  files only after it runs.
+- New counterexample tests for the full rebuild (plan v2) are in place as strict expected
+  failures and turn green as each later step lands.
+
+## 2026-11-09 - Erasure removes what a memory derived (#423, #475, #476)
+
+- Erasing a memory now also deletes the facts and entities derived only from it. Shared ones keep
+  their other sources: the erased episode is stripped, the item's text (fact, summary, content)
+  is blanked at erase time, and it is flagged `rederive_pending`. Recall shows a flagged entity
+  by name only and withholds a flagged fact. A new `derived_rederive` job (every 15 min) rebuilds
+  each item from its remaining sources, judging a fact by subject, relation and object, or deletes
+  a fact they no longer support. With no LLM it skips and the item stays blank. Items with no
+  recorded provenance are left alone and the erase reports `erased_incomplete` (#423).
+- Entities an erasure may delete are fenced at PREPARE, so a merge holding one fails the erase
+  instead of racing it. Replay deletes only the erased nodes and re-checks sharing first.
+- Merge-audit entries holding erased content are tombstoned and the survivor is marked
+  `merge_irreversible`; unmerge reports `snapshot_erased` (#423).
+- Journal snapshots (`graph_operations.before_snapshot_json`, `last_error`) that hold an erased
+  node are purged once the operation is terminal. A new `graph_operation_subjects` index, backfilled
+  on start, finds them. Terminal ENTITY_DELETE and SESSION_TTL_DELETE snapshots are pruned after
+  the diagnostic window. Erasure connections use SQLite `secure_delete` and truncate the WAL (#475).
+- An erase that lands while enrichment is running no longer leaves the Graphiti twin and its
+  derivatives behind: the worker links and erases them, and a 10-minute sweep recovers a crashed
+  worker's twin only when exactly one same-namespace twin matches, an hour after the erase (#476).
+  This needed the in-flight queue node to survive as a content-less tombstone, which it never did:
+  the delete cascade's later UNION branch saw its own FAILED write and deleted the node, and an
+  unfenced LLM-usage stamp could overwrite the erase marker. Both are fixed, erase detection now
+  uses the erase-only `erased_at` stamp, and claim, retry and `force_reset_failed_episode` never
+  requeue a tombstone.
+- New E2E-21 lane (`tests/e2e/test_e2e_21_erasure.py`) proves this through the installed stack
+  with real Graphiti extraction, including an erase timed mid-enrichment.
+- `delete_namespace` also removes the namespace's TODOs and WorkArtifacts with their unshared
+  locations, sources, open questions and declarations; dry runs report `by_label` and
+  `not_covered`. The default namespace is still refused (#476; wiping it is #100).
+- `delete_memory` says plainly when an erase did not run (`prepare_failed`) or is incomplete.
+- Review fixes (PR #595), each first reproduced by a failing test:
+  - A queue node is kept as a content-less tombstone while a twin it doesn't cover could exist:
+    a repeat erase or replay no longer deletes an unlinked tombstone, and a twin linked after
+    the erase resolved its targets is erased right after (the sweep retries on a crash). The
+    tombstone no longer keeps the memory's attached `diff`.
+  - The reconcile path compensates an erase that lands before `mark_episode_ready`.
+  - Derived uuids found during the graph delete are recorded before the telemetry drain, so a
+    drain timeout no longer loses them from the replay's purge.
+  - When the target is already gone, a pinned caller or one naming a namespace touches only
+    that namespace's facts.
+  - A busy WAL checkpoint is read, briefly retried, and reported as `erased_incomplete`.
+  - Re-derived facts get an embedding when an embedder is available, and a fact listing the
+    same episode twice is re-derived instead of failing its compare-and-set forever.
+  - E2E-21 adds four criteria for these (12 in all).
+
 ## 2026-11-09 - The rerank model cache persists by default (#567 follow-up)
 
 - The container image kept the Hugging Face cache under `HOME=/tmp`, which a read-only
@@ -130,35 +220,3 @@
   With nothing newer, output is unchanged.
 - Occurrences that demote a View are not listed here; they behave as before. Approximate rows are
   read for this only, and never enter the ranked list or the fold.
-
-## 2026-11-08 - Cross-encoder recall rerank (on by default, model downloads itself)
-
-- `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`
-  (50) recall candidates with a local ONNX cross-encoder (ms-marco-MiniLM-L6-v2) instead of
-  cutting them at the RRF rank floor. Candidates past the top N keep the floor. Wardens still
-  gate the result; the oracle blend does not reorder it. Shown scores are sigmoid(logit).
-- A reranked list skips the floor, so it would always fill the limit. `MENHIR_RECALL_RERANK_MAX_RESULTS`
-  (7) caps the results returned when rerank ran. In an offline sweep, the top 7 keep the rerank's
-  top-5 recall gain at about the old context size; score floors lost evidence.
-- One install: `onnxruntime`, `tokenizers` and `huggingface-hub` are now normal dependencies. With
-  no `MENHIR_RECALL_RERANK_MODEL_DIR`, a long-running server downloads the pinned model (~92 MB,
-  `cross-encoder/ms-marco-MiniLM-L6-v2` @233902d2) into the Hugging Face cache in the background,
-  checks the tokenizer and model digests, loads it, and then starts reranking. Boot never waits;
-  until then, offline, or on any failure, recall keeps the RRF floor and the server logs why once.
-  Hooks only use an already cached copy and never download. No Hugging Face token is sent.
-- `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false` turns the download off (air-gapped installs); set
-  `MENHIR_RECALL_RERANK_MODEL_DIR` to a flat dir or a Hugging Face snapshot instead. Only a
-  sha256-pinned model loads. `MENHIR_RECALL_RERANK_DEVICE` is `auto`, `cpu` or `cuda`; `cuda`
-  never falls back to CPU. For CUDA, replace `onnxruntime` with `onnxruntime-gpu`.
-- The server refuses to start if a model dir is set explicitly and cannot load. A failure at
-  recall time keeps the floor for that call and says so in the note. Set
-  `MENHIR_RECALL_RERANK_ENABLED=false` to opt out entirely.
-- Recall Lab arms can toggle it (`enable_cross_encoder_rerank`, `rerank_top_n`,
-  `rerank_max_results`).
-- Evidence (`.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` in the workspace):
-  LME distractor graph, 414 questions, answer accuracy 0.850 -> 0.872 with the cap, +7.2% input
-  tokens; base LME graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged (0.818 / 0.814,
-  uncapped). Offline (tiny-model-surgery recall arm, #516): judged-only Recall@5 on the mix set
-  0.555 -> 0.878. About 200 ms per recall on 12 CPU threads, 600 ms on 2, 44 ms on CUDA.
-- `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the new packages. The manifest also picks up
-  version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).

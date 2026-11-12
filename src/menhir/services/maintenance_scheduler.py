@@ -15,7 +15,12 @@ from typing import Awaitable, Callable
 from uuid import uuid4
 
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
-from menhir.services.scheduler_lease import SchedulerLeaseStore, _utc_now_iso
+from menhir.services.scheduler_lease import (
+    SchedulerLeaseStore,
+    _utc_now_iso,
+    clear_local_scheduler,
+    register_local_scheduler,
+)
 from menhir.services.scheduler_protocols import (
     SchedulerGraphAdapter,
     SchedulerIngestService,
@@ -23,12 +28,16 @@ from menhir.services.scheduler_protocols import (
     SchedulerLifecycleService,
 )
 from menhir.services.scheduler_tasks import (
+    derived_rederive,
+    erasure_fence_orphans,
+    erasure_twin_compensation,
     prune_telemetry_tables,
     auto_resolve_conflicts,
     compute_failed_retry_delay_s,
     confirm_conflicts,
     observe_queue_health,
     recover_stale_leases,
+    sidecar_compaction,
     refresh_structure_graphs,
     review_unresolved_conflicts,
     prune_telemetry_revisions,
@@ -143,6 +152,9 @@ class MaintenanceScheduler:
     telemetry_observability_retention_days: int = 30
     telemetry_diagnostic_retention_days: int = 90
     revision_prune_interval_s: float = 86400.0  # daily
+    # Erasure rebuild P3: VACUUM + wal_checkpoint(TRUNCATE) of the sidecar, which is what turns an
+    # `erased_pending_physical` op into one whose sidecar bytes are gone. <= 0 disables the job.
+    sidecar_compaction_interval_s: float = 3600.0  # hourly
     recovery_limit: int = 100
     failed_retry_limit: int = 50
     tick_interval_s: float = 1.0
@@ -222,6 +234,14 @@ class MaintenanceScheduler:
             self._jobs["prune_telemetry_tables"] = _JobState(
                 interval_s=self.revision_prune_interval_s
             )
+        # Erasure completeness: erase Graphiti twins orphaned by an erase racing enrichment.
+        self._jobs["erasure_twin_compensation"] = _JobState(interval_s=600.0)
+        # CF-324: an erase whose fence release failed leaves its op in erasing_ops.
+        self._jobs["erasure_fence_orphans"] = _JobState(interval_s=300.0)
+        # Rewrite or drop facts/entities an erasure flagged rederive_pending.
+        self._jobs["derived_rederive"] = _JobState(interval_s=900.0)
+        if self.sidecar_compaction_interval_s > 0:
+            self._jobs["sidecar_compaction"] = _JobState(interval_s=self.sidecar_compaction_interval_s)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -338,6 +358,7 @@ class MaintenanceScheduler:
         # The acquire is itself a proof of ownership; without stamping it here the first
         # job of the run would be refused for want of a renewal that has not happened yet.
         self._stamp_lease_deadline(acquire_started)
+        register_local_scheduler(self.lease_name, self._owner_id, self._lease_is_provable)
         self._lease_lost_event.clear()
         self._stop_event.clear()
         self._task = asyncio.create_task(
@@ -380,6 +401,9 @@ class MaintenanceScheduler:
                 with contextlib.suppress(asyncio.CancelledError):
                     await standby
             task = self._task
+            # Withdraw the registration first: enrichment must stop claiming as soon as the stop
+            # begins, not after the loop has drained.
+            clear_local_scheduler(self.lease_name, self._owner_id)
             if task is None:
                 if self._lease_acquired:
                     self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
@@ -539,6 +563,7 @@ class MaintenanceScheduler:
         self._lease_acquired = False
         self._lease_valid_until = 0.0
         self._lease_blocked_reason = "lease_lost"
+        clear_local_scheduler(self.lease_name, self._owner_id)
         self._lease_lost_event.set()
         # Wake the job loop so it stops before starting more work. A forced takeover
         # (bug FC-02) must not let the displaced owner keep mutating shared state.
@@ -591,11 +616,26 @@ class MaintenanceScheduler:
         )
         try:
             while not self._stop_event.is_set():
-                if self._lease_lost or not self._renew_lease():
+                try:
+                    renewed: bool | None = (not self._lease_lost) and self._renew_lease()
+                except Exception:
+                    # CF-328: a store error is "not renewed this tick", not a lost lease (same
+                    # rule as _heartbeat_loop). Letting it escape killed this task for good, and
+                    # with it the provable lease the strict enrichment gate depends on.
+                    logger.warning(
+                        "Maintenance scheduler lease renewal errored in the job loop; "
+                        "ownership unproven until it succeeds owner_id=%s",
+                        self._owner_id,
+                        exc_info=True,
+                    )
+                    renewed = None
+                if renewed is False:
                     self._mark_lease_lost()
                     logger.warning("Maintenance scheduler lease lost; stopping loop owner_id=%s", self._owner_id)
                     break
-                await self._run_due_jobs()
+                if renewed:
+                    # Jobs self-gate on _lease_is_provable; an errored tick runs none.
+                    await self._run_due_jobs()
                 try:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=self.tick_interval_s)
                 except asyncio.TimeoutError:
@@ -668,6 +708,30 @@ class MaintenanceScheduler:
                 await self._run_job(
                     job, "scheduler_prune_telemetry_tables", self._make_prune_telemetry_tables()
                 )
+            elif name == "erasure_twin_compensation":
+                await self._run_job(
+                    job,
+                    "scheduler_erasure_twin_compensation",
+                    erasure_twin_compensation(self.graph_adapter),
+                )
+            elif name == "erasure_fence_orphans":
+                await self._run_job(
+                    job,
+                    "scheduler_erasure_fence_orphans",
+                    erasure_fence_orphans(self.graph_adapter),
+                )
+            elif name == "derived_rederive":
+                await self._run_job(
+                    job,
+                    "scheduler_derived_rederive",
+                    derived_rederive(
+                        self.graph_adapter,
+                        getattr(self.lifecycle_service, "llm", None),
+                        embedder=getattr(self.lifecycle_service, "graphiti_client", None),
+                    ),
+                )
+            elif name == "sidecar_compaction":
+                await self._run_job(job, "scheduler_sidecar_compaction", sidecar_compaction())
             elif name == "prune_telemetry_revisions":
                 await self._run_job(
                     job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()

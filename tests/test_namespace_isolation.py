@@ -234,6 +234,12 @@ async def test_delete_namespace_dry_run_never_deletes() -> None:
     assert result == {
         "namespace": "alpha",
         "node_count": 500,
+        # #476: dry runs report the per-label breakdown and what the tool never covers.
+        "by_label": {},
+        "not_covered": [
+            "structure graph (shared group, not namespace-scoped)",
+            "default namespace (refused, never erased by this tool)",
+        ],
         "max_nodes": 200,
         "would_delete": False,
         "dry_run": True,

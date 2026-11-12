@@ -41,6 +41,8 @@ class ErasureShape(str, Enum):
     NAMESPACE_KEYED = "NAMESPACE_KEYED"
     DERIVABLE_SUBJECT = "DERIVABLE_SUBJECT"
     UNADDRESSABLE = "UNADDRESSABLE"
+    #: Content addressed through a side table mapping row_key -> subject uuid.
+    INDEXED_SUBJECT = "INDEXED_SUBJECT"
 
 
 @dataclass(frozen=True)
@@ -61,9 +63,46 @@ class ContentColumn:
     shape: ErasureShape
     key_columns: tuple[str, ...]
     note: str = ""
+    # INDEXED_SUBJECT only: rows of ``table`` whose ``row_key`` appears in ``via_table``
+    # (``via_key`` = row_key value) with ``via_subject`` in the erased node uuids.
+    via_table: str | None = None
+    via_key: str | None = None
+    via_subject: str | None = None
+    row_key: str | None = None
+    # Extra SQL predicate the purge (not the residual count) applies, so rows it must not
+    # touch stay visible as residue and the erasure quarantines instead of claiming success.
+    purge_filter: str | None = None
 
+
+# Unresolved saga rows still need their snapshot to replay; never purge under them.
+_GRAPH_OPS_TERMINAL = "state IN ('COMMITTED', 'FAILED', 'REVERSED')"
+
+_GRAPH_OPS_INDEX_NOTE = (
+    "Journal snapshot/error text holds node properties and relationships (memory text). "
+    "Addressed through graph_operation_subjects, which indexes every uuid the row mentions."
+)
+
+_PENDING_ACTIONS_NOTE = (
+    "R2 CF-329: rehydrate no longer writes episode text here (it records the episode uuid in "
+    "source_uuid), but legacy rows hold it; failure_reason is a fixed label today and was "
+    "classified as possible exception text in R1. Addressed by the node or the source episode."
+)
 
 CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
+    ContentColumn(
+        table="pending_actions",
+        column="context",
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "source_uuid"),
+        note=_PENDING_ACTIONS_NOTE,
+    ),
+    ContentColumn(
+        table="pending_actions",
+        column="failure_reason",
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "source_uuid"),
+        note=_PENDING_ACTIONS_NOTE,
+    ),
     ContentColumn(
         table="memory_revisions",
         column="old_value",
@@ -293,11 +332,82 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
             "content and must be reported when an erasure cannot derive its session ownership."
         ),
     ),
+    ContentColumn(
+        table="graph_operations",
+        column="before_snapshot_json",
+        shape=ErasureShape.INDEXED_SUBJECT,
+        key_columns=("op_id",),
+        note=_GRAPH_OPS_INDEX_NOTE,
+        via_table="graph_operation_subjects",
+        via_key="op_id",
+        via_subject="subject_uuid",
+        row_key="op_id",
+        purge_filter=_GRAPH_OPS_TERMINAL,
+    ),
+    ContentColumn(
+        table="graph_operations",
+        column="last_error",
+        shape=ErasureShape.INDEXED_SUBJECT,
+        key_columns=("op_id",),
+        note=_GRAPH_OPS_INDEX_NOTE + " Exception text can embed content.",
+        via_table="graph_operation_subjects",
+        via_key="op_id",
+        via_subject="subject_uuid",
+        row_key="op_id",
+        purge_filter=_GRAPH_OPS_TERMINAL,
+    ),
 )
 
 
 NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
     {
+        # R1.2 (erasure audit remediation): stores whose tables were created outside this
+        # inventory. Classified from their writers; each group says why it holds no memory text.
+        # pending_actions: ids, the action enum and timestamps. `context` and
+        # `failure_reason` are CONTENT_COLUMNS (R2 CF-329).
+        ("pending_actions", "node_uuid"),
+        ("pending_actions", "source_uuid"),
+        ("pending_actions", "action"),
+        ("pending_actions", "created_at"),
+        ("pending_actions", "failed_at"),
+        # migration_batches: the one-time Metric migration's manifest is a uuid list of
+        # instrumentation nodes plus its SHA and state (migration_batches.py module docstring).
+        ("migration_batches", "batch_id"),
+        ("migration_batches", "classifier_version"),
+        ("migration_batches", "manifest_sha256"),
+        ("migration_batches", "manifest_json"),
+        ("migration_batches", "state"),
+        ("migration_batches", "created_at"),
+        ("migration_batches", "approved_at"),
+        ("migration_batches", "applied_at"),
+        ("migration_batches", "menhir_commit"),
+        # metric_receipts: fold receipts. grouping_json holds {operation, error_type} or
+        # {node_uuid, field} (failure_counter_bridge.py, instability_counter_bridge.py);
+        # source_row_ids_json holds integer row ids.
+        ("metric_receipts", "op_id"),
+        ("metric_receipts", "metric_uuid"),
+        ("metric_receipts", "view_key"),
+        ("metric_receipts", "receipt_kind"),
+        ("metric_receipts", "source_table"),
+        ("metric_receipts", "grouping_json"),
+        ("metric_receipts", "query_version"),
+        ("metric_receipts", "previous_receipt_op_id"),
+        ("metric_receipts", "source_row_ids_json"),
+        ("metric_receipts", "input_digest"),
+        ("metric_receipts", "run_id"),
+        ("metric_receipts", "created_at"),
+        # erasure_residue_waiver: which column an operator accepted residue in, and their note
+        # (operator text about the waiver, never memory content).
+        ("erasure_residue_waiver", "table_name"),
+        ("erasure_residue_waiver", "column_name"),
+        ("erasure_residue_waiver", "accepted_at"),
+        ("erasure_residue_waiver", "note"),
+        # scheduler_leases: lease identity and heartbeats.
+        ("scheduler_leases", "lease_name"),
+        ("scheduler_leases", "owner_id"),
+        ("scheduler_leases", "hostname"),
+        ("scheduler_leases", "started_at"),
+        ("scheduler_leases", "heartbeat_at"),
         # mcp_events
         ("mcp_events", "started_at"),
         ("mcp_events", "completed_at"),
@@ -438,8 +548,94 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         # extraction_lab_runs
         ("extraction_lab_runs", "recorded_at"),
         ("extraction_lab_runs", "namespace"),
+        # graph_operations -- request_json holds uuids and request metadata only; the snapshot
+        # and error text are classified above.
+        ("graph_operations", "op_id"),
+        ("graph_operations", "batch_id"),
+        ("graph_operations", "operation_kind"),
+        ("graph_operations", "target_uuid"),
+        ("graph_operations", "target_key"),
+        ("graph_operations", "request_json"),
+        ("graph_operations", "expected_after_sha256"),
+        ("graph_operations", "state"),
+        ("graph_operations", "created_at"),
+        ("graph_operations", "updated_at"),
+        ("graph_operations", "committed_at"),
+        ("graph_operations", "reverses_op_id"),
+        ("graph_operations", "owner_token"),
+        ("graph_operations", "owner_heartbeat_at"),
+        ("graph_operations", "owner_lease_expires_at"),
+        ("graph_operations", "owner_death_attested_by"),
+        ("graph_operations", "owner_death_attested_at"),
+        ("graph_operations", "owner_death_attested_for_token"),
+        ("graph_operations", "resolved_by_token"),
+        # graph_operation_locks
+        ("graph_operation_locks", "entity_uuid"),
+        ("graph_operation_locks", "op_id"),
+        ("graph_operation_locks", "operation_kind"),
+        ("graph_operation_locks", "created_at"),
+        # graph_operation_subjects / backfill marker
+        ("graph_operation_subjects", "op_id"),
+        ("graph_operation_subjects", "subject_uuid"),
+        ("graph_operation_subjects_backfill", "done_at"),
+        # erasure_subjects -- identifiers (uuids, namespace keys) and timestamps only
+        ("erasure_subjects", "op_id"),
+        ("erasure_subjects", "subject_type"),
+        ("erasure_subjects", "subject_value"),
+        ("erasure_subjects", "recorded_at"),
+        ("erasure_subjects", "purged_at"),
+        # erased_subject_denylist -- subject keys only, never content (P3 denylist)
+        ("erased_subject_denylist", "subject_value"),
+        ("erased_subject_denylist", "op_id"),
+        # graph_operations.sidecar_compacted_at -- timestamp stamped by the compaction job
+        ("graph_operations", "sidecar_compacted_at"),
     }
 )
+
+#: Subject types the denylist (and the closure row-delete) treats as erased closure items.
+#: FLAGGED_UUID and CONTEXT_HOLDER_UUID are live shared items: they are column-purged but never
+#: denylisted and never row-deleted.
+CLOSURE_SUBJECT_TYPES: tuple[str, ...] = ("NODE_UUID", "EPISODE_UUID", "DERIVED_UUID")
+
+#: Columns a CONTEXT_HOLDER_UUID purge may blank (plan 3.5): prompt/provider text that can embed
+#: closure text. Keyed by the holder's episode_uuid; no other column of that row is touched.
+CONTEXT_HOLDER_COLUMNS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("failure_events", "error"),
+        ("llm_usage_events", "provider_usage_json"),
+        ("llm_usage_events", "error"),
+    }
+)
+
+_NS_REASON = (
+    "keyed by namespace, not a per-row subject uuid: purged by the namespace-erase path. A "
+    "namespace denylist would black-hole a namespace that is legitimately re-created."
+)
+_SESSION_REASON = (
+    "keyed by session_id only: a session is not an erased subject, so no row-level denylist "
+    "applies; the purge and the unaddressable census cover it."
+)
+_JOURNAL_REASON = (
+    "journal table: the saga's own row indexes its target as a subject, so a trigger would drop "
+    "the erase's own updates. Purged explicitly after COMMITTED by the INDEXED_SUBJECT purge."
+)
+
+#: Content columns deliberately WITHOUT a denylist trigger, each with its reason. The denylist
+#: coverage test requires every CONTENT_COLUMNS entry to be either triggered or listed here.
+DENYLIST_EXCLUDED: dict[tuple[str, str], str] = {
+    ("recall_lab_runs", "query"): _NS_REASON,
+    ("recall_lab_runs", "arms_json"): _NS_REASON,
+    ("recall_lab_runs", "request_json"): _NS_REASON,
+    ("recall_lab_runs", "result_json"): _NS_REASON,
+    ("recall_query_log", "query"): _NS_REASON,
+    ("extraction_lab_runs", "current_message"): _NS_REASON,
+    ("extraction_lab_runs", "arms_json"): _NS_REASON,
+    ("extraction_lab_runs", "request_json"): _NS_REASON,
+    ("extraction_lab_runs", "result_json"): _NS_REASON,
+    ("recall_receipts", "reason"): _SESSION_REASON,
+    ("graph_operations", "before_snapshot_json"): _JOURNAL_REASON,
+    ("graph_operations", "last_error"): _JOURNAL_REASON,
+}
 
 
 def classified_columns() -> frozenset[tuple[str, str]]:

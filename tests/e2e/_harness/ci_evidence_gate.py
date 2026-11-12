@@ -44,6 +44,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_15_restart_and_isolation[mvp_default]",
         "test_e2e_17_scalar_authority[mvp_default]",
         "test_e2e_18_opt_out_and_back[mvp_default]",
+        "test_e2e_21_erasure[mvp_default]",
         "test_e2e_19_fresh_install_shipped_defaults",
         "test_e2e_20_checkout_config",
         CONTAINER_LANE,

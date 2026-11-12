@@ -46,9 +46,9 @@ from menhir.services.enrichment_steps import (
     run_graphiti_extraction,
     run_preflight_rejection,
     stamp_and_finalize,
-    try_reconcile_existing,
 )
 from menhir.services.ingest_gate import IngestGate
+from menhir.services.scheduler_lease import enrichment_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +171,28 @@ class IngestQueueMixin:
 
         return self._budget_settings_window_s
 
+    def _enrichment_allowed(self) -> bool:
+        """Single-process gate: may this process run enrichment now? One SQLite read, no caching."""
+        return enrichment_allowed(strict=self.require_scheduler_lease)
+
+    def _enrichment_gate_passes(self) -> bool:
+        """`_enrichment_allowed()` plus a log line once per open/closed transition."""
+        allowed = self._enrichment_allowed()
+        if allowed != self._enrichment_gate_open:
+            self._enrichment_gate_open = allowed
+            if allowed:
+                logger.info("Enrichment workers permitted (scheduler lease gate open)")
+            else:
+                logger.warning(
+                    "Enrichment workers not started: this process does not hold a provable "
+                    "scheduler lease (single-process rule)"
+                )
+        return allowed
+
     async def _ensure_enrichment_worker(self) -> None:
         if not self._enrichment_enabled:
+            return
+        if not self._enrichment_gate_passes():
             return
         self._queue()
         # Prune finished loops, then top up to the configured concurrency. Each loop is an
@@ -207,6 +227,8 @@ class IngestQueueMixin:
     async def _recover_stale_episode_leases(self, limit: int = 100) -> tuple[int, int]:
         """Reset expired ENRICHING leases and enqueue all retryable episodes."""
 
+        if not self._enrichment_gate_passes():
+            return 0, 0
         exhausted_pending = await asyncio.to_thread(
             self.graph_adapter.fail_exhausted_pending_episodes,
             max_attempts=self._max_enrichment_attempts,

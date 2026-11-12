@@ -19,6 +19,8 @@ from menhir.infrastructure.telemetry.erasure_inventory import (
     ErasureShape,
     classified_columns,
 )
+from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
+from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry.store import McpTelemetryStore
 
 pytestmark = [pytest.mark.unit]
@@ -28,6 +30,14 @@ def _build_sidecar(tmp_path) -> sqlite3.Connection:
     """Create a real sidecar under tmp_path and return a read connection to it."""
     store = McpTelemetryStore(db_path=tmp_path / "t.db")
     store._ensure_ready()
+    # Every store that creates tables in the same sidecar file (#475): the saga journal and
+    # the erasure subject inventory were invisible to this guard.
+    GraphOperationsJournal(db_path=store.db_path)._ensure_ready()
+    ErasureSubjectStore(db_path=store.db_path)._ensure_ready()
+    # R2 CF-329: pending_actions is classified now, so its table must exist here too.
+    from menhir.infrastructure.pending_actions import PendingActionStore
+
+    PendingActionStore(db_path=store.db_path)._ensure_ready()
     return sqlite3.connect(store.db_path)
 
 

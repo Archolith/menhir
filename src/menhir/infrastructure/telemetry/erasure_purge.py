@@ -45,6 +45,8 @@ from dataclasses import dataclass
 from menhir.domain.erasure import ERASED_MARKER
 from menhir.infrastructure.telemetry.erasure_inventory import (
     CONTENT_COLUMNS,
+    CONTEXT_HOLDER_COLUMNS,
+    ContentColumn,
     ErasureShape,
 )
 
@@ -65,6 +67,23 @@ class ErasureSubjects:
     namespaces: frozenset[str] = frozenset()
     episode_uuids: frozenset[str] = frozenset()
     session_ids: frozenset[str] = frozenset()
+    #: FLAGGED_UUID: live shared items. Their node-keyed content is purged; rows are never deleted.
+    flagged_uuids: frozenset[str] = frozenset()
+    #: CONTEXT_HOLDER_UUID: only ``CONTEXT_HOLDER_COLUMNS`` are purged, keyed by episode_uuid.
+    context_holder_uuids: frozenset[str] = frozenset()
+    #: When set, subjects are NOT read from the sets above: every clause is a subquery over
+    #: ``erasure_subjects WHERE op_id = ?``, so the size of the subject set never meets SQLite's
+    #: bound-variable limit (a 40k-member namespace erase).
+    op_id: str | None = None
+
+
+# SUBJECT_TYPE values (``erasure_subjects.subject_type``) feeding each purge bucket.
+_OP_BUCKET_TYPES: dict[str, tuple[str, ...]] = {
+    "node": ("NODE_UUID", "DERIVED_UUID", "EPISODE_UUID", "FLAGGED_UUID"),
+    "episode": ("NODE_UUID", "DERIVED_UUID", "EPISODE_UUID"),
+    "namespace": ("NAMESPACE",),
+    "session": ("SESSION_ID",),
+}
 
 
 @dataclass(frozen=True)
@@ -87,8 +106,8 @@ class PurgeResult:
     skipped_no_subjects: tuple[str, ...] = ()
 
 
-def _subject_set_for(key_column: str, subjects: ErasureSubjects) -> frozenset[str]:
-    """Resolve a key column name to the subject set that addresses it.
+def _bucket_for(key_column: str) -> str:
+    """Resolve a key column name to the subject bucket that addresses it.
 
     Matched by suffix as well as exact name so per-party lineage columns
     (``survivor_namespace``, ``absorbed_namespace``) resolve to namespaces rather than falling
@@ -96,44 +115,124 @@ def _subject_set_for(key_column: str, subjects: ErasureSubjects) -> frozenset[st
     run, just matching namespace values against a set of uuids and finding nothing.
     """
     if key_column == "namespace" or key_column.endswith("_namespace"):
-        return subjects.namespaces
+        return "namespace"
     if key_column == "episode_uuid":
-        return subjects.episode_uuids
+        return "episode"
     if key_column == "session_id":
+        return "session"
+    return "node"
+
+
+def _subject_set_for(
+    key_column: str, subjects: ErasureSubjects, *, holders: bool = False
+) -> frozenset[str]:
+    """In-memory subject set addressing ``key_column`` (ignored when ``subjects.op_id`` is set)."""
+    bucket = _bucket_for(key_column)
+    if bucket == "namespace":
+        return subjects.namespaces
+    if bucket == "episode":
+        if holders:
+            return subjects.episode_uuids | subjects.context_holder_uuids
+        return subjects.episode_uuids
+    if bucket == "session":
         return subjects.session_ids
-    return subjects.node_uuids
+    return subjects.node_uuids | subjects.flagged_uuids
+
+
+def _in_values(
+    key_column: str,
+    subjects: ErasureSubjects,
+    present: "frozenset[str] | None",
+    holders: bool,
+) -> tuple[str, list[str]] | None:
+    """The right-hand side of ``key IN (...)`` and its params, or None when no subject exists.
+
+    Op mode returns a subquery over ``erasure_subjects`` (one bound op id); in-memory mode
+    returns one placeholder per value. ``present`` is the set of subject types the op holds
+    (None means unknown: assume every bucket is populated).
+    """
+    if subjects.op_id is not None:
+        bucket = _bucket_for(key_column)
+        types = list(_OP_BUCKET_TYPES[bucket])
+        if holders and bucket == "episode":
+            types.append("CONTEXT_HOLDER_UUID")
+        if present is not None:
+            types = [t for t in types if t in present]
+        if not types:
+            return None
+        literal = ",".join(f"'{t}'" for t in types)
+        return (
+            "SELECT subject_value FROM erasure_subjects "
+            f"WHERE op_id = ? AND subject_type IN ({literal})",
+            [subjects.op_id],
+        )
+    values = _subject_set_for(key_column, subjects, holders=holders)
+    if not values:
+        return None
+    return ",".join("?" for _ in values), list(values)
+
+
+def _present_types(conn: sqlite3.Connection, subjects: ErasureSubjects) -> "frozenset[str] | None":
+    if subjects.op_id is None:
+        return None
+    return frozenset(
+        str(r[0])
+        for r in conn.execute(
+            "SELECT DISTINCT subject_type FROM erasure_subjects WHERE op_id = ?",
+            (subjects.op_id,),
+        )
+    )
 
 
 def _where_clause_for(
-    shape: ErasureShape, key_columns: tuple[str, ...], subjects: ErasureSubjects
+    shape: ErasureShape,
+    key_columns: tuple[str, ...],
+    subjects: ErasureSubjects,
+    entry: ContentColumn | None = None,
+    present: "frozenset[str] | None" = None,
 ) -> tuple[str, list[str]] | None:
     """Build a WHERE fragment + bound params for an entry, or None if unreachable.
 
     Returns None when no key column resolves to any subject, so the caller skips the
     entry instead of emitting a ``WHERE x IN ()``. The fragment uses ``?`` placeholders
     for all VALUES; column names are resolved here from the registry and are never
-    caller input.
+    caller input. ``entry`` is required for ``INDEXED_SUBJECT`` (it carries the side table).
     """
-    resolved: list[tuple[str, frozenset[str]]] = []
+    holders = (
+        entry is not None and (entry.table, entry.column) in CONTEXT_HOLDER_COLUMNS
+    )
+    if shape is ErasureShape.INDEXED_SUBJECT:
+        if entry is None or not (
+            entry.via_table and entry.via_key and entry.via_subject and entry.row_key
+        ):
+            return None
+        resolved_node = _in_values("node_uuid", subjects, present, False)
+        if resolved_node is None:
+            return None
+        sql, params = resolved_node
+        return (
+            f"{entry.row_key} IN (SELECT {entry.via_key} FROM {entry.via_table} "
+            f"WHERE {entry.via_subject} IN ({sql}))",
+            params,
+        )
+    resolved: list[tuple[str, str, list[str]]] = []
     for key_column in key_columns:
-        values = _subject_set_for(key_column, subjects)
-        if values:
-            resolved.append((key_column, values))
+        got = _in_values(key_column, subjects, present, holders)
+        if got is not None:
+            resolved.append((key_column, got[0], got[1]))
     if not resolved:
         return None
     if shape in {ErasureShape.TWO_PARTY_UUID, ErasureShape.ANY_SUBJECT}:
         # Match on ANY resolved key column (OR, never AND). One-sided matching would leave
         # recovery material or telemetry content for an erased subject.
         clauses: list[str] = []
-        params: list[str] = []
-        for key_column, values in resolved:
-            placeholders = ",".join("?" for _ in values)
-            clauses.append(f"{key_column} IN ({placeholders})")
-            params.extend(values)
+        params = []
+        for key_column, sql, vals in resolved:
+            clauses.append(f"{key_column} IN ({sql})")
+            params.extend(vals)
         return f"({' OR '.join(clauses)})", params
-    key_column, values = resolved[0]
-    placeholders = ",".join("?" for _ in values)
-    return f"{key_column} IN ({placeholders})", list(values)
+    key_column, sql, vals = resolved[0]
+    return f"{key_column} IN ({sql})", vals
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -180,12 +279,15 @@ def count_residual_content(
     is NOT NULL, so both count as erased.
     """
     residual: dict[str, int] = {}
+    present = _present_types(conn, subjects)
     for entry in CONTENT_COLUMNS:
         if entry.shape is ErasureShape.UNADDRESSABLE:
             continue
         if not _table_exists(conn, entry.table):
             continue
-        clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
+        if entry.via_table and not _table_exists(conn, entry.via_table):
+            continue
+        clause = _where_clause_for(entry.shape, entry.key_columns, subjects, entry, present)
         if clause is None:
             continue
         where, params = clause
@@ -342,6 +444,16 @@ def count_unaddressable_content(
                 populated = f"{populated} AND {pk} > {int(ceiling)}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
             where = populated
+        elif entry.shape is ErasureShape.INDEXED_SUBJECT:
+            if not (entry.via_table and entry.via_key and entry.row_key):
+                continue
+            if not _table_exists(conn, entry.via_table):
+                continue
+            # Populated content with no subject row at all can never be matched by an erasure.
+            where = (
+                f"{populated} AND NOT EXISTS (SELECT 1 FROM {entry.via_table} "
+                f"WHERE {entry.via_table}.{entry.via_key} = {entry.table}.{entry.row_key})"
+            )
         else:
             # Stranded only when EVERY key column is empty. One populated key still lets some
             # subject set address the row, so it is reachable in principle and not counted here.
@@ -382,6 +494,7 @@ def purge_content(
     rows_affected: dict[str, int] = {}
     skipped: list[str] = []
     no_subjects: list[str] = []
+    present = _present_types(conn, subjects)
     for entry in CONTENT_COLUMNS:
         key = f"{entry.table}.{entry.column}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
@@ -389,13 +502,22 @@ def purge_content(
             continue
         if not _table_exists(conn, entry.table):
             continue
-        clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
+        if entry.via_table and not _table_exists(conn, entry.via_table):
+            continue
+        clause = _where_clause_for(entry.shape, entry.key_columns, subjects, entry, present)
         if clause is None:
             # Only worth reporting when the column actually holds something.
             if _has_content(conn, entry.table, entry.column):
                 no_subjects.append(key)
             continue
         where, params = clause
+        if entry.purge_filter:
+            # Not applied by count_residual_content: a filtered-out row stays residue. Only rows
+            # still holding content, so an already-blank row is not reported as purged.
+            where = (
+                f"({where}) AND ({entry.purge_filter}) AND {entry.column} IS NOT NULL "
+                f"AND {entry.column} <> ''"
+            )
         # Table and column names are registry-provided (never caller input), so they are
         # interpolated directly; every VALUE is bound with a placeholder.
         if dry_run:

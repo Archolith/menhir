@@ -97,10 +97,6 @@ def test_erasure_removes_both_episodes_sanity(test_neo4j_repo, tmp_path) -> None
 
 
 @pytest.mark.online
-@pytest.mark.xfail(
-    strict=True,
-    reason="#423: erasure leaves single-source derived entities and facts behind",
-)
 def test_erasure_removes_single_source_entity_and_fact(
     test_neo4j_repo, tmp_path
 ) -> None:
@@ -108,8 +104,6 @@ def test_erasure_removes_single_source_entity_and_fact(
     tag = f"test-derived-{uuidlib.uuid4()}"
     try:
         ids = _seed_and_erase(repo, tmp_path, tag)
-        # Strict xfail also absorbs a failure here, so the sanity test above is the real guard
-        # against a setup bug; these stay for visibility under --runxfail.
         assert _exists(repo, ids["queue"]) is False
         assert _exists(repo, ids["graphiti"]) is False
         # The #423 claim: derived only from the erased episode, so both must be gone.

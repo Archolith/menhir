@@ -1,11 +1,18 @@
-"""CF-305: a graphiti_core without the fork's hook parameters fails with a clear, named fix."""
+"""CF-305: a graphiti_core without the fork's hook parameters fails with a clear, named fix.
+
+Erasure P4: a fork whose ``add_episode`` lacks the publish fence (an older fork) is
+refused the same way, before any publish."""
 
 from __future__ import annotations
 
 import pytest
 
 from menhir.infrastructure import graphiti_client
-from menhir.infrastructure.graphiti_client import FORK_HOOK_PARAMETERS, require_graphiti_fork_hooks
+from menhir.infrastructure.graphiti_client import (
+    FORK_HOOK_PARAMETERS,
+    FORK_PUBLISH_PARAMETERS,
+    require_graphiti_fork_hooks,
+)
 
 
 class _UpstreamGraphiti:
@@ -22,6 +29,16 @@ class _ForkGraphiti:
         candidate_filter_hook=None,
         node_pre_resolution_hook=None,
     ):
+        pass
+
+    async def add_episode(self, name, episode_body, *, publish_fence=None, new_episode_uuid=None):
+        pass
+
+
+class _Post2ForkGraphiti(_ForkGraphiti):
+    """The 0.31.2.post2 fork: every constructor hook, no publish fence."""
+
+    async def add_episode(self, name, episode_body, *, update_communities=False):
         pass
 
 
@@ -133,6 +150,47 @@ def test_from_settings_with_fork_hooks_proceeds_to_construction(
         ):
             built.append({"identity_gate_hook": identity_gate_hook})
 
+        async def add_episode(self, name, episode_body, *, publish_fence=None,
+                              new_episode_uuid=None):
+            pass
+
     wrapper = _stub_from_settings(monkeypatch, _FullFork)
     assert wrapper is not None
     assert built and built[0]["identity_gate_hook"] is not None
+
+
+@pytest.mark.unit
+def test_fork_without_the_publish_fence_is_refused_naming_the_fix() -> None:
+    """Fails if construction accepts a fork that would publish without the erasure fence."""
+    with pytest.raises(RuntimeError) as excinfo:
+        require_graphiti_fork_hooks(_Post2ForkGraphiti)
+    message = str(excinfo.value)
+    for name in FORK_PUBLISH_PARAMETERS:
+        assert f"add_episode({name})" in message
+    assert "reinstall" in message and "archolith-graphiti-core==" in message
+    assert "identity_gate_hook" not in message
+
+
+@pytest.mark.unit
+def test_missing_or_unreadable_add_episode_fails_closed() -> None:
+    """Fails if an absent or unreadable add_episode is treated as fence-capable."""
+
+    class _NoAddEpisode(_ForkGraphiti):
+        add_episode = None
+
+    class _UnreadableAddEpisode(_ForkGraphiti):
+        add_episode = property(lambda self: (_ for _ in ()).throw(TypeError("no signature")))
+
+    for cls in (_NoAddEpisode, _UnreadableAddEpisode):
+        with pytest.raises(RuntimeError, match="publish_fence"):
+            require_graphiti_fork_hooks(cls)
+
+
+@pytest.mark.unit
+def test_from_settings_with_a_post2_fork_raises_before_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup path: from_settings refuses the post2 fork, so bootstrap degrades Graphiti
+    (no enrichment, no publish) instead of running unfenced."""
+    with pytest.raises(RuntimeError, match="publish_fence"):
+        _stub_from_settings(monkeypatch, _Post2ForkGraphiti)

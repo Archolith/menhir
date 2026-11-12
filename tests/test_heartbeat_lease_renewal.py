@@ -327,7 +327,7 @@ async def test_enrichment_past_the_ceiling_fails_with_deadline_exceeded(
         return False
 
     monkeypatch.setattr(worker_module, "handle_enrichment_failure", spy)
-    monkeypatch.setattr(worker_module, "try_reconcile_existing", slow_reconcile)
+    monkeypatch.setattr(worker_module, "finalize_from_link", slow_reconcile)
 
     adapter = stub_memory_graph_adapter
     service = _service(adapter, stub_graphiti_client, stub_llm_adapter, max_enrichment_seconds=0.05)
@@ -371,7 +371,7 @@ async def test_a_timeout_raised_by_the_body_before_the_deadline_is_not_converted
         raise inner
 
     monkeypatch.setattr(worker_module, "handle_enrichment_failure", spy)
-    monkeypatch.setattr(worker_module, "try_reconcile_existing", raising_reconcile)
+    monkeypatch.setattr(worker_module, "finalize_from_link", raising_reconcile)
 
     adapter = stub_memory_graph_adapter
     service = _service(adapter, stub_graphiti_client, stub_llm_adapter, max_enrichment_seconds=3600)
@@ -512,7 +512,7 @@ async def test_worker_passes_the_claimed_start_instant_into_the_heartbeat_loop(
         await asyncio.sleep(0.05)  # let the heartbeat task start before the episode finishes
         return True
 
-    monkeypatch.setattr(worker_module, "try_reconcile_existing", done)
+    monkeypatch.setattr(worker_module, "finalize_from_link", done)
     adapter = stub_memory_graph_adapter
     service = _service(adapter, stub_graphiti_client, stub_llm_adapter, max_enrichment_seconds=3600)
     monkeypatch.setattr(service, "_processing_heartbeat_loop", spy_loop)

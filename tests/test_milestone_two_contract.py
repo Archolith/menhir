@@ -124,6 +124,7 @@ def test_stamp_ingest_metadata_exists_on_adapter() -> None:
         "bootstrap_scope",
         "belief_commit",
         "belief_branch",
+        "executor",  # R2 CF-337: the fenced transaction the worker runs the stamp in
     }
 
 

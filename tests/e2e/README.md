@@ -30,6 +30,7 @@ criteria; it does not redefine them.
 | E2E-18 | opting a lane out and back in across restarts (#170 item 10) | **implemented** |
 | E2E-19 | fresh install with shipped defaults (#168 final-gate item 59) | **implemented** |
 | E2E-20 | checkout config and upgrade (#168 final-gate item 60) | **implemented** |
+| E2E-21 | erasure completeness: graph, derived facts, sidecar, erase-during-enrichment (incl. attached diff text and repeat erase), absent-target namespace isolation, busy-sidecar honesty, namespace TODOs/artifacts (#423, #475, #476) | **implemented** |
 
 E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
 and every installed Python source file, constructs the installed Menhir Graphiti client

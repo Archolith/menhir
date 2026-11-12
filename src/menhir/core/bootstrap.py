@@ -147,6 +147,7 @@ def build_memory_services(
     *,
     capabilities: RuntimeCapabilities | None = None,
     read_only: bool = False,
+    require_scheduler_lease: bool = False,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
@@ -203,6 +204,7 @@ def build_memory_services(
         graph_adapter=graph_adapter,
         llm=llm,
         lifecycle_service=lifecycle_service,
+        require_scheduler_lease=require_scheduler_lease,
     )
     ingest_service.configure(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),

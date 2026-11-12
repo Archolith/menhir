@@ -489,18 +489,21 @@ def test_backend_reports_which_erasure_outcome_occurred(tmp_path, monkeypatch):
         subjects=ErasureSubjectStore(db_path=db),
     )
     provider = Provider(coord)
-    _seed_revision(db, "n-absent", "residue")
+    # Canonical uuids: the backend refuses any other target as invalid_target before erasing.
+    absent = "5d0c2f7a-1b3e-4c8d-9a6f-0e2b4d6c8a10"
+    never = "7e1a3c5b-2d4f-4a6b-8c0d-1f3e5a7c9b20"
+    _seed_revision(db, absent, "residue")
 
-    outcome = asyncio.run(provider.erase_memory("n-absent"))
+    outcome = asyncio.run(provider.erase_memory(absent))
     assert outcome["reason"] == GRAPH_ALREADY_ABSENT
     assert outcome["purged"]["memory_revisions.old_value"] == 1
 
     # delete_memory still answers True: something WAS erased, so "not found" would be a lie.
-    assert asyncio.run(provider.delete_memory("n-absent")) is True
+    assert asyncio.run(provider.delete_memory(absent)) is True
 
     # And a subject with nothing anywhere is the genuine negative.
-    assert asyncio.run(provider.delete_memory("n-never-existed")) is False
-    assert asyncio.run(provider.erase_memory("n-never-existed"))["reason"] == NOTHING_TO_ERASE
+    assert asyncio.run(provider.delete_memory(never)) is False
+    assert asyncio.run(provider.erase_memory(never))["reason"] == NOTHING_TO_ERASE
 
 
 # --------------------------------------------------------------------------- CF-165 closure

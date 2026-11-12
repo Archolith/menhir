@@ -28,6 +28,11 @@ from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.memory_queries import (
+    NAMESPACE_ERASE_PREDICATE,
+    NAMESPACE_PRIMARY_LABEL_CASE,
+    NAMESPACE_SUBORDINATES_CALL,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.vector_indexes import (
     VectorIndexCatalog,
@@ -413,9 +418,57 @@ class MemoryGraphAdapter:
         """See EpisodeLifecycleRepository.episodic_twin_uuids."""
         return self._episodes.episodic_twin_uuids(node_uuid)
 
-    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+    def erasure_evidence_uuids(
+        self, node_uuid: str, *, caller_namespace: str | None = None
+    ) -> list[str]:
         """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
-        return self._episodes.erasure_evidence_uuids(node_uuid)
+        return self._episodes.erasure_evidence_uuids(node_uuid, caller_namespace=caller_namespace)
+
+    def erase_target_namespace_keys(self, node_uuid: str) -> list[str]:
+        """See MemoryQueries.erase_target_namespace_keys."""
+        return self._memory_queries.erase_target_namespace_keys(node_uuid)
+
+    # Erasure compensation for enrichment racing an erase (see services/erasure_compensation).
+    def episode_erased_by_user(self, episode_uuid: str) -> bool:
+        return self._episodes.episode_erased_by_user(episode_uuid)
+
+    def link_erased_twin(self, episode_uuid: str, resolved_episode_uuid: str) -> bool:
+        return self._episodes.link_erased_twin(episode_uuid, resolved_episode_uuid)
+
+    def list_erased_twin_compensations(self, limit: int) -> list[dict]:
+        return self._episodes.list_erased_twin_compensations(limit)
+
+    def clear_erasure_compensation(self, episode_uuid: str) -> bool:
+        return self._episodes.clear_erasure_compensation(episode_uuid)
+
+    def erasure_compensation_pending(self, episode_uuid: str) -> bool:
+        return self._episodes.erasure_compensation_pending(episode_uuid)
+
+    def find_unlinked_erased_twin(self, episode_uuid: str) -> dict:
+        return self._episodes.find_unlinked_erased_twin(episode_uuid)
+
+    def list_unlinked_erased_queue_nodes(self, limit: int) -> list[str]:
+        return self._episodes.list_unlinked_erased_queue_nodes(limit)
+
+    def mark_compensation_checked(self, episode_uuid: str, outcome: str) -> None:
+        self._episodes.mark_compensation_checked(episode_uuid, outcome)
+
+    def erasure_derived_preview(
+        self, erased_uuids: list[str], *, twin_found: bool | None = None
+    ) -> dict[str, object]:
+        """See EpisodeLifecycleRepository.erasure_derived_preview."""
+        return self._episodes.erasure_derived_preview(erased_uuids, twin_found=twin_found)
+
+    def scrub_merge_audit_for_episodes(
+        self,
+        erased_uuids: list[str],
+        deleted_entity_uuids: list[str] | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, object]:
+        """See MemoryQueries.scrub_merge_audit_for_episodes."""
+        return self._memory_queries.scrub_merge_audit_for_episodes(
+            erased_uuids, deleted_entity_uuids or [], namespace=namespace)
 
     def list_episodes_missing_content_embedding(
         self,
@@ -471,15 +524,9 @@ class MemoryGraphAdapter:
         """Return FAILED episodes grouped by error text, most common first."""
         return self._episodes.fetch_failed_error_signatures(limit)
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, Any] | None:
-        return self._episodes.find_completed_episode_artifact(
-            anchor_uuid=anchor_uuid, anchor_name=anchor_name
-        )
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, Any] | None:
+        """See EpisodeLifecycleRepository.linked_twin_artifact (finalize-from-link read)."""
+        return self._episodes.linked_twin_artifact(episode_uuid)
 
     def claim_pending_episode(
         self,
@@ -575,6 +622,8 @@ class MemoryGraphAdapter:
         session_id: str,
         user_id: str,
         source: str,
+        *,
+        read_epoch: int | None = None,
     ) -> str | None:
         """Create a raw-capture entity for a failed episode with memorable content.
 
@@ -592,6 +641,7 @@ class MemoryGraphAdapter:
             session_id=session_id,
             user_id=user_id,
             source=source,
+            read_epoch=read_epoch,
         )
         if entity_uuid:
             # Stamp through the standard choke point to ensure trust metadata flows correctly
@@ -657,6 +707,7 @@ class MemoryGraphAdapter:
                         session_id=row.get("session_id") or "",
                         user_id=row.get("user_id") or "",
                         source=row.get("source") or "claude-code",
+                        read_epoch=int(row.get("fence_epoch") or 0),
                     )
                 except Exception as e:
                     logger.debug(
@@ -701,7 +752,7 @@ class MemoryGraphAdapter:
         EpisodeLifecycleRepository.lookup_entities_by_normalized_names)."""
         return self._episodes.lookup_entities_by_normalized_names(namespace, spellings)
 
-    def ensure_self_entity(self, namespace: str) -> str:
+    def ensure_self_entity(self, namespace: str) -> str | None:
         """Idempotently MERGE the canonical per-namespace self :Entity and return its (deterministic)
         uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self).
 
@@ -709,10 +760,10 @@ class MemoryGraphAdapter:
         reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
 
-    def link_self_tiers(self, namespace: str) -> bool:
+    def link_self_tiers(self, namespace: str, *, executor: Any = None) -> bool:
         """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
         exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
-        return self._episodes.link_self_tiers(namespace)
+        return self._episodes.link_self_tiers(namespace, executor=executor)
 
     def mark_episode_store_only(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
@@ -766,6 +817,7 @@ class MemoryGraphAdapter:
         bootstrap_scope: str | None = None,
         belief_commit: str | None = None,
         belief_branch: str | None = None,
+        executor: Any = None,
     ) -> PolicyStampResult:
         return self._episodes.stamp_ingest_metadata(
             node_uuids=node_uuids,
@@ -778,6 +830,7 @@ class MemoryGraphAdapter:
             bootstrap_scope=bootstrap_scope,
             belief_commit=belief_commit,
             belief_branch=belief_branch,
+            executor=executor,
         )
 
     def record_retention_sources(
@@ -786,11 +839,13 @@ class MemoryGraphAdapter:
         source_episode_uuid: str,
         entity_uuids: list[str],
         namespace: str | None = None,
+        executor: Any = None,
     ) -> int:
         return self._episodes.record_retention_sources(
             source_episode_uuid=source_episode_uuid,
             entity_uuids=entity_uuids,
             namespace=namespace,
+            executor=executor,
         )
 
     def count_namespace(self, group_id: str, *, namespace: str | None = None) -> int:
@@ -809,22 +864,39 @@ class MemoryGraphAdapter:
         legacy event log (event-history lane archived): every :TypedEventAssertion in the namespace and every
         :TypedEventAssertionHead that HAS_VERSION to an event assertion in the namespace.
         """
-        namespace_clause = (
-            " OR (n:Episodic AND n.namespace = $namespace)"
-            " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
-            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-            " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
-            " OR (n:TypedEventAssertionHead AND EXISTS {"
-            " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
-            if namespace is not None else ""
-        )
+        # Same predicate and subordinate expansion as the delete, so count == deleted.
+        # With namespace=None every namespace term is null-false, leaving the group_id partition.
         rows = self.neo4j.execute(
-            f"MATCH (n) WHERE n.group_id = $group_id{namespace_clause} "
-            "RETURN count(DISTINCT n) AS total",
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " RETURN size(direct) + size(subs) AS total",
             params={"group_id": group_id, "namespace": namespace},
         )
         return int(rows[0].get("total", 0)) if rows else 0
+
+    def count_namespace_by_label(
+        self, group_id: str, *, namespace: str | None = None
+    ) -> dict[str, int]:
+        """Per-label counts over the exact set count_namespace counts.
+
+        The label is the first match in NAMESPACE_PRIMARY_LABEL_CASE (a fixed priority list of
+        the known labels), falling back to head(labels(n)); never a bare head(labels(n)) for
+        known labels, since multi-label nodes make that order arbitrary.
+        """
+        rows = self.neo4j.execute(
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " UNWIND direct + subs AS n "
+            "RETURN " + NAMESPACE_PRIMARY_LABEL_CASE + " AS label, count(n) AS total",
+            params={"group_id": group_id, "namespace": namespace},
+        )
+        return {
+            str(r["label"]): int(r.get("total", 0) or 0)
+            for r in (rows or [])
+            if r.get("label")
+        }
 
     def fetch_node_namespaces(self, uuids: list[str]) -> dict[str, str]:
         """Map uuid -> namespace for nodes that still exist. Missing uuids are absent.
@@ -858,19 +930,12 @@ class MemoryGraphAdapter:
         ``delete_namespace`` is about to destroy. If the two predicates drifted, an erasure
         would delete graph nodes whose sidecar content it never recorded a subject for.
         """
-        namespace_clause = (
-            " OR (n:Episodic AND n.namespace = $namespace)"
-            " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
-            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-            " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
-            " OR (n:TypedEventAssertionHead AND EXISTS {"
-            " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
-            if namespace is not None else ""
-        )
         rows = self.neo4j.execute(
-            f"MATCH (n) WHERE n.group_id = $group_id{namespace_clause} "
-            "AND n.uuid IS NOT NULL RETURN DISTINCT n.uuid AS uuid",
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " UNWIND direct + subs AS n "
+            "WITH n WHERE n.uuid IS NOT NULL RETURN DISTINCT n.uuid AS uuid",
             params={"group_id": group_id, "namespace": namespace},
         )
         return [str(r.get("uuid")) for r in (rows or []) if r.get("uuid")]
@@ -912,9 +977,30 @@ class MemoryGraphAdapter:
 
     def delete_memory(self, node_uuid: str) -> bool:
         """Delete a memory/observation, cascade its assertions, and repair scalar projections."""
+        return bool(self.delete_memory_detailed(node_uuid)["touched"])
+
+    def delete_memory_detailed(
+        self,
+        node_uuid: str,
+        *,
+        erased_uuids: list[str] | None = None,
+        deletable_entity_uuids: list[str] | None = None,
+        scope_namespace: str | None = None,
+    ) -> dict[str, object]:
+        """delete_memory returning the full cascade result; erased_uuids spans the whole erasure.
+
+        deletable_entity_uuids: when given, only these single-source entities are deleted (the
+        erasure fenced them); any other single-source entity is flagged instead.
+        scope_namespace: the caller's namespace; bounds the cleanup when the target is gone.
+        """
         operation_id = uuidlib.uuid4().hex
+        extra: dict[str, object] = {"erased_uuids": erased_uuids} if erased_uuids else {}
+        if deletable_entity_uuids is not None:
+            extra["deletable_entity_uuids"] = list(deletable_entity_uuids)
+        if scope_namespace:
+            extra["scope_namespace"] = scope_namespace
         result = self._memory_queries.delete_memory_with_scalar_cascade(
-            node_uuid, operation_id=operation_id)
+            node_uuid, operation_id=operation_id, **extra)
         repair = self.scalar_state_service().repair_pending_deletions(
             operation_id=operation_id, as_of=datetime.now(timezone.utc))
         if repair["failed"]:
@@ -922,7 +1008,7 @@ class MemoryGraphAdapter:
                 "memory %s deleted with %d scalar projection repair(s) pending retry",
                 node_uuid, len(repair["failed"]),
             )
-        return bool(result["touched"])
+        return result
 
     def fetch_candidate_metadata(
         self, node_uuids: list[str]
@@ -1010,6 +1096,26 @@ class MemoryGraphAdapter:
         """Hydrate surfaced :TypedAssertion observations by id (Phase 4a.2 observation lane)."""
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
+    # Derived re-derive repair (see services/derived_rederive).
+    def list_pending_derived_rederive(self, limit: int) -> list[dict]:
+        return self._memory_queries.list_pending_derived_rederive(limit)
+
+    def load_derived_rederive_item(self, item_kind: str, item_uuid: str) -> dict | None:
+        return self._memory_queries.load_derived_rederive_item(item_kind, item_uuid)
+
+    def apply_derived_rederive(self, **kwargs) -> bool:
+        return self._memory_queries.apply_derived_rederive(**kwargs)
+
+    def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
+        return self._memory_queries.mark_derived_rederive_status(repair_key, status)
+
+    def record_derived_rederive_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        return self._memory_queries.record_derived_rederive_failure(
+            repair_key, error_class, max_attempts
+        )
+
     def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
         return self._memory_queries.fetch_temporal_facts(node_uuids)
@@ -1070,8 +1176,17 @@ class MemoryGraphAdapter:
             max_sharpness=max_sharpness,
         )
 
-    def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
-        return self._consolidation.compress_node(node_uuid, compressed_summary)
+    def compress_node(
+        self,
+        node_uuid: str,
+        compressed_summary: str,
+        *,
+        read_epoch: int | None = None,
+        fence_key: str | None = None,
+    ) -> bool:
+        return self._consolidation.compress_node(
+            node_uuid, compressed_summary, read_epoch=read_epoch, fence_key=fence_key
+        )
 
     def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
         return self._consolidation.mark_decay_candidates_selected(node_uuids)
@@ -1080,9 +1195,16 @@ class MemoryGraphAdapter:
         return self._consolidation.fetch_node_freshness(node_uuids)
 
     def complete_rehydration(
-        self, node_uuid: str, updated_content: str | None = None
+        self,
+        node_uuid: str,
+        updated_content: str | None = None,
+        *,
+        source_uuids: tuple[str, ...] = (),
+        read_epoch: int | None = None,
     ) -> bool:
-        return self._consolidation.complete_rehydration(node_uuid, updated_content)
+        return self._consolidation.complete_rehydration(
+            node_uuid, updated_content, source_uuids=source_uuids, read_epoch=read_epoch
+        )
 
     def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
         return self._consolidation.bridge_and_delete(node_uuid)
@@ -1916,6 +2038,23 @@ class MemoryGraphAdapter:
         return self._turn_evidence.load_preceding_context(
             turn_id, namespace=namespace, limit=limit
         )
+
+    def load_preceding_turn_evidence_context_with_ids(
+        self,
+        turn_id: str,
+        *,
+        namespace: str,
+        limit: int = 2,
+    ) -> list[tuple[str, str]]:
+        """Same selection and order as `load_preceding_turn_evidence_context`, as (turn_id, text).
+
+        The publish fence records these turn ids so the repair context's READ_CONTEXT edges can be
+        written in the publish transaction.
+        """
+        rows = self._turn_evidence.load_preceding_context(
+            turn_id, namespace=namespace, limit=limit
+        )
+        return [(str(row["turn_id"]), str(row["text"])) for row in rows]
 
     def turn_evidence_stats(self) -> dict[str, Any]:
         return self._turn_evidence.evidence_stats()

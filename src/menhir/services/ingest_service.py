@@ -46,7 +46,6 @@ from menhir.services.enrichment_steps import (
     run_graphiti_extraction,
     run_preflight_rejection,
     stamp_and_finalize,
-    try_reconcile_existing,
 )
 from menhir.services.ingest_gate import IngestGate
 
@@ -65,6 +64,10 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     graph_adapter: MemoryGraphAdapter
     llm: LLMAdapter | UnavailableLLMAdapter
     lifecycle_service: LifecycleServiceProtocol | None = None
+    #: Single-process rule (erasure P4, plan 2.6): when True, enrichment workers run only while
+    #: this process's maintenance scheduler holds a provable lease. Default False (tests, CLI).
+    require_scheduler_lease: bool = False
+    _enrichment_gate_open: bool | None = field(default=None, init=False, repr=False)
     _ingest_concurrency: int = field(default=1, init=False, repr=False)
     _ingest_gate_obj: IngestGate | None = field(default=None, init=False, repr=False)
     _pending_queue: asyncio.Queue[str] | None = field(

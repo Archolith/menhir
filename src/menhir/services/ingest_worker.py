@@ -50,8 +50,14 @@ from menhir.services.enrichment_steps import (
     embed_episode_content,
     handle_enrichment_failure,
     run_graphiti_extraction,
+    finalize_from_link,
     run_preflight_rejection,
-    try_reconcile_existing,
+)
+from menhir.infrastructure.publish_fence import (
+    ClaimFence,
+    FenceLost,
+    PublishFenced,
+    requeue_fenced,
 )
 from menhir.services.enrichment_failures import EnrichmentDeadlineExceeded
 from menhir.services.ingest_gate import IngestGate
@@ -69,6 +75,18 @@ class LlmBudgetExceeded(LlmUsageControlSignal, RuntimeError):
     Raised from the usage callback at the moment a call is reserved, so the call never
     dispatches. Distinct from a provider error: nothing failed, the work was refused.
     """
+
+
+def _find_fence_exception(exc: BaseException) -> PublishFenced | FenceLost | None:
+    """The PublishFenced / FenceLost in ``exc``'s ``__cause__`` chain (a library may wrap it), or None."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, (PublishFenced, FenceLost)):
+            return current
+        seen.add(id(current))
+        current = current.__cause__
+    return None
 
 
 class IngestWorkerMixin:
@@ -112,6 +130,23 @@ class IngestWorkerMixin:
                 queue.task_done()
 
     async def _process_pending_episode(self, episode_uuid: str) -> None:
+        # Single-process rule: only the scheduler-lease holder claims. The episode stays PENDING for
+        # the holder's own scan; nothing is dequeued-and-dropped from the graph.
+        if not await asyncio.to_thread(self._enrichment_allowed):
+            if not getattr(self, "_claim_gate_logged", False):
+                self._claim_gate_logged = True
+                logger.warning(
+                    "Enrichment claim skipped: this process does not hold the scheduler lease; "
+                    "episodes are left PENDING for the holder"
+                )
+            record_lifecycle_event(
+                component="ingest_worker",
+                event="claim_pending_episode",
+                state="skipped_not_lease_holder",
+                episode_uuid=episode_uuid,
+            )
+            return
+        self._claim_gate_logged = False
         claimed = await asyncio.to_thread(
             self.graph_adapter.claim_pending_episode,
             episode_uuid,
@@ -135,6 +170,16 @@ class IngestWorkerMixin:
         heartbeat_task: asyncio.Task[None] | None = None
         usage_token = None
         ctx: EnrichmentContext | None = None
+        # Publish protocol 2 claims carry the reserved twin uuid; older claim shapes run unfenced.
+        claim_fence: ClaimFence | None = None
+        if claimed.get("reserved_twin_uuid"):
+            claim_fence = ClaimFence(
+                q_uuid=episode_uuid,
+                worker_id=self._worker_id,
+                claim_started_at=claimed.get("processing_started_at"),
+                namespace_key=str(claimed.get("fence_namespace_key") or "default"),
+                reserved_twin_uuid=str(claimed["reserved_twin_uuid"]),
+            )
         try:
             heartbeat_task = asyncio.create_task(
                 self._processing_heartbeat_loop(
@@ -177,6 +222,7 @@ class IngestWorkerMixin:
                 inferred_self_mode=self._inferred_self_mode,
                 source_memories_enabled=self._source_memories_enabled,
                 get_queue_depth=self.get_queue_depth,
+                claim_fence=claim_fence,
             )
 
             record_lifecycle_event(
@@ -208,7 +254,7 @@ class IngestWorkerMixin:
                         await embed_episode_content(ctx)
                         await self._finish_store_only(episode_uuid, claimed, by_turn_role=by_turn_role)
                         return
-                    if await try_reconcile_existing(ctx):
+                    if await finalize_from_link(ctx):
                         return
                     if await run_preflight_rejection(ctx):
                         return
@@ -288,6 +334,23 @@ class IngestWorkerMixin:
             )
             return
         except Exception as exc:
+            fence_exc = _find_fence_exception(exc)
+            if fence_exc is not None and claim_fence is not None:
+                # A vetoed publish or a lost post-claim fence is not a failure: no attempt is
+                # burned, no FAILED write, no failure event. Back to PENDING (or silent when the
+                # queue node itself was erased) and stop.
+                try:
+                    await asyncio.to_thread(
+                        requeue_fenced,
+                        self.graph_adapter.neo4j,
+                        claim_fence,
+                        fence_exc.reason,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Fenced requeue failed episode_id=%s; lease recovery retries", episode_uuid
+                    )
+                return
             if ctx is None:
                 raise  # The worker logs setup failures; lease recovery can retry after cleanup.
             self._failed_enrichments += 1

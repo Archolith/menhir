@@ -50,7 +50,7 @@ its generation. AI and graph client versions in that artifact are:
 | Library | Version |
 |---|---:|
 | `openai` | 2.45.0 |
-| `archolith-graphiti-core` | 0.31.2.post2 |
+| `archolith-graphiti-core` | 0.31.2.post3 |
 | `joserfc` | 1.7.7 |
 | `neo4j` | 6.2.0 |
 | `pydantic` | 2.13.4 |

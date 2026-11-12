@@ -36,7 +36,7 @@ def steps(monkeypatch):
     rec = SimpleNamespace(order=[])
     monkeypatch.setattr(iw, "EnrichmentContext", lambda **kw: SimpleNamespace(**kw))
     for attr, name, result in (
-        ("embed_episode_content", "embed", None), ("try_reconcile_existing", "reconcile", False),
+        ("embed_episode_content", "embed", None), ("finalize_from_link", "reconcile", False),
         ("run_preflight_rejection", "preflight", False), ("run_graphiti_extraction", "extraction", None),
         ("handle_enrichment_failure", "failure", None),
     ):

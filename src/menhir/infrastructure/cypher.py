@@ -7,8 +7,10 @@ repository modules without pulling in a full OGM.
 from __future__ import annotations
 
 from menhir.domain.recall_visibility import view_live_provenance_cypher
+from menhir.infrastructure.erasure_fence import marker_absent_cypher
 
 __all__ = [
+    "EPISODE_NOT_MARKED",
     "Cypher",
     "MEMORY_RETURN_FIELDS",
     "ENTITY_METADATA_FIELDS",
@@ -324,8 +326,9 @@ MEMORY_RETURN_FIELDS = (
     "coalesce(n['view_name'], n.name) AS name",
     "n.type AS type",
     "n.scope AS scope",
-    "n.content AS content",
-    "coalesce(n['view_summary'], n.summary) AS summary",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null ELSE n.content END AS content",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null "
+    "ELSE coalesce(n['view_summary'], n.summary) END AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -352,14 +355,28 @@ MEMORY_RETURN_FIELDS = (
     "n.enriched_edges_touched AS enriched_edges_touched",
 )
 
+# An erased in-flight queue node is kept as a content-less tombstone (FAILED/deleted_by_user) so
+# its worker can compensate. No claim, retry or reset may ever requeue it. Over variable `n`.
+EPISODE_NOT_ERASED = (
+    "n['erased_at'] IS NULL AND coalesce(n.processing_substage, '') <> 'deleted_by_user'"
+)
+
+# G-q: no ErasureMarker exists for the queue node. Over variable `n`. Added next to
+# EPISODE_NOT_ERASED (P4 does not replace it).
+EPISODE_NOT_MARKED = marker_absent_cypher("n")
+
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
     "coalesce(n['view_name'], n.name) AS name",
     "n.scope AS scope",
     "n.type AS type",
-    "n.content AS content",
-    "coalesce(n['view_summary'], n.summary) AS summary",
+    # Erasure fail-closed: a flagged entity (rederive_pending) is shown by name only until the
+    # re-derive job rewrites its summary from the remaining sources.
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null ELSE n.content END AS content",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null "
+    "ELSE coalesce(n['view_summary'], n.summary) END AS summary",
+    "coalesce(n['rederive_pending'], false) AS rederive_pending",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -423,6 +440,10 @@ FACT_TEMPORAL_FIELDS = (
 FACT_TEXT_PRESENT = (
     "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )
+
+# Recall-only: a fact edge flagged by erasure (rederive_pending) is withheld entirely until the
+# re-derive job rewrites or deletes it. Dynamic access avoids warnings on legacy graphs.
+FACT_NOT_REDERIVE_PENDING = "NOT coalesce(r['rederive_pending'], false)"
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,
 # .agent/archive/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS
@@ -522,7 +543,7 @@ def build_reset_or_fail_query(
     """
     return (Cypher()
         .match(match)
-        .where(*where)
+        .where(*where, EPISODE_NOT_MARKED)
         .with_clause(
             "n, coalesce(toInteger(n.processing_attempts), 0)"
             " >= $max_attempts AS exhausted"

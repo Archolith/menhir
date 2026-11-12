@@ -164,7 +164,7 @@ def embedding_dimension_health(
     # anyone wrote. Losing only the endpoint test is what let 284 anchors into this count.
     null_edge_count = int((neo4j.execute(
         f"MATCH (a)-[r:{semantic_fact_edge_pattern()}]->(b) "
-        "WHERE r.fact IS NOT NULL AND r.fact_embedding IS NULL "
+        "WHERE r.fact IS NOT NULL AND trim(r.fact) <> '' AND r.fact_embedding IS NULL "
         "AND a.structure_role IS NULL AND b.structure_role IS NULL RETURN count(r) AS c"
     ) or [{}])[0].get("c", 0) or 0)
 

@@ -1337,7 +1337,9 @@ async def test_process_pending_episode_reconciles_existing_graphiti_completion_b
     adapter.pending_episode_rows[episode_uuid]["processing_error"] = (
         "graphiti add_episode timed out after 0.1s; remote completion status unknown"
     )
-    adapter.completed_episode_artifacts[(episode_uuid, "episode-session-1-pending-reconcile")] = {
+    # The claim returns the link (publish transaction linked q to its twin): finalize-from-link.
+    adapter.pending_episode_rows[episode_uuid]["resolved_episode_uuid"] = "episode-existing-1"
+    adapter.completed_episode_artifacts[episode_uuid] = {
         "resolved_episode_uuid": "episode-existing-1",
         "entity_uuids": ["entity-1"],
         "edge_uuids": ["edge-1"],
@@ -2491,12 +2493,7 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
         def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 3}
 
-        def find_completed_episode_artifact(
-            self,
-            *,
-            anchor_uuid: str,
-            anchor_name: str,
-        ) -> dict[str, object] | None:
+        def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
             return None
 
         def stamp_ingest_metadata(
@@ -2652,12 +2649,7 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
                 }
             ]
 
-        def find_completed_episode_artifact(
-            self,
-            *,
-            anchor_uuid: str,
-            anchor_name: str,
-        ) -> dict[str, object] | None:
+        def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
             return {
                 "resolved_episode_uuid": "episode-existing-1",
                 "entity_uuids": ["entity-1"],
@@ -2797,6 +2789,9 @@ async def test_maintenance_scheduler_does_not_retry_context_window_mismatch_beyo
                 }
             ]
 
+        def linked_twin_artifact(self, episode_uuid: str) -> None:
+            return None
+
     scheduler = MaintenanceScheduler(
         ingest_service=FakeIngestService(),
         graph_adapter=FakeGraphAdapter(),
@@ -2889,12 +2884,7 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
                 }
             ]
 
-        def find_completed_episode_artifact(
-            self,
-            *,
-            anchor_uuid: str,
-            anchor_name: str,
-        ) -> dict[str, object] | None:
+        def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
             return {
                 "resolved_episode_uuid": "episode-existing-1",
                 "entity_uuids": ["entity-1"],
@@ -3016,7 +3006,7 @@ async def test_auto_resolve_conflicts_resolves_stale_groups(monkeypatch: pytest.
             return {}
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list:
             return []
-        def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+        def linked_twin_artifact(self, episode_uuid: str) -> None:
             return None
         def stamp_ingest_metadata(self, **_: object) -> object:
             return None
@@ -3064,7 +3054,7 @@ async def test_auto_resolve_conflicts_skips_when_no_lifecycle_service(monkeypatc
             return {}
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list:
             return []
-        def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+        def linked_twin_artifact(self, episode_uuid: str) -> None:
             return None
         def stamp_ingest_metadata(self, **_: object) -> object:
             return None

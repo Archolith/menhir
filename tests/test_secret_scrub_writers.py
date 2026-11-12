@@ -54,6 +54,8 @@ def _assert_scrubbed(neo4j: MagicMock) -> None:
 def _neo4j() -> MagicMock:
     neo4j = MagicMock()
     neo4j.execute.return_value = []
+    # G-copy writers (R2 CF-327) run their statements through a transaction on the same mock.
+    neo4j.execute_write.side_effect = lambda work: work(neo4j)
     return neo4j
 
 

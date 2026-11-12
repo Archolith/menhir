@@ -170,16 +170,21 @@ def test_cf168_blast_radius_and_capture_name_the_same_set() -> None:
     if the predicates drift, an erasure deletes graph nodes whose sidecar content it never
     recorded a subject for. A dry_run that under-reports the blast radius is the same omission.
 
-    Both `count_namespace` and the capture build the clause, so both must name the label.
+    Delete, `count_namespace` and the capture share NAMESPACE_ERASE_PREDICATE (#476), so the
+    shared predicate must name the label and the adapter must not inline its own copy.
     """
+    from menhir.infrastructure.memory_queries import NAMESPACE_ERASE_PREDICATE
+
+    assert "TurnEvidence" in NAMESPACE_ERASE_PREDICATE
+    assert "ScalarConsolidationWatermark" in NAMESPACE_ERASE_PREDICATE
     source = (_SRC / "infrastructure/memory_graph_adapter.py").read_text(encoding="utf-8")
-    clauses = [
+    assert source.count("+ NAMESPACE_ERASE_PREDICATE") >= 2
+    inline = [
         line
         for line in source.splitlines()
         if "ScalarConsolidationWatermark" in line and "n.namespace = $namespace" in line
     ]
-    assert len(clauses) == 2, f"expected two label clauses, found {len(clauses)}"
-    assert all("TurnEvidence" in line for line in clauses)
+    assert inline == [], f"adapter inlines its own namespace predicate: {inline}"
 
 
 # ---------------------------------------------------------------------------

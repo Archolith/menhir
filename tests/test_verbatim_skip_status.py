@@ -25,7 +25,6 @@ from menhir.domain.verbatim_skip_status import (
 from menhir.mcp import formatters
 from menhir.mcp.tools.ops.get_enrichment_status import GetEnrichmentStatusTool
 from menhir.services import ingest_intake
-from menhir.services.enrichment_steps import still_owns_episode
 from menhir.services.ingest_intake import IngestIntakeMixin
 
 CLIENT = "123e4567-e89b-12d3-a456-426614174111"
@@ -327,18 +326,3 @@ def test_get_enrichment_status_nowait_counterexample_bites_without_fix(monkeypat
     monkeypatch.setattr(mod, "effective_processing_row", lambda row: row)
     text = _status_text(_client(_projection("PENDING")))
     assert "status: READY" in text  # the old, wrong answer
-
-
-# ---------------------------------------------------------------- work fence reads the raw row
-
-def test_still_owns_episode_ignores_projection_state_of_a_skipped_client():
-    """The client row is READY; a work fence must not see the projection's ENRICHING."""
-    row = _client(_enriching(), processing_owner="worker-a")
-
-    adapter = SimpleNamespace(fetch_episode_processing=lambda uuid: row)
-    assert still_owns_episode(adapter, CLIENT, "worker-a") is False
-
-    # sanity: the same helper does answer True for a genuinely ENRICHING claimed row
-    live = dict(row, processing_state="ENRICHING", processing_substage="llm")
-    adapter_live = SimpleNamespace(fetch_episode_processing=lambda uuid: live)
-    assert still_owns_episode(adapter_live, CLIENT, "worker-a") is True

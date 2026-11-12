@@ -24,12 +24,19 @@ from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
+    EPISODE_NOT_ERASED,
+    EPISODE_NOT_MARKED,
     Cypher,
     EPISODE_PROCESSING_FIELDS,
     EPISODE_RETRY_FIELDS,
     LLM_RESET_SET,
     MEMORY_RETURN_FIELDS,
     non_derived_view_cypher,
+)
+from menhir.infrastructure.erasure_fence import (
+    fence_key_cypher,
+    fence_lock_cypher,
+    marker_absent_for_param_cypher,
 )
 
 logger = logging.getLogger(__name__)
@@ -280,9 +287,10 @@ class EpisodeLifecycleRepository:
         earlier is never stamped onto changed text. Returns whether a node was written.
         """
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $uuid})
+            f"""
+            MATCH (n:Episodic {{uuid: $uuid}})
             WHERE NOT coalesce(n.is_evidence_projection, false)
+              AND {EPISODE_NOT_MARKED}
               AND ($expected_content IS NULL OR n.content = $expected_content)
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
@@ -338,7 +346,155 @@ class EpisodeLifecycleRepository:
             twins.append(str(twin))
         return twins
 
-    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+    def episode_erased_by_user(self, episode_uuid: str) -> bool:
+        """True when the queue node was flipped by an erase (substage deleted_by_user)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def link_erased_twin(self, episode_uuid: str, resolved_episode_uuid: str) -> bool:
+        """Guarded write: link an erased queue node to its Graphiti twin and flag compensation."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
+              AND n.resolved_episode_uuid IS NULL
+            SET n.resolved_episode_uuid = $resolved,
+                n.erasure_compensation_pending = true
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def list_erased_twin_compensations(self, limit: int) -> list[dict]:
+        """Erased queue nodes whose linked twin still needs erasing."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
+              AND n.erasure_compensation_pending = true
+            RETURN n.uuid AS uuid, n.resolved_episode_uuid AS resolved_episode_uuid,
+                   n.namespace AS namespace
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [dict(row) for row in rows]
+
+    def erasure_compensation_pending(self, episode_uuid: str) -> bool:
+        """True when an erased queue node still links a twin that needs erasing."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.erasure_compensation_pending = true
+              AND EXISTS { MATCH (t:Episodic {uuid: n.resolved_episode_uuid}) }
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def clear_erasure_compensation(self, episode_uuid: str) -> bool:
+        """Clear the pending flag once the twin no longer exists."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE NOT EXISTS { MATCH (t:Episodic {uuid: n.resolved_episode_uuid}) }
+            REMOVE n.erasure_compensation_pending
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def find_unlinked_erased_twin(self, episode_uuid: str) -> dict:
+        """Find the unlinked Graphiti twin of an erased queue node (crash backstop).
+
+        Returns {"match": uuid} for exactly one candidate, {"ambiguous": n} for several, {} for none.
+        """
+        node_rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
+              AND n.resolved_episode_uuid IS NULL
+            RETURN n.namespace AS namespace, n.group_id AS group_id, n.name AS name,
+                   coalesce(n.processing_started_at, n.created_at) AS since
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        if not node_rows:
+            return {}
+        node = node_rows[0]
+        if node.get("name") is None or node.get("since") is None:
+            return {}
+        # Never None: an unscoped tenant fragment would match twins in every namespace. '' and
+        # 'default' are one silo, so the default namespace must still be searched.
+        tenant = str(node.get("namespace") or node.get("group_id") or "").strip() or "default"
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (e:Episodic)
+            WHERE e.uuid <> $episode_uuid
+              AND {tenant_scope_cypher("e")}
+              AND e.name = $name
+              AND e.created_at >= $since
+              // Graphiti twins only: Menhir queue nodes always carry processing_state.
+              AND e.processing_state IS NULL
+              AND NOT EXISTS {{ MATCH (q:Episodic) WHERE q.resolved_episode_uuid = e.uuid }}
+            RETURN e.uuid AS uuid
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "name": node.get("name"),
+                "since": node.get("since"),
+                **tenant_scope_params(tenant),
+            },
+        )
+        uuids = sorted({str(row["uuid"]) for row in rows if row.get("uuid")})
+        if len(uuids) == 1:
+            return {"match": uuids[0]}
+        if len(uuids) > 1:
+            return {"ambiguous": len(uuids)}
+        return {}
+
+    def list_unlinked_erased_queue_nodes(self, limit: int) -> list[str]:
+        """Erased queue nodes with no twin link that the backstop has not yet examined."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
+              AND n.resolved_episode_uuid IS NULL
+              AND n.erasure_compensation_checked IS NULL
+              // A worker may still be inside add_episode; wait out any enrichment lease.
+              AND coalesce(n.erased_at, datetime('1970-01-01T00:00:00Z'))
+                  < datetime() - duration('PT1H')
+            RETURN n.uuid AS uuid
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [str(row["uuid"]) for row in rows if row.get("uuid")]
+
+    def mark_compensation_checked(self, episode_uuid: str, outcome: str) -> None:
+        """Record that the backstop examined this erased queue node."""
+        self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            SET n.erasure_compensation_checked = $outcome
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid, "outcome": outcome},
+        )
+
+    def erasure_evidence_uuids(
+        self, node_uuid: str, *, caller_namespace: str | None = None
+    ) -> list[str]:
         """The captured evidence that carries an erased memory's words (read-only).
 
         For an `:Episodic`: the turns it is `ADMITTED_ON`. For a `:TurnEvidence` (addressed by
@@ -349,6 +505,9 @@ class EpisodeLifecycleRepository:
         Without these, erasing a memory left its turn behind and the next Phase 3 pass re-perceived
         it, so the deleted claim came back (#170 item 5). A turn admitted by several memories is
         erased with any of them: the cascade already retracts that turn's assertions in that case.
+
+        ``caller_namespace`` (CF-326): when set and the target's home is another namespace, nothing
+        is returned, so a scoped caller never expands into a foreign silo.
         """
         rows = self.neo4j.execute(
             """
@@ -373,8 +532,11 @@ class EpisodeLifecycleRepository:
 
         turn_ids: list[str] = []
         projections: list[str] = []
+        scope = (caller_namespace or "").strip()
         for row in rows:
             home = silo(row.get("n_namespace"), row.get("n_group_id"))
+            if scope and home != normalize_namespace(scope):
+                return []
             turn_id = row.get("turn_id")
             if not turn_id or silo(row.get("t_namespace")) != home:
                 continue
@@ -390,6 +552,95 @@ class EpisodeLifecycleRepository:
                 if twin != node_uuid and twin not in episodes:
                     episodes.append(twin)
         return turn_ids + episodes
+
+    def erasure_derived_preview(
+        self, erased_uuids: list[str], *, twin_found: bool | None = None
+    ) -> dict[str, Any]:
+        """Classify the derived facts/entities an erasure of ``erased_uuids`` would touch (read-only).
+
+        Mirrors the cascade's derived cleanup. ``erased_uuids[0]`` is the queue node.
+        ``twin_found`` says whether a Graphiti twin was resolved; when None it is inferred as
+        ``len(erased_uuids) > 1``. ``twin_missing`` is a READY queue node with no resolved episode
+        and no twin: its derived content cannot be traced.
+        """
+        erased = [str(u) for u in erased_uuids if u]
+        out: dict[str, Any] = {
+            "entities_delete": [],
+            "entities_flag": [],
+            "edges_delete": [],
+            "edges_flag": [],
+            "unknown_provenance": 0,
+            "twin_missing": False,
+        }
+        if not erased:
+            return out
+        edge_rows = self.neo4j.execute(
+            """
+            MATCH (:Entity)-[fe:RELATES_TO]->(:Entity)
+            WHERE fe.fact IS NOT NULL
+              AND any(u IN coalesce(fe.episodes, []) WHERE u IN $erased_uuids)
+            RETURN coalesce(fe.uuid, elementId(fe)) AS uuid,
+                   size([u IN coalesce(fe.episodes, []) WHERE NOT u IN $erased_uuids]) AS remaining
+            """,
+            params={"erased_uuids": erased},
+        )
+        for row in edge_rows or []:
+            key = "edges_flag" if int(row.get("remaining") or 0) > 0 else "edges_delete"
+            out[key].append(str(row["uuid"]))
+        entity_rows = self.neo4j.execute(
+            """
+            MATCH (t:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e:Entity)
+            WHERE t.uuid IN $erased_uuids
+              AND NOT (coalesce(e.is_view, false)
+                       OR coalesce(e.is_quantstate, false)
+                       OR e.view_kind IS NOT NULL)
+              AND NOT coalesce(e.is_artifact, false)
+              AND coalesce(e.type, '') <> 'TEMPORAL'
+              AND ("""
+            + non_structural_memory_cypher("e")
+            + """)
+              AND NOT e.uuid IN $erased_uuids
+            WITH DISTINCT e
+            RETURN e.uuid AS uuid,
+                   EXISTS {
+                       MATCH (e)-[r:RELATES_TO]-(:Entity)
+                       WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) = 0
+                   } AS unknown,
+                   (EXISTS {
+                       MATCH (o:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e)
+                       WHERE NOT o.uuid IN $erased_uuids
+                   } OR EXISTS {
+                       MATCH (e)-[r2:RELATES_TO]-(:Entity)
+                       WHERE r2.fact IS NOT NULL
+                         AND any(u IN coalesce(r2.episodes, []) WHERE NOT u IN $erased_uuids)
+                   }) AS shared
+            """,
+            params={"erased_uuids": erased},
+        )
+        for row in entity_rows or []:
+            if row.get("unknown"):
+                out["unknown_provenance"] += 1
+            elif row.get("shared"):
+                out["entities_flag"].append(str(row["uuid"]))
+            else:
+                out["entities_delete"].append(str(row["uuid"]))
+        if twin_found is None:
+            twin_found = len(erased) > 1
+        if not twin_found:
+            head = self.neo4j.execute(
+                """
+                MATCH (n:Episodic {uuid: $uuid})
+                WHERE n.processing_state = 'READY' AND n.resolved_episode_uuid IS NULL
+                  // verbatim_skipped/store_only rows are READY with no twin by design; only a
+                  // row that recorded extracted data but lost its link is untraceable.
+                  AND (coalesce(toInteger(n.enriched_nodes_touched), 0) > 0
+                       OR coalesce(toInteger(n.enriched_edges_touched), 0) > 0)
+                RETURN count(n) AS n
+                """,
+                params={"uuid": erased[0]},
+            )
+            out["twin_missing"] = bool(head and int(head[0].get("n") or 0) > 0)
+        return out
 
     def list_episodes_missing_content_embedding(
         self,
@@ -507,14 +758,23 @@ class EpisodeLifecycleRepository:
         `namespace=None` does not filter, so an unpinned deployment reaches every turn exactly as
         before and each projection now lands in the right silo.
         """
+        # G-create: lock the turn's namespace fence in the same statement; refuse while an erase holds
+        # it or when the turn or projection uuid is marked. A refusal creates nothing (returns None).
         rows = self.neo4j.execute(
-            """
-            MATCH (t:TurnEvidence {turn_id: $turn_evidence_uuid})
+            f"""
+            MATCH (t:TurnEvidence {{turn_id: $turn_evidence_uuid}})
             WHERE t.role = 'user' AND t.declarant = 'user'
               AND t.text IS NOT NULL AND trim(t.text) <> ''
               AND ($namespace IS NULL OR coalesce(t.namespace, 'default') = $namespace)
-            MERGE (p:Episodic {evidence_projection_of: t.turn_id})
+            WITH t
+            {fence_lock_cypher(fence_key_cypher("t"))}
+            WITH t, f
+            WHERE coalesce(size(f.erasing_ops), 0) = 0
+              AND {marker_absent_for_param_cypher("turn_evidence_uuid")}
+              AND {marker_absent_for_param_cypher("projection_uuid")}
+            MERGE (p:Episodic {{evidence_projection_of: t.turn_id}})
             ON CREATE SET
+                p.created_epoch = coalesce(f.erasure_epoch, 0),
                 p.uuid = $projection_uuid,
                 p.name = $name,
                 p.type = 'EPISODIC',
@@ -559,6 +819,7 @@ class EpisodeLifecycleRepository:
             RETURN p.uuid AS uuid, (p.uuid = $projection_uuid) AS created
             """,
             params={
+                "fence_nonce": uuid.uuid4().hex,
                 "turn_evidence_uuid": turn_evidence_uuid,
                 "projection_uuid": projection_uuid,
                 "name": name,
@@ -661,6 +922,7 @@ class EpisodeLifecycleRepository:
                 "coalesce(toInteger(n.processing_attempts), 0) < $max_attempts",
                 "coalesce(toInteger(n.transient_retries), 0) < $transient_max",
                 "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
+                EPISODE_NOT_MARKED,
             )
             .return_raw("n.uuid AS uuid")
             .order_by("coalesce(n.queued_at, n.created_at) ASC, n.uuid")
@@ -692,6 +954,7 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.processing_state = 'PENDING'",
                 "coalesce(toInteger(n.transient_retries), 0) >= $transient_max",
+                EPISODE_NOT_MARKED,
             )
             .set(
                 (
@@ -726,7 +989,7 @@ class EpisodeLifecycleRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where("n.processing_state = 'FAILED'")
+            .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
             .return_fields(EPISODE_RETRY_FIELDS)
             .order_by("coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at) ASC")
             .limit()
@@ -758,72 +1021,41 @@ class EpisodeLifecycleRepository:
             params={"limit": safe_limit},
         )
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, Any] | None:
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, Any] | None:
+        """The artifact set of a queue node's linked twin, or None (finalize-from-link).
+
+        One read, G-q on the queue node: ``q.resolved_episode_uuid`` must be set and the twin must
+        exist. Returns the twin's uuid, the entities it MENTIONS, the RELATES_TO edges whose
+        ``episodes`` list contains the twin, and the queue node's namespace and fence key. A marked
+        queue node, a node with no link, or a link to a missing twin returns None.
+        """
         rows = self.neo4j.execute(
-            (
-                Cypher()
-                .match("(e:Episodic)-[]-(n:Entity)")
-                .where("e.uuid <> $anchor_uuid", "e.name = $anchor_name")
-                .return_raw("e.uuid AS resolved_episode_uuid, collect(DISTINCT n.uuid) AS entity_uuids")
-                .limit("2")
-                .build()
-            ),
-            params={"anchor_uuid": anchor_uuid, "anchor_name": anchor_name},
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
+            WHERE n.resolved_episode_uuid IS NOT NULL AND {EPISODE_NOT_MARKED}
+            MATCH (g:Episodic {{uuid: n.resolved_episode_uuid}})
+            RETURN g.uuid AS resolved_episode_uuid,
+                   [(g)-[:MENTIONS]->(e:Entity) | e.uuid] AS entity_uuids,
+                   [(:Entity)-[r:RELATES_TO]->(:Entity)
+                    WHERE g.uuid IN coalesce(r.episodes, []) | r.uuid] AS edge_uuids,
+                   n.namespace AS namespace,
+                   {fence_key_cypher("n")} AS fence_namespace_key
+            LIMIT 1
+            """,
+            params={"episode_uuid": episode_uuid},
         )
-        if len(rows) > 1:
-            logger.warning(
-                "Multiple completed episode artifacts found for anchor_name=%s anchor_uuid=%s - skipping reconciliation",
-                anchor_name,
-                anchor_uuid,
-            )
-        if len(rows) != 1:
+        if not rows:
             return None
-
-        resolved_episode_uuid = str(rows[0].get("resolved_episode_uuid") or "")
-        entity_uuids = [
-            str(entity_uuid)
-            for entity_uuid in (rows[0].get("entity_uuids") or [])
-            if str(entity_uuid)
-        ]
-        if not resolved_episode_uuid or not entity_uuids:
+        row = rows[0]
+        resolved = str(row.get("resolved_episode_uuid") or "")
+        if not resolved:
             return None
-
-        edge_uuids: list[str] = []
-        episode_edge_rows = self.neo4j.execute(
-            (
-                Cypher()
-                .match("(:Episodic {uuid: $episode_uuid})-[r]-()")
-                .where("r.uuid IS NOT NULL")
-                .return_raw("collect(DISTINCT r.uuid) AS edge_uuids")
-                .build()
-            ),
-            params={"episode_uuid": resolved_episode_uuid},
-        )
-        if episode_edge_rows:
-            edge_uuids.extend(str(uuid) for uuid in (episode_edge_rows[0].get("edge_uuids") or []) if str(uuid))
-
-        entity_edge_rows = self.neo4j.execute(
-            (
-                Cypher()
-                .match("(a:Entity)-[r]-(b:Entity)")
-                .where("a.uuid IN $entity_uuids", "b.uuid IN $entity_uuids", "r.uuid IS NOT NULL")
-                .return_raw("collect(DISTINCT r.uuid) AS edge_uuids")
-                .build()
-            ),
-            params={"entity_uuids": entity_uuids},
-        )
-        if entity_edge_rows:
-            edge_uuids.extend(str(uuid) for uuid in (entity_edge_rows[0].get("edge_uuids") or []) if str(uuid))
-
         return {
-            "resolved_episode_uuid": resolved_episode_uuid,
-            "entity_uuids": entity_uuids,
-            "edge_uuids": list(dict.fromkeys(edge_uuids)),
+            "resolved_episode_uuid": resolved,
+            "entity_uuids": list(dict.fromkeys(str(u) for u in (row.get("entity_uuids") or []) if u)),
+            "edge_uuids": list(dict.fromkeys(str(u) for u in (row.get("edge_uuids") or []) if u)),
+            "namespace": row.get("namespace"),
+            "fence_namespace_key": str(row.get("fence_namespace_key") or "default"),
         }
 
     def claim_pending_episode(
@@ -856,6 +1088,8 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.uuid = $episode_uuid",
                 "n.processing_state IN ['PENDING', 'FAILED']",
+                EPISODE_NOT_ERASED,
+                EPISODE_NOT_MARKED,
                 "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
                 "(coalesce(toInteger(n.processing_attempts), 0) < $max_attempts"
                 " OR (n.processing_state = 'FAILED'"
@@ -887,6 +1121,14 @@ class EpisodeLifecycleRepository:
                     "n.processing_heartbeat_at = datetime()",
                     "n.processing_error = null",
                     "n.retry_after = null",
+                    # P4 publish fence: reserve the twin uuid this attempt will publish under.
+                    "n.reserved_twin_uuids = coalesce(n.reserved_twin_uuids, [])"
+                    " + $reserved_twin_uuid",
+                    "n.publish_protocol = 2",
+                    # CF-336: binds the protocol flag to this claim. datetime() is the statement
+                    # clock, so it equals processing_started_at above; a later old-code claim
+                    # changes processing_started_at only, and the seal then counts it unfenced.
+                    "n.publish_protocol_claimed_at = datetime()",
                 )
             )
             .with_clause(
@@ -961,12 +1203,17 @@ class EpisodeLifecycleRepository:
                 "n.processing_owner AS processing_owner",
                 "n.processing_started_at AS processing_started_at",
                 "n.processing_lease_expires_at AS processing_lease_expires_at",
+                "$reserved_twin_uuid AS reserved_twin_uuid",
+                "n.resolved_episode_uuid AS resolved_episode_uuid",
+                f"{fence_key_cypher('n')} AS fence_namespace_key",
+                "n.publish_protocol AS publish_protocol",
             )
             .build()
         )
         rows = self.neo4j.execute(
             claim_query,
             params={
+                "reserved_twin_uuid": str(uuid.uuid4()),
                 "episode_uuid": episode_uuid,
                 "max_attempts": max_attempts,
                 "context_retry_attempts": context_cap,
@@ -1029,6 +1276,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
+                EPISODE_NOT_MARKED,
                 "($required_state IS NULL OR n.processing_state = $required_state)",
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING'"
                 " AND n.processing_owner = $worker_id"
@@ -1089,9 +1337,10 @@ class EpisodeLifecycleRepository:
         if not worker_id or claim_started_at is None:
             return None
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $episode_uuid})
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
             WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+              AND {EPISODE_NOT_MARKED}
               AND n.processing_started_at IS NOT NULL
               AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
               AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
@@ -1104,7 +1353,7 @@ class EpisodeLifecycleRepository:
             WITH n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS turns
             WHERE size(turns) = 1 AND n.content = turns[0].text
             WITH n, turns[0] AS t
-            MATCH (p:Episodic {evidence_projection_of: t.turn_id})-[:ADMITTED_ON]->(t)
+            MATCH (p:Episodic {{evidence_projection_of: t.turn_id}})-[:ADMITTED_ON]->(t)
             WHERE p.uuid <> n.uuid
               AND coalesce(p.is_evidence_projection, false)
               AND p.content = n.content
@@ -1164,9 +1413,10 @@ class EpisodeLifecycleRepository:
         if not worker_id or claim_started_at is None:
             return False
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $episode_uuid})
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
             WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+              AND {EPISODE_NOT_MARKED}
               AND n.processing_started_at IS NOT NULL
               AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
               AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
@@ -1219,12 +1469,13 @@ class EpisodeLifecycleRepository:
         Returns the re-enabled client uuids for enqueueing.
         """
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Episodic)
             WHERE n.extraction_skipped_for IS NOT NULL
               AND ($projection_uuid IS NULL OR n.extraction_skipped_for = $projection_uuid)
               AND n.processing_state = 'READY'
-            OPTIONAL MATCH (p:Episodic {uuid: n.extraction_skipped_for})
+              AND {EPISODE_NOT_MARKED}
+            OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
             WITH n, p
             WHERE p IS NULL OR p.processing_state = 'FAILED'
             WITH n LIMIT $limit
@@ -1287,6 +1538,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
+                EPISODE_NOT_MARKED,
                 "(($worker_id IS NULL AND NOT $transient_requeue)"
                 " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
                 + owner_instant,
@@ -1352,6 +1604,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
+                EPISODE_NOT_MARKED,
                 "(($worker_id IS NULL AND NOT $transient_requeue)"
                 " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
                 " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
@@ -1520,7 +1773,7 @@ class EpisodeLifecycleRepository:
             if row.get("episode_uuid")
         }
 
-    def ensure_self_entity(self, namespace: str) -> str:
+    def ensure_self_entity(self, namespace: str) -> str | None:
         """Idempotently MERGE the ONE canonical self :Entity for `namespace` and return its uuid.
 
         The uuid is DETERMINISTIC per namespace (uuid5), so replay never forks a second self node and
@@ -1537,17 +1790,26 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         if not namespace:
             raise ValueError("ensure_self_entity requires a non-empty namespace")
         self_uuid = self_uuid_for_namespace(namespace)
-        self.neo4j.execute(
-            """
-            MERGE (n:Entity {uuid: $self_uuid})
-            ON CREATE SET n.created_at = datetime(), n.summary = $summary
-            SET n.name = $name,
-                n.namespace = $namespace,
-                n.group_id = $group_id,
-                n.is_self = true,
-                n.entity_role = 'self'
+        # G-create: lock the namespace fence in the same statement; refuse while an erase holds it.
+        # A refusal returns None (callers treat a falsy uuid as "self-binding skipped").
+        created = self.neo4j.execute(
+            f"""
+            {fence_lock_cypher("$fence_key")}
+            WITH f, coalesce(size(f.erasing_ops), 0) = 0 AS open
+            FOREACH (_ IN CASE WHEN open THEN [1] ELSE [] END |
+                MERGE (n:Entity {{uuid: $self_uuid}})
+                ON CREATE SET n.created_at = datetime(), n.summary = $summary
+                ON CREATE SET n.created_epoch = coalesce(f.erasure_epoch, 0)
+                SET n.name = $name,
+                    n.namespace = $namespace,
+                    n.group_id = $group_id,
+                    n.is_self = true,
+                    n.entity_role = 'self')
+            RETURN open AS open
             """,
             params={
+                "fence_nonce": uuid.uuid4().hex,
+                "fence_key": str(namespace).strip() or "default",
                 "self_uuid": self_uuid,
                 "name": _SELF_ENTITY_NAME,
                 "namespace": namespace,
@@ -1558,6 +1820,9 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
                 "summary": "Canonical first-person self identity for this namespace.",
             },
         )
+        if created and created[0].get("open") is False:
+            logger.info("ensure_self_entity refused namespace=%s: erase in progress", namespace)
+            return None
         forks = self.detect_self_forks(namespace=namespace, self_uuid=self_uuid)
         if forks:
             # DO NOT absorb here. The old path bulk-rewired and DETACH DELETEd every same-named
@@ -1570,7 +1835,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
             )
         return self_uuid
 
-    def link_self_tiers(self, namespace: str) -> bool:
+    def link_self_tiers(self, namespace: str, *, executor: Any = None) -> bool:
         """Link the anchored self to the inferred self with an INFERRED_VIEW_OF edge.
 
         Structural link only: created only when BOTH tiers already exist (MATCH-only, never
@@ -1578,7 +1843,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         link exists after the call."""
         if not namespace:
             raise ValueError("link_self_tiers requires a non-empty namespace")
-        rows = self.neo4j.execute(
+        rows = (executor or self.neo4j).execute(
             """
             MATCH (a:Entity {uuid: $anchored})
             WHERE a.group_id = $group_id AND coalesce(a.is_self, false)

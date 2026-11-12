@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import uuid as uuidlib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ from typing import Any
 
 from menhir.domain import merge_delta as md
 from menhir.domain import merge_snapshot as ms
+from menhir.domain.erasure import ERASED_MARKER
+from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
@@ -64,6 +67,7 @@ logger = logging.getLogger(__name__)
 # Stable refusal reason codes (contract surface for operator tooling and tests).
 NOT_A_COMMITTED_MERGE = "NOT_A_COMMITTED_MERGE"
 NO_SNAPSHOT = "NO_SNAPSHOT"
+SNAPSHOT_ERASED = "snapshot_erased"
 GRAPH_NOT_IN_MERGE_AFTER_STATE = "GRAPH_NOT_IN_MERGE_AFTER_STATE"
 SURVIVOR_CHANGED_SINCE_MERGE = "SURVIVOR_CHANGED_SINCE_MERGE"
 MISSING_PEER = "MISSING_PEER"
@@ -102,6 +106,25 @@ class UnmergeCoordinator:
                 "leaving for reconcile repair",
                 survivor_uuid, absorbed_uuid, merge_op_id, unmerge_op_id, exc)
 
+    def _snapshot_was_erased(self, merge_op_id: str) -> bool:
+        """Whether an erasure of any subject of this merge has purged content.
+
+        True only when the op has a graph_operation_subjects row matching an erasure_subjects
+        NODE_UUID row already stamped purged. Any read failure reads as False (NO_SNAPSHOT).
+        """
+        try:
+            with connect_telemetry_db(self.journal.db_path) as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM graph_operation_subjects s "
+                    "JOIN erasure_subjects e ON e.subject_value = s.subject_uuid "
+                    "WHERE s.op_id = ? AND e.subject_type = 'NODE_UUID' "
+                    "AND e.purged_at IS NOT NULL LIMIT 1",
+                    (merge_op_id,),
+                ).fetchone()
+            return row is not None
+        except sqlite3.Error:
+            return False
+
     # ------------------------------------------------------------------ public API
     def unmerge(self, merge_op_id: str, *, dry_run: bool = False) -> dict[str, Any]:
         """Reverse a COMMITTED ENTITY_MERGE exactly. Abstains rather than approximating.
@@ -121,6 +144,14 @@ class UnmergeCoordinator:
             }
 
         raw = merge_row.get("before_snapshot_json")
+        if raw == ERASED_MARKER or (not raw and self._snapshot_was_erased(merge_op_id)):
+            return {
+                "restored": 0, "reason": SNAPSHOT_ERASED,
+                "message": (
+                    "this merge is permanently non-reversible: an erasure removed its snapshot"
+                ),
+                "diagnostics": {"merge_op_id": merge_op_id},
+            }
         if not raw:
             return {"restored": 0, "reason": NO_SNAPSHOT,
                     "diagnostics": {"merge_op_id": merge_op_id}}
@@ -654,6 +685,7 @@ __all__ = [
     "UnmergeCoordinator",
     "NOT_A_COMMITTED_MERGE",
     "NO_SNAPSHOT",
+    "SNAPSHOT_ERASED",
     "GRAPH_NOT_IN_MERGE_AFTER_STATE",
     "SURVIVOR_CHANGED_SINCE_MERGE",
     "MISSING_PEER",

@@ -67,7 +67,14 @@ ON CREATE SET c.kept_edge_uuid = row.kept_edge_uuid, c.cause_edge_uuid = row.cau
     c.group_id = row.group_id, c.reason = row.reason, c.cause_source = row.cause_source,
     c.kept_fact = row.kept_fact, c.cause_fact = row.cause_fact, c.kept_by = row.kept_by,
     c.status = 'unresolved', c.created_at = datetime()
-SET c.last_seen_at = datetime(), c.seen_count = coalesce(c.seen_count, 0) + 1
+SET c.last_seen_at = datetime(), c.seen_count = coalesce(c.seen_count, 0) + 1,
+    // CF-331: every episode that caused a sighting, so erasing any of them finds the record.
+    c.cause_episode_uuids = CASE
+        WHEN row.cause_episode_uuid IS NULL
+          OR row.cause_episode_uuid IN coalesce(c.cause_episode_uuids, [])
+        THEN c.cause_episode_uuids
+        ELSE coalesce(c.cause_episode_uuids, []) + row.cause_episode_uuid
+    END
 RETURN count(c) AS recorded
 """
 
@@ -279,7 +286,9 @@ def _as_utc(value: object) -> datetime | None:
         return None
 
 
-def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
+def kept_conflict_rows(
+    kept: list[KeptEdge], cause_episode_uuid: str | None = None
+) -> list[dict[str, Any]]:
     """One row per distinct (kept edge, cause edge); the uuid is derived, so writes are idempotent."""
     rows: dict[str, dict[str, str]] = {}
     for item in kept:
@@ -294,6 +303,8 @@ def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
             "kept_fact": item.kept_fact,
             "cause_fact": item.cause_fact,
         }
+        if cause_episode_uuid:
+            row["cause_episode_uuid"] = cause_episode_uuid
         if item.kept_by != "authority":
             # Absent means authority, so pre-2a records and rows read the same way.
             row["kept_by"] = item.kept_by
@@ -301,15 +312,41 @@ def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
     return list(rows.values())
 
 
-async def record_kept_conflicts(driver: Any, kept: list[KeptEdge]) -> int:
-    """Write unresolved conflict records for ``kept``; returns the number of rows sent."""
-    rows = kept_conflict_rows(kept)
+def kept_conflict_statement(
+    kept: list[KeptEdge], cause_episode_uuid: str | None = None
+) -> tuple[str, dict[str, Any]] | None:
+    """``(cypher, params)`` recording ``kept``, or None when there is nothing to record."""
+    rows = kept_conflict_rows(kept, cause_episode_uuid)
     if not rows:
+        return None
+    return KEPT_CONFLICT_CYPHER, {"rows": rows}
+
+
+async def record_kept_conflicts_in_tx(
+    run: Any, kept: list[KeptEdge], cause_episode_uuid: str | None = None
+) -> int:
+    """Same write inside an open publish transaction; ``run`` is ``async (cypher, params) -> rows``.
+
+    A Cypher error propagates (it poisons the transaction), rolling the publish back.
+    """
+    statement = kept_conflict_statement(kept, cause_episode_uuid)
+    if statement is None:
         return 0
-    await asyncio.wait_for(
-        driver.execute_query(KEPT_CONFLICT_CYPHER, rows=rows), timeout=_RECORD_TIMEOUT_S
-    )
-    return len(rows)
+    cypher, params = statement
+    await run(cypher, params)
+    return len(params["rows"])
+
+
+async def record_kept_conflicts(
+    driver: Any, kept: list[KeptEdge], cause_episode_uuid: str | None = None
+) -> int:
+    """Write unresolved conflict records for ``kept``; returns the number of rows sent."""
+    statement = kept_conflict_statement(kept, cause_episode_uuid)
+    if statement is None:
+        return 0
+    cypher, params = statement
+    await asyncio.wait_for(driver.execute_query(cypher, **params), timeout=_RECORD_TIMEOUT_S)
+    return len(params["rows"])
 
 
 #: Edge properties the guard reads that must survive duplicate resolution. A paraphrased

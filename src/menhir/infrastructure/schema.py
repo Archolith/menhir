@@ -211,6 +211,9 @@ def _node_index_queries() -> list[str]:
             # Unindexed that is a full :Entity label scan on the highest-cardinality label to find a
             # handful of verifiers. Measured: 44,013 -> 7 dbHits for 3 verifiers among 22,003.
             "CREATE INDEX entity_is_verifier_idx IF NOT EXISTS FOR (n:Entity) ON (n.is_verifier)",
+            # Erase markers (G-q) are probed by uuid on every guarded write and by op_id on release.
+            "CREATE INDEX erasure_marker_subject_uuid_idx IF NOT EXISTS FOR (n:ErasureMarker) ON (n.subject_uuid)",
+            "CREATE INDEX erasure_marker_op_id_idx IF NOT EXISTS FOR (n:ErasureMarker) ON (n.op_id)",
         ]
     )
     # :Todo and its owned :TodoLocation value objects. Before these, :Todo had no

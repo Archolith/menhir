@@ -586,12 +586,18 @@ Concept id: `mcp.tool.delete_memory`
 
 Delete a specific memory node and all its relationships.
 - **`node_uuid`** (str): The UUID of the memory node to delete.
+- Also deletes facts/entities derived only from it. Shared ones are stripped of the erased episode
+  and flagged `rederive_pending`; their text is blanked at erase time and hidden from recall until
+  the `derived_rederive` job rebuilds it from the remaining sources. Reasons include `prepare_failed` (did not run) and `erased_incomplete` (items without
+  provenance, or a missing twin).
 
 ### `delete_namespace`
 Concept id: `mcp.tool.delete_namespace`
 Required tier: `operator`
 
 Tear down a throwaway/eval namespace silo. Refuses the default/shared namespace.
+Includes the namespace's TODOs and WorkArtifacts and their unshared subordinates; not the
+structure graph. Results carry `by_label`; dry runs also list `not_covered`.
 - **`namespace`** (str): The namespace silo to delete.
 - **`max_nodes`** (int, optional): Safety gate — refuses deletion if the namespace has
   more nodes than this (default: 200).

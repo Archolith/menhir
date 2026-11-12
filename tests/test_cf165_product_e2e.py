@@ -75,6 +75,10 @@ def product_stack(test_neo4j_repo, tmp_path, monkeypatch):
 
     real_store = store_mod.McpTelemetryStore(db_path=db)
     real_store._ensure_ready()
+    # R2 CF-329: pending_actions is a classified content table created by its own store.
+    from menhir.infrastructure.pending_actions import PendingActionStore
+
+    PendingActionStore(db_path=db)._ensure_ready()
 
     # The recorders bind their store as a DEFAULT ARGUMENT
     # (`store: McpTelemetryStore = telemetry_store`), evaluated once at function definition.
@@ -125,6 +129,20 @@ def _text_columns(db) -> list[tuple[str, str]]:
     return out
 
 
+def _assert_gone_or_erased_tombstone(repo, node_uuid: str, message: str) -> None:
+    """A not-yet-enriched queue node is kept as a content-less FAILED/deleted_by_user tombstone so
+    its queue stops and an in-flight worker can compensate (#476); anything else must be gone.
+    (Before #476 a UNION bug deleted the tombstone too, which is what this used to assert.)"""
+    rows = repo.execute(
+        "MATCH (n) WHERE n.uuid = $u RETURN n.processing_state AS state, "
+        "n.processing_error AS error, n.erased_at IS NOT NULL AS erased, n.content AS content",
+        params={"u": node_uuid},
+    )
+    for row in rows:
+        assert row["state"] == "FAILED" and row["error"] == "deleted_by_user", message
+        assert row["erased"] and row["content"] is None, message
+
+
 def _sentinel_hits(db, sentinel: str) -> list[tuple[str, str, int]]:
     """(table, column, count) for every place the sentinel survives."""
     hits: list[tuple[str, str, int]] = []
@@ -143,11 +161,17 @@ def _sentinel_hits(db, sentinel: str) -> list[tuple[str, str, int]]:
 
 
 def _graph_hits(repo, sentinel: str) -> int:
-    """The sentinel anywhere in any string property of any node in the real graph."""
+    """The sentinel anywhere in any scalar or list-valued property of any node in the real graph."""
     rows = repo.execute(
         """
         MATCH (n)
-        WITH n, [k IN keys(n) WHERE toString(n[k]) CONTAINS $s] AS bad
+        WITH n, [k IN keys(n) WHERE
+            CASE
+              WHEN valueType(n[k]) STARTS WITH 'LIST'
+                THEN any(x IN n[k] WHERE coalesce(toString(x), '') CONTAINS $s)
+              ELSE coalesce(toString(n[k]), '') CONTAINS $s
+            END
+        ] AS bad
         WHERE size(bad) > 0
         RETURN count(n) AS c
         """,
@@ -248,10 +272,7 @@ def test_real_writer_ingest_then_saga_erase_leaves_zero_content_anywhere(product
     )
     assert _graph_hits(repo, sentinel) == 0, "the sentinel survives in a graph property"
 
-    rows = repo.execute(
-        "MATCH (n) WHERE n.uuid = $u RETURN count(n) AS c", params={"u": node_uuid}
-    )
-    assert int(rows[0]["c"]) == 0, "the graph node survived"
+    _assert_gone_or_erased_tombstone(repo, node_uuid, "the graph node survived")
 
 
 @pytest.mark.online
@@ -273,6 +294,26 @@ def test_the_scan_is_not_vacuous(product_stack) -> None:
     tables = {t for t, _c, _n in hits}
     assert "memory_revisions" in tables, f"expected a revision copy; scanner saw {hits}"
     assert _graph_hits(repo, sentinel) > 0, "the graph scanner found nothing either"
+
+
+@pytest.mark.online
+def test_the_graph_scan_sees_a_needle_planted_in_a_list_property(product_stack) -> None:
+    """Instrument check for CF-339: a list-valued property must be scanned element-wise."""
+    _adapter, _coordinator, _db, repo, _store = product_stack
+    sentinel = f"SENTINEL-{uuidlib.uuid4().hex}-IN-A-LIST"
+    probe = f"cf339-list-probe-{uuidlib.uuid4().hex}"
+    try:
+        repo.execute(
+            "CREATE (:Cf339ListProbe {uuid:$u, tags:['harmless', $s, 'other'], "
+            "nums:[1, 2, 3]})",
+            params={"u": probe, "s": sentinel},
+        )
+        assert _graph_hits(repo, sentinel) == 1, "the graph scan missed a list-valued property"
+        assert _graph_hits(repo, f"{sentinel}-absent") == 0
+    finally:
+        repo.execute(
+            "MATCH (n:Cf339ListProbe {uuid:$u}) DETACH DELETE n", params={"u": probe}
+        )
 
 
 @pytest.mark.online
@@ -347,7 +388,4 @@ def test_a_crash_after_prepare_replays_to_the_same_zero_content_state(product_st
     assert "REPLAYED" in replayed, f"the prepared erasure was not replayed: {replayed}"
     assert _sentinel_hits(db, sentinel) == [], "content survived the replayed erasure"
     assert _graph_hits(repo, sentinel) == 0
-    rows = repo.execute(
-        "MATCH (n) WHERE n.uuid = $u RETURN count(n) AS c", params={"u": node_uuid}
-    )
-    assert int(rows[0]["c"]) == 0, "the graph node survived the replay"
+    _assert_gone_or_erased_tombstone(repo, node_uuid, "the graph node survived the replay")

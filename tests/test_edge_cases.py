@@ -581,18 +581,18 @@ class TestLLMWrongSchema:
 
 class TestPartialStampFailure:
     """If stamp_ingest_metadata fails after Graphiti succeeds,
-    try_reconcile_existing should recover on retry."""
+    finalize_from_link should recover on retry."""
 
     async def test_reconcile_finds_existing_completion(
         self,
         stub_memory_graph_adapter,
     ):
-        """When find_completed_episode_artifact returns data, reconcile succeeds."""
+        """When the claim carries a link and linked_twin_artifact returns data, finalize succeeds."""
         from unittest.mock import AsyncMock, patch
-        from menhir.services.enrichment_steps import EnrichmentContext, try_reconcile_existing
+        from menhir.services.enrichment_steps import EnrichmentContext, finalize_from_link
 
-        # Key must match (anchor_uuid, anchor_name) that try_reconcile_existing will look up
-        stub_memory_graph_adapter.completed_episode_artifacts[("ep-1", "test-ep")] = {
+        # Keyed by the queue node uuid: the link, not a name match, identifies the twin
+        stub_memory_graph_adapter.completed_episode_artifacts["ep-1"] = {
             "resolved_episode_uuid": "resolved-123",
             "entity_uuids": ["ent-1", "ent-2"],
             "edge_uuids": ["edge-1"],
@@ -605,7 +605,10 @@ class TestPartialStampFailure:
 
         ctx = EnrichmentContext(
             episode_uuid="ep-1",
-            claimed={"name": "test-ep", "session_id": "s1", "user_id": "u1", "source": "test"},
+            claimed={
+                "name": "test-ep", "session_id": "s1", "user_id": "u1", "source": "test",
+                "resolved_episode_uuid": "resolved-123",
+            },
             started=perf_counter(),
             processing_attempts=1,
             worker_id="w1",
@@ -623,15 +626,15 @@ class TestPartialStampFailure:
         )
 
         with patch("menhir.services.enrichment_steps.record_mcp_event"):
-            handled = await try_reconcile_existing(ctx)
+            handled = await finalize_from_link(ctx)
         assert handled is True
 
     async def test_reconcile_returns_false_when_no_artifact(
         self,
         stub_memory_graph_adapter,
     ):
-        """When no prior completion exists, reconcile returns False."""
-        from menhir.services.enrichment_steps import EnrichmentContext, try_reconcile_existing
+        """When the claim carries no link, finalize-from-link returns False."""
+        from menhir.services.enrichment_steps import EnrichmentContext, finalize_from_link
 
         ctx = EnrichmentContext(
             episode_uuid="ep-new",
@@ -652,7 +655,7 @@ class TestPartialStampFailure:
             get_queue_depth=lambda: 0,
         )
 
-        handled = await try_reconcile_existing(ctx)
+        handled = await finalize_from_link(ctx)
         assert handled is False
 
 
@@ -1166,7 +1169,7 @@ class TestRetryDeletedEpisode:
 
         @dataclass
         class _MinimalAdapter:
-            def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+            def linked_twin_artifact(self, episode_uuid: str) -> None:
                 return None
 
         @dataclass
@@ -1201,7 +1204,7 @@ class TestRetryDeletedEpisode:
 
         @dataclass
         class _MinimalAdapter:
-            def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+            def linked_twin_artifact(self, episode_uuid: str) -> None:
                 return None
 
         @dataclass
@@ -1234,7 +1237,7 @@ class TestRetryDeletedEpisode:
 
         @dataclass
         class _MinimalAdapter:
-            def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+            def linked_twin_artifact(self, episode_uuid: str) -> None:
                 return None
 
         requeued: list[str] = []
@@ -1275,7 +1278,7 @@ class TestRetryDeletedEpisode:
 
         @dataclass
         class _MinimalAdapter:
-            def find_completed_episode_artifact(self, *, anchor_uuid: str, anchor_name: str) -> None:
+            def linked_twin_artifact(self, episode_uuid: str) -> None:
                 return None
 
         @dataclass

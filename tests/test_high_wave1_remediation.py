@@ -776,7 +776,7 @@ async def test_three_retryable_failures_leave_the_episode_claimable_not_parked()
     ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
-            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            SimpleNamespace(linked_twin_artifact=lambda *a, **k: None),
             ingest,
             _retry_row(adapter, "ep-79"),
             max_attempts=3,
@@ -824,7 +824,7 @@ async def test_three_manual_review_failures_still_consume_attempts_and_park() ->
     ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
-            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            SimpleNamespace(linked_twin_artifact=lambda *a, **k: None),
             ingest,
             _retry_row(adapter, "ep-79"),
             max_attempts=3,
@@ -906,7 +906,7 @@ async def test_scheduler_exhausts_on_the_transient_cap_for_retryable_rows() -> N
     ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
-            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            SimpleNamespace(linked_twin_artifact=lambda *a, **k: None),
             ingest,
             row,
             max_attempts=3,

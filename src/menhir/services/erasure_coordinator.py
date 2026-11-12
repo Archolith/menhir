@@ -9,6 +9,7 @@ subjects from a graph that may already be gone.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import uuid as uuidlib
@@ -16,9 +17,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from menhir.domain.namespace import normalize_namespace
+from menhir.infrastructure.erasure_fence import (
+    ERASURE_MARKER_LABEL,
+    SealResult,
+    release_memory,
+    release_orphaned_erasing_ops,
+    seal_memory,
+    seal_namespace,
+)
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.infrastructure.telemetry.erasure_purge import (
     ErasureSubjects,
     count_residual_content,
@@ -91,7 +102,14 @@ class ErasureCoordinator:
         McpTelemetryStore(db_path=self.journal.db_path)._ensure_ready()
 
     # ------------------------------------------------------------------ public entry points
-    def erase_memory(self, node_uuid: str, *, dry_run: bool = False) -> dict[str, Any]:
+    def erase_memory(
+        self,
+        node_uuid: str,
+        *,
+        dry_run: bool = False,
+        caller_namespace: str | None = None,
+        _follow_late_twin: bool = True,
+    ) -> dict[str, Any]:
         """Erase one memory -- the node, its `:Episodic` twin, and every sidecar row addressable to them.
 
         A memory has two `:Episodic` nodes (Menhir's queue node and the Graphiti episode it resolves
@@ -107,28 +125,96 @@ class ErasureCoordinator:
         node_uuid = (node_uuid or "").strip()
         if not node_uuid:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
+        scope = (caller_namespace or "").strip()
+        if scope:
+            # CF-326: the transport guards look up Entity/Episodic only, so a scoped caller holding
+            # a foreign TurnEvidence turn_id got through. This check sits below every transport;
+            # nothing is prepared, sealed or purged for a foreign target.
+            keys_lookup = getattr(self.graph_adapter, "erase_target_namespace_keys", None)
+            keys = list(keys_lookup(node_uuid) or []) if callable(keys_lookup) else []
+            if keys and keys != [normalize_namespace(scope)]:
+                return {
+                    "reason": ERASED_INCOMPLETE,
+                    "incomplete_reasons": ["foreign_target"],
+                    "purged": {},
+                }
         twin_lookup = getattr(self.graph_adapter, "episodic_twin_uuids", None)
         twins = [str(t) for t in (twin_lookup(node_uuid) if callable(twin_lookup) else []) if t]
         evidence_lookup = getattr(self.graph_adapter, "erasure_evidence_uuids", None)
         evidence: list[str] = []
         if callable(evidence_lookup):
             for base in [node_uuid, *twins]:
-                evidence.extend(str(u) for u in (evidence_lookup(base) or []) if u)
+                found = (
+                    evidence_lookup(base, caller_namespace=scope)
+                    if scope
+                    else evidence_lookup(base)
+                )
+                evidence.extend(str(u) for u in (found or []) if u)
         targets: list[str] = []
         for target in [node_uuid, *twins, *evidence]:
             if target not in targets:
                 targets.append(target)
-        return self._run(
-            subjects=[("NODE_UUID", target) for target in targets],
-            purge=_subjects_for_uuids(set(targets)),
-            request={"targets": targets, "namespace": None},
+        # Derived facts/entities restating the memory (#423); fail closed like the twin lookup.
+        preview_lookup = getattr(self.graph_adapter, "erasure_derived_preview", None)
+        preview = preview_lookup(targets, twin_found=bool(twins)) if callable(preview_lookup) else {}
+        if not isinstance(preview, dict):
+            preview = {}
+        derived = _new_derived()
+        caller_namespace = (caller_namespace or "").strip() or None
+        derived["caller_namespace"] = caller_namespace
+        derived["twin_missing"] = bool(preview.get("twin_missing"))
+        # Only entities fenced at PREPARE may be deleted; a merge holding one makes PREPARE fail.
+        fence = sorted({str(u) for u in preview.get("entities_delete") or [] if u} - set(targets))
+        derived["deletable"] = set(fence)
+        derived_uuids = sorted(
+            {str(u) for k in ("entities_delete", "edges_delete") for u in preview.get(k) or [] if u}
+            - set(targets)
+        )
+        outcome = self._run(
+            # DERIVED_UUID is purge-only: replay must never delete a derived node by uuid.
+            subjects=[("NODE_UUID", target) for target in targets]
+            + [("DERIVED_UUID", u) for u in derived_uuids],
+            purge=_subjects_for_uuids(set(targets) | set(derived_uuids)),
+            request={"targets": targets, "fence_uuids": fence, "namespace": None,
+                     "caller_namespace": caller_namespace},
             target_uuid=node_uuid,
             target_key=None,
-            delete_graph=lambda: sum(
-                1 if self.graph_adapter.delete_memory(target) else 0 for target in targets
+            delete_graph=lambda closure=(): self._delete_memory_targets(
+                list(dict.fromkeys([*targets, *closure])), derived
             ),
             dry_run=dry_run,
+            derived=derived,
+            seal=self._seal_for(
+                lambda neo4j, op_id: seal_memory(
+                    neo4j, op_id, targets, caller_namespace=scope or None
+                )
+            ),
         )
+        # A twin linked after the targets were resolved keeps the queue node as a flagged
+        # tombstone (B-1). Erase it now; the sweep's pending retry covers a crash before this.
+        pending = getattr(self.graph_adapter, "erasure_compensation_pending", None)
+        if _follow_late_twin and not dry_run and callable(pending) and pending(node_uuid):
+            follow = self.erase_memory(
+                node_uuid, caller_namespace=caller_namespace, _follow_late_twin=False
+            )
+            clear = getattr(self.graph_adapter, "clear_erasure_compensation", None)
+            if callable(clear):
+                clear(node_uuid)
+            outcome = {**outcome, "late_twin_erased": follow.get("reason")}
+            # CF-325: a follow-up that is itself erased_incomplete left residue; the outer reply
+            # must not stay a success class over it.
+            if follow.get("reason") not in DELETION_SUCCEEDED_REASONS:
+                outcome["reason"] = ERASED_INCOMPLETE
+                outcome["incomplete_reasons"] = list(
+                    dict.fromkeys(
+                        [
+                            *outcome.get("incomplete_reasons", []),
+                            "late_twin_erase_failed",
+                            *(follow.get("incomplete_reasons") or []),
+                        ]
+                    )
+                )
+        return outcome
 
     def erase_namespace(
         self, group_id: str, *, namespace: str | None = None, dry_run: bool = False
@@ -169,8 +255,13 @@ class ErasureCoordinator:
             },
             target_uuid=None,
             target_key=f"erasure:namespace:{group_id}",
-            delete_graph=lambda: self._delete_namespace_graph(group_id, namespace=namespace),
+            delete_graph=lambda closure=(): self._delete_namespace_graph(
+                group_id, namespace=namespace
+            ),
             dry_run=dry_run,
+            seal=self._seal_for(
+                lambda neo4j, op_id: seal_namespace(neo4j, op_id, str(namespace or group_id))
+            ),
         )
 
     # ------------------------------------------------------------------ saga body
@@ -184,6 +275,8 @@ class ErasureCoordinator:
         target_key: str | None,
         delete_graph: Any,
         dry_run: bool,
+        derived: dict[str, Any] | None = None,
+        seal: Any = None,
     ) -> dict[str, Any]:
         if dry_run:
             with self._connect() as conn:
@@ -205,6 +298,7 @@ class ErasureCoordinator:
                 "would_purge": preview.rows_affected,
                 "unaddressable": sorted({*preview.skipped_unaddressable, *stranded}),
                 "unaddressable_rows": stranded,
+                **({"incomplete_reasons": ["unaddressable_content"]} if stranded else {}),
             }
 
         op_id = uuidlib.uuid4().hex
@@ -239,7 +333,52 @@ class ErasureCoordinator:
                 op_id=op_id,
                 purge=purge,
                 delete_graph=delete_graph,
+                derived=derived,
+                seal=seal,
             )
+
+    def _fence_neo4j(self) -> Any:
+        """The graph repository the erasure fence runs on, or None when the adapter has none."""
+        neo4j = getattr(self.graph_adapter, "neo4j", None)
+        return neo4j if callable(getattr(neo4j, "execute_write", None)) else None
+
+    def _seal_for(self, seal_fn: Any) -> Any:
+        """Bind ``seal_fn(neo4j, op_id)`` to this coordinator's repository (None without one)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return None
+        return lambda op_id: seal_fn(neo4j, op_id)
+
+    def _sealed_closure_uuids(self, op_id: str) -> set[str]:
+        """Every subject this op's seal marked (empty without a fence repository)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return set()
+        rows = neo4j.execute(
+            f"MATCH (m:{ERASURE_MARKER_LABEL} {{op_id: $op_id}}) "
+            "RETURN DISTINCT m.subject_uuid AS uuid",
+            params={"op_id": op_id},
+        )
+        return {str(r["uuid"]) for r in rows if r.get("uuid")}
+
+    def _rederive_flagged_uuids(self, erased: set[str]) -> set[str]:
+        """Items an erase of ``erased`` flagged for rederive (their repair keys name the erased uuid)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None or not erased:
+            return set()
+        rows = neo4j.execute(
+            "UNWIND $uuids AS u MATCH (rr:DerivedRederiveRepair) "
+            "WHERE rr.repair_key STARTS WITH u + $sep RETURN DISTINCT rr.item_uuid AS uuid",
+            params={"uuids": sorted(erased), "sep": "\x1f"},
+        )
+        return {str(r["uuid"]) for r in rows if r.get("uuid")} - erased
+
+    def release_orphaned_erasing_ops(self) -> list[str]:
+        """Release fence entries whose journal row is terminal or absent (scheduler sweep)."""
+        neo4j = self._fence_neo4j()
+        if neo4j is None:
+            return []
+        return release_orphaned_erasing_ops(neo4j, self.journal)
 
     def _erase_and_verify(
         self,
@@ -247,10 +386,35 @@ class ErasureCoordinator:
         op_id: str,
         purge: ErasureSubjects,
         delete_graph: Any,
+        derived: dict[str, Any] | None = None,
+        seal: Any = None,
+        release_fence: bool = False,
     ) -> dict[str, Any]:
-        """Delete graph state, purge the sidecar, verify, then transition."""
+        """Seal, delete graph state, release, purge the sidecar, verify, then transition."""
+        if derived is None:
+            derived = _new_derived()
+        incomplete_reasons: list[str] = []
+        sealed: SealResult | None = None
         try:
-            graph_deleted = int(delete_graph() or 0)
+            if seal is not None:
+                result_seal = seal(op_id)
+                sealed = result_seal if isinstance(result_seal, SealResult) else None
+            closure: list[str] = []
+            if sealed is not None:
+                closure = [u for u in sealed.closure_uuids if u not in purge.node_uuids]
+                if closure:
+                    # Durable before the deletes: a replay must reach what the seal found.
+                    with self._connect() as conn:
+                        self.subjects.record_subjects(
+                            op_id, [("NODE_UUID", u) for u in closure], conn=conn
+                        )
+                        conn.commit()
+                    purge = _subjects_for_uuids(
+                        set(purge.node_uuids) | set(closure), namespaces=frozenset(purge.namespaces)
+                    )
+                if sealed.unfenced_inflight:
+                    incomplete_reasons.append("unfenced_inflight")
+            graph_deleted = int(delete_graph(closure) or 0)
         except Exception as exc:  # noqa: BLE001
             self.journal.record_attempt(
                 op_id,
@@ -258,6 +422,42 @@ class ErasureCoordinator:
                 owner_token=oo.process_owner_token(),
             )
             raise
+        finally:
+            if sealed is not None or release_fence:
+                neo4j = self._fence_neo4j()
+                if neo4j is not None:
+                    try:
+                        release_memory(neo4j, op_id)
+                    except Exception:  # noqa: BLE001
+                        # Markers stay and the orphan sweep releases the epoch later.
+                        logger.warning("erasure %s: fence release failed", op_id, exc_info=True)
+                        incomplete_reasons.append("fence_release_failed")
+
+        # Derived/merge uuids found during the graph delete join the purge set. They exist only in
+        # memory and the graph delete already removed what found them, so record them before
+        # anything that can fail and leave the op PREPARED: replay cannot rediscover them (F2).
+        extra = set(derived["extra_uuids"]) - set(purge.node_uuids)
+        if extra:
+            with self._connect() as conn:
+                self.subjects.record_subjects(
+                    op_id, [("DERIVED_UUID", u) for u in sorted(extra)], conn=conn
+                )
+                conn.commit()
+            purge = _subjects_for_uuids(
+                set(purge.node_uuids) | extra, namespaces=frozenset(purge.namespaces)
+            )
+        # CF-335: live items the cascade scrubbed or flagged keep their rows, but their node-keyed
+        # sidecar content (memory_revisions, ...) can quote the erased text. FLAGGED_UUID is purged
+        # by column and never denylisted. Replay recovers these from DerivedRederiveRepair keys.
+        flagged = (
+            set(derived["entities_flagged"]) | set(derived["edges_flagged"])
+        ) - set(purge.node_uuids)
+        if flagged:
+            with self._connect() as conn:
+                self.subjects.record_subjects(
+                    op_id, [("FLAGGED_UUID", u) for u in sorted(flagged)], conn=conn
+                )
+                conn.commit()
 
         try:
             # #527: a queued observability row for this subject must land before the purge,
@@ -267,8 +467,17 @@ class ErasureCoordinator:
 
             TELEMETRY_WRITER.drain_strict(_SQLITE_BUSY_TIMEOUT_S * 2)
             with self._connect() as conn:
-                result = purge_content(conn, purge, dry_run=False)
-                leftover = count_residual_content(conn, purge)
+                # This erasure's own row is still PREPARED (the purge skips unresolved rows), but
+                # a recorded attempt's exception text can quote the content being erased.
+                conn.execute(
+                    "UPDATE graph_operations SET last_error = NULL WHERE op_id = ?", (op_id,)
+                )
+                # Op-keyed: the purge and census read subjects by subquery over erasure_subjects,
+                # never as one bound variable per member (40k-member erases). Rows are blanked,
+                # not deleted; secure_delete plus scheduled compaction removes the old bytes.
+                op_purge = ErasureSubjects(op_id=op_id)
+                result = purge_content(conn, op_purge, dry_run=False)
+                leftover = count_residual_content(conn, op_purge)
                 self.subjects.mark_purged(op_id, conn=conn)
                 conn.commit()
         except Exception as exc:  # noqa: BLE001
@@ -278,6 +487,31 @@ class ErasureCoordinator:
                 owner_token=oo.process_owner_token(),
             )
             raise
+
+        # Best effort: fold the WAL so purged pages do not linger in it.
+        import time as _time
+
+        wal_checkpoint_complete = False
+        try:
+            checkpoint_conn = self._connect()
+            try:
+                # TRUNCATE waits out the busy handler on every attempt while a reader holds an old
+                # snapshot; the default 5 s handler times 6 attempts past the caller's 30 s timeout.
+                checkpoint_conn.execute("PRAGMA busy_timeout=250")
+                for delay in (0.1, 0.2, 0.4, None):
+                    row = checkpoint_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                    if row is not None and int(row[0]) == 0:
+                        wal_checkpoint_complete = True
+                        break
+                    if delay is None:
+                        break
+                    _time.sleep(delay)
+            finally:
+                checkpoint_conn.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("erasure %s: wal_checkpoint(TRUNCATE) failed: %s", op_id, exc)
+        if not wal_checkpoint_complete:
+            logger.warning("erasure %s: WAL checkpoint did not complete (busy reader/writer)", op_id)
 
         if leftover:
             self.journal.mark_needs_review(
@@ -313,10 +547,35 @@ class ErasureCoordinator:
         else:
             reason = NOTHING_TO_ERASE
 
-        if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (stranded or not stranded_known):
+        derived_summary = {
+            "entities_deleted": len(derived["entities_deleted"]),
+            "entities_flagged": len(derived["entities_flagged"]),
+            "edges_deleted": len(derived["edges_deleted"]),
+            "edges_flagged": len(derived["edges_flagged"]),
+            "unknown_provenance": int(derived["unknown_provenance"]),
+            "conflicts_deleted": int(derived["conflicts_deleted"]),
+            "twin_missing": bool(derived["twin_missing"]),
+            "merge_audits_tombstoned": int(derived["merge_audits_tombstoned"]),
+            "merge_audits_unscrubbed": int(derived["merge_audits_unscrubbed"]),
+        }
+        for flag, why in (
+            (stranded, "unaddressable_content"),
+            (not stranded_known, "unaddressable_census_failed"),
+            (derived_summary["unknown_provenance"] > 0, "unknown_provenance"),
+            # An unparseable merge_audit entry naming the target may still hold its text.
+            (derived_summary["merge_audits_unscrubbed"] > 0, "merge_audits_unscrubbed"),
+            (derived_summary["twin_missing"], "twin_missing"),
+            (not wal_checkpoint_complete, "wal_checkpoint_incomplete"),
+        ):
+            if flag and reason in (ERASED, GRAPH_ALREADY_ABSENT):
+                incomplete_reasons.append(why)
+        if incomplete_reasons:
             reason = ERASED_INCOMPLETE
 
         return {
+            **({"incomplete_reasons": incomplete_reasons} if reason == ERASED_INCOMPLETE else {}),
+            "wal_checkpoint_complete": wal_checkpoint_complete,
+            "derived": derived_summary,
             "reason": reason,
             "op_id": op_id,
             "graph_deleted": graph_deleted,
@@ -377,16 +636,51 @@ class ErasureCoordinator:
             for r in pending
             if r["subject_type"] == "NAMESPACE"
         }
-        purge = _subjects_for_uuids(node_uuids, namespaces=frozenset(namespaces))
+        derived_uuids = {
+            str(r["subject_value"]) for r in pending if r["subject_type"] == "DERIVED_UUID"
+        }
+        # CF-334: the seal commits before its closure is recorded here, so a crash in between
+        # leaves closure-only twins known only to their markers. Read them back by op id.
+        sealed_closure = self._sealed_closure_uuids(op_id) - node_uuids - derived_uuids
+        if sealed_closure:
+            self.subjects.record_subjects(
+                op_id, [("NODE_UUID", u) for u in sorted(sealed_closure)]
+            )
+            node_uuids |= sealed_closure
+        # CF-335: the cascade's flagged items are known only to the graph once it commits; a
+        # crash before the first attempt recorded them leaves their repair nodes, keyed by the
+        # erased uuid, as the durable fact.
+        repaired = self._rederive_flagged_uuids(node_uuids | derived_uuids)
+        if repaired:
+            self.subjects.record_subjects(
+                op_id, [("FLAGGED_UUID", u) for u in sorted(repaired)]
+            )
+        purge = _subjects_for_uuids(
+            node_uuids | derived_uuids, namespaces=frozenset(namespaces)
+        )
 
         # CF-271/F5: the replay mutates the graph and sidecar exactly as the first attempt does, so it
         # holds the same ownership heartbeat and revocation predicate the dispatcher's claim began.
+        derived = _new_derived()
+        # Still fenced: the row is PREPARED, so its participant locks (incl. fence_uuids) hold.
+        derived["deletable"] = set(_request_fence_uuids(row))
+        derived["caller_namespace"] = _request_caller_namespace(row)
         with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
             result = self._erase_and_verify(
                 op_id=op_id,
                 purge=purge,
-                delete_graph=lambda: self._replay_graph_deletes(namespaces, node_uuids),
+                delete_graph=lambda closure=(): self._replay_graph_deletes(
+                    namespaces, node_uuids, derived=derived
+                ),
+                derived=derived,
+                release_fence=True,
             )
+        neo4j = self._fence_neo4j()
+        if neo4j is not None:
+            try:
+                release_orphaned_erasing_ops(neo4j, self.journal)
+            except Exception:  # noqa: BLE001
+                logger.warning("orphaned erasing-op release failed", exc_info=True)
         if result.get("reason") == RESIDUAL_CONTENT:
             return DRIFTED, {
                 "observed_error": (
@@ -413,7 +707,55 @@ class ErasureCoordinator:
             deleted += int(purge_turn_evidence(logical_namespace) or 0)
         return deleted
 
-    def _replay_graph_deletes(self, namespaces: set[str], node_uuids: set[str]) -> int:
+    def _delete_memory_targets(self, targets: list[str], derived: dict[str, Any]) -> int:
+        """Delete each target with the whole erasure's uuids in scope, then scrub merge audits."""
+        detailed = getattr(self.graph_adapter, "delete_memory_detailed", None)
+        deleted = 0
+        for target in targets:
+            result = (
+                detailed(
+                    target,
+                    erased_uuids=list(targets),
+                    deletable_entity_uuids=sorted(derived.get("deletable") or ()),
+                    **({"scope_namespace": derived["caller_namespace"]}
+                       if derived.get("caller_namespace") else {}),
+                )
+                if callable(detailed)
+                else None
+            )
+            if isinstance(result, dict):
+                touched = bool(result.get("touched"))
+                _fold_derived(derived, result)
+            else:
+                touched = bool(self.graph_adapter.delete_memory(target))
+            deleted += 1 if touched else 0
+        scrub = getattr(self.graph_adapter, "scrub_merge_audit_for_episodes", None)
+        if callable(scrub):
+            scrubbed = scrub(
+                list(targets),
+                sorted(derived["entities_deleted"]),
+                **({"namespace": derived["caller_namespace"]}
+                   if derived.get("caller_namespace") else {}),
+            )
+            if isinstance(scrubbed, dict):
+                derived["merge_audits_tombstoned"] += int(
+                    scrubbed.get("merge_audits_tombstoned") or 0
+                )
+                derived["merge_audits_unscrubbed"] += int(
+                    scrubbed.get("merge_audits_unscrubbed") or 0
+                )
+                derived["extra_uuids"].update(
+                    str(u) for u in scrubbed.get("merge_absorbed_uuids") or [] if u
+                )
+        return deleted
+
+    def _replay_graph_deletes(
+        self,
+        namespaces: set[str],
+        node_uuids: set[str],
+        *,
+        derived: dict[str, Any] | None = None,
+    ) -> int:
         """Re-run every graph-side delete and propagate any failure to keep PREPARED unresolved."""
         deleted = 0
         purge_turn_evidence = getattr(self.graph_adapter, "purge_turn_evidence", None)
@@ -421,13 +763,16 @@ class ErasureCoordinator:
             deleted += int(self.graph_adapter.delete_namespace(namespace) or 0)
             if callable(purge_turn_evidence):
                 deleted += int(purge_turn_evidence(namespace) or 0)
-        for node_uuid in sorted(node_uuids):
-            deleted += 1 if self.graph_adapter.delete_memory(node_uuid) else 0
+        if node_uuids:
+            deleted += self._delete_memory_targets(
+                sorted(node_uuids), derived if derived is not None else _new_derived()
+            )
         return deleted
 
     def _connect(self) -> sqlite3.Connection:
         """One connection over the shared sidecar file, so intent and inventory are atomic."""
-        return sqlite3.connect(self.journal.db_path)
+        # The shared seam sets secure_delete=ON, temp_store=MEMORY, WAL and the busy timeout.
+        return connect_telemetry_db(self.journal.db_path)
 
     def _capture_namespace_uuids(
         self, group_id: str, namespace: str | None
@@ -455,6 +800,61 @@ class ErasureCoordinator:
                 exc_info=True,
             )
             return None
+
+
+def _new_derived() -> dict[str, Any]:
+    """Mutable accumulator for derived-cleanup results across one erasure's graph deletes."""
+    return {
+        "entities_deleted": [],
+        "entities_flagged": [],
+        "edges_deleted": [],
+        "edges_flagged": [],
+        "unknown_provenance": 0,
+        "conflicts_deleted": 0,
+        "twin_missing": False,
+        "merge_audits_tombstoned": 0,
+        "merge_audits_unscrubbed": 0,
+        "extra_uuids": set(),
+        "deletable": set(),
+    }
+
+
+def _request_fence_uuids(row: Mapping[str, Any]) -> list[str]:
+    """Derived entities this erasure fenced at PREPARE (request_json.fence_uuids)."""
+    try:
+        request = json.loads(str(row.get("request_json") or "{}"))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(request, dict):
+        return []
+    return [str(u) for u in request.get("fence_uuids") or [] if u]
+
+
+def _request_caller_namespace(row: Mapping[str, Any]) -> str | None:
+    """The namespace a memory erasure was scoped to (request_json.caller_namespace), if any."""
+    try:
+        request = json.loads(str(row.get("request_json") or "{}"))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(request, dict):
+        return None
+    return str(request.get("caller_namespace") or "").strip() or None
+
+
+def _fold_derived(derived: dict[str, Any], result: Mapping[str, Any]) -> None:
+    for key in ("entities_deleted", "entities_flagged", "edges_deleted", "edges_flagged"):
+        for item in result.get(f"derived_{key}_uuids") or []:
+            if item and item not in derived[key]:
+                derived[key].append(str(item))
+    derived["unknown_provenance"] += int(result.get("derived_unknown_provenance") or 0)
+    derived["conflicts_deleted"] += int(result.get("derived_conflicts_deleted") or 0)
+    # Deleted derived items must be in the purge set, whether or not the preview saw them.
+    derived["extra_uuids"].update(
+        str(u)
+        for key in ("derived_entities_deleted_uuids", "derived_edges_deleted_uuids")
+        for u in result.get(key) or []
+        if u
+    )
 
 
 def _canonical(payload: dict[str, Any]) -> str:

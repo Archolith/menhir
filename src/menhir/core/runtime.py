@@ -721,6 +721,13 @@ async def _initialize_services(
         settings,
         capabilities=capabilities,
         read_only=candidate_readonly,
+        # Single-process rule: strict only where this same runtime starts the maintenance
+        # scheduler (see the scheduler start condition at the end of this function).
+        require_scheduler_lease=(
+            not candidate_readonly
+            and not settings.benchmark_mode
+            and capabilities.enrichment_ready
+        ),
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
     # No model dir set: fetch the pinned rerank model in the background; recall keeps the RRF

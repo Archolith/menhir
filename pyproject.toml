@@ -14,7 +14,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Archolith fork of stable Graphiti 0.31.2, with native Menhir extension hooks.
     # Its distribution name differs from the graphiti_core import package.
-    "archolith-graphiti-core==0.31.2.post2",
+    "archolith-graphiti-core==0.31.2.post3",
     # credential detection on memory writes (domain/secret_scrub.py)
     "detect-secrets==1.5.0",
     "fastapi>=0.115,<1",

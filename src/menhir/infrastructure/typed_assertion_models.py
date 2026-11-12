@@ -30,6 +30,7 @@ import json
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
+from menhir.infrastructure.erasure_fence import marker_absent_for_param_cypher
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
 
 
@@ -53,7 +54,12 @@ class ScalarStateActivationError(RuntimeError):
             f"exact contract match; run an explicit migration or purge_scalar_state_nodes() first."
         )
 
-_RECORD_CYPHER = """
+_RECORD_CYPHER = (
+    # P4 marker half of G-copy: $episode_uuid carries the grounding anchor (an :Episodic uuid or a
+    # :TurnEvidence turn_id), so one check covers the episode and its source turn. A marked anchor
+    # matches nothing: no head, no assertion, no rows (the repository maps that to "nothing written").
+    "WITH 1 AS _gate\nWHERE " + marker_absent_for_param_cypher("episode_uuid") + "\n"
+) + """
 MERGE (h:TypedAssertionHead {source_key: $source_key})
   ON CREATE SET h.created_at = datetime(), h.namespace = $namespace,
                 h.subject_uuid = $subject_uuid, h.claim_key = $claim_key,

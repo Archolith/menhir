@@ -159,15 +159,30 @@ class RuntimeProviderDataOpsMixin:
         # later inherited the same default. Unknown reasons now read as failure.
         return outcome.get("reason") in DELETION_SUCCEEDED_REASONS
 
-    async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
+    async def erase_memory(
+        self, node_uuid: str, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Erase a memory and report which outcome occurred (CF-165).
 
         The richer sibling of delete_memory. ``graph_already_absent`` is the case a bool
         cannot express: the node was gone from the graph, but sidecar content WAS erased --
         which is what a merge leaves behind for its absorbed participant.
+
+        The pin, else the caller's namespace, bounds the cleanup when the target is absent
+        everywhere: the ownership guard lets an absent uuid through (review F4).
         """
-        await self._require_own_memory(node_uuid)
-        outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
+        from menhir.domain.erase_target import INVALID_TARGET, normalize_erase_target
+
+        # Strict canonical-uuid gate, before any lookup, PREPARE or sidecar purge: the scrubs
+        # downstream match by value, so a short id would match unrelated content.
+        target = normalize_erase_target(node_uuid)
+        if target is None:
+            return {"reason": INVALID_TARGET, "purged": {}}
+        await self._require_own_memory(target)
+        scope = pinned_namespace() or (namespace or "").strip() or None
+        outcome = await self._off_loop(
+            self._erasure().erase_memory, target, caller_namespace=scope
+        )
         return dict(outcome or {})
 
     async def delete_namespace(
@@ -211,11 +226,24 @@ class RuntimeProviderDataOpsMixin:
             self.built.graph_adapter.count_namespace, group_id, namespace=namespace
         )
         would_delete = force or node_count <= max_nodes
+        # Reporting only: a failed breakdown must never block or fail the erase itself.
+        by_label: dict | None = None
+        count_by_label = getattr(self.built.graph_adapter, "count_namespace_by_label", None)
+        if callable(count_by_label):
+            try:
+                by_label = await self._off_loop(count_by_label, group_id, namespace=namespace)
+            except Exception:
+                logger.warning("delete_namespace by_label count failed", exc_info=True)
 
         if dry_run:
             return {
                 "namespace": namespace,
                 "node_count": int(node_count),
+                "by_label": dict(by_label or {}),
+                "not_covered": [
+                    "structure graph (shared group, not namespace-scoped)",
+                    "default namespace (refused, never erased by this tool)",
+                ],
                 "max_nodes": max_nodes,
                 "would_delete": bool(would_delete),
                 "dry_run": True,
@@ -289,6 +317,7 @@ class RuntimeProviderDataOpsMixin:
         return {
             "namespace": namespace,
             "deleted": int(outcome.get("graph_deleted") or 0),
+            "by_label": dict(by_label or {}),
             "reason": reason,
             # False whenever a content class was left behind, whether because nothing can ever
             # address it or because THIS operation could not derive its subjects.

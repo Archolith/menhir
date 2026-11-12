@@ -9,6 +9,7 @@ and per-participant fencing (``prepare``), and unique-index conflict classificat
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid as uuidlib
@@ -25,6 +26,65 @@ from menhir.infrastructure.graph_operations_model import (
 from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.infrastructure.telemetry.helpers import add_column_if_missing
 from menhir.clock import utc_now_iso as _utc_now_iso
+
+
+def _add_node_uuids(node: object, out: set[str]) -> None:
+    """Collect a snapshot node's uuid and every relationship peer_uuid."""
+    if not isinstance(node, dict):
+        return
+    node_uuid = node.get("uuid")
+    if isinstance(node_uuid, str) and node_uuid:
+        out.add(node_uuid)
+    rels = node.get("relationships")
+    if isinstance(rels, list):
+        for rel in rels:
+            if isinstance(rel, dict):
+                peer = rel.get("peer_uuid")
+                if isinstance(peer, str) and peer:
+                    out.add(peer)
+
+
+def _snapshot_subject_uuids(request: dict, snapshot_json: str | None) -> set[str]:
+    """Every uuid a journal row's request and snapshot mention. Never raises."""
+    out: set[str] = set()
+    if isinstance(request, dict):
+        for key in ("survivor_uuid", "absorbed_uuid"):
+            value = request.get(key)
+            if isinstance(value, str) and value:
+                out.add(value)
+        targets = request.get("targets")
+        if isinstance(targets, list):
+            out.update(t for t in targets if isinstance(t, str) and t)
+    if not snapshot_json:
+        return out
+    try:
+        snap = json.loads(snapshot_json)
+    except (TypeError, ValueError):
+        return out
+    if not isinstance(snap, dict):
+        return out
+    # Delete / TTL shape: {"nodes": {uuid: node}, "newly_unreferenced_evidence": ...}.
+    nodes = snap.get("nodes")
+    if isinstance(nodes, dict):
+        for key, node in nodes.items():
+            if isinstance(key, str) and key:
+                out.add(key)
+            _add_node_uuids(node, out)
+    evidence = snap.get("newly_unreferenced_evidence")
+    if isinstance(evidence, list):
+        for item in evidence:
+            if isinstance(item, str) and item:
+                out.add(item)
+            elif isinstance(item, dict):
+                item_uuid = item.get("uuid")
+                if isinstance(item_uuid, str) and item_uuid:
+                    out.add(item_uuid)
+    # Merge / unmerge shape: {"body": {"survivor": node, "absorbed": node}}.
+    body = snap.get("body")
+    if isinstance(body, dict):
+        _add_node_uuids(body.get("survivor"), out)
+        _add_node_uuids(body.get("absorbed"), out)
+    return out
 
 
 class _GraphOperationsPrepareMixin:
@@ -142,9 +202,63 @@ class _GraphOperationsPrepareMixin:
                     "CREATE INDEX IF NOT EXISTS idx_graph_operation_locks_op "
                     "ON graph_operation_locks (op_id)"
                 )
+                # Erasure index (#475): every uuid a row's snapshot/request mentions, so an
+                # erasure can find and purge the snapshot without scanning JSON.
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS graph_operation_subjects (
+                        op_id         TEXT NOT NULL,
+                        subject_uuid  TEXT NOT NULL,
+                        PRIMARY KEY (op_id, subject_uuid)
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_graph_operation_subjects_subject "
+                    "ON graph_operation_subjects (subject_uuid)"
+                )
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS graph_operation_subjects_backfill "
+                    "(done_at TEXT NOT NULL)"
+                )
                 self._backfill_participant_locks(conn)
+                self._backfill_operation_subjects(conn)
                 conn.commit()
             self._initialized = True
+
+    def _backfill_operation_subjects(self, conn: sqlite3.Connection) -> None:
+        """One-time index of subjects for rows written before graph_operation_subjects existed."""
+        if conn.execute("SELECT 1 FROM graph_operation_subjects_backfill LIMIT 1").fetchone():
+            return
+        last_op_id = ""
+        while True:
+            rows = conn.execute(
+                "SELECT op_id, target_uuid, request_json, before_snapshot_json "
+                "FROM graph_operations WHERE op_id > ? ORDER BY op_id LIMIT 500",
+                (last_op_id,),
+            ).fetchall()
+            if not rows:
+                break
+            for op_id, target_uuid, request_json, snapshot_json in rows:
+                try:
+                    request = json.loads(request_json) if request_json else {}
+                except (TypeError, ValueError):
+                    request = {}
+                if not isinstance(request, dict):
+                    request = {}
+                subjects = _snapshot_subject_uuids(request, snapshot_json)
+                if target_uuid:
+                    subjects.add(str(target_uuid))
+                conn.executemany(
+                    "INSERT OR IGNORE INTO graph_operation_subjects (op_id, subject_uuid) "
+                    "VALUES (?, ?)",
+                    [(op_id, s) for s in subjects],
+                )
+            last_op_id = rows[-1][0]
+        conn.execute(
+            "INSERT INTO graph_operation_subjects_backfill (done_at) VALUES (?)",
+            (_utc_now_iso(),),
+        )
 
     def _backfill_participant_locks(self, conn: sqlite3.Connection) -> None:
         """Materialize locks for unresolved rows written before this fence existed.
@@ -258,6 +372,20 @@ class _GraphOperationsPrepareMixin:
                     "(entity_uuid, op_id, operation_kind, created_at) VALUES (?, ?, ?, ?)",
                     (entity_uuid, op_id, operation_kind, now),
                 )
+            try:
+                request_obj = json.loads(request_json)
+            except (TypeError, ValueError):
+                request_obj = {}
+            subjects = _snapshot_subject_uuids(
+                request_obj if isinstance(request_obj, dict) else {}, before_snapshot_json
+            )
+            if target_uuid:
+                subjects.add(str(target_uuid))
+            connection.executemany(
+                "INSERT OR IGNORE INTO graph_operation_subjects (op_id, subject_uuid) "
+                "VALUES (?, ?)",
+                [(op_id, s) for s in sorted(subjects)],
+            )
             if owns:
                 connection.commit()
         except sqlite3.IntegrityError as exc:

@@ -44,12 +44,7 @@ class SchedulerGraphAdapter(Protocol):
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, object]]:
         ...
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, object] | None:
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
         ...
 
     def stamp_ingest_metadata(

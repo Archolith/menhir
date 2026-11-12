@@ -432,7 +432,7 @@ class TurnEvidenceRepository:
             WITH prior
             ORDER BY prior.recorded_at DESC, prior.turn_key DESC
             LIMIT $limit
-            RETURN prior.role AS role, prior.text AS text,
+            RETURN prior.turn_id AS turn_id, prior.role AS role, prior.text AS text,
                    toString(prior.recorded_at) AS recorded_at
             """,
             params={"turn_id": turn_id, "limit": safe_limit, "namespace": namespace},

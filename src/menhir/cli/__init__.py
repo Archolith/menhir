@@ -80,7 +80,6 @@ def erasure_backfill(
     and opt-in: the alternative is retaining content that no erasure request can ever reach.
     """
     import json
-    import sqlite3
 
     configure_logging()
     from menhir.config import MemorySettings
@@ -91,7 +90,9 @@ def erasure_backfill(
     settings = MemorySettings.from_env()
     built = build_memory_services(settings)
     db_path = GraphOperationsJournal().db_path
-    conn = sqlite3.connect(db_path)
+    from menhir.infrastructure.telemetry import connect_telemetry_db
+
+    conn = connect_telemetry_db(db_path)
     try:
         report = run_backfill(
             conn,

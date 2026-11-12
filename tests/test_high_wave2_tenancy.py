@@ -29,6 +29,10 @@ class _RecordingNeo4j:
         self.calls.append((query, params or {}))
         return list(self._rows)
 
+    def execute_write(self, work: Any) -> Any:
+        # G-copy writers (R2 CF-327) run their statements in a transaction; record them alike.
+        return work(self)
+
 
 # ---------------------------------------------------------------------------
 # CF-126 -- query_blast_radius leaked cross-namespace memory previews
@@ -164,13 +168,19 @@ class _Backend:
             return None
         return {"uuid": node_uuid}
 
-    async def erase_memory(self, node_uuid: str):
+    async def erase_memory(self, node_uuid: str, namespace: str | None = None):
         self.erased.append(node_uuid)
         return {"reason": "erased", "purged": {"x": 1}}
 
     async def flag_memory(self, node_uuid: str, *, bootstrap_scope=None):
         self.flagged.append(node_uuid)
         return True
+
+
+# Canonical uuids: delete_memory refuses any other target as invalid_target, which would
+# make the namespace-guard assertions below pass for the wrong reason.
+_UUID_1 = "3c9e1f20-6a4b-4d8e-b2f1-5a7c9e0d1b31"
+_UUID_GONE = "9a2d4f61-0c8e-4b3a-a5d7-2e6f8b1c3d42"
 
 
 def _tool_with_backend(tool, backend):
@@ -185,7 +195,7 @@ async def test_cf64_pinned_caller_cannot_erase_another_silos_node() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    result = await tool.endpoint("uuid-1", namespace="tenant-a")
+    result = await tool.endpoint(_UUID_1, namespace="tenant-a")
 
     assert "Refused" in result
     assert backend.erased == []
@@ -198,9 +208,9 @@ async def test_cf64_pinned_caller_can_erase_its_own_node() -> None:
     backend = _Backend(node_namespace="tenant-a")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-1", namespace="tenant-a")
+    await tool.endpoint(_UUID_1, namespace="tenant-a")
 
-    assert backend.erased == ["uuid-1"]
+    assert backend.erased == [_UUID_1]
 
 
 @pytest.mark.asyncio
@@ -213,9 +223,9 @@ async def test_cf64_guard_does_not_block_erasing_residual_content_of_an_absent_n
     backend = _Backend(node_namespace=None)  # not in the graph at all
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-gone", namespace="tenant-a")
+    await tool.endpoint(_UUID_GONE, namespace="tenant-a")
 
-    assert backend.erased == ["uuid-gone"]
+    assert backend.erased == [_UUID_GONE]
 
 
 @pytest.mark.asyncio
@@ -225,9 +235,9 @@ async def test_cf64_unpinned_caller_is_unaffected() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    await tool.endpoint("uuid-1")
+    await tool.endpoint(_UUID_1)
 
-    assert backend.erased == ["uuid-1"]
+    assert backend.erased == [_UUID_1]
 
 
 @pytest.mark.asyncio
@@ -267,7 +277,7 @@ def test_cf215_raw_captures_are_stamped_with_group_id() -> None:
         source="claude-code",
     )
 
-    query, params = neo4j.calls[0]
+    query, params = next(c for c in neo4j.calls if "raw_capture_for" in c[0])
     assert "n.group_id = $group_id" in query
     assert params["group_id"] == "tenant-a"
     assert params["namespace"] == "tenant-a"
@@ -289,7 +299,7 @@ def test_cf215_default_namespace_capture_gets_the_empty_group_id() -> None:
         source="claude-code",
     )
 
-    _query, params = neo4j.calls[0]
+    _query, params = next(c for c in neo4j.calls if "raw_capture_for" in c[0])
     assert params["group_id"] == ""
 
 

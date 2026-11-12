@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -84,6 +85,9 @@ class Script:
     defaults: list[Rule] = field(default_factory=list)
     unmatched: list[dict[str, Any]] = field(default_factory=list)
     log: list[dict[str, Any]] = field(default_factory=list)
+    #: Optional per-request delay: given a chat prompt, seconds to sleep before answering it
+    #: (outside the script lock). Default None leaves every existing lane unchanged.
+    delay_for: Callable[[str], float] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, rule: Rule) -> Rule:
@@ -133,6 +137,9 @@ def _handler_for(script: Script) -> type[DeterministicProviderHandler]:
             prompt = "\n".join(_content_text(m.get("content")) for m in messages)
             response_format = payload.get("response_format") or {}
             structured = bool(response_format.get("json_schema")) or bool(payload.get("logprobs"))
+            delay = script.delay_for(prompt) if script.delay_for is not None else 0.0
+            if delay > 0:
+                time.sleep(delay)
             reply = script.respond(prompt, payload, structured=structured)
             if reply is None:
                 self._default(payload, prompt)

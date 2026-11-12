@@ -426,7 +426,7 @@ class StubMemoryGraphAdapter:
     )
     flagged_nodes: list[str] = field(default_factory=list)
     deleted_nodes: list[str] = field(default_factory=list)
-    completed_episode_artifacts: dict[tuple[str, str], dict[str, object]] = field(default_factory=dict)
+    completed_episode_artifacts: dict[str, dict[str, object]] = field(default_factory=dict)
     weighted_edges: list[str] = field(default_factory=list)
     candidate_metadata: list[dict[str, object]] = field(default_factory=list)
     candidate_provenance_rows: list[dict[str, object]] = field(default_factory=list)
@@ -643,7 +643,7 @@ class StubMemoryGraphAdapter:
     ) -> list[dict[str, object]]:
         return [dict(row) for row in self.decay_candidates_by_freshness.get(freshness, [])]
 
-    def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
+    def compress_node(self, node_uuid: str, compressed_summary: str, **_fence: object) -> bool:
         self.compressed_nodes.append(
             {"uuid": node_uuid, "summary": compressed_summary}
         )
@@ -667,7 +667,9 @@ class StubMemoryGraphAdapter:
                 freshness_map[node_uuid] = metadata_by_uuid[node_uuid]
         return freshness_map
 
-    def complete_rehydration(self, node_uuid: str, updated_content: str | None = None) -> bool:
+    def complete_rehydration(
+        self, node_uuid: str, updated_content: str | None = None, **_fence: object
+    ) -> bool:
         self.rehydrated_nodes.append({"uuid": node_uuid, "content": updated_content})
         self.node_freshness[node_uuid] = FreshnessState.ACTIVE
         for row in self.candidate_metadata:
@@ -764,13 +766,8 @@ class StubMemoryGraphAdapter:
         ]
         return rows[:limit]
 
-    def find_completed_episode_artifact(
-        self,
-        *,
-        anchor_uuid: str,
-        anchor_name: str,
-    ) -> dict[str, object] | None:
-        artifact = self.completed_episode_artifacts.get((anchor_uuid, anchor_name))
+    def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
+        artifact = self.completed_episode_artifacts.get(episode_uuid)
         if artifact is None:
             return None
         return dict(artifact)

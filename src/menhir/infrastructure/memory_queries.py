@@ -8,9 +8,10 @@ original MemoryGraphAdapter methods they replace.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import timezone
 from typing import Any
 from uuid import uuid4
@@ -41,17 +42,37 @@ from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
     FACT_TEMPORAL_FIELDS,
+    FACT_NOT_REDERIVE_PENDING,
     FACT_TEXT_PRESENT,
     MEMORY_RETURN_FIELDS,
     memory_recency_cypher,
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
+from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
+from menhir.infrastructure.graph_text_inventory import (
+    ABSORBED_BLOCK_SEPARATOR,
+    ENTITY_STRUCTURAL_PROPERTIES,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
+
+#: CF-332: the absorbed-block header written by conflict resolution, as a Cypher literal.
+ABSORBED_BLOCK_SEPARATOR_CYPHER = json.dumps(ABSORBED_BLOCK_SEPARATOR)
+
+
+def _absorbed_block_cut(expr: str) -> str:
+    """Cypher: ``expr`` with every absorbed block whose source is in ``cut_uuids`` removed (null
+    stays null)."""
+    sep = ABSORBED_BLOCK_SEPARATOR_CYPHER
+    return (
+        f"CASE WHEN {expr} IS NULL THEN null ELSE reduce(acc = head(split({expr}, {sep})), "
+        f"p IN tail(split({expr}, {sep})) | CASE WHEN any(u IN cut_uuids "
+        f"WHERE p STARTS WITH u + ')') THEN acc ELSE acc + {sep} + p END) END"
+    )
 
 #: Turn capture is running and the admission join has NEVER been drawn (CF-229).
 ADMISSION_NEVER_LINKED = "never_linked"
@@ -62,6 +83,66 @@ ADMISSION_NO_TURNS = "no_turns"
 
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+# Single source of truth for what a namespace erase removes directly (over variable `n`, params
+# $group_id and $namespace). Delete, count and uuid capture all use it so they cannot drift.
+NAMESPACE_ERASE_PREDICATE = """n.group_id = $group_id
+               OR (n:Episodic AND n.namespace = $namespace)
+               OR (n:TypedAssertion AND n.namespace = $namespace)
+               OR (n:TypedAssertionHead AND n.namespace = $namespace)
+               OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
+               OR (n:TurnEvidence AND n.namespace = $namespace)
+               OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
+               OR (n:TypedEventAssertion AND n.namespace = $namespace)
+               OR (n:TypedEventAssertionHead AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace }
+                   AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
+                                    WHERE ev2.namespace <> $namespace })
+               OR (n:Todo AND n.namespace = $namespace)
+               OR (n:WorkArtifact AND n.namespace = $namespace)"""
+
+# Subordinate expansion. Input: `direct` (list of directly doomed nodes). Output column: `subs`,
+# the Todo/WorkArtifact children that carry no namespace/group_id themselves and have no
+# incoming owner edge from a node outside `direct`. Use as: WITH ..., direct <this> then
+# WITH ..., direct + subs AS doomed.
+NAMESPACE_SUBORDINATES_CALL = """
+            CALL {
+                WITH direct
+                UNWIND direct AS d
+                OPTIONAL MATCH (d)-[:HAS_LOCATION|EMBODIED_IN|HAS_OPEN_QUESTION|DECLARES]->(s)
+                WHERE (
+                        (d:Todo AND s:TodoLocation)
+                        OR (d:WorkArtifact AND (s:ArtifactSource OR s:ArtifactLocation
+                                                OR s:OpenQuestion OR s:ArtifactDeclaration))
+                      )
+                  AND NOT s IN direct
+                  AND NOT EXISTS {
+                      MATCH (o)-[:HAS_LOCATION|EMBODIED_IN|HAS_OPEN_QUESTION|DECLARES]->(s)
+                      WHERE NOT o IN direct
+                  }
+                RETURN collect(DISTINCT s) AS subs
+            }
+"""
+
+# Primary label per node for by_label reporting: first match in this order, else head(labels).
+NAMESPACE_PRIMARY_LABEL_CASE = """CASE
+                WHEN n:Todo THEN 'Todo'
+                WHEN n:WorkArtifact THEN 'WorkArtifact'
+                WHEN n:TodoLocation THEN 'TodoLocation'
+                WHEN n:ArtifactSource THEN 'ArtifactSource'
+                WHEN n:ArtifactLocation THEN 'ArtifactLocation'
+                WHEN n:OpenQuestion THEN 'OpenQuestion'
+                WHEN n:ArtifactDeclaration THEN 'ArtifactDeclaration'
+                WHEN n:TurnEvidence THEN 'TurnEvidence'
+                WHEN n:Episodic THEN 'Episodic'
+                WHEN n:Entity THEN 'Entity'
+                WHEN n:TypedAssertionHead THEN 'TypedAssertionHead'
+                WHEN n:TypedAssertion THEN 'TypedAssertion'
+                WHEN n:TypedEventAssertionHead THEN 'TypedEventAssertionHead'
+                WHEN n:TypedEventAssertion THEN 'TypedEventAssertion'
+                WHEN n:ScalarConsolidationWatermark THEN 'ScalarConsolidationWatermark'
+                WHEN n:EventConsolidationWatermark THEN 'EventConsolidationWatermark'
+                ELSE coalesce(head(labels(n)), 'unlabeled')
+            END"""
 
 
 def _validated_evidence_tombstone_params(
@@ -729,6 +810,7 @@ class MemoryQueryRepository:
             MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
                   -[r:RELATES_TO]-(:Entity)
             WHERE episode_uuid IN coalesce(r.episodes, [])
+              AND {FACT_NOT_REDERIVE_PENDING}
               AND {tenant_scope_cypher("r")}
             WITH DISTINCT episode_uuid, r
             ORDER BY r.valid_at
@@ -880,7 +962,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -902,7 +984,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -1239,17 +1321,465 @@ class MemoryQueryRepository:
         )
         return bool(rows and int(rows[0].get("nodes_updated", 0)) > 0)
 
-    def delete_memory_with_scalar_cascade(
-        self, node_uuid: str, *, operation_id: str
-    ) -> dict[str, Any]:
-        """Delete one memory/observation and its authoritative scalar assertions atomically.
+    # CF-330: the scrub removes these too. Literal lists, so every call site gets them.
+    _EDGE_ANCHORED_TIME_PROPS = "[" + ", ".join(f'"{p}"' for p in PRESERVED_EDGE_ATTRIBUTES) + "]"
+    _ENTITY_KEEP_PROPS = "[" + ", ".join(
+        f'"{p}"' for p in sorted(ENTITY_STRUCTURAL_PROPERTIES | {"summary"})
+    ) + "]"
 
-        A surfaced observation is addressed by ``assertion_id``; an Entity/Episodic deletion also
-        removes assertions bound to or grounded on that node.  A pending repair receipt is created
-        for every affected subject+namespace in the SAME Neo4j transaction as the deletion.  Thus a
-        crash can delay View repair, but can never make the work undiscoverable (G15/G20).
+    # CF-332: conflict resolution appended an erased memory's content to a kept entity, as a block
+    # headed by the marker below. Cut those blocks out (the holder keeps its own text), blank the
+    # summary that may restate them and flag the holder. Legacy holders have no absorbed_from, so
+    # the marker text is the fallback selector. A block is a copy of its source entity's text, so
+    # it goes whenever that text goes: the erase targets, and in the cascade also every entity it
+    # deleted or scrubbed (__CUT_SET__). Shared by the cascade and the target-absent path.
+    _HOLDER_SCRUB_FRAGMENT = (
         """
-        namespace_rows = self.neo4j.execute(
+        WITH __CARRY__ __CUT_SET__ AS cut_uuids
+        OPTIONAL MATCH (h:Entity)
+        WHERE NOT h.uuid IN $erased_uuids AND NOT h.uuid IN __DELETED__
+          AND (any(u IN coalesce(h.absorbed_from, []) WHERE u IN cut_uuids)
+               OR any(u IN cut_uuids
+                      WHERE coalesce(h.content, '') CONTAINS __ABSORB_SEP__ + u + ')'
+                         OR coalesce(h.original_content, '') CONTAINS __ABSORB_SEP__ + u + ')'))
+          __HOLDER_NS_FILTER__
+        WITH __CARRY__ cut_uuids,
+             [x IN collect(DISTINCT h) WHERE x IS NOT NULL] AS holders
+        FOREACH (h IN holders |
+            SET h.content = __CUT__(h.content),
+                h.original_content = __CUT__(h.original_content),
+                h.summary = '',
+                h.absorbed_from = [u IN coalesce(h.absorbed_from, []) WHERE NOT u IN cut_uuids],
+                h.rederive_pending = true,
+                h.rederive_reason = 'source_erased',
+                h.rederive_flagged_at = datetime()
+            REMOVE h.content_embedding
+        )
+        FOREACH (h IN holders |
+            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + h.uuid})
+            ON CREATE SET rr.item_uuid = h.uuid,
+                          rr.item_kind = 'entity',
+                          rr.namespace = CASE
+                              WHEN trim(toString(coalesce(h.namespace, h.group_id, ''))) = ''
+                              THEN 'default'
+                              ELSE trim(toString(coalesce(h.namespace, h.group_id)))
+                          END,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        """
+    ).replace(
+        "__CUT__(h.content)", _absorbed_block_cut("h.content")
+    ).replace(
+        "__CUT__(h.original_content)", _absorbed_block_cut("h.original_content")
+    ).replace("__ABSORB_SEP__", ABSORBED_BLOCK_SEPARATOR_CYPHER)
+
+    # Derived-fact cleanup (#423). Fact edges first: strip erased episodes, delete emptied edges,
+    # flag survivors. The entity step reads the stripped edges, so this must run before it.
+    _DERIVED_EDGE_BODY = (
+        """
+        OPTIONAL MATCH (:Entity)-[fe:RELATES_TO]->(:Entity)
+        WHERE fe.fact IS NOT NULL
+          AND any(u IN coalesce(fe.episodes, []) WHERE u IN $erased_uuids)
+          __EDGE_NS_FILTER__
+        WITH [x IN collect(DISTINCT fe) WHERE x IS NOT NULL] AS hit_edges
+        WITH [x IN hit_edges
+              WHERE size([u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids]) = 0
+             ] AS dead_edges,
+             [x IN hit_edges
+              WHERE size([u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids]) > 0
+             ] AS live_edges
+        WITH dead_edges, live_edges,
+             [x IN dead_edges | coalesce(x.uuid, elementId(x))] AS edges_deleted_uuids,
+             [x IN live_edges | coalesce(x.uuid, elementId(x))] AS edges_flagged_uuids
+        // Owner ruling 2026-11-09: scrub at erase. The text may restate the erased episode; the
+        // rederive job rebuilds it from the remaining sources ('' keeps Graphiti's str field valid).
+        FOREACH (x IN live_edges |
+            SET x.episodes = [u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids],
+                x.fact = '',
+                x.fact_embedding = null,
+                x.rederive_pending = true,
+                x.rederive_reason = 'source_erased',
+                x.rederive_flagged_at = datetime()
+        )
+        // CF-330: time_expression quotes the memory; the rest of the anchored-time contract was
+        // resolved from the scrubbed fact, so it goes with it.
+        FOREACH (x IN live_edges |
+            FOREACH (k IN [k IN keys(x) WHERE k IN __EDGE_TIME_PROPS__] | REMOVE x[k])
+        )
+        FOREACH (x IN live_edges |
+            MERGE (rr:DerivedRederiveRepair {
+                repair_key: $node_uuid + '\\u001f' + coalesce(x.uuid, elementId(x))
+            })
+            ON CREATE SET rr.item_uuid = coalesce(x.uuid, elementId(x)),
+                          rr.item_kind = 'fact',
+                          rr.namespace = CASE
+                              WHEN trim(toString(coalesce(x.namespace, x.group_id, ''))) = ''
+                              THEN 'default'
+                              ELSE trim(toString(coalesce(x.namespace, x.group_id)))
+                          END,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        FOREACH (x IN dead_edges | DELETE x)
+        // CF-331: a conflict record copies its kept and cause facts. It goes when either edge
+        // was deleted or scrubbed, or when an erased episode caused it (the cause edge may never
+        // have persisted).
+        WITH edges_deleted_uuids, edges_flagged_uuids
+        OPTIONAL MATCH (c:EdgeInvalidationConflict)
+        WHERE (c.kept_edge_uuid IN edges_deleted_uuids + edges_flagged_uuids
+               OR c.cause_edge_uuid IN edges_deleted_uuids + edges_flagged_uuids
+               OR any(u IN coalesce(c.cause_episode_uuids, []) WHERE u IN $erased_uuids))
+          __CONFLICT_NS_FILTER__
+        WITH edges_deleted_uuids, edges_flagged_uuids,
+             [x IN collect(DISTINCT c) WHERE x IS NOT NULL] AS conflicts
+        FOREACH (x IN conflicts | DETACH DELETE x)
+        RETURN edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted
+        """
+    ).replace("__EDGE_TIME_PROPS__", _EDGE_ANCHORED_TIME_PROPS)
+    _DERIVED_EDGE_NS_FILTER = (
+        """AND CASE
+                 WHEN trim(toString(coalesce(fe.namespace, fe.group_id, ''))) = ''
+                 THEN 'default'
+                 ELSE trim(toString(coalesce(fe.namespace, fe.group_id)))
+             END = $namespace_key"""
+    )
+    _DERIVED_CONFLICT_NS_FILTER = _DERIVED_EDGE_NS_FILTER.replace(
+        "coalesce(fe.namespace, fe.group_id", "coalesce(c.group_id"
+    )
+    _DERIVED_EDGE_SCOPED_BODY = _DERIVED_EDGE_BODY.replace(
+        "__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER
+    ).replace("__CONFLICT_NS_FILTER__", _DERIVED_CONFLICT_NS_FILTER)
+    _DERIVED_EDGE_CALL = "\n            CALL {" + _DERIVED_EDGE_SCOPED_BODY + "}\n"
+    # Target gone: its fact edges and its absorbed blocks (CF-332) can still carry the text. One
+    # statement, so the holder scrub commits with the edge scrub.
+    _DERIVED_EDGE_RETURN = (
+        "RETURN edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted"
+    )
+    _ABSENT_HOLDER_TAIL = (
+        "WITH edges_deleted_uuids, edges_flagged_uuids, size(conflicts) AS conflicts_deleted"
+        + _HOLDER_SCRUB_FRAGMENT.replace("__DELETED__", "[]").replace(
+            "__CARRY__", "edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,"
+        ).replace("__CUT_SET__", "$erased_uuids")
+        + "RETURN edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,\n"
+        "               [h IN holders | h.uuid] AS holders_flagged_uuids\n"
+    )
+    _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "").replace(
+        "__CONFLICT_NS_FILTER__", ""
+    ).replace(_DERIVED_EDGE_RETURN, _ABSENT_HOLDER_TAIL.replace("__HOLDER_NS_FILTER__", ""))
+    # Target gone, caller scoped: only edges and holders in the caller's namespace (review F4).
+    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_SCOPED_BODY.replace(
+        _DERIVED_EDGE_RETURN,
+        _ABSENT_HOLDER_TAIL.replace(
+            "__HOLDER_NS_FILTER__", _DERIVED_EDGE_NS_FILTER.replace("fe.", "h.")
+        ),
+    )
+    # Entities reached from the target episode; views/artifacts/structure/TEMPORAL are skipped.
+    _DERIVED_ENTITY_MATCH = (
+        """
+        OPTIONAL MATCH (:Episodic {uuid: $node_uuid})-[:MENTIONS|RETENTION_SOURCE]->(e:Entity)
+        WHERE NOT (coalesce(e.is_view, false)
+                   OR coalesce(e.is_quantstate, false)
+                   OR e.view_kind IS NOT NULL)
+          AND NOT coalesce(e.is_artifact, false)
+          AND coalesce(e.type, '') <> 'TEMPORAL'
+          AND ("""
+        + non_structural_memory_cypher("e")
+        + """)
+          AND NOT e.uuid IN $erased_uuids
+          __ENTITY_NS_FILTER__
+        WITH collect(DISTINCT e) AS cands
+        WITH cands,
+             [e IN cands WHERE EXISTS {
+                 MATCH (e)-[r:RELATES_TO]-(:Entity)
+                 WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) = 0
+             }] AS unknown
+        WITH [e IN cands WHERE NOT e IN unknown] AS rest, size(unknown) AS unknown_n
+        WITH rest, unknown_n,
+             [e IN rest
+              WHERE NOT EXISTS {
+                      MATCH (o:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e)
+                      WHERE NOT o.uuid IN $erased_uuids
+                  }
+                AND NOT EXISTS {
+                      MATCH (e)-[r:RELATES_TO]-(:Entity)
+                      WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) > 0
+                  }
+                // Only entities the erasure fenced at PREPARE; the rest are flagged, not deleted.
+                AND ($deletable_entity_uuids IS NULL OR e.uuid IN $deletable_entity_uuids)
+             ] AS doomed
+        WITH unknown_n, doomed, [e IN rest WHERE NOT e IN doomed] AS shared
+        WITH unknown_n, doomed, shared,
+             [e IN doomed | e.uuid] AS entities_deleted_uuids,
+             [e IN shared | e.uuid] AS entities_flagged_uuids
+        """
+    )
+    _DERIVED_ENTITY_NS_FILTER = (
+        """AND CASE
+                 WHEN trim(toString(coalesce(e.namespace, e.group_id, ''))) = ''
+                 THEN 'default'
+                 ELSE trim(toString(coalesce(e.namespace, e.group_id)))
+             END = $namespace_key"""
+    )
+    _DERIVED_ENTITY_WRITE = (
+        """
+        // Scrub at erase (owner ruling 2026-11-09): summary/content may restate the erased episode.
+        FOREACH (e IN shared |
+            SET e.summary = '',
+                e.content = null,
+                e.rederive_pending = true,
+                e.rederive_reason = 'source_erased',
+                e.rederive_flagged_at = datetime()
+        )
+        // CF-330: every non-structural key is text (graph_text_inventory), e.g. original_content
+        // and Graphiti custom attributes. Rederive restores only the summary (v2 S1.3).
+        FOREACH (e IN shared |
+            FOREACH (k IN [k IN keys(e) WHERE NOT k IN __ENTITY_KEEP_PROPS__
+                                          AND NOT k STARTS WITH 'rederive_'] | REMOVE e[k])
+        )
+        FOREACH (e IN shared |
+            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + e.uuid})
+            ON CREATE SET rr.item_uuid = e.uuid,
+                          rr.item_kind = 'entity',
+                          rr.namespace = $namespace_key,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        FOREACH (e IN doomed | DETACH DELETE e)
+        // CF-327: a raw capture is the erased episode's full text; delete it even when its
+        // MENTIONS link is missing (legacy two-statement writer).
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
+        OPTIONAL MATCH (rc:Entity)
+        WHERE rc.raw_capture_for IN $erased_uuids AND NOT rc.uuid IN entities_deleted_uuids
+          __RC_NS_FILTER__
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids,
+             [x IN collect(DISTINCT rc) WHERE x IS NOT NULL] AS rcs
+        WITH unknown_n, rcs, entities_deleted_uuids + [x IN rcs | x.uuid] AS entities_deleted_uuids,
+             [u IN entities_flagged_uuids WHERE NOT u IN [x IN rcs | x.uuid]]
+                 AS entities_flagged_uuids
+        FOREACH (x IN rcs | DETACH DELETE x)
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
+        __HOLDER_SCRUB__
+        RETURN unknown_n AS derived_unknown_provenance, entities_deleted_uuids,
+               entities_flagged_uuids
+               + [h IN holders WHERE NOT h.uuid IN entities_flagged_uuids | h.uuid]
+               AS entities_flagged_uuids
+        """
+    ).replace("__ENTITY_KEEP_PROPS__", _ENTITY_KEEP_PROPS).replace(
+        "__HOLDER_SCRUB__",
+        _HOLDER_SCRUB_FRAGMENT.replace("__DELETED__", "entities_deleted_uuids").replace(
+            "__CARRY__", "unknown_n, entities_deleted_uuids, entities_flagged_uuids,"
+        ).replace(
+            # toStringOrNull types the list as strings; Cypher's checker rejects `'...' + u`
+            # over the cascade's computed lists otherwise.
+            "__CUT_SET__",
+            "[x IN $erased_uuids + entities_deleted_uuids + entities_flagged_uuids"
+            " | toStringOrNull(x)]",
+        ),
+    )
+    _DERIVED_ENTITY_CALL = (
+        "\n            CALL {"
+        + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)
+        + _DERIVED_ENTITY_WRITE.replace(
+            "__HOLDER_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER.replace("e.", "h.")
+        ).replace("__RC_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER.replace("e.", "rc."))
+        + "}\n"
+    )
+
+    # Re-derive repair (#423 follow-up): rewrite or delete items flagged `rederive_pending` by an
+    # erasure. Text-bearing values are only ever passed as parameters; nothing here logs them.
+    _REDERIVE_EDGE_MATCH = (
+        "MATCH ()-[r:RELATES_TO]->() "
+        "WHERE (r.uuid = $item_uuid OR (r.uuid IS NULL AND elementId(r) = $item_uuid))"
+    )
+    _REDERIVE_CLEAR = (
+        "{v}.rederive_pending = null, {v}.rederive_reason = null, {v}.rederive_flagged_at = null"
+    )
+
+    def list_pending_derived_rederive(self, limit: int) -> list[dict[str, Any]]:
+        """Pending DerivedRederiveRepair nodes, oldest first."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair)
+            WHERE rr.status = 'pending'
+            RETURN rr.repair_key AS repair_key, rr.item_uuid AS item_uuid,
+                   rr.item_kind AS item_kind, rr.namespace AS namespace,
+                   coalesce(rr.attempts, 0) AS attempts
+            ORDER BY rr.created_at ASC, rr.repair_key ASC
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [dict(row) for row in rows]
+
+    def load_derived_rederive_item(self, item_kind: str, item_uuid: str) -> dict[str, Any] | None:
+        """Snapshot a flagged item plus its remaining source episode contents.
+
+        Returns None when the item no longer exists. ``episodes`` is the CAS token (with
+        ``flagged_at``); ``sources`` is the content of the remaining source episodes.
+        """
+        if item_kind == "fact":
+            rows = self.neo4j.execute(
+                self._REDERIVE_EDGE_MATCH
+                + """
+                RETURN coalesce(r['rederive_pending'], false) AS pending,
+                       toString(r['rederive_flagged_at']) AS flagged_at,
+                       coalesce(r.episodes, []) AS episodes, r.fact AS text,
+                       // Erase scrubs r.fact, so the claim's shape is what the rewrite checks.
+                       coalesce(startNode(r).name, '?') + ' ' + coalesce(r.name, 'RELATES_TO')
+                           + ' ' + coalesce(endNode(r).name, '?') AS name
+                LIMIT 1
+                """,
+                params={"item_uuid": item_uuid},
+            )
+        else:
+            rows = self.neo4j.execute(
+                """
+                MATCH (e:Entity {uuid: $item_uuid})
+                RETURN coalesce(e['rederive_pending'], false) AS pending,
+                       toString(e['rederive_flagged_at']) AS flagged_at,
+                       [(ep:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e) | ep.uuid] AS episodes,
+                       e.summary AS text, e.name AS name
+                LIMIT 1
+                """,
+                params={"item_uuid": item_uuid},
+            )
+        if not rows:
+            return None
+        row = dict(rows[0])
+        episodes_raw = [str(u) for u in (row.get("episodes") or [])]
+        episodes = list(dict.fromkeys(str(u) for u in (row.get("episodes") or []) if u))
+        source_rows = (
+            self.neo4j.execute(
+                """
+                MATCH (ep:Episodic)
+                WHERE ep.uuid IN $episodes AND ep.content IS NOT NULL
+                RETURN ep.uuid AS uuid, ep.content AS content
+                ORDER BY ep.uuid
+                LIMIT 20
+                """,
+                params={"episodes": episodes},
+            )
+            if episodes
+            else []
+        )
+        return {
+            "pending": bool(row.get("pending")),
+            "flagged_at": row.get("flagged_at"),
+            "episodes": episodes,
+            "episodes_raw": episodes_raw if item_kind == "fact" else episodes,
+            "text": row.get("text"),
+            "name": row.get("name"),
+            "sources": [str(s.get("content") or "") for s in source_rows if s.get("content")],
+        }
+
+    def apply_derived_rederive(
+        self,
+        *,
+        repair_key: str,
+        item_kind: str,
+        item_uuid: str,
+        flagged_at: str | None,
+        episodes: Sequence[str],
+        new_text: str | None,
+        delete: bool = False,
+        embedding: Sequence[float] | None = None,
+    ) -> bool:
+        """CAS write of a re-derive result; True only when it applied.
+
+        Applies only if the item still has ``rederive_pending`` with the same
+        ``rederive_flagged_at`` and the same source-episode set the caller read. The repair node
+        is finished in the same statement ('done', or 'deleted' for a deleted fact edge).
+        """
+        params = {
+            "repair_key": repair_key,
+            "item_uuid": item_uuid,
+            "flagged_at": flagged_at,
+            "episodes": list(episodes),
+            "new_text": new_text,
+            "embedding": list(embedding) if embedding is not None else None,
+        }
+        edge_guard = (
+            "coalesce(r['rederive_pending'], false) "
+            "AND toString(r['rederive_flagged_at']) = $flagged_at "
+            "AND coalesce(r.episodes, []) = $episodes"
+        )
+        if item_kind == "fact" and delete:
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                + self._REDERIVE_EDGE_MATCH
+                + f" AND {edge_guard} "
+                "SET rr.status = 'deleted', rr.finished_at = datetime() "
+                "WITH r, rr DELETE r RETURN count(rr) AS c"
+            )
+        elif item_kind == "fact":
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                + self._REDERIVE_EDGE_MATCH
+                + f" AND {edge_guard} "
+                "SET r.fact = $new_text, r.fact_embedding = $embedding, "
+                + self._REDERIVE_CLEAR.format(v="r")
+                + ", rr.status = 'done', rr.finished_at = datetime() "
+                "RETURN count(r) AS c"
+            )
+        else:
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                "MATCH (e:Entity {uuid: $item_uuid}) "
+                "WHERE coalesce(e['rederive_pending'], false) "
+                "AND toString(e['rederive_flagged_at']) = $flagged_at "
+                "WITH rr, e, [(ep:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e) | ep.uuid] AS cur "
+                "WHERE all(x IN cur WHERE x IN $episodes) AND all(x IN $episodes WHERE x IN cur) "
+                "SET e.summary = $new_text, "
+                + self._REDERIVE_CLEAR.format(v="e")
+                + ", rr.status = 'done', rr.finished_at = datetime() "
+                "RETURN count(e) AS c"
+            )
+        rows = self.neo4j.execute(query, params=params)
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
+        """Set a pending repair's terminal status (e.g. 'obsolete' when the item is gone)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            SET rr.status = $status, rr.finished_at = datetime()
+            RETURN count(rr) AS c
+            """,
+            params={"repair_key": repair_key, "status": status},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def record_derived_rederive_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        """Count a failed attempt (error class only, never content); 'failed' at the cap."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            WITH rr, coalesce(rr.attempts, 0) + 1 AS n
+            SET rr.attempts = n, rr.last_error = $error_class,
+                rr.last_attempt_at = datetime(),
+                rr.status = CASE WHEN n >= $max_attempts THEN 'failed' ELSE 'pending' END
+            RETURN rr.status AS status
+            """,
+            params={
+                "repair_key": repair_key,
+                "error_class": str(error_class)[:80],
+                "max_attempts": int(max_attempts),
+            },
+        )
+        return str(rows[0]["status"]) if rows else None
+
+    def erase_target_namespace_keys(self, node_uuid: str) -> list[str]:
+        """The canonical namespace keys of every node an erase of ``node_uuid`` addresses.
+
+        Entity/Episodic by uuid, TurnEvidence by turn_id, TypedAssertion by its ids. Empty when the
+        target is absent. The cascade and the coordinator's scope check share this (CF-326).
+        """
+        rows = self.neo4j.execute(
             """
             OPTIONAL MATCH (target)
             WHERE ((target:Entity OR target:Episodic) AND target.uuid = $node_uuid)
@@ -1271,13 +1801,68 @@ class MemoryQueryRepository:
             """,
             params={"node_uuid": node_uuid},
         )
-        namespace_keys = [
+        return [
             str(value) for value in (
-                namespace_rows[0].get("namespace_keys", []) if namespace_rows else []
+                rows[0].get("namespace_keys", []) if rows else []
             ) if value is not None and str(value).strip()
         ]
+
+    def delete_memory_with_scalar_cascade(
+        self,
+        node_uuid: str,
+        *,
+        operation_id: str,
+        erased_uuids: Sequence[str] | None = None,
+        deletable_entity_uuids: Sequence[str] | None = None,
+        scope_namespace: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete one memory/observation and its authoritative scalar assertions atomically.
+
+        A surfaced observation is addressed by ``assertion_id``; an Entity/Episodic deletion also
+        removes assertions bound to or grounded on that node.  A pending repair receipt is created
+        for every affected subject+namespace in the SAME Neo4j transaction as the deletion.  Thus a
+        crash can delay View repair, but can never make the work undiscoverable (G15/G20).
+        """
+        namespace_keys = self.erase_target_namespace_keys(node_uuid)
+        scope = (scope_namespace or "").strip()
+        if scope and namespace_keys and namespace_keys != [normalize_namespace(scope)]:
+            # CF-326: a scoped caller never cascades into another namespace, even when it names
+            # an existing foreign node (e.g. a TurnEvidence turn_id the ownership guard missed).
+            raise PermissionError(
+                f"erase target resolves to namespace(s) {namespace_keys}, outside {scope!r}; "
+                "refusing a cross-namespace cascade"
+            )
+        erased = list(dict.fromkeys(str(u) for u in (erased_uuids or [node_uuid]) if u))
         if not namespace_keys:
-            return self._empty_memory_erasure_result()
+            result = self._empty_memory_erasure_result()
+            if not erased:
+                return result
+            # Target already gone: its derived fact edges can still carry the erased text. A
+            # scoped caller (pinned, or naming a namespace) touches only its own namespace: an
+            # absent uuid passes the ownership guard, so it must not reach other silos (F4).
+            scope = (scope_namespace or "").strip()
+            if scope:
+                edge_rows = self.neo4j.execute(
+                    self._DERIVED_EDGE_ONLY_SCOPED_STATEMENT,
+                    params={"node_uuid": node_uuid, "erased_uuids": erased,
+                            "namespace_key": scope},
+                )
+            else:
+                edge_rows = self.neo4j.execute(
+                    self._DERIVED_EDGE_ONLY_STATEMENT,
+                    params={"node_uuid": node_uuid, "erased_uuids": erased},
+                )
+            edge_row = dict(edge_rows[0]) if edge_rows else {}
+            result["derived_edges_deleted_uuids"] = list(edge_row.get("edges_deleted_uuids") or [])
+            result["derived_edges_flagged_uuids"] = list(edge_row.get("edges_flagged_uuids") or [])
+            result["derived_edges_deleted"] = len(result["derived_edges_deleted_uuids"])
+            result["derived_edges_flagged"] = len(result["derived_edges_flagged_uuids"])
+            result["derived_conflicts_deleted"] = int(edge_row.get("conflicts_deleted") or 0)
+            result["derived_entities_flagged_uuids"] = list(
+                edge_row.get("holders_flagged_uuids") or []
+            )
+            result["derived_entities_flagged"] = len(result["derived_entities_flagged_uuids"])
+            return result
         if len(namespace_keys) != 1:
             raise RuntimeError(
                 "evidence erasure target resolves to multiple canonical namespaces; refusing "
@@ -1287,11 +1872,23 @@ class MemoryQueryRepository:
             node_uuid,
             operation_id=operation_id,
             namespace_key=namespace_keys[0],
+            erased_uuids=erased or [node_uuid],
+            deletable_entity_uuids=deletable_entity_uuids,
         )
 
     @staticmethod
     def _empty_memory_erasure_result() -> dict[str, Any]:
         return {
+            "derived_edges_deleted": 0,
+            "derived_edges_flagged": 0,
+            "derived_entities_deleted": 0,
+            "derived_entities_flagged": 0,
+            "derived_unknown_provenance": 0,
+            "derived_conflicts_deleted": 0,
+            "derived_edges_deleted_uuids": [],
+            "derived_edges_flagged_uuids": [],
+            "derived_entities_deleted_uuids": [],
+            "derived_entities_flagged_uuids": [],
             "touched": False,
             "memory_touched": 0,
             "assertions_deleted": 0,
@@ -1306,9 +1903,17 @@ class MemoryQueryRepository:
         }
 
     def _delete_memory_with_scalar_cascade_in_namespace(
-        self, node_uuid: str, *, operation_id: str, namespace_key: str
+        self,
+        node_uuid: str,
+        *,
+        operation_id: str,
+        namespace_key: str,
+        erased_uuids: Sequence[str] | None = None,
+        deletable_entity_uuids: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Apply one erasure after locking and revalidating its preflight namespace."""
+        erased = list(erased_uuids) if erased_uuids else [node_uuid]
+        deletable = None if deletable_entity_uuids is None else list(deletable_entity_uuids)
         # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
@@ -1532,20 +2137,48 @@ class MemoryQueryRepository:
                 RETURN size(doomed_events) AS event_assertions_deleted,
                        size(event_heads) AS event_heads_deleted
             }
+            // Derived edges/entities restating the erased text, before the node's MENTIONS go.
+            """ + self._DERIVED_EDGE_CALL + self._DERIVED_ENTITY_CALL + """
             CALL {
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
                    OR (n:TurnEvidence AND n.turn_id = $node_uuid)
+                // UNION branches run in order and see earlier branches' writes: branch 2 sets
+                // FAILED, so branch 3 must test the state from BEFORE any branch ran or it deletes
+                // the in-flight tombstone the worker needs (e2e-21 erase_during_enrichment).
+                //
+                // A queue node is kept as a content-less tombstone whenever a twin could still
+                // exist that this erase does not cover: enrichment running (PENDING/ENRICHING), an
+                // unlinked tombstone whose worker may still publish (a repeat erase or replay,
+                // review B-2), or a twin linked after the erase resolved its targets (B-1). The
+                // late-twin case is flagged so compensation erases the twin.
+                WITH n, coalesce(n.processing_state, '') AS prior_state,
+                     n.resolved_episode_uuid AS prior_resolved,
+                     (n['erased_at'] IS NOT NULL
+                      OR coalesce(n.processing_substage, '') = 'deleted_by_user') AS prior_erased
+                WITH n, prior_state,
+                     (prior_resolved IS NOT NULL AND NOT prior_resolved IN $erased_uuids
+                      AND EXISTS { MATCH (lt:Episodic {uuid: prior_resolved}) })
+                         AS late_twin,
+                     (prior_erased AND prior_resolved IS NULL) AS unlinked_tombstone,
+                     (prior_resolved IS NOT NULL AND prior_resolved IN $erased_uuids)
+                         AS drop_link
+                WITH n, late_twin, drop_link,
+                     (prior_state IN ['PENDING', 'ENRICHING'] OR unlinked_tombstone OR late_twin)
+                         AS keep_tombstone
                 CALL {
-                    WITH n
+                    WITH n, late_twin, keep_tombstone, drop_link
                     WITH n WHERE n:Entity
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n
-                    WITH n WHERE n:Episodic
-                      AND coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
-                    SET n.processing_state = 'FAILED',
+                    WITH n, late_twin, keep_tombstone, drop_link
+                    WITH n, late_twin, drop_link WHERE n:Episodic AND keep_tombstone
+                    FOREACH (_ IN CASE WHEN drop_link THEN [1] ELSE [] END |
+                        REMOVE n.resolved_episode_uuid)
+                    SET n.erasure_compensation_pending = CASE
+                            WHEN late_twin THEN true ELSE n.erasure_compensation_pending END,
+                        n.processing_state = 'FAILED',
                         n.processing_stage = 'failed',
                         n.processing_substage = 'deleted_by_user',
                         n.processing_substage_started_at = datetime(),
@@ -1555,22 +2188,22 @@ class MemoryQueryRepository:
                         n.processing_lease_expires_at = null,
                         n.processing_heartbeat_at = datetime(),
                         n.processing_error = 'deleted_by_user',
+                        n.erased_at = coalesce(n.erased_at, datetime()),
                         n.processing_llm_active_task = null,
                         n.processing_llm_active_kind = null,
                         n.processing_llm_active_model = null,
                         n.processing_llm_active_endpoint = null
                     // The node is kept so the queue stops; the erased text is not.
                     REMOVE n.content, n.content_embedding, n.content_embedding_model,
-                           n.ingest_key, n.ingest_request_sha256
+                           n.diff, n.ingest_key, n.ingest_request_sha256
                     RETURN 1 AS touched
                     UNION
-                    WITH n
-                    WITH n WHERE n:Episodic
-                      AND NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
+                    WITH n, late_twin, keep_tombstone
+                    WITH n WHERE n:Episodic AND NOT keep_tombstone
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n
+                    WITH n, late_twin, keep_tombstone
                     WITH n WHERE n:TurnEvidence
                     DETACH DELETE n
                     RETURN 1 AS touched
@@ -1580,25 +2213,33 @@ class MemoryQueryRepository:
             WITH repairs, source_keys, assertions_deleted, memory_touched,
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
-                 event_assertions_deleted, event_heads_deleted
+                 event_assertions_deleted, event_heads_deleted,
+                 edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
+                 entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
             WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
-                 event_assertions_deleted, event_heads_deleted
+                 event_assertions_deleted, event_heads_deleted,
+                 edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
+                 entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
                    size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted,
                    dependent_views_retired, dependent_views_scrubbed,
                    view_repairs_created, watermarks_reset,
-                   event_assertions_deleted, event_heads_deleted
+                   event_assertions_deleted, event_heads_deleted,
+                   edges_deleted_uuids, edges_flagged_uuids, conflicts_deleted,
+                   entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             """,
             params={
                 "node_uuid": node_uuid,
                 "operation_id": operation_id,
                 "namespace_key": namespace_key,
+                "erased_uuids": erased,
+                "deletable_entity_uuids": deletable,
             },
         )
         if not rows:
@@ -1617,6 +2258,16 @@ class MemoryQueryRepository:
             "event_assertions_deleted": int(row.get("event_assertions_deleted", 0) or 0),
             "event_heads_deleted": int(row.get("event_heads_deleted", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
+            "derived_edges_deleted": len(row.get("edges_deleted_uuids") or []),
+            "derived_edges_flagged": len(row.get("edges_flagged_uuids") or []),
+            "derived_entities_deleted": len(row.get("entities_deleted_uuids") or []),
+            "derived_entities_flagged": len(row.get("entities_flagged_uuids") or []),
+            "derived_unknown_provenance": int(row.get("derived_unknown_provenance", 0) or 0),
+            "derived_conflicts_deleted": int(row.get("conflicts_deleted", 0) or 0),
+            "derived_edges_deleted_uuids": list(row.get("edges_deleted_uuids") or []),
+            "derived_edges_flagged_uuids": list(row.get("edges_flagged_uuids") or []),
+            "derived_entities_deleted_uuids": list(row.get("entities_deleted_uuids") or []),
+            "derived_entities_flagged_uuids": list(row.get("entities_flagged_uuids") or []),
         }
 
     def delete_memory(self, node_uuid: str) -> bool:
@@ -1625,6 +2276,132 @@ class MemoryQueryRepository:
             node_uuid, operation_id=uuid4().hex
         )
         return bool(result["touched"])
+
+    def scrub_merge_audit_for_episodes(
+        self,
+        erased_uuids: Sequence[str],
+        deleted_entity_uuids: Sequence[str] = (),
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        """Tombstone merge_audit entries that copied erased content; such merges become irreversible.
+
+        Survivors are matched inside ``namespace`` only (``None`` is the legacy unscoped
+        behaviour). Needles must be canonical uuids; an entry is tombstoned only when one of its
+        parsed JSON string leaves EQUALS a needle. An entry that mentions a needle but cannot be
+        parsed is left in place and counted in ``merge_audits_unscrubbed``.
+        """
+        import json
+
+        from menhir.domain.erase_target import canonical_uuid_needles
+
+        needles = canonical_uuid_needles([*erased_uuids, *deleted_entity_uuids])
+        result: dict[str, Any] = {
+            "merge_audits_tombstoned": 0,
+            "merge_absorbed_uuids": [],
+            "merge_audits_unscrubbed": 0,
+        }
+        if not needles:
+            return result
+        needle_set = set(needles)
+
+        def _leaves(node: Any) -> Iterator[str]:
+            if isinstance(node, str):
+                yield node
+            elif isinstance(node, dict):
+                for key, val in node.items():
+                    yield str(key)
+                    yield from _leaves(val)
+            elif isinstance(node, (list, tuple)):
+                for val in node:
+                    yield from _leaves(val)
+
+        def _classify(entry: str) -> str:
+            """'keep' (no needle), 'match' (exact leaf hit) or 'unparseable' (mentions a needle)."""
+            try:
+                parsed = json.loads(entry)
+            except (TypeError, ValueError):
+                return "unparseable" if any(u in entry for u in needles) else "keep"
+            return "match" if any(leaf in needle_set for leaf in _leaves(parsed)) else "keep"
+
+        # CONTAINS is only a candidate prefilter over validated uuids; the exact decision is made
+        # per parsed entry in Python.
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (s:Entity)
+            WHERE {tenant_scope_cypher("s")}
+              AND any(entry IN coalesce(s.merge_audit, [])
+                      WHERE any(u IN $all WHERE entry CONTAINS u))
+            RETURN s.uuid AS uuid, s.merge_audit AS merge_audit
+            """,
+            params={"all": needles, **tenant_scope_params(namespace)},
+        )
+        absorbed: list[str] = []
+        for row in rows or []:
+            suuid = row.get("uuid")
+            if not suuid:
+                continue
+            row_unparseable = 0
+            for attempt in range(2):
+                old = [str(e) for e in (row.get("merge_audit") or [])]
+                new: list[str] = []
+                tombstoned = 0
+                unparseable = 0
+                found: list[str] = []
+                for entry in old:
+                    kind = _classify(entry)
+                    if kind == "unparseable":
+                        unparseable += 1
+                    if kind != "match":
+                        new.append(entry)
+                        continue
+                    try:
+                        parsed = json.loads(entry)
+                    except (TypeError, ValueError):
+                        parsed = None
+                    parsed = parsed if isinstance(parsed, dict) else {}
+                    absorbed_uuid = parsed.get("absorbed_uuid")
+                    if absorbed_uuid:
+                        found.append(str(absorbed_uuid))
+                    new.append(json.dumps({
+                        "erased": True,
+                        "absorbed_uuid": absorbed_uuid,
+                        "survivor_uuid": parsed.get("survivor_uuid") or suuid,
+                        "reason": "source_erased",
+                    }))
+                    tombstoned += 1
+                row_unparseable = unparseable
+                if not tombstoned:
+                    break
+                written = self.neo4j.execute(
+                    """
+                    MATCH (s:Entity {uuid: $uuid})
+                    WHERE s.merge_audit = $old
+                    SET s.merge_audit = $new, s.merge_irreversible = true
+                    RETURN count(s) AS updated
+                    """,
+                    params={"uuid": suuid, "old": old, "new": new},
+                )
+                if written and int(written[0].get("updated", 0) or 0) > 0:
+                    result["merge_audits_tombstoned"] += tombstoned
+                    absorbed.extend(found)
+                    break
+                if attempt == 0:
+                    # merge_audit changed under us: re-read once and retry.
+                    again = self.neo4j.execute(
+                        "MATCH (s:Entity {uuid: $uuid}) RETURN s.merge_audit AS merge_audit",
+                        params={"uuid": suuid},
+                    )
+                    row = {"uuid": suuid, "merge_audit": (again[0].get("merge_audit") if again else [])}
+                else:
+                    logger.warning(
+                        "merge_audit scrub lost a compare-and-set twice for %s; entry left in place",
+                        suuid,
+                    )
+                    result["merge_audits_unscrubbed"] += 1
+            result["merge_audits_unscrubbed"] += row_unparseable
+        result["merge_absorbed_uuids"] = list(dict.fromkeys(absorbed))
+        return result
 
     def delete_namespace_with_scalar_cascade(
         self, group_id: str, namespace: str, *, operation_id: str
@@ -1678,20 +2455,10 @@ class MemoryQueryRepository:
             )
             WITH f, repairs
             OPTIONAL MATCH (n)
-            WHERE n.group_id = $group_id
-               OR (n:Episodic AND n.namespace = $namespace)
-               OR (n:TypedAssertion AND n.namespace = $namespace)
-               OR (n:TypedAssertionHead AND n.namespace = $namespace)
-               OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
-               OR (n:TurnEvidence AND n.namespace = $namespace)
-               OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
-               OR (n:TypedEventAssertion AND n.namespace = $namespace)
-               OR (n:TypedEventAssertionHead
-                   AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
-                                WHERE ev.namespace = $namespace }
-                   AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
-                                    WHERE ev2.namespace <> $namespace })
-            WITH f, repairs, collect(DISTINCT n) AS doomed
+            WHERE """ + NAMESPACE_ERASE_PREDICATE + """
+            WITH f, repairs, collect(DISTINCT n) AS direct
+            """ + NAMESPACE_SUBORDINATES_CALL + """
+            WITH f, repairs, direct + subs AS doomed
             WITH f, repairs, doomed,
                  [n IN doomed WHERE coalesce(n.uuid, n.turn_id) IS NOT NULL |
                     coalesce(n.uuid, n.turn_id)] AS doomed_uuids

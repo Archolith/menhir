@@ -70,8 +70,11 @@ class BackendClientOpsMixin:
     async def delete_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("delete_memory", {"node_uuid": node_uuid}))
 
-    async def erase_memory(self, node_uuid: str) -> dict:
-        return dict(await self._request("erase_memory", {"node_uuid": node_uuid}) or {})
+    async def erase_memory(self, node_uuid: str, namespace: str | None = None) -> dict:
+        payload: dict[str, Any] = {"node_uuid": node_uuid}
+        if namespace:
+            payload["namespace"] = namespace
+        return dict(await self._request("erase_memory", payload) or {})
 
     async def delete_namespace(
         self,

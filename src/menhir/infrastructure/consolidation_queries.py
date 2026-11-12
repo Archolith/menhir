@@ -10,6 +10,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Callable
 from typing import Any
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
@@ -18,7 +19,10 @@ from menhir.domain.retention import destructive_retention_allowed_cypher
 from menhir.infrastructure.cypher import (
     Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
 )
+from menhir.infrastructure.erasure_fence import fence_key_cypher
+from menhir.infrastructure.graph_text_inventory import ABSORBED_BLOCK_SEPARATOR
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
+from menhir.infrastructure.publish_fence import CopyFenced, execute_copy_fenced
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +225,9 @@ class ConsolidationRepository:
                    "n.freshness = $freshness",
                    harmful_automatic_mutation_allowed_cypher("n"),
                    f"{memory_recency_cypher()} < datetime() - duration({{days: $min_days_since_accessed}})",
-                   "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
+                   "coalesce(toInteger(n.edge_count), 0) < $max_edge_count",
+                   # CF-338: a node an erase scrubbed waits for rederive; never compress it.
+                   "NOT coalesce(n.rederive_pending, false)")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
             .with_clause(f"n, {memory_timestamp_cypher('n.decay_last_selected_at')} AS selected_at")
             .return_raw("""n.uuid AS uuid,
@@ -238,7 +244,11 @@ class ConsolidationRepository:
        coalesce(n.namespace, 'default') AS namespace,
        coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
-       n.created_at AS created_at""")
+       n.created_at AS created_at,
+       """ + fence_key_cypher("n") + """ AS fence_key,
+       head(COLLECT { MATCH (f:EvidenceNamespaceFence) WHERE f.namespace_key = """
+                + fence_key_cypher("n") + """
+                      RETURN coalesce(f.erasure_epoch, 0) }) AS fence_epoch""")
             .order_by(
                 f"selected_at IS NOT NULL ASC, selected_at ASC, "
                 f"coalesce({memory_timestamp_cypher('n.created_at')}, "
@@ -270,23 +280,53 @@ class ConsolidationRepository:
         )
         return int(rows[0].get("marked", 0)) if rows else 0
 
-    def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
-        """Transition a PERSISTENT ACTIVE node to COMPRESSED with a summary."""
+    @staticmethod
+    def _updated_unless_fenced(node_uuid: str, fenced_write: Callable[[], Any]) -> bool:
+        """Run a G-copy single-node write; False when it matched nothing or was fenced.
+
+        ``fenced_write`` calls ``execute_copy_fenced`` with ``key_from_uuid=node_uuid``: without a
+        fence key the node's key is resolved inside the fenced transaction, and without a read
+        epoch only the epoch comparison is skipped.
+        """
+        try:
+            rows = fenced_write()
+        except CopyFenced as fenced:
+            logger.info(
+                "Lifecycle write to %s refused by the erasure fence (%s)", node_uuid, fenced.reason
+            )
+            return False
+        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+
+    def compress_node(
+        self,
+        node_uuid: str,
+        compressed_summary: str,
+        *,
+        read_epoch: int | None = None,
+        fence_key: str | None = None,
+    ) -> bool:
+        """Transition a PERSISTENT ACTIVE node to COMPRESSED with a summary.
+
+        G-copy (CF-338): the summary is derived from the content the decay sweep read, so the
+        write is refused if an erase touched the namespace since ``read_epoch`` (read with that
+        content by ``fetch_decay_candidates``), and never lands on a node an erase scrubbed.
+        """
 
         query = (Cypher()
             .match("(n:Entity {uuid: $node_uuid})")
             .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'",
+                   "NOT coalesce(n.rederive_pending, false)",
                    harmful_automatic_mutation_allowed_cypher("n"))
             .set(("n.original_content = coalesce(n.original_content, n.content)",
                   "n.content = $compressed_summary",
                   "n.freshness = 'COMPRESSED'"))
             .return_raw("count(n) AS updated")
             .build())
-        rows = self.neo4j.execute(query, params={
-                "node_uuid": node_uuid,
-                "compressed_summary": compressed_summary,
-            })
-        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+        params = {"node_uuid": node_uuid, "compressed_summary": compressed_summary}
+        return self._updated_unless_fenced(node_uuid, lambda: execute_copy_fenced(
+            self.neo4j, fence_key, read_epoch, [node_uuid],
+            lambda tx: tx.execute(query, params), key_from_uuid=node_uuid,
+        ))
 
     def fetch_node_freshness(self, node_uuids: list[str]) -> dict[str, str]:
         """Return {uuid: freshness} for the given Entity nodes."""
@@ -304,8 +344,22 @@ class ConsolidationRepository:
             if row.get("uuid")
         }
 
-    def complete_rehydration(self, node_uuid: str, updated_content: str | None = None) -> bool:
-        """Transition a PERSISTENT COMPRESSED node back to ACTIVE."""
+    def complete_rehydration(
+        self,
+        node_uuid: str,
+        updated_content: str | None = None,
+        *,
+        source_uuids: tuple[str, ...] = (),
+        read_epoch: int | None = None,
+    ) -> bool:
+        """Transition a PERSISTENT COMPRESSED node back to ACTIVE.
+
+        With ``updated_content`` (an LLM merge of the archived original and new context) the
+        write runs under G-copy with the node and ``source_uuids`` (the context's episode) as
+        sources, and never lands on a node an erase scrubbed (CF-338). Without ``read_epoch`` the
+        epoch comparison is skipped: the source markers, ``erasing_ops`` and ``rederive_pending``
+        still refuse a copy of erased text.
+        """
         params: dict[str, object] = {"node_uuid": node_uuid}
         set_lines = [
             "n.freshness = 'ACTIVE'",
@@ -320,11 +374,19 @@ class ConsolidationRepository:
             .match("(n:Entity {uuid: $node_uuid})")
             .where("n.scope = 'PERSISTENT'", "n.freshness = 'COMPRESSED'",
                    automatic_lifecycle_protection_cypher("n"))
+            .where_if(updated_content is not None, "NOT coalesce(n.rederive_pending, false)")
             .set(set_lines)
             .return_raw("count(n) AS updated")
             .build())
-        rows = self.neo4j.execute(query, params=params)
-        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+        if updated_content is None:
+            # A state flip; no text is copied.
+            rows = self.neo4j.execute(query, params=params)
+            return bool(rows and int(rows[0].get("updated", 0)) > 0)
+        sources = [node_uuid, *(u for u in source_uuids if u)]
+        return self._updated_unless_fenced(node_uuid, lambda: execute_copy_fenced(
+            self.neo4j, None, read_epoch, sources,
+            lambda tx: tx.execute(query, params), key_from_uuid=node_uuid,
+        ))
 
     def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
         """Bridge entity neighbors around a node, then delete it.
@@ -982,7 +1044,12 @@ class ConsolidationRepository:
                 .where("n.conflict_group_id = $group_id",
                        namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
-                .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name")
+                # G-copy (CF-332): each member's fence key and epoch, read before any content.
+                .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name, "
+                            f"{fence_key_cypher('n')} AS fence_key, "
+                            "head(COLLECT { MATCH (f:EvidenceNamespaceFence) WHERE "
+                            f"f.namespace_key = {fence_key_cypher('n')} "
+                            "RETURN coalesce(f.erasure_epoch, 0) }) AS fence_epoch")
                 .build()),
             params={"group_id": conflict_group_id, **namespace_params},
         )
@@ -1020,6 +1087,17 @@ class ConsolidationRepository:
                     + ". Pass allow_promoted_removal=True to override."
                 )
 
+        # G-copy (CF-332): absorption copies the removed members' text, and rewrites keep's own,
+        # into keep. The epoch came with the members read, before either content is read, so an
+        # erase landing before the write refuses the copy instead of resurrecting scrubbed text.
+        fence_keys = {
+            str(r["uuid"]): str(r.get("fence_key") or "default") for r in members if r.get("uuid")
+        }
+        fence_epochs = {str(r["uuid"]): int(r.get("fence_epoch") or 0) for r in members if r.get("uuid")}
+        copy_key = fence_keys.get(keep_uuid, "default")
+        copy_epoch = fence_epochs.get(keep_uuid, 0)
+        absorption_fenced = ""
+
         keep_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
@@ -1033,6 +1111,13 @@ class ConsolidationRepository:
 
         # --- Content absorption before GONE ---
         for target_uuid in remove_uuids:
+            if absorption_fenced:
+                break
+            if fence_keys.get(target_uuid, copy_key) != copy_key:
+                logger.info(
+                    "Skipping absorption across fence keys keep=%s remove=%s", keep_uuid, target_uuid
+                )
+                continue
             remove_rows = self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
@@ -1057,25 +1142,41 @@ class ConsolidationRepository:
                         continue
                 absorbed_date = datetime.now(timezone.utc).date().isoformat()
                 merged = (
-                    f"{keep_content}\n\n"
-                    f"--- Absorbed from superseded memory ({target_uuid}) on {absorbed_date} ---\n"
+                    f"{keep_content}{ABSORBED_BLOCK_SEPARATOR}"
+                    f"{target_uuid}) on {absorbed_date} ---\n"
                     f"{remove_content}"
                 )
-                self.neo4j.execute(
-                    (Cypher()
-                        .match("(n:Entity)")
-                        .where("n.uuid = $uuid", namespace_predicate,
-                               automatic_lifecycle_protection_cypher("n"))
-                        .set(("n.content = $content",
-                              "n.original_content = coalesce(n.original_content, $original)"))
-                        .build()),
-                    params={
-                        "uuid": keep_uuid,
-                        "content": merged,
-                        "original": keep_content,
-                        **namespace_params,
-                    },
-                )
+                absorb_statement = (Cypher()
+                    .match("(n:Entity)")
+                    .where("n.uuid = $uuid", namespace_predicate,
+                           automatic_lifecycle_protection_cypher("n"))
+                    .set(("n.content = $content",
+                          "n.original_content = coalesce(n.original_content, $original)",
+                          # The erase's selector for this block (idempotent on a retried tx).
+                          "n.absorbed_from = CASE WHEN $target IN coalesce(n.absorbed_from, []) "
+                          "THEN n.absorbed_from ELSE coalesce(n.absorbed_from, []) + $target END"))
+                    .build())
+                absorb_params = {
+                    "uuid": keep_uuid,
+                    "content": merged,
+                    "original": keep_content,
+                    "target": target_uuid,
+                    **namespace_params,
+                }
+                try:
+                    execute_copy_fenced(
+                        self.neo4j, copy_key, copy_epoch, [keep_uuid, target_uuid],
+                        lambda tx, s=absorb_statement, p=absorb_params: tx.execute(s, p),
+                    )
+                except CopyFenced as fenced:
+                    # An erase touched the namespace since the reads: absorb nothing more. The
+                    # resolution itself (GONE, bridging) copies no text and still runs.
+                    absorption_fenced = fenced.reason
+                    logger.info(
+                        "Absorption into %s refused by the erasure fence (%s)",
+                        keep_uuid, fenced.reason,
+                    )
+                    break
                 logger.debug(
                     "Content absorbed from %s into %s (%d chars appended)",
                     target_uuid,

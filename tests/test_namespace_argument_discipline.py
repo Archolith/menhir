@@ -55,8 +55,6 @@ NAMESPACE_MUTATORS = frozenset({
 #: namespace"). They are the same guarantee, and a check that recognised only one reported a
 #: guarded tool as unguarded -- which this file did on its first run.
 ALLOWED: dict[tuple[str, str], str] = {
-    ("mcp/tools/ingest/delete_memory.py", "erase_memory"):
-        "CF-64 two-lookup ownership guard on node_uuid runs first (inline spelling)",
     ("mcp/tools/ingest/flag_memory.py", "flag_memory"):
         "CF-64 two-lookup ownership guard on node_uuid runs first",
     ("mcp/tools/ingest/promote_memory.py", "promote_memory"):

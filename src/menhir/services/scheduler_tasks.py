@@ -254,16 +254,19 @@ async def retry_process_candidate(
 ) -> str:
     """Decide what to do with one failed enrichment candidate. Returns the action taken."""
     episode_uuid = str(row.get("uuid") or "")
-    anchor_name = str(row.get("name") or "")
     processing_attempts = int(row.get("processing_attempts") or 0)
 
-    if episode_uuid and anchor_name:
+    if episode_uuid:
+        # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
+        # match) says a completion exists. The retry row carries no namespace; the artifact does.
         existing_completion = await asyncio.to_thread(
-            graph_adapter.find_completed_episode_artifact,
-            anchor_uuid=episode_uuid,
-            anchor_name=anchor_name,
+            graph_adapter.linked_twin_artifact,
+            episode_uuid,
         )
         if existing_completion is not None:
+            link_namespace = str(
+                existing_completion.get("namespace") or row.get("namespace") or "default"
+            )
             resolved_episode_uuid = str(existing_completion.get("resolved_episode_uuid") or "")
             entity_uuids = [str(u) for u in (existing_completion.get("entity_uuids") or []) if str(u)]
             edge_uuids = [str(u) for u in (existing_completion.get("edge_uuids") or []) if str(u)]
@@ -278,7 +281,7 @@ async def retry_process_candidate(
                 user_id=str(row.get("user_id") or ""),
                 source=str(row.get("source") or "claude-code"),
                 source_confidence=source_confidence_for(str(row.get("source") or "claude-code")),
-                namespace=str(row.get("namespace") or "default"),
+                namespace=link_namespace,
                 **stamp_kwargs,
             )
             try:
@@ -286,7 +289,7 @@ async def retry_process_candidate(
                     graph_adapter,
                     entity_uuids,
                     source_episode_uuid=episode_uuid,
-                    namespace=str(row.get("namespace") or "default"),
+                    namespace=link_namespace,
                 )
             except ValueError as exc:
                 logger.warning(
@@ -961,6 +964,46 @@ async def prune_telemetry_tables(
             ", ".join(f"{t}={n}" for t, n in sorted(deleted.items())),
         )
     return {"pruned": deleted, "total": total}
+
+
+async def erasure_twin_compensation(graph_adapter: object, *, limit: int = 50) -> dict[str, object]:
+    """Erase Graphiti twins orphaned by an erase that raced enrichment."""
+    from menhir.services.erasure_compensation import sweep_erased_twin_compensations
+
+    return await asyncio.to_thread(
+        sweep_erased_twin_compensations, graph_adapter, limit=limit
+    )
+
+
+async def erasure_fence_orphans(graph_adapter: object) -> dict[str, object]:
+    """Release ``erasing_ops`` an erase left behind when its own fence release failed (CF-324)."""
+    from menhir.services.erasure_coordinator import ErasureCoordinator
+
+    def _run() -> dict[str, object]:
+        released = ErasureCoordinator(graph_adapter=graph_adapter).release_orphaned_erasing_ops()
+        return {"released": list(released)}
+
+    return await asyncio.to_thread(_run)
+
+
+async def sidecar_compaction() -> dict[str, object]:
+    """VACUUM + wal_checkpoint(TRUNCATE) the telemetry sidecar and stamp compacted erasure ops.
+
+    Threaded off the event loop: VACUUM rewrites the whole file. A busy result is a normal
+    retry-next-run outcome, not a failure.
+    """
+    from menhir.services.sidecar_compaction import run_sidecar_compaction
+
+    return await asyncio.to_thread(run_sidecar_compaction)
+
+
+async def derived_rederive(
+    graph_adapter: object, llm: object, *, limit: int = 25, embedder: object | None = None
+) -> dict[str, object]:
+    """Re-derive facts/entities an erasure flagged; recall hides their text until then."""
+    from menhir.services.derived_rederive import run_derived_rederive
+
+    return await run_derived_rederive(graph_adapter, llm, limit=limit, embedder=embedder)
 
 
 async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:

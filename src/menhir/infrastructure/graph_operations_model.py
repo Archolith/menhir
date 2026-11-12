@@ -80,7 +80,8 @@ def _participant_uuids(operation_kind: str, request: dict[str, Any]) -> list[str
         ]
     if operation_kind in _PARTICIPANT_DELETE_KINDS:
         seen: dict[str, None] = {}
-        for t in request.get("targets") or []:
+        # fence_uuids: derived entities an erasure may delete (#423); fenced, never deleted by uuid.
+        for t in [*(request.get("targets") or []), *(request.get("fence_uuids") or [])]:
             if t:
                 seen.setdefault(str(t), None)
         return list(seen)
