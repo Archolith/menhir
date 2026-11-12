@@ -36,6 +36,7 @@ from menhir.infrastructure.cypher import (
 from menhir.infrastructure.erasure_fence import (
     fence_key_cypher,
     fence_lock_cypher,
+    warn_if_on_event_loop,
     marker_absent_for_param_cypher,
 )
 
@@ -758,6 +759,7 @@ class EpisodeLifecycleRepository:
         `namespace=None` does not filter, so an unpinned deployment reaches every turn exactly as
         before and each projection now lands in the right silo.
         """
+        warn_if_on_event_loop("create_evidence_projection")
         # G-create: lock the turn's namespace fence in the same statement; refuse while an erase holds
         # it or when the turn or projection uuid is marked. A refusal creates nothing (returns None).
         rows = self.neo4j.execute(
@@ -1787,6 +1789,7 @@ class EpisodeLifecycleRepository:
 NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If same-named
         forks exist it REPORTS them (`SELF_FORKS_REQUIRE_MIGRATION`) and leaves them untouched;
         consolidating them is an operator-only, journaled migration, never a side effect of a write."""
+        warn_if_on_event_loop("ensure_self_entity")
         if not namespace:
             raise ValueError("ensure_self_entity requires a non-empty namespace")
         self_uuid = self_uuid_for_namespace(namespace)
