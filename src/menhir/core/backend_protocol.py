@@ -239,6 +239,18 @@ class MemoryBackend(Protocol):
         """Fetch a single memory node by UUID, optionally restricted to one namespace."""
         ...
 
+    async def list_namespace_records(
+        self,
+        namespace: str,
+        *,
+        kind: str = "memory",
+        limit: int = 50,
+        after_id: str | None = None,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        """One page of a silo's erasable records of one kind, keyed by the id an erase takes."""
+        ...
+
     async def fetch_recent_memories(
         self, limit: int = 20, namespace: str | None = None
     ) -> list[dict[str, Any]]:

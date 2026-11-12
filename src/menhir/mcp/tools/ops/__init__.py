@@ -12,6 +12,7 @@ from .resolve_todo import ResolveTodoTool
 from .reopen_todo import ReopenTodoTool
 from .link_memory_to_todo import LinkMemoryToTodoTool
 from .delete_namespace import DeleteNamespaceTool
+from .list_namespace_memories import ListNamespaceMemoriesTool
 from .force_reenrich import ForceReenrichTool
 from .force_release_lease import ForceReleaseEnrichmentLeaseTool
 from .force_scheduler_takeover import ForceSchedulerTakeoverTool
@@ -50,6 +51,7 @@ OPS_TOOLS = [
     ListEnrichmentQueueTool,
     RepairStaleEnrichmentTool,
     DeleteNamespaceTool,
+    ListNamespaceMemoriesTool,
     ForceReleaseEnrichmentLeaseTool,
     GetEpisodeTraceTool,
     GetProvenanceTool,

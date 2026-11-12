@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+
+#: Synthetic reason: the id is proven to belong to another namespace; nothing ran.
+OUTSIDE_NAMESPACE = "outside_namespace"
 
 
 async def delete_memory(node_uuid: str, namespace: str = "") -> str:
@@ -18,6 +23,139 @@ async def delete_memory(node_uuid: str, namespace: str = "") -> str:
     """
 
     return await DeleteMemoryTool().execute(node_uuid=node_uuid, namespace=namespace)
+
+
+def describe_erase(node_uuid: str, outcome: dict[str, Any]) -> str:
+    """The honest one-line description of an erase outcome (never claims unproven success).
+
+    Shared by delete_memory and delete_memories so a batch reports exactly as a single call does.
+    """
+    reason = outcome.get("reason")
+    purged = sum((outcome.get("purged") or {}).values())
+
+    if reason == "invalid_target":
+        return (
+            f"Refused: {node_uuid!r} is not a valid memory uuid (expected the full "
+            "36-character form). Nothing was erased."
+        )
+    if reason == OUTSIDE_NAMESPACE:
+        return (
+            f"Refused: memory {node_uuid} exists but is outside namespace "
+            f"{outcome.get('namespace')}."
+        )
+    if reason == "nothing_to_erase":
+        return f"No memory found with uuid={node_uuid}, and no stored content for it."
+    if reason == "graph_already_absent":
+        # Not "not found": the node was gone from the graph -- which is how a merge leaves
+        # the node it absorbed -- but its stored content was still there and is now erased.
+        return (
+            f"Memory {node_uuid} was already absent from the graph, but {purged} stored "
+            "record(s) still held its content. Those are now erased."
+        )
+    if reason == "residual_content_after_purge":
+        return (
+            f"Erasure of {node_uuid} did NOT complete: content remains after the purge and "
+            "the operation is quarantined for review."
+        )
+    if reason == "prepare_failed":
+        # The erase never started -- a lock or a paused saga refused it. Nothing was
+        # touched, so say that plainly instead of implying a partial erasure.
+        return (
+            f"Erasure of {node_uuid} did NOT run: the operation could not be prepared "
+            "(another operation holds this memory, or saga writes are paused). Nothing "
+            "was erased; retry later."
+        )
+    if reason == "erased_incomplete" and "foreign_target" in (
+        outcome.get("incomplete_reasons") or []
+    ):
+        # CF-326: refused before anything ran; "Erased ... INCOMPLETE" would be untrue.
+        return (
+            f"Refused: {node_uuid} belongs to another namespace. Nothing was erased."
+        )
+    if reason == "erased_incomplete":
+        # The purge ran but provably missed something. Enumerate what, so the caller can
+        # tell a benign leftover from a real leak; only claim what we can prove.
+        derived = outcome.get("derived") or {}
+        message = f"Erased memory {node_uuid}, but the erasure is INCOMPLETE:"
+        gaps = 0
+        unaddressable_count = len(outcome.get("unaddressable") or [])
+        if unaddressable_count:
+            message += (
+                f" {unaddressable_count} content location(s) could not be addressed and "
+                "were left untouched."
+            )
+            gaps += 1
+        unknown_provenance = int(derived.get("unknown_provenance") or 0)
+        if unknown_provenance:
+            message += (
+                f" {unknown_provenance} derived fact(s) or entit(ies) have no traceable "
+                "source and were left in place."
+            )
+            gaps += 1
+        if derived.get("twin_missing"):
+            message += (
+                " The memory's extracted graph data could not be located (no twin link), "
+                "so derived facts may remain."
+            )
+            gaps += 1
+        if outcome.get("unaddressable_known") is False:
+            message += " The stored content census failed, so completeness is unknown."
+            gaps += 1
+        if outcome.get("wal_checkpoint_complete") is False:
+            message += (
+                " The telemetry database's write-ahead log could not be checkpointed, so "
+                "erased bytes may remain in it until the next checkpoint."
+            )
+            gaps += 1
+        if not gaps:
+            message += " completeness could not be confirmed."
+        return message
+    if reason == "erased":
+        message = (
+            f"Erased memory {node_uuid}: the graph node, all its relationships, and {purged} "
+            "stored record(s) of its content."
+        )
+        derived = outcome.get("derived") or {}
+        entities_deleted = int(derived.get("entities_deleted") or 0)
+        edges_deleted = int(derived.get("edges_deleted") or 0)
+        entities_flagged = int(derived.get("entities_flagged") or 0)
+        edges_flagged = int(derived.get("edges_flagged") or 0)
+        merge_audits_tombstoned = int(derived.get("merge_audits_tombstoned") or 0)
+        conflicts_deleted = int(derived.get("conflicts_deleted") or 0)
+        if (
+            entities_deleted
+            + edges_deleted
+            + entities_flagged
+            + edges_flagged
+            + merge_audits_tombstoned
+            + conflicts_deleted
+        ) > 0:
+            message += (
+                f" Derived data: {entities_deleted} entit(ies) and {edges_deleted} fact(s) "
+                f"removed; {entities_flagged + edges_flagged} shared item(s) hidden pending "
+                f"re-derivation; {merge_audits_tombstoned} merge(s) made non-reversible."
+            )
+            if conflicts_deleted:
+                message += f" {conflicts_deleted} fact-conflict record(s) quoting it removed."
+        unaddressable = outcome.get("unaddressable") or []
+        if unaddressable:
+            # Never let an erasure claim a completeness it does not have.
+            message += (
+                f" NOTE: {len(unaddressable)} content location(s) could not be addressed and "
+                "were left untouched."
+            )
+        if outcome.get("wal_checkpoint_complete") is False:
+            message += (
+                " NOTE: erased bytes may remain in the telemetry database's write-ahead log "
+                "until the next checkpoint."
+            )
+        return message
+    # Unknown reason. An outcome we do not recognise is exactly the case where a
+    # cheerful default message would be a lie, so never claim success.
+    return (
+        f"Erasure of {node_uuid} returned an unexpected result ({reason!r}); it may not "
+        "have completed. Check get_memory_stats or the operator logs."
+    )
 
 
 class DeleteMemoryTool(BaseTextTool):
@@ -41,15 +179,11 @@ class DeleteMemoryTool(BaseTextTool):
         Returns:
             Confirmation or failure message.
         """
-        from menhir.domain.erase_target import normalize_erase_target
+        from menhir.domain.erase_target import INVALID_TARGET, normalize_erase_target
 
-        normalized = normalize_erase_target(node_uuid)
-        if normalized is None:
-            return (
-                f"Refused: {node_uuid!r} is not a valid memory uuid (expected the full "
-                "36-character form). Nothing was erased."
-            )
-        node_uuid = normalized
+        target = normalize_erase_target(node_uuid)
+        if target is None:
+            return describe_erase(node_uuid, {"reason": INVALID_TARGET})
         backend = self.get_backend()
         # Ownership guard. Without the `namespace` parameter above, the pin cannot reach
         # this tool at all: _apply_pinned_namespace injects only into endpoints whose
@@ -62,132 +196,8 @@ class DeleteMemoryTool(BaseTextTool):
         # erasable. So absent-from-graph proceeds, and only a node that demonstrably
         # belongs to another silo is refused.
         ns = namespace.strip() or None
-        if ns is not None and await backend.fetch_memory_by_uuid(
-            node_uuid, namespace=ns
-        ) is None:
-            if await backend.fetch_memory_by_uuid(node_uuid) is not None:
-                return (
-                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
-                )
-        outcome = await backend.erase_memory(node_uuid, namespace=ns)
-        reason = outcome.get("reason")
-        purged = sum((outcome.get("purged") or {}).values())
-
-        if reason == "invalid_target":
-            return (
-                f"Refused: {node_uuid!r} is not a valid memory uuid (expected the full "
-                "36-character form). Nothing was erased."
-            )
-        if reason == "nothing_to_erase":
-            return f"No memory found with uuid={node_uuid}, and no stored content for it."
-        if reason == "graph_already_absent":
-            # Not "not found": the node was gone from the graph -- which is how a merge leaves
-            # the node it absorbed -- but its stored content was still there and is now erased.
-            return (
-                f"Memory {node_uuid} was already absent from the graph, but {purged} stored "
-                "record(s) still held its content. Those are now erased."
-            )
-        if reason == "residual_content_after_purge":
-            return (
-                f"Erasure of {node_uuid} did NOT complete: content remains after the purge and "
-                "the operation is quarantined for review."
-            )
-        if reason == "prepare_failed":
-            # The erase never started -- a lock or a paused saga refused it. Nothing was
-            # touched, so say that plainly instead of implying a partial erasure.
-            return (
-                f"Erasure of {node_uuid} did NOT run: the operation could not be prepared "
-                "(another operation holds this memory, or saga writes are paused). Nothing "
-                "was erased; retry later."
-            )
-        if reason == "erased_incomplete" and "foreign_target" in (
-            outcome.get("incomplete_reasons") or []
-        ):
-            # CF-326: refused before anything ran; "Erased ... INCOMPLETE" would be untrue.
-            return (
-                f"Refused: {node_uuid} belongs to another namespace. Nothing was erased."
-            )
-        if reason == "erased_incomplete":
-            # The purge ran but provably missed something. Enumerate what, so the caller can
-            # tell a benign leftover from a real leak; only claim what we can prove.
-            derived = outcome.get("derived") or {}
-            message = f"Erased memory {node_uuid}, but the erasure is INCOMPLETE:"
-            gaps = 0
-            unaddressable_count = len(outcome.get("unaddressable") or [])
-            if unaddressable_count:
-                message += (
-                    f" {unaddressable_count} content location(s) could not be addressed and "
-                    "were left untouched."
-                )
-                gaps += 1
-            unknown_provenance = int(derived.get("unknown_provenance") or 0)
-            if unknown_provenance:
-                message += (
-                    f" {unknown_provenance} derived fact(s) or entit(ies) have no traceable "
-                    "source and were left in place."
-                )
-                gaps += 1
-            if derived.get("twin_missing"):
-                message += (
-                    " The memory's extracted graph data could not be located (no twin link), "
-                    "so derived facts may remain."
-                )
-                gaps += 1
-            if outcome.get("unaddressable_known") is False:
-                message += " The stored content census failed, so completeness is unknown."
-                gaps += 1
-            if outcome.get("wal_checkpoint_complete") is False:
-                message += (
-                    " The telemetry database's write-ahead log could not be checkpointed, so "
-                    "erased bytes may remain in it until the next checkpoint."
-                )
-                gaps += 1
-            if not gaps:
-                message += " completeness could not be confirmed."
-            return message
-        if reason == "erased":
-            message = (
-                f"Erased memory {node_uuid}: the graph node, all its relationships, and {purged} "
-                "stored record(s) of its content."
-            )
-            derived = outcome.get("derived") or {}
-            entities_deleted = int(derived.get("entities_deleted") or 0)
-            edges_deleted = int(derived.get("edges_deleted") or 0)
-            entities_flagged = int(derived.get("entities_flagged") or 0)
-            edges_flagged = int(derived.get("edges_flagged") or 0)
-            merge_audits_tombstoned = int(derived.get("merge_audits_tombstoned") or 0)
-            conflicts_deleted = int(derived.get("conflicts_deleted") or 0)
-            if (
-                entities_deleted
-                + edges_deleted
-                + entities_flagged
-                + edges_flagged
-                + merge_audits_tombstoned
-                + conflicts_deleted
-            ) > 0:
-                message += (
-                    f" Derived data: {entities_deleted} entit(ies) and {edges_deleted} fact(s) "
-                    f"removed; {entities_flagged + edges_flagged} shared item(s) hidden pending "
-                    f"re-derivation; {merge_audits_tombstoned} merge(s) made non-reversible."
-                )
-                if conflicts_deleted:
-                    message += f" {conflicts_deleted} fact-conflict record(s) quoting it removed."
-            unaddressable = outcome.get("unaddressable") or []
-            if unaddressable:
-                # Never let an erasure claim a completeness it does not have.
-                message += (
-                    f" NOTE: {len(unaddressable)} content location(s) could not be addressed and "
-                    "were left untouched."
-                )
-            if outcome.get("wal_checkpoint_complete") is False:
-                message += (
-                    " NOTE: erased bytes may remain in the telemetry database's write-ahead log "
-                    "until the next checkpoint."
-                )
-            return message
-        # Unknown reason. An outcome we do not recognise is exactly the case where a
-        # cheerful default message would be a lie, so never claim success.
-        return (
-            f"Erasure of {node_uuid} returned an unexpected result ({reason!r}); it may not "
-            "have completed. Check get_memory_stats or the operator logs."
-        )
+        if ns is not None and await backend.fetch_memory_by_uuid(target, namespace=ns) is None:
+            if await backend.fetch_memory_by_uuid(target) is not None:
+                return describe_erase(target, {"reason": OUTSIDE_NAMESPACE, "namespace": ns})
+        outcome = await backend.erase_memory(target, namespace=ns)
+        return describe_erase(target, dict(outcome or {}))

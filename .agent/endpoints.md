@@ -195,6 +195,13 @@ Changing a client's tier changes its scopes, so the client must reauthorize: ref
 tokens carry the old scopes and are refused. Changing only its tools takes effect once the
 server restarts with the new policy, and existing tokens keep working.
 
+When a build adds MCP tools, a v1/v2 policy fails startup until every client decides them.
+`scripts/update_client_policy.py <policy>` prints what it would add (operator: allowed
+unless operator-denied; agent: allowed only if in the agent set; readonly: denied) and the
+new `MENHIR_CLIENT_POLICY_DIGEST`; `--out <file>` writes it after loading it as startup
+does. For v3, `--profile-catalog N` re-pins the catalog so newer profile tools are granted.
+Deploy the new file and the new digest together.
+
 Agent Smith client-metadata documents advertise the scopes the policy gives that client,
 falling back to the built-in table when the client is not in the policy.
 
@@ -590,6 +597,37 @@ Delete a specific memory node and all its relationships.
   and flagged `rederive_pending`; their text is blanked at erase time and hidden from recall until
   the `derived_rederive` job rebuilds it from the remaining sources. Reasons include `prepare_failed` (did not run) and `erased_incomplete` (items without
   provenance, or a missing twin).
+
+### `delete_memories`
+Concept id: `mcp.tool.delete_memories`
+Required tier: `operator`
+
+Erase up to 100 ids, each exactly as `delete_memory` erases one: the same ownership guard, erase
+path and messages. This is how the `default` namespace is cleared, since `delete_namespace` refuses it (#476).
+- **`node_uuids`** (list[str]): 1-100 canonical uuids (memory, entity, TurnEvidence turn or
+  typed-assertion ids). More than 100, or any invalid id, refuses the whole call with nothing run.
+- **`namespace`** (str, optional): An id proven to be in another silo is refused; pinned clients
+  have this forced.
+- **`dry_run`** (bool, optional): Defaults to **true**, which reports what each id resolves to
+  without erasing. Pass false to erase.
+- Returns `results` (one per distinct id: `id`, `reason`, `message`) and `totals` by reason. Ids
+  run sequentially, and a failure on one id does not stop the rest. Once the 90 s budget is spent,
+  the remaining ids are reported as `not_run`.
+
+### `list_namespace_memories`
+Concept id: `mcp.tool.list_namespace_memories`
+Required tier: `operator`
+
+Read-only. Pages a namespace's erasable records and returns the ids `delete_memories` accepts.
+Silo membership uses the erase's own rule (namespace, else group_id, blank = `default`), so
+`default` covers all its stored spellings. Never lists structure rows, artifacts, Todos,
+WorkArtifacts, evidence projections or Graphiti twins.
+- **`namespace`** (str, optional): Defaults to `default`. Pinned clients have this forced.
+- **`kind`** (str, optional): `memory` (default), `turn_evidence` or `typed_assertion`.
+- **`limit`** (int, optional): Page size, 1-100 (default 50).
+- **`after_id`** (str, optional): The previous page's `next_after_id`.
+- **`source`** (str, optional): Memories from this source only.
+- Results are ordered by id, not time. `next_after_id` is null on the last page.
 
 ### `delete_namespace`
 Concept id: `mcp.tool.delete_namespace`

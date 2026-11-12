@@ -12,6 +12,7 @@ placements in ``EARLIER_PLACEMENTS``, so an older policy still resolves it
 where its catalog put it. Release notes list every bump.
 
 Catalog 2: ``get_client_context`` moved from operate to core.
+Catalog 3: ``delete_memories`` and ``list_namespace_memories`` added to curate (#476).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from dataclasses import dataclass
 
 from menhir.tiers import TIER_RANK, tier_allows
 
-CATALOG_VERSION = 2
+CATALOG_VERSION = 3
 
 CORE = "core"
 CURATE = "curate"
@@ -55,6 +56,8 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "promote_memory": (CURATE, 1),
     "close_memory": (CURATE, 1),
     "delete_memory": (CURATE, 1),
+    "delete_memories": (CURATE, 3),
+    "list_namespace_memories": (CURATE, 3),
     "add_candidate": (CURATE, 1),
     "add_memory_and_track": (CURATE, 1),
     "rate_recall": (CURATE, 1),
