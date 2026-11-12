@@ -123,6 +123,72 @@ def test_admitted_add_memory_does_not_block_the_loop_on_the_fence(test_neo4j_rep
         )
 
 
+def _hold_episode_lock(episode_uuid: str, acquired: threading.Event) -> threading.Thread:
+    """Hold a write lock on the episode for HOLD_S, as LOCK_CYPHER does for the claimed queue node."""
+
+    def run() -> None:
+        driver = GraphDatabase.driver(
+            os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688"),
+            auth=(os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
+                  os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")),
+        )
+        try:
+            with driver.session(database=os.getenv("MENHIR_TEST_NEO4J_DATABASE", "neo4j")) as s:
+                tx = s.begin_transaction()
+                tx.run("MATCH (q:Episodic {uuid: $u}) SET q.lock_nonce = $n",
+                       u=episode_uuid, n=uuid.uuid4().hex).consume()
+                acquired.set()
+                time.sleep(HOLD_S)
+                tx.rollback()
+        finally:
+            driver.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    assert acquired.wait(10), "could not lock the episode"
+    return thread
+
+
+def test_shutdown_does_not_block_the_loop_on_a_locked_episode(test_neo4j_repo) -> None:
+    """Fails if shutdown releases this worker's leases on the event loop (#601)."""
+    from menhir.services.ingest_queue import IngestQueueMixin
+
+    namespace = f"fence-loop-{uuid.uuid4().hex[:8]}"
+    worker_id = f"w-shutdown-{uuid.uuid4().hex[:8]}"
+    episode_uuid = str(uuid.uuid4())
+    test_neo4j_repo.execute(
+        "CREATE (:Episodic {uuid: $u, namespace: $ns, group_id: $ns, processing_state: 'ENRICHING', "
+        "processing_owner: $w, processing_attempts: 1})",
+        params={"u": episode_uuid, "ns": namespace, "w": worker_id},
+    )
+
+    class _Queue(IngestQueueMixin):
+        graph_adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+        _worker_id = worker_id
+        _max_enrichment_attempts = 3
+
+        def __init__(self) -> None:
+            self._worker_tasks = []
+            self._pending_queue = None
+            self._queued_episode_ids = set()
+
+    try:
+        acquired = threading.Event()
+        holder = _hold_episode_lock(episode_uuid, acquired)
+        result, gap = asyncio.run(_run_beside_heartbeat(_Queue().shutdown()))
+        holder.join(10)
+        assert gap < MAX_GAP_S, f"event loop blocked for {gap:.2f}s behind the episode lock"
+        assert result == 1, result
+        row = test_neo4j_repo.execute(
+            "MATCH (n:Episodic {uuid: $u}) RETURN n.processing_state AS s", params={"u": episode_uuid}
+        )
+        assert row[0]["s"] == "PENDING", "the lease is still released once the lock frees"
+    finally:
+        test_neo4j_repo.execute(
+            "MATCH (n:Episodic {uuid: $u}) DETACH DELETE n", params={"u": episode_uuid}
+        )
+
+
 def test_fenced_post_publish_write_does_not_block_the_loop(test_neo4j_repo) -> None:
     """Fails if stamp_and_finalize's fenced writes take the fence lock on the event loop."""
     from menhir.services import enrichment_steps

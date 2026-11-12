@@ -9,6 +9,9 @@
   link) and the preflight raw capture also run on a worker thread.
 - Every sync fence-lock writer logs `FENCE_LOCK_ON_EVENT_LOOP` (ERROR, with stack) if it runs on an
   event-loop thread, and an AST census test refuses an async function that calls one directly.
+- `IngestService.shutdown` cancels the workers first and then releases their leases on a worker
+  thread. The release writes the in-flight episode, which an open publish locks, so releasing on
+  the loop first could hang a graceful stop during enrichment (#601).
 
 ## 2026-11-12 - Graphiti fork 0.31.2.post3: publish fence inside the add_episode publish transaction
 
