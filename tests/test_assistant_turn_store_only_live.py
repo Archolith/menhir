@@ -25,7 +25,9 @@ TEXT = "Multnomah Falls is 2.4 miles round trip."
 _VOLATILE = {"uuid", "name", "created_at", "queued_at", "processing_started_at",
              "processing_completed_at", "processing_heartbeat_at", "processing_substage_started_at",
              "reference_time", "valid_at", "content_embedding", "content_embedding_at",
-             "last_accessed"}
+             "last_accessed",
+             # Per-claim publish-protocol fields (a fresh twin reservation, the claim instant).
+             "reserved_twin_uuids", "publish_protocol_claimed_at"}
 
 
 def _uid(prefix: str) -> str:
