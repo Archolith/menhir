@@ -54,10 +54,15 @@ inside a running server.
   `residual_content_after_purge` (quarantined), and a note when some sidecar rows could not be
   addressed. A memory still PENDING or ENRICHING is kept as FAILED with its content removed. It
   accepts memory, entity, TurnEvidence and typed-assertion ids.
+  Entities and facts derived from the memory are handled by provenance (#423): one only the erased
+  memory supports is deleted; one other memories also support keeps them, but its summary and fact
+  text are blanked and it is flagged for re-derivation from the remaining sources. Content that
+  conflict resolution absorbed from the memory is cut out of the surviving entity.
 - **`delete_namespace(namespace, max_nodes=200, force=False, dry_run=False)`** is hard and
-  irreversible, operator tier. REST equivalent: `DELETE /api/namespace/{ns}`. It refuses
+  irreversible, operator tier. REST equivalent: `DELETE /api/namespace/{ns}`. It removes the
+  namespace's memories, TurnEvidence, typed assertions, TODOs and WorkArtifacts. It refuses
   `default` and the shared structure group, and `max_nodes` is a blast-radius guard, not a backup.
-  Use `dry_run=true` first.
+  Use `dry_run=true` first; it lists the counts per label.
 - **Soft tools change status and remove nothing:** `close_memory`, `close_todo`,
   `close_stale_todos`, `resolve_todo`, `supersede_todo`, `reopen_todo`, `unflag_memory`,
   `transition_artifact`, `supersede_artifact`, `revoke_client`. `resolve_conflict` marks the removed
@@ -69,20 +74,29 @@ There is no `erase_memory` MCP tool and no data export command.
 
 ## What deletion does not remove yet
 
-- Entities and facts extracted from a deleted memory (#423,
-  https://github.com/Archolith/menhir/issues/423). A summary or fact can restate the erased content.
+- **Derived items with unknown provenance.** When an entity's facts have no recorded source
+  episodes (older data), the erase cannot tell whether the erased memory wrote them, so it leaves
+  them and replies `erased_incomplete` with the reason `unknown_provenance`.
+- **Re-derived text.** A shared entity or fact is blanked at erase time and re-derived from its
+  other sources. Nothing yet verifies that a model-written paraphrase of the erased memory does not
+  survive in another memory's derived text.
 - Views built from an erased memory are marked retired but stay as nodes.
-- `delete_namespace` cannot remove the `default` namespace, and it skips `:Todo`, `:WorkArtifact`
-  and the code-structure graph (#476, https://github.com/Archolith/menhir/issues/476).
-- `graph_operations` snapshots are full copies of merged and TTL-deleted nodes. They are never
-  pruned and erasure does not reach them (#475, https://github.com/Archolith/menhir/issues/475).
+- `delete_namespace` cannot remove the `default` namespace (#476,
+  https://github.com/Archolith/menhir/issues/476). Its data shares a graph group with the
+  code-structure graph, which `delete_namespace` never touches.
+- `graph_operations` journal snapshots: erasure purges the ones that name an erased item (#475).
+  Snapshots of completed deletes and TTL deletes are cleared after the diagnostic retention window.
+  Merge snapshots are kept until the merged item is erased, because unmerge needs them. Journal
+  rows themselves are kept; after these purges they hold ids and request metadata, not memory text.
 - `merge_audit`, `llm_usage_events`, the registries and `erasure_subjects` are never pruned.
   Erased ids stay in `erasure_subjects` permanently.
-- The SQLite file never shrinks. Menhir does not run VACUUM.
 - Log files may contain memory text and are never rewritten.
 - Backups are not touched by erasure.
 - No tool deletes a single fact edge, a TODO, or a WorkArtifact.
 - Whether Neo4j store files keep deleted bytes after a delete is unknown.
+
+The sidecar is compacted hourly (`VACUUM`, then a WAL checkpoint), so content that a purge blanked
+does not survive in free pages after the next compaction.
 
 Deleting the sidecar file is not a supported way to erase data: it holds the only unmerge copy, the
 erasure journal and the erased-id suppression record.
