@@ -75,6 +75,10 @@ def product_stack(test_neo4j_repo, tmp_path, monkeypatch):
 
     real_store = store_mod.McpTelemetryStore(db_path=db)
     real_store._ensure_ready()
+    # R2 CF-329: pending_actions is a classified content table created by its own store.
+    from menhir.infrastructure.pending_actions import PendingActionStore
+
+    PendingActionStore(db_path=db)._ensure_ready()
 
     # The recorders bind their store as a DEFAULT ARGUMENT
     # (`store: McpTelemetryStore = telemetry_store`), evaluated once at function definition.
