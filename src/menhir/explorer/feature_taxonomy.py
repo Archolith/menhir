@@ -94,6 +94,8 @@ PARENTS: dict[str, list[str]] = {
         "unflag_memory",
         "promote_memory",
         "delete_memory",
+        "delete_memories",
+        "list_namespace_memories",
         "delete_namespace",
         "close_memory",
         "recover_orphans",

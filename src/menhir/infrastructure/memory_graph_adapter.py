@@ -1254,6 +1254,20 @@ class MemoryGraphAdapter:
             node_uuid, namespace=namespace
         )
 
+    def list_namespace_records(
+        self,
+        namespace: str,
+        *,
+        kind: str = "memory",
+        limit: int = 50,
+        after_id: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """One page of a silo's erasable records of one kind (see MemoryQueryRepository)."""
+        return self._memory_queries.list_namespace_records(
+            namespace, kind=kind, limit=limit, after_id=after_id, source=source
+        )
+
     def fetch_memories_by_scope(
         self, scope: str, limit: int = 10, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:

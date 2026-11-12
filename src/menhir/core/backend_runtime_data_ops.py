@@ -201,8 +201,13 @@ class RuntimeProviderDataOpsMixin:
         `force`. This is a blast-radius guard, not a backup -- deletion is still
         irreversible once it proceeds.
         """
-        if not namespace or not namespace.strip() or namespace == DEFAULT_NAMESPACE:
-            raise ValueError(f"refusing to delete the default/shared namespace: {namespace!r}")
+        # Permanent (#476): the default silo shares graphiti group '' with the structure graph and
+        # artifacts, so it is removed by id instead. Stripped first so ' default ' is refused too.
+        if not namespace or not namespace.strip() or namespace.strip() == DEFAULT_NAMESPACE:
+            raise ValueError(
+                f"refusing to delete the default/shared namespace: {namespace!r}. Delete its "
+                "records by id instead: list_namespace_memories, then delete_memories."
+            )
 
         # A pinned caller may only tear down its OWN silo. This is the one operation where the
         # namespace is the target rather than a filter, so the pin cannot be "applied" to it in
@@ -543,6 +548,39 @@ class RuntimeProviderDataOpsMixin:
                 self.built.graph_adapter.fetch_memory_by_uuid, node_uuid, **kwargs
             )
         )
+
+    async def list_namespace_records(
+        self,
+        namespace: str,
+        *,
+        kind: str = "memory",
+        limit: int = 50,
+        after_id: str | None = None,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        """One page of a silo's erasable records (#476). Ids are what delete_memories accepts.
+
+        A pinned caller lists only its own silo, whatever it named.
+        """
+        requested = pinned_namespace() or (namespace or "").strip()
+        if not requested:
+            raise ValueError("namespace is required")
+        safe_limit = max(1, min(int(limit), 100))
+        rows = await self._off_loop(
+            self.built.graph_adapter.list_namespace_records,
+            requested,
+            kind=kind,
+            limit=safe_limit,
+            after_id=after_id,
+            source=source,
+        )
+        items = _to_jsonable(rows) or []
+        return {
+            "namespace": requested,
+            "kind": kind,
+            "items": items,
+            "next_after_id": items[-1]["id"] if len(items) == safe_limit else None,
+        }
 
     async def fetch_node_receipts(self, node_uuid: str) -> dict[str, Any] | None:
         return _to_jsonable(

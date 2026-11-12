@@ -41,6 +41,7 @@ from menhir.infrastructure.vector_indexes import (
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
+    EPISODE_NOT_ERASED,
     FACT_TEMPORAL_FIELDS,
     FACT_NOT_REDERIVE_PENDING,
     FACT_TEXT_PRESENT,
@@ -99,6 +100,50 @@ NAMESPACE_ERASE_PREDICATE = """n.group_id = $group_id
                                     WHERE ev2.namespace <> $namespace })
                OR (n:Todo AND n.namespace = $namespace)
                OR (n:WorkArtifact AND n.namespace = $namespace)"""
+
+# A node's silo key over `n`: the rule erase_target_namespace_keys applies to an erase target.
+_SILO_KEY_CYPHER = (
+    "CASE WHEN trim(toString(coalesce(n.namespace, n.group_id, ''))) = '' THEN 'default'"
+    " ELSE trim(toString(coalesce(n.namespace, n.group_id))) END"
+)
+
+# list_namespace_records: per kind, the label, the id an erase accepts (erase_target_namespace_keys),
+# its time, a preview, and the filters that keep non-user rows out.
+_LISTABLE_KINDS: dict[str, dict[str, Any]] = {
+    "memory": {
+        "label": "Episodic",
+        "id": "n.uuid",
+        "time": "n.created_at",
+        "preview": "n.content",
+        "source": "n.source",
+        "state": "n.processing_state",
+        "where": (
+            non_structural_memory_cypher("n"),
+            EPISODE_NOT_ERASED,
+            # A Graphiti twin is erased with its queue node; listing it would erase twice.
+            "NOT EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid }",
+        ),
+    },
+    "turn_evidence": {
+        "label": "TurnEvidence",
+        "id": "n.turn_id",
+        "time": "n.recorded_at",
+        "preview": "n.text",
+        "source": "n.role",
+        "state": "null",
+        "where": (),
+    },
+    "typed_assertion": {
+        "label": "TypedAssertion",
+        "id": "n.assertion_id",
+        "time": "n.recorded_at",
+        "preview": "coalesce(n.subject_display, '') + ' ' + coalesce(n.attribute, '') + ' = '"
+                   " + coalesce(toString(n.value), '')",
+        "source": "n.episode_uuid",
+        "state": "null",
+        "where": (),
+    },
+}
 
 # Subordinate expansion. Input: `direct` (list of directly doomed nodes). Output column: `subs`,
 # the Todo/WorkArtifact children that carry no namespace/group_id themselves and have no
@@ -417,7 +462,12 @@ class MemoryQueryRepository:
         where = ["(n:Entity OR n:Episodic)", "n.uuid = $node_uuid"]
         params: dict[str, Any] = {"node_uuid": node_uuid}
         if namespace is not None and str(namespace).strip():
-            where.append("coalesce(n.namespace, 'default') = $namespace")
+            # '' is the same silo as 'default' (namespace_spellings); without the second clause
+            # an ownership check for 'default' refuses a node stored as '' as foreign.
+            where.append(
+                "(coalesce(n.namespace, 'default') = $namespace"
+                " OR ($namespace = 'default' AND n.namespace = ''))"
+            )
             params["namespace"] = str(namespace).strip()
         query = (Cypher()
             .match("(n)")
@@ -427,6 +477,50 @@ class MemoryQueryRepository:
             .build())
         rows = self.neo4j.execute(query, params=params)
         return rows[0] if rows else None
+
+    def list_namespace_records(
+        self,
+        namespace: str,
+        *,
+        kind: str = "memory",
+        limit: int = 50,
+        after_id: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """One page of a silo's erasable records of one kind, ordered by the id the erase takes.
+
+        Silo membership uses the same key as ``erase_target_namespace_keys`` (namespace, else
+        group_id, blank -> 'default'), so what is listed is what the erase's scope check accepts.
+        Never matches by group_id alone and never lists :Entity, structure rows, evidence
+        projections or Graphiti twins (each twin is erased with its queue node).
+        """
+        spec = _LISTABLE_KINDS.get(kind)
+        if spec is None:
+            raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(_LISTABLE_KINDS)}")
+        where = [
+            f"{_SILO_KEY_CYPHER} = $ns_key",
+            f"{spec['id']} IS NOT NULL",
+            f"($after_id = '' OR {spec['id']} > $after_id)",
+            *spec["where"],
+        ]
+        params: dict[str, Any] = {
+            "ns_key": normalize_namespace(namespace),
+            "after_id": (after_id or "").strip(),
+            "limit": max(1, min(int(limit), 100)),
+        }
+        if source and kind == "memory":
+            where.append("n.source = $source")
+            params["source"] = source
+        query = (
+            f"MATCH (n:{spec['label']}) WHERE " + " AND ".join(where)
+            + f" RETURN {spec['id']} AS id, toString({spec['time']}) AS recorded_at,"
+            f" left(toString(coalesce({spec['preview']}, '')), 200) AS preview,"
+            f" {spec['source']} AS source, {spec['state']} AS processing_state"
+            " ORDER BY id LIMIT $limit"
+        )
+        return [
+            {**row, "kind": kind} for row in self.neo4j.execute(query, params=params)
+        ]
 
     def fetch_memories_by_scope(
         self, scope: str, limit: int = 10, *, namespace: str | None = None

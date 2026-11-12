@@ -783,6 +783,7 @@ _BACKEND_METHODS = {
     "delete_memory",
     "erase_memory",
     "delete_namespace",
+    "list_namespace_records",
     "enqueue_pending_episode",
     "recall",
     "recall_history",
@@ -876,6 +877,8 @@ _BACKEND_METHODS = {
 # forbidden — memory-governance.md §4).
 _OP_TIER_OPERATOR = {
     "delete_memory", "erase_memory", "delete_namespace",
+    # Read-only, but previews every record in a silo: operator, like the deletes it feeds.
+    "list_namespace_records",
     "resolve_conflict_group", "requeue_conflicts_for_llm_review", "scan_for_conflicts",
     "confirm_pending_conflicts", "record_conflict_resolution",
     "force_reset_failed_episode", "force_release_episode_lease",

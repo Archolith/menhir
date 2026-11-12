@@ -264,6 +264,26 @@ class BackendClientOpsMixin:
             "fetch_memory_by_uuid", {"node_uuid": node_uuid, "namespace": namespace}
         )
 
+    async def list_namespace_records(
+        self,
+        namespace: str,
+        *,
+        kind: str = "memory",
+        limit: int = 50,
+        after_id: str | None = None,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "list_namespace_records",
+            {
+                "namespace": namespace,
+                "kind": kind,
+                "limit": limit,
+                "after_id": after_id,
+                "source": source,
+            },
+        )
+
     async def fetch_node_receipts(self, node_uuid: str) -> dict[str, Any] | None:
         return await self._request("fetch_node_receipts", {"node_uuid": node_uuid})
 

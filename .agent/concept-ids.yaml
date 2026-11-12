@@ -215,6 +215,12 @@ mcp:
   mcp.tool.delete_memory:
     owner: endpoints.md
     meaning: Delete one memory and its relationships
+  mcp.tool.delete_memories:
+    owner: endpoints.md
+    meaning: Erase up to 100 memories by id, each as delete_memory does
+  mcp.tool.list_namespace_memories:
+    owner: endpoints.md
+    meaning: Page a namespace's erasable records by the ids delete_memories accepts
   mcp.tool.delete_namespace:
     owner: endpoints.md
     meaning: Tear down a throwaway/eval namespace silo, gated by node count

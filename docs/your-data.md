@@ -63,6 +63,11 @@ inside a running server.
   namespace's memories, TurnEvidence, typed assertions, TODOs and WorkArtifacts. It refuses
   `default` and the shared structure group, and `max_nodes` is a blast-radius guard, not a backup.
   Use `dry_run=true` first; it lists the counts per label.
+- **`list_namespace_memories(namespace="default", kind="memory")`** and
+  **`delete_memories(node_uuids, dry_run=True)`** are how to remove data from `default`, which
+  `delete_namespace` refuses. Both need the operator tier. The listing pages a namespace's memories,
+  TurnEvidence or typed assertions by id. `delete_memories` takes up to 100 of those ids and erases
+  each one exactly as `delete_memory` does. It previews by default, so pass `dry_run=false` to erase.
 - **Soft tools change status and remove nothing:** `close_memory`, `close_todo`,
   `close_stale_todos`, `resolve_todo`, `supersede_todo`, `reopen_todo`, `unflag_memory`,
   `transition_artifact`, `supersede_artifact`, `revoke_client`. `resolve_conflict` marks the removed
@@ -81,9 +86,11 @@ There is no `erase_memory` MCP tool and no data export command.
   other sources. Nothing yet verifies that a model-written paraphrase of the erased memory does not
   survive in another memory's derived text.
 - Views built from an erased memory are marked retired but stay as nodes.
-- `delete_namespace` cannot remove the `default` namespace (#476,
+- `delete_namespace` never removes the `default` namespace (#476,
   https://github.com/Archolith/menhir/issues/476). Its data shares a graph group with the
-  code-structure graph, which `delete_namespace` never touches.
+  code-structure graph, so it is removed by id instead (`list_namespace_memories`, then
+  `delete_memories`). `default`'s TODOs and WorkArtifacts stay, because no tool deletes a single
+  TODO or WorkArtifact.
 - `graph_operations` journal snapshots: erasure purges the ones that name an erased item (#475).
   Snapshots of completed deletes and TTL deletes are cleared after the diagnostic retention window.
   Merge snapshots are kept until the merged item is erased, because unmerge needs them. Journal
