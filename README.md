@@ -679,13 +679,19 @@ the private `Archolith/menhir-deploy` repository.
 
 These are known gaps in 0.3.10, each with a planned fix:
 
-- **Erasure leaves extracted knowledge behind (#423).** `delete_memory` removes the memory, its
-  episode, captured evidence turns, their projections and its scalar assertions. It does not
-  remove the entities and fact edges enrichment extracted from it, and
-  an entity summary or fact can restate the erased content. Entities are shared across
-  memories, so they are not deleted with one memory. Deleting a non-default namespace removes
-  its memories and derived graph data, but not TODOs, WorkArtifacts or the shared code-structure
-  graph, and `default` cannot be deleted. See [`docs/your-data.md`](docs/your-data.md).
+- **Erasure can leave some derived text behind.** `delete_memory` removes the memory, its
+  episode, evidence turns, projections and scalar assertions. Since 0.3.9, entities and facts
+  extracted from it are handled by provenance (#423). One only that memory supports is deleted. One
+  other memories also support is blanked and re-derived from them. Two gaps remain:
+  - Older data with no recorded provenance is left in place, and the reply says
+    `erased_incomplete`.
+  - Nothing yet verifies that a model-written paraphrase of the erased memory doesn't survive in
+    re-derived text.
+
+  `delete_namespace` removes a namespace's memories, TODOs and WorkArtifacts, but refuses
+  `default`. To remove data from `default`, page its ids with `list_namespace_memories` and erase
+  them with `delete_memories` (#476). Its TODOs and WorkArtifacts stay. See
+  [`docs/your-data.md`](docs/your-data.md).
 - **Scalar source checks are pattern-based (#411).** Since 0.3.1, duration, frequency, weekday,
   status and boolean values must be stated in the source and not negated or hedged. The checks
   are English patterns: they drop what they cannot read, and they can miss a misattribution such

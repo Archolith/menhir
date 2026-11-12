@@ -1,3 +1,11 @@
+## 2026-11-12 - README: erasure known limitation matches what erasure now does
+
+- `README.md` still said erasure leaves extracted entities and facts behind (#423) and that
+  `default` cannot be cleared. The bullet now describes provenance-based cleanup and the two
+  remaining gaps (unknown provenance, unverified re-derived paraphrases), and points to
+  `list_namespace_memories` / `delete_memories` for `default` (#476). Wording follows
+  `docs/your-data.md`.
+
 ## 2026-11-12 - v0.3.10: 0.3.9 with a release image (release workflows pinned to ubuntu-24.04)
 
 - Ships everything in v0.3.9 (#476 delete by id, the erase fence, the fence-lock hang fixes). v0.3.9
