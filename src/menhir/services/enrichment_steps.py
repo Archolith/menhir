@@ -350,7 +350,8 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
             if episode_content.strip():
                 # Short name: first ~60 chars of content
                 capture_name = episode_content[:60].replace("\n", " ").strip()
-                ctx.graph_adapter.create_raw_capture_entity(
+                await asyncio.to_thread(
+                    ctx.graph_adapter.create_raw_capture_entity,
                     episode_uuid=ctx.episode_uuid,
                     name=capture_name,
                     content=episode_content,
@@ -989,6 +990,13 @@ def _fenced_write(ctx: EnrichmentContext, call: Callable[[Any], Any]) -> Any:
     return run_fenced_call(ctx.graph_adapter.neo4j, ctx.claim_fence, ctx.gate_fence, call)
 
 
+async def _fenced_write_off_loop(ctx: EnrichmentContext, call: Callable[[Any], Any]) -> Any:
+    """``_fenced_write`` on a worker thread. Its lock statement can wait on a same-namespace
+    publish that holds the fence in an async transaction only this loop can commit, so it
+    must never wait on the loop (test_fence_lock_off_event_loop_online)."""
+    return await asyncio.to_thread(_fenced_write, ctx, call)
+
+
 def _record_retention_fenced(ctx: EnrichmentContext, entity_uuids: list[str]) -> None:
     """RETENTION_SOURCE edges under the claim fence (R2 CF-337).
 
@@ -1093,7 +1101,9 @@ async def stamp_and_finalize(
         if link_self_tiers is not None:
             namespace = str(ctx.claimed.get("namespace") or "default")
             try:
-                _fenced_write(ctx, lambda ex: link_self_tiers(namespace, **_executor_kw(ex)))
+                await _fenced_write_off_loop(
+                    ctx, lambda ex: link_self_tiers(namespace, **_executor_kw(ex))
+                )
             except FenceLost:
                 raise  # the worker requeues; never swallowed as a best-effort failure
             except Exception:
@@ -1223,7 +1233,7 @@ async def stamp_and_finalize(
     stamp_kwargs: dict[str, object] = {}
     if ctx.claimed.get("bootstrap_scope") is not None:
         stamp_kwargs["bootstrap_scope"] = ctx.claimed.get("bootstrap_scope")
-    stamped = _fenced_write(ctx, lambda ex: ctx.graph_adapter.stamp_ingest_metadata(
+    stamped = await _fenced_write_off_loop(ctx, lambda ex: ctx.graph_adapter.stamp_ingest_metadata(
         node_uuids=node_uuids,
         edge_uuids=edge_uuids,
         session_id=str(ctx.claimed.get("session_id") or ""),
@@ -1234,7 +1244,9 @@ async def stamp_and_finalize(
         **stamp_kwargs,
         **_executor_kw(ex),
     ))
-    _record_retention_fenced(ctx, [node.uuid for node in extracted_nodes])
+    await asyncio.to_thread(
+        _record_retention_fenced, ctx, [node.uuid for node in extracted_nodes]
+    )
     # M6 Phase 5: Record scope assignment for extracted entity nodes
     if ctx.settings_record_revisions:
         for node in extracted_nodes:

@@ -97,6 +97,70 @@ class IngestIntakeMixin:
         passed to the admission gate and never counts as user foundation.
         """
 
+        # One thread hop for every graph write. The projection takes the namespace fence lock,
+        # which a same-namespace publish holds inside an async transaction only this loop can
+        # commit; waiting for it on the loop hangs the process (release PR #599 E2E).
+        # test_fence_lock_off_event_loop_online exercises that race.
+        outcome = await asyncio.to_thread(
+            self._record_episode_for_enrichment, episode, session, source, diff, flagged,
+            bootstrap_scope, namespace, occurred_at, turn_evidence_uuid, user_statement, role,
+            idempotency_key, store_only,
+        )
+        if isinstance(outcome, IngestResult):
+            return outcome
+        episode_uuid, evidence_projection_uuid = outcome
+        try:
+            if self._enrichment_enabled:
+                await self._ensure_enrichment_worker()
+                await self._enqueue_pending_episode(episode_uuid)
+                # The projection is a real PENDING episode and enriches through the same worker;
+                # without this it would sit queued forever and produce none of the entities it
+                # exists to produce. Enqueued AFTER the memory so the curated write is never
+                # delayed by it.
+                if evidence_projection_uuid:
+                    await self._enqueue_pending_episode(evidence_projection_uuid)
+        except Exception:  # catch-all: episode queue must not crash the caller
+            logger.exception(
+                "Episode queue failed for session_id=%s source=%s",
+                session.session_id,
+                source,
+            )
+            return IngestResult(
+                episode_id="",
+                status=IngestStatus.FAILED,
+                nodes_touched=0,
+                edges_touched=0,
+            )
+
+        return IngestResult(
+            episode_id=episode_uuid,
+            status=IngestStatus.QUEUED,
+            nodes_touched=1,
+            edges_touched=0,
+        )
+
+    def _record_episode_for_enrichment(
+        self,
+        episode: str,
+        session: MemorySession,
+        source: str,
+        diff: str | None,
+        flagged: bool,
+        bootstrap_scope: str | None,
+        namespace: str | None,
+        occurred_at: str | None,
+        turn_evidence_uuid: str | None,
+        user_statement: str | None,
+        role: str | None,
+        idempotency_key: str | None,
+        store_only: bool,
+    ) -> IngestResult | tuple[str, str | None]:
+        """The synchronous part of ``queue_episode_for_enrichment``; runs on a worker thread.
+
+        Returns an ``IngestResult`` to hand back as-is (idempotent replay, or FAILED), or the
+        episode uuid and the evidence projection uuid (or None) to enqueue.
+        """
+
         validate_memory_payload(episode, diff)
 
         # #577: scrub before the digest, evidence, or the episode sees the text. Under policy
@@ -382,15 +446,6 @@ class IngestIntakeMixin:
                     "Admission granted as requested (source=%s) for session=%s; routine grant, audit suppressed",
                     source, session.session_id,
                 )
-
-            if self._enrichment_enabled:
-                await self._ensure_enrichment_worker()
-                await self._enqueue_pending_episode(episode_uuid)
-                # The projection is a real PENDING episode and enriches through the same worker;
-                # without this it would sit queued forever and produce none of the entities it exists
-                # to produce. Enqueued AFTER the memory so the curated write is never delayed by it.
-                if evidence_projection_uuid:
-                    await self._enqueue_pending_episode(evidence_projection_uuid)
         except IdempotencyKeyConflict:
             raise
         except Exception:  # catch-all: episode queue must not crash the caller
@@ -406,12 +461,7 @@ class IngestIntakeMixin:
                 edges_touched=0,
             )
 
-        return IngestResult(
-            episode_id=episode_uuid,
-            status=IngestStatus.QUEUED,
-            nodes_touched=1,
-            edges_touched=0,
-        )
+        return episode_uuid, evidence_projection_uuid
 
     @staticmethod
     def _idempotent_replay_result(existing: dict, digest: str | None) -> IngestResult:
