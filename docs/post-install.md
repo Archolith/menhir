@@ -99,7 +99,7 @@ when enabled or when perceiver versions change. Review namespace/version and his
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.
 Keep configuration and verified data backups for a separately approved deployment rollback.
 
-**Known limitations in 0.3.8.** The source checks on five scalar kinds (duration, frequency,
+**Known limitations in 0.3.9.** The source checks on five scalar kinds (duration, frequency,
 weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
 (#411; see
 [source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
