@@ -151,7 +151,7 @@ FORK_HOOK_PARAMETERS = (
 )
 
 
-#: ``Graphiti.add_episode`` parameters of the publish fence (archolith-graphiti-core 0.31.2.post3).
+#: ``Graphiti.add_episode`` parameters of the fork's publish fence.
 FORK_PUBLISH_PARAMETERS = ("publish_fence", "new_episode_uuid")
 
 
@@ -173,12 +173,13 @@ def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
     install over the fork leaves no hooks and ``Graphiti(...)`` would raise a bare ``TypeError``.
     Erasure P4: an ``add_episode`` without the publish fence could publish an erased memory, so
     an older fork is refused here, at client construction, rather than at the first publish.
-    A ``**kwargs`` signature is a test double; an unreadable signature counts as missing.
+    A ``**kwargs`` constructor marks a test double (both checks are skipped); an unreadable
+    signature counts as missing.
     """
-    missing: list[str] = []
     params = _signature_params(getattr(graphiti_cls, "__init__", None))
-    if params is not None:
-        missing += [name for name in FORK_HOOK_PARAMETERS if name not in params]
+    if params is None:
+        return
+    missing = [name for name in FORK_HOOK_PARAMETERS if name not in params]
     publish = _signature_params(getattr(graphiti_cls, "add_episode", None))
     if publish is not None:
         missing += [f"add_episode({name})" for name in FORK_PUBLISH_PARAMETERS if name not in publish]
@@ -187,7 +188,7 @@ def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
             "The installed graphiti_core is not the required Archolith fork: Graphiti has no "
             f"{', '.join(missing)} parameter. Upstream graphiti-core shares the graphiti_core "
             "import package and may have replaced or shadowed archolith-graphiti-core, or the "
-            "fork is older than 0.31.2.post3. Fix: reinstall the fork in a clean virtual "
+            "fork predates the publish fence. Fix: reinstall the fork in a clean virtual "
             "environment (uninstall graphiti-core and archolith-graphiti-core, then install "
             "archolith-graphiti-core==0.31.2.post3)."
         )
@@ -702,7 +703,7 @@ class GraphitiClient:
         if publish_fence is not None and not accepts("publish_fence"):
             raise RuntimeError(
                 "A publish fence was requested but the installed graphiti_core add_episode has no "
-                "publish_fence parameter (archolith-graphiti-core>=0.31.2.post3 is required); "
+                "publish_fence parameter (install the pinned archolith-graphiti-core); "
                 "refusing to publish unfenced."
             )
         kwargs: dict[str, Any] = {}

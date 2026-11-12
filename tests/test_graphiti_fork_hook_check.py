@@ -1,6 +1,6 @@
 """CF-305: a graphiti_core without the fork's hook parameters fails with a clear, named fix.
 
-Erasure P4: a fork whose ``add_episode`` lacks the publish fence (older than 0.31.2.post3) is
+Erasure P4: a fork whose ``add_episode`` lacks the publish fence (an older fork) is
 refused the same way, before any publish."""
 
 from __future__ import annotations
@@ -160,14 +160,14 @@ def test_from_settings_with_fork_hooks_proceeds_to_construction(
 
 
 @pytest.mark.unit
-def test_fork_without_the_publish_fence_is_refused_naming_post3() -> None:
+def test_fork_without_the_publish_fence_is_refused_naming_the_fix() -> None:
     """Fails if construction accepts a fork that would publish without the erasure fence."""
     with pytest.raises(RuntimeError) as excinfo:
         require_graphiti_fork_hooks(_Post2ForkGraphiti)
     message = str(excinfo.value)
     for name in FORK_PUBLISH_PARAMETERS:
         assert f"add_episode({name})" in message
-    assert "0.31.2.post3" in message
+    assert "reinstall" in message and "archolith-graphiti-core==" in message
     assert "identity_gate_hook" not in message
 
 

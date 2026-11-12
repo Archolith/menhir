@@ -1,3 +1,7 @@
+## 2026-11-12 - Graphiti fork 0.31.2.post3: publish fence inside the add_episode publish transaction
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post3`, fork commit `420bebec`. Pins, docs and release checks updated.
+
 ## 2026-11-11 - Erasure rebuild, fence foundation: an erase fences in-flight enrichment
 
 - An erase now seals before it deletes. One transaction locks the memory's namespace, records a
