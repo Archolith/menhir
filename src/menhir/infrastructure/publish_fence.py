@@ -31,6 +31,7 @@ from uuid import uuid4
 from menhir.infrastructure.erasure_fence import (
     fence_key_cypher,
     fence_lock_cypher,
+    warn_if_on_event_loop,
     marker_absent_for_param_cypher,
 )
 
@@ -343,6 +344,7 @@ def run_fenced(
     checks apply only when ``gate`` is given (writes before gate entry carry no foreign reads).
     Raises ``FenceLost``; nothing is written then. Returns each statement's rows.
     """
+    warn_if_on_event_loop("run_fenced")
     prepared = [(query, dict(params or {})) for query, params in statements]
 
     def work(tx: Any) -> list[list[dict[str, Any]]]:
@@ -374,6 +376,7 @@ def run_fenced_call(
     ``call(executor)`` runs inside the same write transaction, after the lock and re-check; the
     executor has ``neo4j.execute``'s shape. Raises ``FenceLost``; nothing is written then.
     """
+    warn_if_on_event_loop("run_fenced_call")
 
     def work(tx: Any) -> Any:
         tx.execute(LOCK_CYPHER, _lock_params(claim))
@@ -467,6 +470,7 @@ def execute_copy_fenced(
     an erased or being-erased source, but an erase that completed before the call and left no
     marker on any source (a namespace erase) is not detected.
     """
+    warn_if_on_event_loop("execute_copy_fenced")
     sources = sorted({str(u) for u in source_uuids if u})
 
     def tx_work(tx: Any) -> Any:

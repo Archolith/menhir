@@ -1,3 +1,18 @@
+## 2026-11-12 - Fence-lock writes no longer wait on the event loop (stdio E2E hang)
+
+- The publish fence holds a namespace's `EvidenceNamespaceFence` inside Graphiti's async publish
+  transaction, which only the event loop can commit. Sync writes that take the same lock ran on the
+  loop, so a same-namespace publish could freeze the backend for good: an admitted `add_memory`
+  (its evidence projection) hung the release PR #599 stdio E2E.
+- `queue_episode_for_enrichment` now does all of its graph writes in one `asyncio.to_thread` hop;
+  enqueueing stays on the loop. `stamp_and_finalize`'s fenced writes (stamp, retention, self-tier
+  link) and the preflight raw capture also run on a worker thread.
+- Every sync fence-lock writer logs `FENCE_LOCK_ON_EVENT_LOOP` (ERROR, with stack) if it runs on an
+  event-loop thread, and an AST census test refuses an async function that calls one directly.
+- `IngestService.shutdown` cancels the workers first and then releases their leases on a worker
+  thread. The release writes the in-flight episode, which an open publish locks, so releasing on
+  the loop first could hang a graceful stop during enrichment (#601).
+
 ## 2026-11-12 - Graphiti fork 0.31.2.post3: publish fence inside the add_episode publish transaction
 
 - `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post3`, fork commit `420bebec`. Pins, docs and release checks updated.

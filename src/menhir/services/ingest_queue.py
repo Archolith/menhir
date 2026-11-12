@@ -421,17 +421,24 @@ class IngestQueueMixin:
     async def shutdown(self) -> int:
         """Stop the in-process worker and release leases owned by this runtime."""
 
-        released = self.graph_adapter.release_worker_episode_leases(
-            self._worker_id,
-            max_attempts=self._max_enrichment_attempts,
-        )
+        # Stop the workers first, then release off the loop. The release writes the in-flight
+        # episode, which an open publish locks inside an async transaction only this loop can
+        # commit; releasing on the loop before cancelling hung shutdown (#601).
+        # test_shutdown_does_not_block_the_loop_on_a_locked_episode exercises that race.
         workers = self._worker_tasks
-        for worker in workers:
-            if not worker.done():
-                worker.cancel()
-        for worker in workers:
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker
+        try:
+            for worker in workers:
+                if not worker.done():
+                    worker.cancel()
+            for worker in workers:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await worker
+        finally:
+            released = await asyncio.to_thread(
+                self.graph_adapter.release_worker_episode_leases,
+                self._worker_id,
+                max_attempts=self._max_enrichment_attempts,
+            )
         self._worker_tasks = []
         self._pending_queue = None
         self._queued_episode_ids.clear()

@@ -6,12 +6,34 @@ uses these exact expressions, so the namespace key and the marker predicate cann
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: Grep marker for a sync fence-lock write issued on an event-loop thread.
+FENCE_LOCK_ON_EVENT_LOOP = "FENCE_LOCK_ON_EVENT_LOOP"
+
+
+def warn_if_on_event_loop(op: str) -> None:
+    """Log an ERROR (with stack) when a sync fence-lock write runs on an event-loop thread.
+
+    A publish holds the fence inside an async transaction only that loop can commit, so a sync
+    wait for the same lock on the loop never returns. Logs instead of raising: several callers
+    are best-effort and swallow exceptions, which would hide a raise.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    logger.error(
+        "%s op=%s: sync fence-lock write on the event loop thread; a same-namespace publish "
+        "can hang the process. Run it with asyncio.to_thread.",
+        FENCE_LOCK_ON_EVENT_LOOP, op, stack_info=True,
+    )
 
 #: Label of the permanent per-uuid erase marker.
 ERASURE_MARKER_LABEL = "ErasureMarker"
@@ -212,6 +234,7 @@ def seal_memory(
     With ``caller_namespace`` set, a target whose fence key is another namespace raises
     ``PermissionError`` before any fence is locked (CF-326, defense in depth).
     """
+    warn_if_on_event_loop("seal_memory")
     targets = [str(u) for u in dict.fromkeys(target_uuids) if u]
     scope = (caller_namespace or "").strip()
     scope_key = scope
@@ -285,6 +308,7 @@ def seal_memory(
 
 def seal_namespace(neo4j: Any, op_id: str, namespace: str) -> SealResult:
     """Seal one namespace for a namespace erase: epoch bump plus ``erasing_ops`` (no per-member markers)."""
+    warn_if_on_event_loop("seal_namespace")
     key = str(namespace or "").strip() or "default"
 
     def work(tx: Any) -> SealResult:
@@ -299,6 +323,7 @@ def release_memory(neo4j: Any, op_id: str) -> list[str]:
 
     Returns the namespace keys released (empty when the op held nothing).
     """
+    warn_if_on_event_loop("release_memory")
 
     def work(tx: Any) -> list[str]:
         nonce = uuidlib.uuid4().hex
@@ -357,6 +382,7 @@ def release_orphaned_erasing_ops(
     op's markers were sealed more than ``absent_grace_s`` ago; with no markers (a namespace seal)
     it is held and logged. Returns the op ids released.
     """
+    warn_if_on_event_loop("release_orphaned_erasing_ops")
     rows = neo4j.execute(
         "MATCH (f:EvidenceNamespaceFence) UNWIND coalesce(f.erasing_ops, []) AS op "
         "RETURN DISTINCT op"
