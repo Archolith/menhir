@@ -47,7 +47,7 @@ versions in that generated environment are:
 | `archolith-mcp-framework` | 0.2.0 |
 | `archolith-oauth` | 0.3.1 |
 | `fastapi` | 0.139.0 |
-| `archolith-graphiti-core` | 0.31.2.post2 |
+| `archolith-graphiti-core` | 0.31.2.post3 |
 | `joserfc` | 1.7.7 |
 | `neo4j` | 6.2.0 |
 | `openai` | 2.45.0 |

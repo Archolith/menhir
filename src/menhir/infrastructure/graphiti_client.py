@@ -43,13 +43,13 @@ except ImportError as exc:
             raise
         raise ImportError(
             f"graphiti_core is broken or incomplete ({exc}). Menhir requires "
-            "archolith-graphiti-core==0.31.2.post2, which shares the graphiti_core package with "
+            "archolith-graphiti-core==0.31.2.post3, which shares the graphiti_core package with "
             "upstream graphiti-core. Use a fresh virtual environment or uninstall both "
             "graphiti-core distributions before reinstalling Menhir (see docs/post-install.md)."
         ) from exc
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.31.2.post2; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post3; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -151,27 +151,45 @@ FORK_HOOK_PARAMETERS = (
 )
 
 
+#: ``Graphiti.add_episode`` parameters of the publish fence (archolith-graphiti-core 0.31.2.post3).
+FORK_PUBLISH_PARAMETERS = ("publish_fence", "new_episode_uuid")
+
+
+def _signature_params(fn: Any) -> dict[str, inspect.Parameter] | None:
+    """Parameters of ``fn``; ``None`` for a ``**kwargs`` test double; ``{}`` when unreadable."""
+    try:
+        params = dict(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return None
+    return params
+
+
 def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
     """Refuse an installed ``graphiti_core`` whose ``Graphiti`` lacks the fork's hook parameters.
 
     CF-305: the fork and upstream ``graphiti-core`` share one import package, so an upstream
     install over the fork leaves no hooks and ``Graphiti(...)`` would raise a bare ``TypeError``.
+    Erasure P4: an ``add_episode`` without the publish fence could publish an erased memory, so
+    an older fork is refused here, at client construction, rather than at the first publish.
     A ``**kwargs`` signature is a test double; an unreadable signature counts as missing.
     """
-    try:
-        params = inspect.signature(graphiti_cls.__init__).parameters
-    except (TypeError, ValueError):
-        params = {}
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return
-    missing = [name for name in FORK_HOOK_PARAMETERS if name not in params]
+    missing: list[str] = []
+    params = _signature_params(getattr(graphiti_cls, "__init__", None))
+    if params is not None:
+        missing += [name for name in FORK_HOOK_PARAMETERS if name not in params]
+    publish = _signature_params(getattr(graphiti_cls, "add_episode", None))
+    if publish is not None:
+        missing += [f"add_episode({name})" for name in FORK_PUBLISH_PARAMETERS if name not in publish]
     if missing:
         raise RuntimeError(
-            "The installed graphiti_core is not the Archolith fork: Graphiti() has no "
+            "The installed graphiti_core is not the required Archolith fork: Graphiti has no "
             f"{', '.join(missing)} parameter. Upstream graphiti-core shares the graphiti_core "
-            "import package and has replaced or shadowed archolith-graphiti-core. Fix: reinstall "
-            "the fork in a clean virtual environment (uninstall graphiti-core and "
-            "archolith-graphiti-core, then install archolith-graphiti-core==0.31.2.post2)."
+            "import package and may have replaced or shadowed archolith-graphiti-core, or the "
+            "fork is older than 0.31.2.post3. Fix: reinstall the fork in a clean virtual "
+            "environment (uninstall graphiti-core and archolith-graphiti-core, then install "
+            "archolith-graphiti-core==0.31.2.post3)."
         )
 
 
