@@ -195,6 +195,13 @@ Changing a client's tier changes its scopes, so the client must reauthorize: ref
 tokens carry the old scopes and are refused. Changing only its tools takes effect once the
 server restarts with the new policy, and existing tokens keep working.
 
+When a build adds MCP tools, a v1/v2 policy fails startup until every client decides them.
+`scripts/update_client_policy.py <policy>` prints what it would add (operator: allowed
+unless operator-denied; agent: allowed only if in the agent set; readonly: denied) and the
+new `MENHIR_CLIENT_POLICY_DIGEST`; `--out <file>` writes it after loading it as startup
+does. For v3, `--profile-catalog N` re-pins the catalog so newer profile tools are granted.
+Deploy the new file and the new digest together.
+
 Agent Smith client-metadata documents advertise the scopes the policy gives that client,
 falling back to the built-in table when the client is not in the policy.
 
