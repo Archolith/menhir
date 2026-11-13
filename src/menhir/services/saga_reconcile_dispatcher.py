@@ -304,7 +304,10 @@ class SagaReconcileDispatcher:
             return LIVE_OWNER, {
                 "observed_error": (
                     "claim lost between classification and claim; another reconciler owns this row"
-                )
+                ),
+                # The claim refuses this process's own rows (#404 F-3), so an attested row from an
+                # earlier startup attempt in this PID lands here; it must block readiness.
+                "own_claim": oo.is_own_claim(row),
             }
 
         # A recorded non-replayable kind quarantines here rather than inside the handler: the

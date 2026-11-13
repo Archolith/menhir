@@ -84,7 +84,7 @@ def _real_takeover(journal, op_id, *, new_owner=_R_TOKEN):
 _MARKS = {
     "mark_committed", "mark_failed", "mark_needs_review", "mark_reversed", "record_attempt",
     "commit_or_settle", "close_after_failed_mutation", "settle_refused_commit",
-    "escalate_after_refused_commit",
+    "escalate_after_refused_commit", "quarantine_after_graph_work",
 }
 
 
@@ -133,6 +133,9 @@ def test_every_production_terminal_mark_passes_a_claim_token():
     ("store.mark_reversed(op, owner_token=oo.process_owner_token())",
      "owner_token=process_owner_token()"),
     ("commit_or_settle(j, op, owner_token=token, after_graph_work=True, observed='')", None),
+    ("quarantine_after_graph_work(self.journal, op, observed_error='x')", "no owner_token="),
+    ("quarantine_after_graph_work(j, op, owner_token=oo.process_owner_token(), observed_error='x')",
+     "owner_token=process_owner_token()"),
 ])
 def test_the_guard_flags_each_unsafe_shape_on_any_receiver(source, offence):
     call = ast.parse(source).body[0].value

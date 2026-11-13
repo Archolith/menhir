@@ -345,11 +345,14 @@ class MergeCoordinator:
         # Already applied by an attempt that crashed before COMMITTED: the survivor carries THIS
         # op's marker, so replaying is a no-op.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            commit_or_settle(
+            settled = commit_or_settle(
                 self.journal, op_id, owner_token=owner_token, after_graph_work=False,
                 observed="merge already applied; survivor carries this op's marker",
             )
-            return {"merged": 1, "replayed": True, "op_id": op_id}
+            done = {"merged": 1, "replayed": True, "op_id": op_id}
+            if settled == COMPLETED_BY_OTHER_OWNER:
+                done["completed_by_other_owner"] = True
+            return done
 
         # Neither expected state -> quarantine. A background replay must never paper over a graph
         # that some other writer changed.
@@ -413,8 +416,9 @@ class MergeCoordinator:
             if (
                 expected_after and post_fp == expected_after
                 # The fingerprint ignores the survivor's op stamp, so it cannot tell WHICH merge
-                # absorbed the node; this op's fence keeps every other merge off the survivor, so
-                # the stamp is exact here and is what proves this op was applied.
+                # absorbed the node. Requiring this op's stamp fails closed: a later merge into the
+                # survivor (possible once another owner committed and released the fence) leaves
+                # a real success quarantined for review, never a foreign absorption reported as ours.
                 and post.get("last_merge_op_id") == op_id
             ):
                 # Another owner already applied this very op, so this writer did no graph work.
@@ -537,7 +541,10 @@ class MergeCoordinator:
             )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
-            self._apply(request, owner_token=owner_token)
+            result = self._apply(request, owner_token=owner_token)
+            if result.get("completed_by_other_owner"):
+                # The row moved under this claim (#404 F-4): not a clean replay.
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return REPLAYED, {}
         except StaleTransitionError as exc:
             logger.warning("merge saga: op %s moved under the replay (stale): %s", op_id, exc)

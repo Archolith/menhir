@@ -267,7 +267,7 @@ class LegacyUnmergeCoordinator:
 
             settled = commit_or_settle(
                 self.journal, op_id, owner_token=token, after_graph_work=True,
-                observed="legacy unmerge restore verified",
+                observed=f"legacy unmerge restore verified: {after_fp}",
             )
         out = dict(result)
         if settled == COMPLETED_BY_OTHER_OWNER:

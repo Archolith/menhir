@@ -352,3 +352,43 @@ def test_bookkeeping_failure_never_replaces_the_mutation_error(journal):
     assert close_after_failed_mutation(
         _Broken(), "op", owner_token="t", exc=ClientError("x"), prove_before=lambda: True,
     ) is False
+
+
+# ------------------------------------------------------------------ review F5 / F16 (#404 F-4)
+def test_a_replay_whose_row_was_completed_under_its_claim_is_stale_not_replayed(journal):
+    """Review F16: if another owner closes the row while this replay holds its claim, the replay
+    lost ownership mid-flight; reporting REPLAYED would let a live boot treat that as clean."""
+    from menhir.services.delete_coordinator import DeleteCoordinator
+
+    class _Gone:
+        def capture_node_state(self, uuid):
+            return None
+
+    other = oo.new_claim_token()
+    op_id = journal.prepare(
+        operation_kind="ENTITY_DELETE",
+        request_json=json.dumps({"targets": ["n1"]}),
+        target_uuid="n1",
+        owner_token=other,
+    )
+    stale_snapshot = journal.get(op_id)
+    journal.mark_committed(op_id, owner_token=other, after_graph_work=False)
+    outcome, diag = DeleteCoordinator(graph_adapter=_Gone(), journal=journal).replay_prepared_row(
+        stale_snapshot, owner_token=oo.new_claim_token(),
+    )
+    assert outcome == STALE and diag["stale"] is True
+    assert journal.get(op_id)["state"] == "COMMITTED"
+
+
+@pytest.mark.usefixtures("pid_namespace_verifiable")
+def test_this_process_s_own_attested_row_blocks_a_live_boot(journal):
+    """Review F5: the claim refuses this process's own rows (F-3), so an attested row left by an
+    earlier startup attempt in this PID must still block readiness, not read as a healthy peer."""
+    own = oo.new_claim_token()
+    op_id = _merge(journal, own)
+    _expire_and_attest(journal, op_id)
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers={"ENTITY_MERGE": _StaleHandler()},
+    ).run(dry_run=False, gate=_Gate())
+    assert run.write_ready is False
+    assert journal.get(op_id)["state"] == "PREPARED"

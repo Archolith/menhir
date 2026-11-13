@@ -43,6 +43,7 @@ from menhir.services.saga_reconcile_outcomes import (
     REPLAYED,
     SKIP,
     SKIPPED,
+    STALE,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     summarize_outcomes,
@@ -369,10 +370,11 @@ class DeleteCoordinator:
         if outcome == SKIP:
             return SKIPPED, {}
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            commit_or_settle(
+            if commit_or_settle(
                 self.journal, op_id, owner_token=owner_token, after_graph_work=False,
                 observed="every delete target already absent",
-            )
+            ) == COMPLETED_BY_OTHER_OWNER:
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return REPLAYED, {}
         if outcome == WOULD_NEEDS_REVIEW:
             observed = diagnostics["observed_error"]

@@ -14,6 +14,9 @@
   owner token the operator inspected (#406).
 - New `menhir saga list|show|attest|resolve|clear-review` operator commands; see
   `.agent/workflows/operations_runbook.md` for when attestation is true.
+- Upgrade every process that shares a journal (server, workers, CLI) together. An older binary
+  still makes tokenless marks, reports a stale replay as `LIVE_OWNER`, and can re-open a row to
+  `PREPARED` without an owner, so the guarantees above hold only once no older process remains.
 
 ## 2026-11-12 - README: erasure known limitation matches what erasure now does
 

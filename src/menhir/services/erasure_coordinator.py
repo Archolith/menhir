@@ -41,6 +41,7 @@ from menhir.services.saga_reconcile_outcomes import (
     REPLAYED,
     SKIP,
     SKIPPED,
+    STALE,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
 )
@@ -638,13 +639,14 @@ class ErasureCoordinator:
         op_id = str(row.get("op_id") or "")
         outcome, diagnostics = self.classify_prepared_row(row)
         if outcome == SKIP:
-            commit_or_settle(
+            if commit_or_settle(
                 self.journal,
                 op_id,
                 owner_token=owner_token,
                 after_graph_work=False,
                 observed="no unpurged subjects remain",
-            )
+            ) == COMPLETED_BY_OTHER_OWNER:
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return SKIPPED, dict(diagnostics)
         if outcome == WOULD_NEEDS_REVIEW:
             observed = str(diagnostics.get("observed_error"))
@@ -716,6 +718,8 @@ class ErasureCoordinator:
                     f"{RESIDUAL_CONTENT}: {sorted(result.get('residual') or {})}"
                 )
             }
+        if result.get("completed_by_other_owner"):
+            return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
         return REPLAYED, {"purged": result.get("purged", {})}
 
     # ------------------------------------------------------------------ helpers

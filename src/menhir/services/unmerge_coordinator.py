@@ -649,7 +649,10 @@ class UnmergeCoordinator:
             )
             return DRIFTED, {"observed_error": observed}
         try:
-            self._apply(request, plan, owner_token=owner_token)
+            result = self._apply(request, plan, owner_token=owner_token)
+            if result.get("completed_by_other_owner"):
+                # The row moved under this claim (#404 F-4): not a clean replay.
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return REPLAYED, {}
         except StaleTransitionError as exc:
             logger.warning("unmerge saga: op %s moved under the replay (stale): %s", op_id, exc)

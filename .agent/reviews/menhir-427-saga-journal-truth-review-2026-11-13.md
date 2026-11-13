@@ -671,5 +671,9 @@ reverting). Lows are fixed where they touch the journal's truth; the rest are re
 | F6 | Fixed: delete commits `after_graph_work=bool(deleted)`. |
 | F13 | Fixed: the erasure `last_error` scrub is bound to `state='PREPARED' AND owner_token=<claim>`. |
 | F14 | Fixed: journal failures inside `close_after_failed_mutation` are logged and never replace the mutation's exception. Test: `test_bookkeeping_failure_never_replaces_the_mutation_error`. |
-| F5, F7, F8, F9, F10, F11, F12, F15, F16, F17, F18, F19 | Deferred, listed in the PR. None lets a stale writer move a row or marks FAILED over a possible mutation. |
+| F5 | Fixed (#404 F-4): a refused claim on this process's own row carries `own_claim` and blocks readiness. Test: `test_this_process_s_own_attested_row_blocks_a_live_boot`. |
+| F16 | Fixed (#404 F-4): a replay whose row was completed by another owner under its claim reports STALE in every wrapper. Test: `test_a_replay_whose_row_was_completed_under_its_claim_is_stale_not_replayed`. |
+| F10 | Mitigated by a CHANGELOG instruction to upgrade every process sharing a journal together; the old-binary behaviours themselves remain. |
+| F7, F8, F9, F11, F12, F15, F17, F18, F19 | Deferred, listed in the PR. None lets a stale writer move a row or marks FAILED over a possible mutation. |
+| Also | The AST guard now covers `quarantine_after_graph_work`; metric and legacy-unmerge escalations record the after-state fingerprint (#404 item 3); the #406 F-10 fakes assert the token PREPARE (or the test) set. |
 | OQ2 | Open: whether a killed writer's statement can commit server-side after an operator resolve. Needs a Neo4j experiment; the runbook's "restart the server first" guidance bounds it. |

@@ -184,7 +184,7 @@ class MetricReconcileMixin:
         # (2) Already applied by a previous attempt that crashed before COMMITTED. The receipt
         # pointer proves THIS op produced it, so replaying is a no-op, not a conflict.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            commit_or_settle(
+            settled = commit_or_settle(
                 self.journal,
                 op_id,
                 owner_token=owner_token,
@@ -194,6 +194,8 @@ class MetricReconcileMixin:
             return {
                 "uuid": str(request["metric_uuid"]), "view_key": key, "op_id": op_id,
                 "created": False, "replayed": True,
+                **({"completed_by_other_owner": True}
+                   if settled == COMPLETED_BY_OTHER_OWNER else {}),
             }
 
         # (3) Neither expected state: refuse to mutate. A half-applied or externally-modified node
@@ -282,7 +284,7 @@ class MetricReconcileMixin:
             op_id,
             owner_token=owner_token,
             after_graph_work=True,
-            observed="metric after-state verified",
+            observed=f"metric after-state verified: {actual}",
         )
         res["op_id"] = op_id
         if settled == COMPLETED_BY_OTHER_OWNER:
@@ -356,7 +358,10 @@ class MetricReconcileMixin:
             )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
-            self._apply(request, owner_token=owner_token)
+            result = self._apply(request, owner_token=owner_token)
+            if result.get("completed_by_other_owner"):
+                # The row moved under this claim (#404 F-4): not a clean replay.
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             logger.info(
                 "metric saga: replayed PREPARED op %s (%s)", op_id, request.get("view_key")
             )
