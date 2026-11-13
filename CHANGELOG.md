@@ -1,3 +1,10 @@
+## 2026-11-13 - Explorer is off by default
+
+- `MENHIR_EXPLORER_ENABLED` now defaults to `false`, so `/explorer` is not mounted unless an
+  operator turns it on. On a loopback bind the explorer answers without a credential, so leaving it
+  on by default put an unauthenticated read and candidate-approval surface on every local install
+  (config review M5 F1). Set `MENHIR_EXPLORER_ENABLED=true` to keep using it.
+
 ## 2026-11-13 - Loopback servers refuse requests addressed to other hosts (DNS rebinding)
 
 - A web page whose hostname re-resolves to 127.0.0.1 could reach a loopback-bound server from

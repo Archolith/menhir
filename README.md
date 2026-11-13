@@ -319,7 +319,7 @@ the enrichment queue, and the maintenance scheduler.
 |-----------|------------------|-------|
 | Remote MCP | `http://127.0.0.1:8100/mcp-http` | Streamable HTTP transport |
 | REST API | `http://127.0.0.1:8100/api` | Health, readiness, memory, and operator routes |
-| Explorer | `http://127.0.0.1:8100/explorer` | Browser-based graph inspection |
+| Explorer | `http://127.0.0.1:8100/explorer` | Browser-based graph inspection. Off by default; set `MENHIR_EXPLORER_ENABLED=true` |
 | Stdio bridge | `python -m menhir.mcp.server` | Trusted local bridge to a running backend |
 
 The stdio bridge does not create a second runtime. Set `MENHIR_BACKEND_URL` to the

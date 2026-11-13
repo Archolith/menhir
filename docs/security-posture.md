@@ -58,8 +58,8 @@ loopback posture, not by in-app controls** (operator checklist:
   (traffic never leaves the host). A non-loopback `NEO4J_URI` **must** use an encrypted scheme
   (`bolt+s://` / `neo4j+s://`) or a tunnel — a bare remote `bolt://` would send credentials and
   memory content in the clear. No code change for MVP; local posture is safe.
-- **Graph explorer (Finding B).** The explorer is mounted into the main app at `/explorer` on the
-  API port (default `127.0.0.1:8100`), sharing the runtime Neo4j pool. `BearerAuthMiddleware` now
+- **Graph explorer (Finding B).** The explorer is off by default. `MENHIR_EXPLORER_ENABLED=true`
+  mounts it into the main app at `/explorer` on the API port (default `127.0.0.1:8100`), sharing the runtime Neo4j pool. `BearerAuthMiddleware` now
   gates `/explorer` and `/explorer/candidates/*` exactly like `/api/*`: on a loopback bind in
   `AuthMode.NONE` it is open (unauthenticated localhost inspection, as before); on a non-loopback
   bind it requires the same bearer/OAuth/client-token credential as the API. Only `/explorer/static/*`

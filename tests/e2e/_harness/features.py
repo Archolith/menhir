@@ -125,7 +125,7 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     _flag(
         "explorer",
         "MENHIR_EXPLORER_ENABLED",
-        summary="Explorer web UI. Ships on; outside the local-stdio MVP contract.",
+        summary="Explorer web UI. Ships off; outside the local-stdio MVP contract.",
     ),
     _flag(
         "oauth",

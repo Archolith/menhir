@@ -513,7 +513,7 @@ The system has a working ingestion pipeline:
     - Cytoscape.js graph visualization API
     - Auth-gated on non-loopback binds (bearer token required for remote access)
     - Static assets at `/explorer/static` exempt from auth (CSS/JS can load)
-    - Can be disabled via `MENHIR_EXPLORER_ENABLED=false`
+    - Off by default; enable with `MENHIR_EXPLORER_ENABLED=true`
     - **Known limitation:** session views query by `n.session_id`, which means
       persistent/promoted entities touched by a session (but not stamped with its
       session_id due to conservative stamping) will not appear. "Session graph"
