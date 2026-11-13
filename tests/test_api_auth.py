@@ -54,7 +54,7 @@ def _build_app(api_key: str) -> TestClient:
         return JSONResponse({"other": True})
 
     wrapped = BearerAuthMiddleware(app, api_key=api_key)
-    return TestClient(wrapped)
+    return TestClient(wrapped, base_url="http://127.0.0.1")
 
 
 def test_dev_mode_skips_auth_when_key_empty():
@@ -76,7 +76,7 @@ def test_no_auth_loopback_binds_the_operator_tier():
     async def tier():
         return JSONResponse({"tier": get_request_tier()})
 
-    client = TestClient(BearerAuthMiddleware(app, api_key=""))
+    client = TestClient(BearerAuthMiddleware(app, api_key=""), base_url="http://127.0.0.1")
     resp = client.get("/api/tier")
     assert resp.status_code == 200
     assert resp.json()["tier"] == "operator"
@@ -190,7 +190,7 @@ def _build_tiered_app(
         agent_key=agent_key,
         readonly_key=readonly_key,
     )
-    return TestClient(wrapped)
+    return TestClient(wrapped, base_url="http://127.0.0.1")
 
 
 def test_resolve_tier_maps_all_keys():
@@ -336,7 +336,7 @@ def _build_oauth_app(
         oauth_verifier=verifier,
         client_policy=client_policy,
     )
-    return TestClient(wrapped)
+    return TestClient(wrapped, base_url="http://127.0.0.1")
 
 
 def test_oauth_disabled_preserves_static_auth():
@@ -356,7 +356,7 @@ def test_oauth_disabled_preserves_static_auth():
         api_key="static-key",
         oauth_config=OAuthConfig(enabled=False),
     )
-    client = TestClient(wrapped)
+    client = TestClient(wrapped, base_url="http://127.0.0.1")
 
     resp = client.get("/api/secure", headers={"Authorization": "Bearer static-key"})
     assert resp.status_code == 200
@@ -615,7 +615,7 @@ def test_oauth_dev_mode_with_no_static_keys_and_no_oauth():
         app,
         oauth_config=OAuthConfig(enabled=False),
     )
-    client = TestClient(wrapped)
+    client = TestClient(wrapped, base_url="http://127.0.0.1")
 
     resp = client.get("/api/secure")
     assert resp.status_code == 200
@@ -758,7 +758,7 @@ def test_static_bearer_ignores_the_removed_x_yawn_headers():
         })
 
     wrapped = BearerAuthMiddleware(app, api_key="static-key")
-    client = TestClient(wrapped)
+    client = TestClient(wrapped, base_url="http://127.0.0.1")
 
     resp = client.get(
         "/api/secure",
@@ -788,7 +788,7 @@ def _identity_echo_client(api_key: str = "static-key") -> TestClient:
             "client_id": session.client_id if session else "",
         })
 
-    return TestClient(BearerAuthMiddleware(app, api_key=api_key))
+    return TestClient(BearerAuthMiddleware(app, api_key=api_key), base_url="http://127.0.0.1")
 
 
 def test_canonical_menhir_identity_headers_are_read():
@@ -901,7 +901,7 @@ def _build_oauth_mcp_app(*, static_api_key: str = "") -> TestClient:
         oauth_config=_oauth_config(),
         oauth_verifier=verifier,
     )
-    return TestClient(wrapped)
+    return TestClient(wrapped, base_url="http://127.0.0.1")
 
 
 def test_oauth_enabled_rejects_api_key_on_mcp():
@@ -963,7 +963,7 @@ def _build_cors_preflight_client() -> TestClient:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    return TestClient(BearerAuthMiddleware(app, api_key="secret"))
+    return TestClient(BearerAuthMiddleware(app, api_key="secret"), base_url="http://127.0.0.1")
 
 
 def test_cors_preflight_passes_through_auth():
@@ -1017,7 +1017,7 @@ def _build_explorer_test_app(
         return JSONResponse({"ok": True})
 
     wrapped = BearerAuthMiddleware(app, api_key=api_key, loopback_bound=loopback_bound)
-    return TestClient(wrapped, client=(client_host, 50000))
+    return TestClient(wrapped, client=(client_host, 50000), base_url="http://127.0.0.1")
 
 
 def test_explorer_home_open_on_loopback_even_in_static_mode():

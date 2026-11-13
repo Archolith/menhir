@@ -274,7 +274,7 @@ class TestStats:
         wrapped = BearerAuthMiddleware(app)
         backend = _fake_backend()
         with patch.object(api_routes, "_get_backend", return_value=backend):
-            client = TestClient(wrapped)
+            client = TestClient(wrapped, base_url="http://127.0.0.1")
             resp = client.get("/api/stats")
 
         assert resp.status_code == 200

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 from collections.abc import Callable, Sequence
@@ -275,6 +276,31 @@ class BearerAuthMiddleware:
         return is_loopback_host(host)
 
     @staticmethod
+    def _host_header_is_loopback(headers: dict[bytes, bytes]) -> bool:
+        """Return True unless the request names a non-loopback host.
+
+        DNS rebinding: a web page whose own hostname re-resolves to 127.0.0.1 reaches a
+        loopback-bound server from the user's browser, from a loopback peer, with no forwarding
+        header, but its Host header still names the attacker's domain. Every credential-free
+        loopback grant must therefore also see a loopback Host. A request without Host is not
+        a browser request and is left to the peer and forwarding checks.
+        """
+        raw = headers.get(b"host")
+        if raw is None:
+            return True
+        host = raw.decode("latin-1").strip().lower()
+        if host.startswith("["):
+            host = host[1:host.find("]")] if "]" in host else host[1:]
+        elif host.count(":") == 1:
+            host = host.rsplit(":", 1)[0]
+        if host == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    @staticmethod
     def _has_proxy_forwarding_header(headers: dict[bytes, bytes]) -> bool:
         """Return True when the request carries a reverse-proxy forwarding header.
 
@@ -440,9 +466,13 @@ class BearerAuthMiddleware:
         # stricter three-way `and` broke all three. The mint path is stricter because it issues
         # credentials; this one has a different contract, and the defect was only ever the
         # unevaluated forwarding term.
+        # A loopback Host is also required: a DNS-rebound page is a loopback peer with no
+        # forwarding header, and only its Host names the attacker's domain.
         explorer_loopback_ok = (
-            self._loopback_admin_ok or self._client_is_loopback(scope)
-        ) and not self._has_proxy_forwarding_header(headers)
+            (self._loopback_admin_ok or self._client_is_loopback(scope))
+            and not self._has_proxy_forwarding_header(headers)
+            and self._host_header_is_loopback(headers)
+        )
         if is_explorer and explorer_loopback_ok:
             await self.app(scope, receive, send)
             return
@@ -505,6 +535,20 @@ class BearerAuthMiddleware:
                         "proxied or remote clients."
                     ),
                     code="proxied_request_without_auth",
+                )
+                return
+            # DNS rebinding: a browser page can reach a loopback bind with a non-loopback Host.
+            if not self._host_header_is_loopback(headers):
+                await self._send_auth_error(
+                    scope,
+                    send,
+                    status_code=401,
+                    detail=(
+                        "This server runs with authentication disabled and only answers requests "
+                        "addressed to localhost, 127.0.0.1 or [::1]. This request names another "
+                        "host. Configure an API key or per-client tokens to serve other hosts."
+                    ),
+                    code="non_loopback_host_without_auth",
                 )
                 return
 
@@ -621,6 +665,7 @@ class BearerAuthMiddleware:
                 self._loopback_admin_ok
                 and self._client_is_loopback(scope)
                 and not self._has_proxy_forwarding_header(headers)
+                and self._host_header_is_loopback(headers)
             )
 
             admin_identity: tuple[str, str] | None = None  # (client_id, client_name)
