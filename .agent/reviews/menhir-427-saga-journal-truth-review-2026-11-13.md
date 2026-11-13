@@ -2,8 +2,7 @@
 
 Date: 2026-11-13. HEAD `035ecc81`, diff `git diff origin/main...HEAD`. Reviewer lane: recall-maximizing.
 Nothing here has been through an orchestrator verification pass yet. No code was edited. The repro
-script lives outside the repo at
-`C:/Users/thron/AppData/Local/Temp/claude/0f5969dc40e57058/17d95120-6a4d-4f3f-8c7a-f868a95d358d/scratchpad/repro_427.py`.
+script (`repro_427.py`) lived in the reviewer's session scratch directory, outside the repo.
 It uses temp SQLite files only and stubs the telemetry recorders. `git status --short` at the end of
 the review shows only `?? .agent/reviews/menhir-427-saga-review.md`.
 
