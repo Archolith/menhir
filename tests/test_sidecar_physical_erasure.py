@@ -403,6 +403,29 @@ def test_compaction_removes_nonsecure_deleted_and_purged_canaries_from_all_files
     assert stamp is not None
 
 
+def test_an_op_committed_in_the_same_clock_tick_waits_for_the_next_compaction(
+    tmp_path, monkeypatch
+):
+    """The #605 flake, made deterministic: a start time equal to committed_at does not prove the
+    commit came first, so that run leaves the op unstamped and a later run stamps it."""
+    from menhir.services import sidecar_compaction
+
+    db = _db(tmp_path)
+    journal = GraphOperationsJournal(db_path=db)
+    op = journal.prepare(operation_kind="EXPLICIT_ERASURE", request_json="{}")
+    journal.mark_committed(op, owner_token=oo.process_owner_token())
+    with sqlite3.connect(db) as conn:
+        committed_at = conn.execute(
+            "SELECT committed_at FROM graph_operations WHERE op_id=?", (op,)
+        ).fetchone()[0]
+
+    monkeypatch.setattr(sidecar_compaction, "_utc_now_iso", lambda: committed_at)
+    assert run_sidecar_compaction(db_path=db)["ops_stamped"] == 0
+    monkeypatch.undo()
+    _wait_for_clock_past_commit(db, op)
+    assert run_sidecar_compaction(db_path=db)["ops_stamped"] == 1
+
+
 def test_compaction_stamps_only_ops_committed_before_it_started(tmp_path):
     db = _db(tmp_path)
     journal = GraphOperationsJournal(db_path=db)

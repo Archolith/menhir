@@ -1,17 +1,19 @@
-## 2026-11-13 - Concurrent admission denials keep every audit record; four Windows flakes fixed (#604, #605)
+## 2026-11-13 - Concurrent admission denials no longer drop audit records; Windows flakes fixed (#604, #605)
 
 - Since #600, intake runs in worker threads, so two admission denials for one subject could race
   on the shared audit view's compare-and-set, and the loser's record was dropped with a DEBUG
-  log. A lost compare-and-set now raises `ViewWriteConflict` (still a `ValueError`), the
-  admission-audit writer re-reads and retries up to 5 times, and a write that still fails logs
-  at WARNING with the subject and reason. On a test Neo4j, four concurrent denials lost three
-  records without the retry and kept all four with it.
+  log. A lost compare-and-set, on both the create path and the unchanged-signature refresh
+  path, now raises `ViewWriteConflict` (still a `ValueError`). The admission-audit writer
+  re-reads and retries up to 5 times, and intake and the temporal path log a write that still
+  fails at WARNING. On a test Neo4j, four concurrent denials lost three records without the
+  retry and kept all four with it. Unchanged: denials with identical fields (the same reason and
+  turn id, or no turn id) still share one record, as they did when written one at a time.
 - #605: none of the flakes is a product race. Sidecar compaction correctly skips an op committed
   in the same ~15.6 ms clock tick it starts in (Python 3.12 on Windows); the test now waits for
-  the clock to pass the commit. The telemetry ordering test saw writes in order but a read that
+  the clock to pass the commit, and a new test pins the tie. The telemetry ordering test saw writes in order but a read that
   gave up its 5 s drain on a loaded runner; it now allows 60 s. The erasure drain tests wait for
   the released writer before replaying. The redirect test's server reads the request body before
-  answering (Windows resets a socket closed with unread input). The lane-overlap test checks that
+  answering (likely cause: Windows resets a socket closed with unread input). The lane-overlap test checks that
   each lane sees the other start, instead of a wall-clock budget.
 
 ## 2026-11-13 - The erasure fence has one node per namespace (#603, #602)

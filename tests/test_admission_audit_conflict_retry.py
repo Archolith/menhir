@@ -6,10 +6,14 @@ All of one subject's denials share a view key. A write that loses the compare-an
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from menhir.domain import MemorySession
 from menhir.infrastructure.memory_graph_adapter import (
     _ADMISSION_AUDIT_ATTEMPTS,
     MemoryGraphAdapter,
@@ -18,6 +22,7 @@ from menhir.infrastructure.view_write_repository import (
     ViewWriteConflict,
     ViewWriteRepositoryMixin,
 )
+from menhir.services.ingest_intake import IngestIntakeMixin
 
 
 class _NoRowsNeo4j:
@@ -85,6 +90,39 @@ def test_exhausted_retries_raise_the_conflict() -> None:
     with pytest.raises(ViewWriteConflict):
         _adapter(views).record_admission_audit(subject="user-1", reason="downgraded")
     assert views.calls == _ADMISSION_AUDIT_ATTEMPTS
+
+
+class _Intake(IngestIntakeMixin):
+    def __init__(self, adapter) -> None:
+        self.graph_adapter = adapter
+        self._enrichment_enabled = False
+        self._ensure_enrichment_worker = AsyncMock()
+        self._enqueue_pending_episode = AsyncMock()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_intake_reports_a_dropped_denial_audit_at_warning(caplog) -> None:
+    adapter = MagicMock()
+    adapter.find_episode_by_ingest_key.return_value = None
+    adapter.record_admission_audit.side_effect = ViewWriteConflict("LOST UPDATE")
+    session = MemorySession(
+        session_id="session-1", user_id="user-1",
+        started_at=datetime.now(timezone.utc), client_name="opencode",
+    )
+    caplog.set_level(logging.WARNING, logger="menhir.services.ingest_intake")
+
+    # A user-tier claim with no turn evidence is denied; the ingest itself still succeeds.
+    await _Intake(adapter).queue_episode_for_enrichment(
+        episode="hello", session=session, source="user",
+    )
+
+    adapter.record_admission_audit.assert_called_once()
+    warnings = [r for r in caplog.records
+                if r.levelno == logging.WARNING and "admission audit" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "user-1" in warnings[0].getMessage()
+    assert "no turn_evidence_uuid provided" in warnings[0].getMessage()
 
 
 @pytest.mark.unit

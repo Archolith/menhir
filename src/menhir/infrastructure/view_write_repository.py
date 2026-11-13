@@ -390,7 +390,11 @@ class ViewWriteRepositoryMixin:
                     timeout_s=SAGA_MUTATION_TIMEOUT_S,
                 )
                 if not touched:
-                    raise ValueError("FACT View refresh refused after concurrent lifecycle change")
+                    # The version we read was superseded or retired after the read: the same
+                    # lost race as the create path below, so the same typed conflict (#604).
+                    raise ViewWriteConflict(
+                        "FACT View refresh refused after concurrent lifecycle change"
+                    )
                 prov = {}
             else:
                 self.neo4j.execute(
