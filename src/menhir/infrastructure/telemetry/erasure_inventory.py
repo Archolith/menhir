@@ -569,6 +569,12 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("graph_operations", "owner_death_attested_at"),
         ("graph_operations", "owner_death_attested_for_token"),
         ("graph_operations", "resolved_by_token"),
+        ("graph_operations", "commit_graph_work"),
+        # graph_operation_claims -- claim tokens only (#404)
+        ("graph_operation_claims", "op_id"),
+        ("graph_operation_claims", "claim_token"),
+        ("graph_operation_claims", "claim_kind"),
+        ("graph_operation_claims", "claimed_at"),
         # graph_operation_locks
         ("graph_operation_locks", "entity_uuid"),
         ("graph_operation_locks", "op_id"),

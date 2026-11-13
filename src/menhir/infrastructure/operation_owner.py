@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
 
@@ -172,6 +173,34 @@ def process_owner_token() -> str:
     yields "cannot prove death" rather than a false claim of death.
     """
     return f"{_instance_label()}:{process_liveness.hostname()}:{os.getpid()}:{_PROCESS_NONCE}"
+
+
+def new_claim_token() -> str:
+    """A token for ONE claim on one operation, unique even within this process (#404 F-3).
+
+    A process token alone cannot tell a stale writer from a later claim by the same process: after
+    a P -> R -> P takeover, P's original writer matches the row again. A per-claim suffix on the
+    nonce component makes every claim distinct while keeping the four colon-separated parts, so
+    :func:`_owner_parts` (and an older binary) still reads host and PID for death evidence.
+    """
+    return f"{process_owner_token()}-{uuidlib.uuid4().hex}"
+
+
+_CLAIM_SUFFIX = re.compile(r"^(?P<process>.+)-[0-9a-f]{32}$")
+
+
+def process_part(token: str) -> str:
+    """The process token a claim token was minted from; a process token maps to itself."""
+    match = _CLAIM_SUFFIX.match(token)
+    return match.group("process") if match else token
+
+
+def same_process(token: object, *, process_token: str | None = None) -> bool:
+    """Whether ``token`` (a process token or a claim token) was minted by this process."""
+    if not isinstance(token, str) or not token:
+        return False
+    mine = process_part(process_token or process_owner_token())
+    return process_part(token) == mine
 
 
 def lease_expiry_iso(*, seconds: int = DEFAULT_LEASE_SECONDS, now: datetime | None = None) -> str:
@@ -374,8 +403,8 @@ def is_own_claim(row: object, *, token: str | None = None) -> bool:
     """
     if not isinstance(row, dict):
         return False
-    recorded = row.get("owner_token")
-    return isinstance(recorded, str) and recorded == (token or process_owner_token())
+    # Process-level: a claim token minted by this process is still this process's claim.
+    return same_process(row.get("owner_token"), process_token=token)
 
 
 __all__ = [
@@ -396,6 +425,8 @@ __all__ = [
     "HOST_PID_NAMESPACE_ENV",
     "is_own_claim",
     "lease_expiry_iso",
+    "new_claim_token",
     "process_owner_token",
+    "same_process",
     "utc_now_iso",
 ]

@@ -196,6 +196,9 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         # Saga-journal identity on a commit-refused failure event (CF-271 F2): server-minted
         # op_id hex, the operation kind and the journal state are enum-shaped, never user text.
         "journal_state",
+        # #404/#406: enum outcome of an escalation and the CAS refusal reason (FR-7).
+        "escalation",
+        "refusal",
         "keep_uuid",
         "kind",
         "memory_uuid",
