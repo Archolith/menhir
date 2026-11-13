@@ -1,3 +1,14 @@
+## 2026-11-13 - Recall rerank uses ~90 MB less memory per process
+
+- ONNX Runtime's Python wrapper kept its own copy of the model bytes (~90 MB) for the life of
+  the session. The only reader of that copy is its silent CUDA-to-CPU fallback. The reranker now
+  turns that fallback off and drops the copy. `MENHIR_RECALL_RERANK_DEVICE=cuda` already promised
+  no CPU fallback, and now a CUDA failure keeps the floor for that call.
+- Resident memory after scoring went from 282 MB to 194 MB per process (Windows, pinned MiniLM).
+  This matters because every agent session's MCP process loads the model. Scoring speed is
+  unchanged.
+- The CPU memory arena stays on: turning it off saved only ~20 MB and made scoring ~20% slower.
+
 ## 2026-11-13 - Explorer is off by default
 
 - `MENHIR_EXPLORER_ENABLED` now defaults to `false`, so `/explorer` is not mounted unless an
