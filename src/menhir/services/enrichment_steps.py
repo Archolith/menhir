@@ -587,7 +587,9 @@ async def run_graphiti_extraction(
             )
             publication_intent = None
             if ctx.evidence_publication_intents is not None:
-                publication_intent = ctx.evidence_publication_intents.begin(
+                # #602: begin takes the namespace fence lock; keep it off the loop.
+                publication_intent = await asyncio.to_thread(
+                    ctx.evidence_publication_intents.begin,
                     episode_uuid=ctx.episode_uuid,
                     namespace=namespace,
                     expected_name=episode_name,
@@ -651,11 +653,10 @@ async def run_graphiti_extraction(
                 ),
             )
             if publication_intent is not None:
-                publication_transition = (
-                    ctx.evidence_publication_intents.finalize_remote_outcome(
-                        publication_intent,
-                        remote_episode_uuid=str(graphiti_result.episode.uuid),
-                    )
+                publication_transition = await asyncio.to_thread(
+                    ctx.evidence_publication_intents.finalize_remote_outcome,
+                    publication_intent,
+                    remote_episode_uuid=str(graphiti_result.episode.uuid),
                 )
                 if not publication_transition.finalized:
                     logger.warning(

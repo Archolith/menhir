@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +35,34 @@ def warn_if_on_event_loop(op: str) -> None:
         "can hang the process. Run it with asyncio.to_thread.",
         FENCE_LOCK_ON_EVENT_LOOP, op, stack_info=True,
     )
+
+FENCE_LABEL = "EvidenceNamespaceFence"
+
+#: A statement that writes a fence node, which takes its write lock: a MERGE on the label, or a
+#: SET of a fence property in a statement that names the label. Reads take no lock and don't match.
+_FENCE_MERGE_RE = re.compile(r"MERGE\s*\(\s*\w*\s*:\s*" + FENCE_LABEL + r"\b")
+_FENCE_SET_RE = re.compile(
+    r"\bSET\b[^;]*?\b\w+\.(?:lock_nonce|erasure_epoch|erasing_ops)\s*=(?!=)", re.DOTALL
+)
+
+
+def is_fence_lock_query(query: Any) -> bool:
+    """True when ``query`` (a Cypher string) writes an ``EvidenceNamespaceFence`` node."""
+    text = query if isinstance(query, str) else str(getattr(query, "text", query) or "")
+    if FENCE_LABEL not in text:
+        return False
+    return bool(_FENCE_MERGE_RE.search(text) or _FENCE_SET_RE.search(text))
+
+
+def guard_fence_lock_query(query: Any) -> None:
+    """Run the on-loop guard for a sync statement that takes a fence lock (#602).
+
+    Called from the sync Neo4j wrapper, which every sync fence writer goes through, so a writer
+    missing its own ``warn_if_on_event_loop`` is still caught at run time.
+    """
+    if is_fence_lock_query(query):
+        warn_if_on_event_loop("neo4j_execute_fence_lock")
+
 
 #: Label of the permanent per-uuid erase marker.
 ERASURE_MARKER_LABEL = "ErasureMarker"

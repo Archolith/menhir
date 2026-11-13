@@ -10,6 +10,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar
 
+from menhir.infrastructure.erasure_fence import guard_fence_lock_query
+
 
 class _Neo4jDriverUnavailable(Exception):
     """Stand-in for the driver's exception types when the `neo4j` package is absent.
@@ -177,6 +179,7 @@ class Neo4jTransaction:
         query: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        guard_fence_lock_query(query)
         result = self._tx.run(query, **(params or {}))
         return [record.data() for record in result]
 
@@ -360,6 +363,7 @@ class Neo4jRepository:
         result is a legitimate query outcome and would be indistinguishable from "the mutation
         matched nothing", which several coordinators interpret as a benign abstention.
         """
+        guard_fence_lock_query(query)
         statement: Any = query
         if timeout_s is not None:
             if Query is None:  # pragma: no cover - import guard

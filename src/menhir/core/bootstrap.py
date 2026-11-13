@@ -340,6 +340,12 @@ async def prepare_memory_runtime(
             "skipped": False,
         }
 
+    # #603: every start, and before any writer: the fence writers' MERGE is only atomic against
+    # concurrent first writers once the uniqueness constraint exists. Raises if it can't.
+    evidence_lifecycle_schema = await asyncio.to_thread(
+        artifacts.graph_adapter.ensure_evidence_lifecycle_schema
+    )
+
     # Edge counts feed decay-protection thresholds; they are not required to serve
     # reads. This is a full-graph recount in one transaction, so any single damaged
     # record (e.g. a corrupt property chain) fails the whole statement. Let the
@@ -364,6 +370,7 @@ async def prepare_memory_runtime(
         "schema": schema,
         "retired_index_failures": retired_index_failures,
         "vector_indexes": vector_indexes,
+        "evidence_lifecycle_schema": evidence_lifecycle_schema,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,
     }

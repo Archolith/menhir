@@ -329,6 +329,12 @@ class MemoryGraphAdapter:
                 failures.append(str(exc))
         return failures
 
+    def ensure_evidence_lifecycle_schema(self) -> dict[str, Any]:
+        """Merge duplicate fences and bring the evidence-lifecycle constraints online (#603).
+        Every start; raises EvidenceLifecycleSchemaError when they cannot come online."""
+        from menhir.infrastructure.evidence_lifecycle_schema import ensure_evidence_lifecycle_schema
+        return ensure_evidence_lifecycle_schema(self.neo4j)
+
     def ensure_vector_indexes(self) -> dict[str, str]:
         """Create missing similarity-search vector indexes (#574); never raises. Every start, like
         `retire_obsolete_indexes`, so existing installs get them on upgrade."""
