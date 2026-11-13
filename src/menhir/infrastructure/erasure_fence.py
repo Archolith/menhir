@@ -40,9 +40,10 @@ FENCE_LABEL = "EvidenceNamespaceFence"
 
 #: A statement that writes a fence node, which takes its write lock: a MERGE on the label, or a
 #: SET of a fence property in a statement that names the label. Reads take no lock and don't match.
-_FENCE_MERGE_RE = re.compile(r"MERGE\s*\(\s*\w*\s*:\s*" + FENCE_LABEL + r"\b")
+_FENCE_MERGE_RE = re.compile(r"MERGE\s*\(\s*\w*\s*:\s*" + FENCE_LABEL + r"\b", re.IGNORECASE)
 _FENCE_SET_RE = re.compile(
-    r"\bSET\b[^;]*?\b\w+\.(?:lock_nonce|erasure_epoch|erasing_ops)\s*=(?!=)", re.DOTALL
+    r"\bSET\b[^;]*?\b\w+\.(?:lock_nonce|erasure_epoch|erasing_ops|generation)\s*=(?!=)",
+    re.DOTALL | re.IGNORECASE,
 )
 
 

@@ -1200,7 +1200,8 @@ async def stamp_and_finalize(
                 ctx.episode_uuid,
                 ctx.worker_id,
             )
-            _compensate(resolved_episode_uuid)
+            # #602: compensation can seal the namespace fence; keep it off the loop.
+            await asyncio.to_thread(_compensate, resolved_episode_uuid)
             return
         duration_ms = int((perf_counter() - ctx.started) * 1000)
         # Record as successful empty extraction with a reason receipt
@@ -1423,7 +1424,8 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
-        _compensate(resolved_episode_uuid)
+        # #602: compensation can seal the namespace fence; keep it off the loop.
+        await asyncio.to_thread(_compensate, resolved_episode_uuid)
         return
     record_lifecycle_event(
         component="ingest_worker",

@@ -37,8 +37,9 @@ EVIDENCE_LIFECYCLE_REQUIRED_CONSTRAINTS = (
      ("ViewProjectionRepair",), ("repair_key",)),
 )
 
-#: Labels whose duplicates are refused rather than merged. Each key embeds a unique operation
-#: id, so a duplicate needs two transactions with one operation id; no merge rule is assumed.
+#: Labels whose duplicates are refused rather than merged: no merge rule is defined for them.
+#: Repair keys embed an operation id; an intent key is per episode, so two begins for one episode
+#: before the constraint existed could duplicate it (the intent repository is not wired in yet).
 _REFUSED_DUPLICATE_KEYS = (
     ("EvidencePublicationIntent", "intent_key"),
     ("EvidenceTombstone", "tombstone_key"),
@@ -63,21 +64,25 @@ _DUPLICATE_FENCE_KEYS_CYPHER = (
 _LOCK_COPIES_CYPHER = (
     f"MATCH (f:{FENCE_LABEL} {{namespace_key: $key}}) "
     "SET f.lock_nonce = $nonce, f.locked_at = datetime() "
+    # Re-check the label under the lock: a concurrent merge may have relabelled this copy
+    # while we waited, and the MATCH above does not re-evaluate it.
+    f"WITH f WHERE f:{FENCE_LABEL} "
     "WITH f ORDER BY coalesce(f.erasure_epoch, 0) DESC, f.created_at ASC, elementId(f) ASC "
     "WITH collect(f) AS fs "
     "RETURN elementId(head(fs)) AS keep_id, [d IN tail(fs) | elementId(d)] AS dup_ids"
 )
 
 _FOREIGN_RELS_CYPHER = (
-    "MATCH (d)-[r]-() WHERE elementId(d) IN $dup_ids AND type(r) <> 'GOVERNS_PUBLICATION' "
+    f"MATCH (d:{FENCE_LABEL})-[r]-() WHERE elementId(d) IN $dup_ids "
+    "AND type(r) <> 'GOVERNS_PUBLICATION' "
     "RETURN collect(DISTINCT type(r)) AS types"
 )
 
 #: Survivor takes the highest epoch and generation, every in-flight erase op and the oldest
 #: created_at: readers then see an epoch at least as high as any copy they recorded.
 _MERGE_INTO_SURVIVOR_CYPHER = (
-    "MATCH (keep) WHERE elementId(keep) = $keep_id "
-    "MATCH (d) WHERE elementId(d) IN $dup_ids "
+    f"MATCH (keep:{FENCE_LABEL}) WHERE elementId(keep) = $keep_id "
+    f"MATCH (d:{FENCE_LABEL}) WHERE elementId(d) IN $dup_ids "
     "WITH keep, collect(d) AS ds "
     "WITH keep, ds, [keep] + ds AS all "
     "SET keep.erasure_epoch = reduce(m = 0, x IN all | "
@@ -93,8 +98,8 @@ _MERGE_INTO_SURVIVOR_CYPHER = (
 )
 
 _REPOINT_PUBLICATIONS_CYPHER = (
-    "MATCH (keep) WHERE elementId(keep) = $keep_id "
-    "MATCH (d)-[r:GOVERNS_PUBLICATION]->(i) WHERE elementId(d) IN $dup_ids "
+    f"MATCH (keep:{FENCE_LABEL}) WHERE elementId(keep) = $keep_id "
+    f"MATCH (d:{FENCE_LABEL})-[r:GOVERNS_PUBLICATION]->(i) WHERE elementId(d) IN $dup_ids "
     "MERGE (keep)-[:GOVERNS_PUBLICATION]->(i) "
     "DELETE r"
 )
@@ -157,8 +162,11 @@ def _merge_one_fence_key(neo4j: Any, key: str) -> dict[str, Any]:
 def merge_duplicate_fences(neo4j: Any) -> list[dict[str, Any]]:
     """Merge every namespace's duplicate fence copies into one; return one row per merged key."""
     keys = [str(r["key"]) for r in neo4j.execute(_DUPLICATE_FENCE_KEYS_CYPHER)]
-    merged = [_merge_one_fence_key(neo4j, key) for key in keys]
-    for row in merged:
+    merged: list[dict[str, Any]] = []
+    for key in keys:
+        # Each key commits on its own; log it now so a later key's failure doesn't hide it.
+        row = _merge_one_fence_key(neo4j, key)
+        merged.append(row)
         logger.warning(
             "Merged %d duplicate %s copies for namespace %r (epoch now %s); copies kept as :%s",
             row.get("moved", 0), FENCE_LABEL, row["key"], row.get("epoch"), DUPLICATE_FENCE_LABEL,

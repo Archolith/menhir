@@ -222,16 +222,37 @@ class _Corpus:
                 return hits
         if isinstance(func, ast.Name) and (path, None, name) in self.by_id:
             return [(path, None, name)]
-        return list(self.by_name.get(name, []))
+        return [t for t in self.by_name.get(name, []) if self._can_execute(t)]
 
-    def _calls_writer(self, call: ast.Call, path: Path, cls: str | None, writers: set) -> bool:
+    def _can_execute(self, ident: tuple) -> bool:
+        """A sync definition with a real body: not async (a sync call can't reach it), not a
+        Protocol/ABC stub."""
+        fn = self.by_id[ident]
+        if not isinstance(fn, ast.FunctionDef):
+            return False
+        body = [st for st in fn.body
+                if not (isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant))]
+        if all(isinstance(st, ast.Raise) or isinstance(st, ast.Pass) for st in body):
+            return False
+        cls = ident[1]
+        if cls is not None:
+            for _, node in self.classes.get(cls, []):
+                if any(_ref_name(b) in ("Protocol", "ABC") for b in node.bases):
+                    return False
+        return True
+
+    def _calls_writer(
+        self, call: ast.Call, path: Path, cls: str | None, writers: set,
+        caller: tuple | None = None,
+    ) -> bool:
         """A call reaches a writer when every definition it can resolve to is one.
 
         ``self.x()`` and ``self.attr.x()`` resolve through the class (and the attribute's
-        constructor); other calls fall back to every same-named definition, which counts only
-        when all of them are writers. What stays unresolved is covered by the runtime guard.
+        constructor); other calls fall back to every same-named sync definition with a body,
+        excluding the caller itself, and count only when all of them are writers. What stays
+        unresolved is covered by the runtime guard in the sync Neo4j wrapper.
         """
-        targets = self.resolve(call, path, cls)
+        targets = [t for t in self.resolve(call, path, cls) if t != caller]
         return bool(targets) and all(t in writers for t in targets)
 
     def _derive_writers(self) -> set[str]:
@@ -250,7 +271,7 @@ class _Corpus:
                 ident = (p, c, f.name)
                 if ident in writers:
                     continue
-                if any(isinstance(n, ast.Call) and self._calls_writer(n, p, c, writers)
+                if any(isinstance(n, ast.Call) and self._calls_writer(n, p, c, writers, ident)
                        for n in ast.walk(f)):
                     writers.add(ident)
                     changed = True
@@ -360,6 +381,44 @@ def test_sync_transaction_execute_guards_fence_locks(caplog) -> None:
 
     asyncio.run(on_loop())
     assert f"{FENCE_LOCK_ON_EVENT_LOOP} op=neo4j_execute_fence_lock" in caplog.text
+
+
+def test_repository_execute_guards_fence_locks(caplog, monkeypatch) -> None:
+    """The auto-commit path runs the guard too, before any driver call."""
+    from menhir.infrastructure.neo4j import Neo4jRepository
+
+    caplog.set_level(logging.ERROR, logger="menhir.infrastructure.erasure_fence")
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def run(self, query, **params):
+            return []
+
+    repo = Neo4jRepository.__new__(Neo4jRepository)
+    repo.database = "neo4j"
+    monkeypatch.setattr(
+        repo, "_get_driver", lambda: type("D", (), {"session": lambda self, **kw: _Session()})()
+    )
+
+    async def on_loop() -> None:
+        repo.execute(fence_lock_cypher("$key"), {"key": "k", "fence_nonce": "n"})
+
+    asyncio.run(on_loop())
+    assert f"{FENCE_LOCK_ON_EVENT_LOOP} op=neo4j_execute_fence_lock" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["merge (f:EvidenceNamespaceFence {namespace_key: $k})",
+     "MATCH (f:EvidenceNamespaceFence) SET f.generation = 1"],
+)
+def test_fence_lock_predicate_covers_lowercase_and_generation(query: str) -> None:
+    assert is_fence_lock_query(query)
 
 
 def test_census_derives_every_known_writer(corpus: _Corpus) -> None:
