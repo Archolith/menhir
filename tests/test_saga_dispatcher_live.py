@@ -99,7 +99,7 @@ def _kill_owner(journal: GraphOperationsJournal, op_id: str) -> None:
 
 def _crash_before_commit(coord, pair) -> str:
     """Perform a real merge against the real graph, crashing before the journal commits."""
-    def boom(op_id, owner_token=None):
+    def boom(op_id, owner_token=None, after_graph_work=True):
         raise RuntimeError("crash before COMMITTED")
 
     real = coord.journal.mark_committed
