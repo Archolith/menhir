@@ -491,7 +491,7 @@ class MemorySettings:
     # Source-only Ed25519 private key. This path is configured only on the old
     # authority and is deliberately absent from target Compose/backup state.
     source_fence_private_key_path: str = ""
-    explorer_enabled: bool = True
+    explorer_enabled: bool = False
     privacy_redact: bool = False
     secret_policy: str = "redact"
     telemetry_record_recall_queries: bool = False

@@ -48,16 +48,16 @@ gate for any future non-local deployment.
 
 ## 3. Explorer — unauthenticated localhost tooling only (Finding B)
 
-The graph explorer is mounted into the main app at `/explorer` on the API port (default
+When enabled, the graph explorer is mounted into the main app at `/explorer` on the API port (default
 `127.0.0.1:8100`) and shares the runtime Neo4j pool. `BearerAuthMiddleware` gates `/explorer` and
-`/explorer/candidates/*` exactly like `/api/*` (only `/explorer/static/*` is exempt). Set
-`MENHIR_EXPLORER_ENABLED=false` to omit the surface entirely. The standalone `menhir-explorer`
+`/explorer/candidates/*` exactly like `/api/*` (only `/explorer/static/*` is exempt). It is off by
+default; set `MENHIR_EXPLORER_ENABLED=true` to mount it. The standalone `menhir-explorer`
 process and port `8787` were removed.
 
 | Situation | Required |
 |---|---|
 | Local single-user (MVP) | Keep the API bound to `127.0.0.1`. On a loopback bind (`AuthMode.NONE`) the explorer is open, unauthenticated localhost inspection — as before. |
-| Any non-loopback need | A non-loopback bind already requires the API's bearer/OAuth/client-token credential on `/explorer` too, so the graph is not exposed unauthenticated. A reverse proxy / SSH tunnel remains good defense-in-depth; set `MENHIR_EXPLORER_ENABLED=false` if the explorer is not needed on that host. |
+| Any non-loopback need | A non-loopback bind already requires the API's bearer/OAuth/client-token credential on `/explorer` too, so the graph is not exposed unauthenticated. A reverse proxy / SSH tunnel remains good defense-in-depth; leave the explorer off unless it is needed on that host. |
 
 MVP status: **explorer inherits the API's auth posture.** Loopback = open inspection; non-loopback =
 credential-gated. No separate explorer port or process to secure.

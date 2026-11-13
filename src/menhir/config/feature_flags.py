@@ -76,7 +76,7 @@ _SETTINGS = (
         False, ()),
     ('startup_scope', 'MENHIR_STARTUP_SCOPE', 'full', 'runtime', 'Configure startup scope.', False, ()),
     ('runtime_mode', 'MENHIR_RUNTIME_MODE', 'production', 'runtime', 'Configure runtime mode.', False, ()),
-    ('explorer_enabled', 'MENHIR_EXPLORER_ENABLED', True, 'runtime', 'Enable Explorer routes.', False, ()),
+    ('explorer_enabled', 'MENHIR_EXPLORER_ENABLED', False, 'runtime', 'Enable Explorer routes.', False, ()),
     ('privacy_redact', 'MENHIR_PRIVACY_REDACT', False, 'telemetry', 'Enable privacy redact.', False, ()),
     ('secret_policy', 'MENHIR_SECRET_POLICY', 'redact', 'runtime',
         'Credential handling on memory writes and recall output: redact, refuse, or off (store and return credentials as given).', False, ()),
