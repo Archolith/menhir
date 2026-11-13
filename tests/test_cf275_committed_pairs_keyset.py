@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from menhir.infrastructure import graph_operations_reads as reads
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 
 
@@ -16,7 +17,7 @@ def _prep(journal, i, commit=True):
         operation_kind="ENTITY_MERGE",
         request_json=json.dumps({"absorbed_uuid": f"a{i}", "survivor_uuid": f"s{i}"}))
     if commit:
-        journal.mark_committed(op_id)
+        journal.mark_committed(op_id, owner_token=oo.process_owner_token())
     return op_id
 
 
@@ -43,7 +44,7 @@ def test_row_committed_behind_cursor_does_not_skip_a_later_row(tmp_path, monkeyp
     def wrapper(path):
         calls["n"] += 1
         if calls["n"] == 2:  # second page read: page 1 is done, commit m0 behind the cursor
-            journal.mark_committed(m0)
+            journal.mark_committed(m0, owner_token=oo.process_owner_token())
         return real(path)
 
     monkeypatch.setattr(reads, "connect_telemetry_db", wrapper)

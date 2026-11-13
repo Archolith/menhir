@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 
 
@@ -15,7 +16,7 @@ def _prep_commit(journal, *, absorbed, survivor, kind="ENTITY_MERGE", commit=Tru
         operation_kind=kind,
         request_json=json.dumps({"absorbed_uuid": absorbed, "survivor_uuid": survivor}))
     if commit:
-        journal.mark_committed(op_id)
+        journal.mark_committed(op_id, owner_token=oo.process_owner_token())
     return op_id
 
 
@@ -47,7 +48,7 @@ def test_list_committed_merges_skips_rows_missing_a_pair(tmp_path):
     # a committed merge whose request lacks a survivor -> skipped, not returned half-formed.
     bad = journal.prepare(operation_kind="ENTITY_MERGE",
                           request_json=json.dumps({"absorbed_uuid": "X"}))
-    journal.mark_committed(bad)
+    journal.mark_committed(bad, owner_token=oo.process_owner_token())
     out = journal.list_committed_merges()
     assert [o["op_id"] for o in out] == [good]
 
@@ -69,7 +70,7 @@ def test_list_committed_merges_malformed_rows_do_not_hide_valid_lineage(tmp_path
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
     for _ in range(3):
         bad = journal.prepare(operation_kind="ENTITY_MERGE", request_json="{not json")
-        journal.mark_committed(bad)
+        journal.mark_committed(bad, owner_token=oo.process_owner_token())
     good = _prep_commit(journal, absorbed="A", survivor="B")
     out = journal.list_committed_merges(page_size=2)
     assert [o["op_id"] for o in out] == [good]        # valid lineage still reached past malformed rows
@@ -94,6 +95,6 @@ def test_list_committed_unmerges_carries_merge_op_id_from_reverses(tmp_path):
                          request_json=json.dumps({"absorbed_uuid": "A", "survivor_uuid": "B",
                                                   "merge_op_id": merge}),
                          reverses_op_id=merge)
-    journal.mark_committed(un)
+    journal.mark_committed(un, owner_token=oo.process_owner_token())
     out = journal.list_committed_unmerges()
     assert out == [{"op_id": un, "absorbed_uuid": "A", "survivor_uuid": "B", "merge_op_id": merge}]

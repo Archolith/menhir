@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from menhir.domain.erasure import ERASED_MARKER
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore, suppressed_node_uuids
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry import helpers
@@ -389,8 +390,8 @@ def test_compaction_stamps_only_ops_committed_before_it_started(tmp_path):
     journal = GraphOperationsJournal(db_path=db)
     before = journal.prepare(operation_kind="EXPLICIT_ERASURE", request_json="{}")
     after = journal.prepare(operation_kind="EXPLICIT_ERASURE", request_json="{}")
-    journal.mark_committed(before)
-    journal.mark_committed(after)
+    journal.mark_committed(before, owner_token=oo.process_owner_token())
+    journal.mark_committed(after, owner_token=oo.process_owner_token())
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE graph_operations SET committed_at = '9999-01-01T00:00:00+00:00' "
                      "WHERE op_id = ?", (after,))
@@ -405,7 +406,7 @@ def test_compaction_returns_retry_and_stamps_nothing_when_busy(tmp_path, monkeyp
     db = _db(tmp_path)
     journal = GraphOperationsJournal(db_path=db)
     op = journal.prepare(operation_kind="EXPLICIT_ERASURE", request_json="{}")
-    journal.mark_committed(op)
+    journal.mark_committed(op, owner_token=oo.process_owner_token())
     run_sidecar_compaction(db_path=db)  # adds the column; stamps the op
     with connect_telemetry_db(db) as conn:
         conn.execute("UPDATE graph_operations SET sidecar_compacted_at = NULL")

@@ -209,7 +209,7 @@ def test_clear_needs_review_to_needs_review_is_a_noop(journal):
         before = conn.execute(
             "SELECT updated_at FROM graph_operations WHERE op_id = ?", (op_id,)
         ).fetchone()
-    journal.clear_needs_review(op_id, to_state="NEEDS_REVIEW")
+    journal.clear_needs_review(op_id, to_state="NEEDS_REVIEW", operator="op")
     with sqlite3.connect(journal.db_path) as conn:
         after = conn.execute(
             "SELECT updated_at FROM graph_operations WHERE op_id = ?", (op_id,)
@@ -224,7 +224,7 @@ def test_clear_needs_review_to_needs_review_is_a_noop(journal):
 def test_s5_record_attempt_does_not_overwrite_a_needs_review_row(journal):
     op_id = _prepare(journal)
     journal.mark_needs_review(op_id, observed_error="R evidence", owner_token=oo.process_owner_token())
-    assert journal.record_attempt(op_id, error="W stale exc") is False
+    assert journal.record_attempt(op_id, owner_token=oo.process_owner_token(), error="W stale exc") is False
     state, _o, last_error, attempts = _row(journal, op_id)
     assert (state, last_error, attempts) == ("NEEDS_REVIEW", "R evidence", 0)
 
@@ -233,7 +233,7 @@ def test_s5_record_attempt_does_not_overwrite_a_needs_review_row(journal):
 def test_s5b_record_attempt_does_not_touch_a_committed_row(journal):
     op_id = _prepare(journal)
     journal.mark_committed(op_id, owner_token=oo.process_owner_token())
-    assert journal.record_attempt(op_id, error="W stale exc") is False
+    assert journal.record_attempt(op_id, owner_token=oo.process_owner_token(), error="W stale exc") is False
     assert _row(journal, op_id)[2:] == (None, 0)
 
 
@@ -250,7 +250,7 @@ def test_record_attempt_wrong_owner_is_a_noop_and_right_owner_records(journal):
 @pytest.mark.unit
 def test_record_attempt_unknown_op_still_raises(journal):
     with pytest.raises(GraphOperationError):
-        journal.record_attempt("missing", error="x")
+        journal.record_attempt("missing", owner_token=oo.process_owner_token(), error="x")
 
 
 @pytest.mark.unit
