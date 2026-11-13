@@ -798,6 +798,15 @@ the source of truth for "done". `op_id` and `request_json` are immutable once PR
 | `before_snapshot_json` | The complete lossless recovery snapshot, committed BEFORE any destruction (invariant 3). |
 | `expected_after_sha256` | Postcondition fingerprint frozen at PREPARE; only an exact match may COMMIT (invariant 5). |
 | `state` | `PREPARED` → `COMMITTED` \| `NEEDS_REVIEW` \| `FAILED` \| `REVERSED`. `FAILED` = terminal, no graph mutation occurred (releases the fence). `NEEDS_REVIEW` = drift, operator-only escape. |
+| `owner_token` | The claim that may move a `PREPARED` row: `label:host:pid:nonce-<32hex>`, minted per claim (`operation_owner.new_claim_token`). The `-<32hex>` suffix makes two claims by one process distinct, so a stale writer cannot match a row this process re-claimed (#404 F-3). Every mark requires it. |
+| `resolved_by_token` | The claim (or `operator:<name>`) that made the last transition (#406 FR-3). |
+| `commit_graph_work` | `1` when the committer itself mutated the graph, `0` when it only observed the after-state, `NULL` for rows committed by an older binary. Decides whether a refused writer commit is one application or a possible double apply (#404). |
+
+### Table: `graph_operation_claims`
+
+Every token that has held a claim on an op: `(op_id, claim_token, claim_kind, claimed_at)`, primary
+key `(op_id, claim_token)`, `claim_kind` `prepare` or `takeover`. A writer whose commit was refused
+may escalate its row back to `NEEDS_REVIEW` only if its token is listed here for that op.
 
 ### Lossless snapshot envelope (`domain/merge_snapshot.py`)
 

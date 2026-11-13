@@ -78,11 +78,32 @@ def _real_takeover(journal, op_id, *, new_owner=_R_TOKEN):
 
 
 # ------------------------------------------------------------------------------ AST guard
-_MARKS = {"mark_committed", "mark_failed", "mark_needs_review"}
+#: Every journal transition that moves or touches a row, plus the #427/#404 helpers that call them.
+#: Matched on the called NAME, whatever the receiver (``self.journal``, an alias, a bare import), so
+#: renaming the receiver cannot hide a call from the guard (#406 F-10).
+_MARKS = {
+    "mark_committed", "mark_failed", "mark_needs_review", "mark_reversed", "record_attempt",
+    "commit_or_settle", "close_after_failed_mutation", "settle_refused_commit",
+    "escalate_after_refused_commit",
+}
+
+
+def _owner_token_offence(node: ast.Call) -> str | None:
+    """Why this call's owner token is unacceptable, or None when it names a claim."""
+    token = next((kw.value for kw in node.keywords if kw.arg == "owner_token"), None)
+    if token is None:
+        return "no owner_token="
+    if isinstance(token, ast.Constant) and token.value is None:
+        return "owner_token=None"
+    # The bare process token is shared by every claim this process makes: passing it to a mark
+    # re-validates any older claim of this process (#404 F-3). Marks take the per-claim token.
+    if isinstance(token, ast.Call) and ast.unparse(token.func).endswith("process_owner_token"):
+        return "owner_token=process_owner_token()"
+    return None
 
 
 @pytest.mark.unit
-def test_every_production_terminal_mark_passes_owner_token():
+def test_every_production_terminal_mark_passes_a_claim_token():
     src_root = Path(menhir.__file__).parent
     offenders: list[str] = []
     seen = 0
@@ -91,18 +112,31 @@ def test_every_production_terminal_mark_passes_owner_token():
             continue  # the definitions themselves
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _MARKS
-                # journal calls only; migration_batches has its own unrelated mark_* methods
-                and "journal" in ast.unparse(node.func.value)
-            ):
-                seen += 1
-                if not any(kw.arg == "owner_token" for kw in node.keywords):
-                    offenders.append(f"{path.relative_to(src_root)}:{node.lineno} {node.func.attr}")
-    assert seen > 20, "the walker found suspiciously few call sites; the guard is not looking"
-    assert not offenders, "journal mark call(s) without owner_token=: " + ", ".join(offenders)
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name not in _MARKS:
+                continue
+            seen += 1
+            offence = _owner_token_offence(node)
+            if offence:
+                offenders.append(f"{path.relative_to(src_root)}:{node.lineno} {name} {offence}")
+    assert seen >= 40, "the walker found suspiciously few call sites; the guard is not looking"
+    assert not offenders, "journal mark call(s) without a claim token: " + ", ".join(offenders)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source, offence", [
+    ("self.journal.mark_failed(op, reason='x')", "no owner_token="),
+    ("j.record_attempt(op, owner_token=None)", "owner_token=None"),
+    ("store.mark_reversed(op, owner_token=oo.process_owner_token())",
+     "owner_token=process_owner_token()"),
+    ("commit_or_settle(j, op, owner_token=token, after_graph_work=True, observed='')", None),
+])
+def test_the_guard_flags_each_unsafe_shape_on_any_receiver(source, offence):
+    call = ast.parse(source).body[0].value
+    assert _owner_token_offence(call) == offence
 
 
 # ------------------------------------------------------------------ S1: W stalls, R claims

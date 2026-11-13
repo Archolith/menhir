@@ -1,3 +1,20 @@
+## 2026-11-12 - Saga journal tells the truth: failed merges close, stale writers are fenced, operators can resolve (#427, #404, #406)
+
+- A saga write the server itself rolled back (`ClientError`, `TransientError`) now closes its row
+  `FAILED` once a graph re-read shows the op's before-state, releasing the pair fence and no longer
+  blocking a `live` boot. A dropped connection stays `PREPARED`: the write may have landed (#427).
+  Erasure is excluded: it has no before-state proof.
+- Every claim gets its own token (`<process token>-<32hex>`), and every journal mark requires it, so
+  a stalled writer can no longer commit or fail a row that was taken over and re-claimed by its own
+  process (#404 F-3, #406). New `graph_operation_claims` table and `commit_graph_work` column.
+- A writer whose commit is refused after it mutated the graph re-fences the participants and moves
+  the row to `NEEDS_REVIEW` when two owners may have applied it, or reports success when exactly one
+  application is proven (#404). A replay refused mid-transition is `STALE` and blocks a live boot.
+- `clear_needs_review` refuses `PREPARED` and stamps `operator:<name>`; attestation is bound to the
+  owner token the operator inspected (#406).
+- New `menhir saga list|show|attest|resolve|clear-review` operator commands; see
+  `.agent/workflows/operations_runbook.md` for when attestation is true.
+
 ## 2026-11-12 - README: erasure known limitation matches what erasure now does
 
 - `README.md` still said erasure leaves extracted entities and facts behind (#423) and that
