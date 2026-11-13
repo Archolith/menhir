@@ -60,13 +60,15 @@ class _Replayer:
         self.replayed: list[str] = []
         self.journal = journal
         self.owner_at_replay: dict[str, object] = {}
+        self.tokens: dict[str, str] = {}
 
     def classify_prepared_row(self, row):
         return self.outcome, dict(self.diagnostics)
 
-    def replay_prepared_row(self, row):
+    def replay_prepared_row(self, row, *, owner_token):
         op_id = str(row.get("op_id"))
         self.replayed.append(op_id)
+        self.tokens[op_id] = owner_token
         # Record who owns the row AT THE MOMENT the handler runs. This is what proves the claim
         # happened first: without it the test would only show that the handler was reached, which
         # stays true even if the claim is deleted outright.
@@ -268,9 +270,13 @@ def test_an_abandoned_row_is_claimed_before_the_handler_sees_it(journal):
     # The load-bearing assertion. Reaching the handler proves nothing on its own -- that stays
     # true even with the claim deleted. Ownership having ALREADY transferred by the time the
     # handler ran is what proves the claim preceded the mutation it authorises.
-    assert handler.owner_at_replay["op-1"] == oo.process_owner_token(), (
-        "the row must be owned by this process BEFORE its handler touches the graph"
+    # #406: the claim is a per-claim token of this process, and the handler is given that same
+    # token, so its marks are fenced against any later claim by this process too.
+    assert handler.owner_at_replay["op-1"] == handler.tokens["op-1"], (
+        "the row must be owned by this claim BEFORE its handler touches the graph"
     )
+    assert handler.tokens["op-1"] != oo.process_owner_token()
+    assert oo.same_process(handler.tokens["op-1"], process_token=oo.process_owner_token())
     assert handler.owner_at_replay["op-1"] != _DEAD_LOCAL
     assert run.counts[REPLAYED] == 1
     assert run.dry_run is False, "a live run must not report itself as a forecast"
@@ -389,7 +395,7 @@ def test_a_quarantined_row_does_not_stop_the_pass(journal):
     good = _Replayer()
 
     class _Mixed(_Replayer):
-        def replay_prepared_row(self, row):
+        def replay_prepared_row(self, row, *, owner_token):
             self.replayed.append(str(row.get("op_id")))
             if row.get("op_id") == "op-bad":
                 return DRIFTED, {"observed_error": "drifted"}

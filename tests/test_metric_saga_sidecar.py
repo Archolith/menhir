@@ -12,9 +12,12 @@ import sqlite3
 
 import pytest
 
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationError, GraphOperationsJournal
 from menhir.infrastructure.metric_receipts import MetricReceiptError, MetricReceiptStore
 from menhir.infrastructure.migration_batches import MigrationBatchError, MigrationBatchStore
+
+TOKEN = oo.process_owner_token()
 
 
 # --------------------------------------------------------------------- graph_operations
@@ -33,7 +36,7 @@ def test_prepare_then_commit(journal):
     )
     row = journal.get(op)
     assert row["state"] == "PREPARED" and row["committed_at"] is None
-    journal.mark_committed(op)
+    journal.mark_committed(op, owner_token=TOKEN)
     row = journal.get(op)
     assert row["state"] == "COMMITTED"
     assert row["committed_at"] is not None
@@ -48,7 +51,7 @@ def test_expected_after_sha256_frozen_at_prepare(journal):
         operation_kind="METRIC_WRITE", request_json="{}", target_key="k",
         expected_after_sha256="frozen",
     )
-    journal.mark_committed(op)  # no way to pass a different fingerprint
+    journal.mark_committed(op, owner_token=TOKEN)  # no way to pass a different fingerprint
     assert journal.get(op)["expected_after_sha256"] == "frozen"
 
 
@@ -60,10 +63,9 @@ def test_request_json_immutable_across_transitions(journal):
         batch_id="b", target_uuid="u1",
     )
     before = journal.get(op)["request_json"]
-    journal.mark_needs_review(op, observed_error="drift")
-    journal.clear_needs_review(op, to_state="PREPARED")
-    journal.mark_committed(op)
-    journal.mark_reversed(op)
+    journal.mark_needs_review(op, owner_token=TOKEN, observed_error="drift")
+    journal.clear_needs_review(op, to_state="COMMITTED", operator="op")
+    journal.mark_reversed(op, owner_token=TOKEN)
     assert journal.get(op)["request_json"] == before
 
 
@@ -84,7 +86,7 @@ def test_prepared_write_fences_target_key(journal):
 @pytest.mark.unit
 def test_fence_released_after_commit(journal):
     op = journal.prepare(operation_kind="METRIC_WRITE", request_json="{}", target_key="k")
-    journal.mark_committed(op)
+    journal.mark_committed(op, owner_token=TOKEN)
     # Once the first is COMMITTED it no longer fences -- a fresh write may prepare.
     op2 = journal.prepare(operation_kind="METRIC_WRITE", request_json="{}", target_key="k")
     assert journal.get(op2)["state"] == "PREPARED"
@@ -104,40 +106,43 @@ def test_batch_target_uniqueness(journal):
 @pytest.mark.unit
 def test_illegal_transition_rejected(journal):
     op = journal.prepare(operation_kind="METRIC_WRITE", request_json="{}", target_key="k")
-    journal.mark_committed(op)
+    journal.mark_committed(op, owner_token=TOKEN)
     # COMMITTED cannot go back to COMMITTED-from-PREPARED semantics via mark_committed twice
-    journal.mark_committed(op)  # idempotent no-op
+    journal.mark_committed(op, owner_token=TOKEN)  # idempotent no-op
     # A committed row cannot be marked reversed's precondition violated etc.
     with pytest.raises(GraphOperationError, match="illegal transition"):
-        journal.clear_needs_review(op, to_state="PREPARED")
+        journal.clear_needs_review(op, to_state="FAILED", operator="op")
 
 
 @pytest.mark.unit
 def test_needs_review_only_cleared_by_operator(journal):
     op = journal.prepare(operation_kind="METRIC_MIGRATE", request_json="{}", batch_id="b",
                          target_uuid="u")
-    journal.mark_needs_review(op, observed_error="drift")
+    journal.mark_needs_review(op, owner_token=TOKEN, observed_error="drift")
     row = journal.get(op)
     assert row["state"] == "NEEDS_REVIEW" and row["last_error"] == "drift"
     # Explicit operator escape is allowed; background transitions are not expressible.
-    journal.clear_needs_review(op, to_state="PREPARED")
-    assert journal.get(op)["state"] == "PREPARED"
+    # Re-opening to PREPARED is refused (#406 F-7); a terminal state is the way out.
+    with pytest.raises(GraphOperationError):
+        journal.clear_needs_review(op, to_state="PREPARED", operator="op")
+    journal.clear_needs_review(op, to_state="FAILED", operator="op")
+    assert journal.get(op)["state"] == "FAILED"
 
 
 @pytest.mark.unit
 def test_reverse_flow(journal):
     op = journal.prepare(operation_kind="METRIC_MIGRATE", request_json="{}", batch_id="b",
                          target_uuid="u")
-    journal.mark_committed(op)
-    journal.mark_reversed(op)
+    journal.mark_committed(op, owner_token=TOKEN)
+    journal.mark_reversed(op, owner_token=TOKEN)
     assert journal.get(op)["state"] == "REVERSED"
 
 
 @pytest.mark.unit
 def test_record_attempt_increments(journal):
     op = journal.prepare(operation_kind="METRIC_WRITE", request_json="{}", target_key="k")
-    journal.record_attempt(op, error="boom")
-    journal.record_attempt(op, error="boom2")
+    journal.record_attempt(op, owner_token=TOKEN, error="boom")
+    journal.record_attempt(op, owner_token=TOKEN, error="boom2")
     row = journal.get(op)
     assert row["attempt_count"] == 2 and row["last_error"] == "boom2"
 
@@ -184,7 +189,7 @@ def test_participant_fence_released_after_commit(journal):
         operation_kind="ENTITY_MERGE", request_json=_merge_req("A", "B"),
         target_uuid="B", target_key=_pair_key("A", "B"),
     )
-    journal.mark_committed(op)
+    journal.mark_committed(op, owner_token=TOKEN)
     # B is free again once the A+B merge COMMITTED.
     op2 = journal.prepare(
         operation_kind="ENTITY_MERGE", request_json=_merge_req("B", "C"),
@@ -214,7 +219,7 @@ def test_needs_review_keeps_participant_fence(journal):
         operation_kind="ENTITY_MERGE", request_json=_merge_req("A", "B"),
         target_uuid="B", target_key=_pair_key("A", "B"),
     )
-    journal.mark_needs_review(op, observed_error="drift")
+    journal.mark_needs_review(op, owner_token=TOKEN, observed_error="drift")
     with pytest.raises(GraphOperationError, match="already fenced"):
         journal.prepare(
             operation_kind="ENTITY_DELETE",
@@ -229,7 +234,7 @@ def test_failed_releases_participant_fence(journal):
         operation_kind="ENTITY_MERGE", request_json=_merge_req("A", "B"),
         target_uuid="B", target_key=_pair_key("A", "B"),
     )
-    journal.mark_failed(op, reason="repository abstained")
+    journal.mark_failed(op, owner_token=TOKEN, reason="repository abstained")
     # FAILED is a terminal, non-quarantine state: the participant is released.
     op2 = journal.prepare(
         operation_kind="ENTITY_DELETE",

@@ -53,20 +53,30 @@ class _Journal:
 
     def __init__(self) -> None:
         self.events: list[tuple[str, str]] = []
+        self.expected_token: str | None = None
+
+    def _check(self, owner_token: str) -> None:
+        assert owner_token == self.expected_token, (
+            f"journal got owner_token {owner_token!r}, PREPARE stored {self.expected_token!r}"
+        )
 
     def _ensure_ready(self) -> None:
         pass
 
     def prepare(self, **kw: Any) -> None:
+        self.expected_token = kw.get("owner_token")
         self.events.append(("prepare", str(kw.get("op_id"))))
 
-    def record_attempt(self, op_id: str, error: str = "", owner_token=None) -> None:
+    def record_attempt(self, op_id: str, *, owner_token: str, error: str = "") -> None:
+        self._check(owner_token)
         self.events.append(("attempt", op_id))
 
-    def mark_needs_review(self, op_id: str, observed_error: str = "", owner_token=None) -> None:
+    def mark_needs_review(self, op_id: str, *, owner_token: str, observed_error: str = "") -> None:
+        self._check(owner_token)
         self.events.append(("needs_review", op_id))
 
-    def mark_committed(self, op_id: str, owner_token=None) -> None:
+    def mark_committed(self, op_id: str, *, owner_token: str, after_graph_work=True) -> None:
+        self._check(owner_token)
         self.events.append(("committed", op_id))
 
     # WriterHeartbeat renews through the journal; accept and record whatever it calls.

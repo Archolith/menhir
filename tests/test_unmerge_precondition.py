@@ -38,10 +38,16 @@ class _Adapter:
 class _Journal:
     """Stub journal recording quarantines/commits; never touches a real DB."""
 
-    def __init__(self, expected_after):
+    def __init__(self, expected_after, expected_token):
         self.expected_after = expected_after
+        self.expected_token = expected_token
         self.review_calls = []
         self.commits = 0
+
+    def _check(self, owner_token):
+        assert owner_token == self.expected_token, (
+            f"journal got owner_token {owner_token!r}, PREPARE stored {self.expected_token!r}"
+        )
 
     def _ensure_ready(self):
         pass
@@ -49,14 +55,16 @@ class _Journal:
     def get(self, op_id):
         return {"expected_after_sha256": self.expected_after}
 
-    def mark_needs_review(self, op_id, observed_error, owner_token=None):
+    def mark_needs_review(self, op_id, observed_error, *, owner_token):
+        self._check(owner_token)
         self.review_calls.append((op_id, observed_error))
 
-    def mark_committed(self, op_id, owner_token=None):
+    def mark_committed(self, op_id, *, owner_token, after_graph_work=True):
+        self._check(owner_token)
         self.commits += 1
 
-    def mark_reversed(self, op_id):
-        pass
+    def mark_reversed(self, op_id, *, owner_token):
+        self._check(owner_token)
 
 
 def _request(op_id="op1", **extra):
@@ -68,7 +76,7 @@ def _request(op_id="op1", **extra):
 def _coordinator(adapter_state, op_id, expected_before):
     expected_after = merge_state_fingerprint(_RESTORED, op_id=op_id)
     adapter = _Adapter(adapter_state)
-    journal = _Journal(expected_after)
+    journal = _Journal(expected_after, expected_token="tok")
     coord = UnmergeCoordinator(graph_adapter=adapter, journal=journal)
     request = _request(op_id=op_id, expected_before_sha256=expected_before)
     return coord, adapter, journal, request
@@ -81,7 +89,7 @@ def test_drift_quarantines_and_never_restores():
     coord, adapter, journal, request = _coordinator(_DRIFTED, op_id, expected_before)
 
     with pytest.raises(MergeDrift):
-        coord._apply(request, {})
+        coord._apply(request, {}, owner_token="tok")
 
     assert journal.review_calls, "drift must quarantine to NEEDS_REVIEW"
     assert journal.review_calls[0][0] == op_id
@@ -93,12 +101,12 @@ def test_missing_precondition_fails_closed_and_never_restores():
     op_id = "op-missing"
     # No expected_before_sha256 in the request at all.
     adapter = _Adapter(_MERGED)
-    journal = _Journal(merge_state_fingerprint(_RESTORED, op_id=op_id))
+    journal = _Journal(merge_state_fingerprint(_RESTORED, op_id=op_id), expected_token="tok")
     coord = UnmergeCoordinator(graph_adapter=adapter, journal=journal)
     request = _request(op_id=op_id)
 
     with pytest.raises(MergeDrift):
-        coord._apply(request, {})
+        coord._apply(request, {}, owner_token="tok")
 
     assert journal.review_calls, "missing precondition must quarantine to NEEDS_REVIEW"
     assert journal.review_calls[0][0] == op_id
@@ -111,7 +119,7 @@ def test_matching_precondition_still_applies():
     expected_before = merge_state_fingerprint(_MERGED, op_id=op_id)
     coord, adapter, journal, request = _coordinator(_MERGED, op_id, expected_before)
 
-    out = coord._apply(request, {})
+    out = coord._apply(request, {}, owner_token="tok")
 
     assert adapter.restore_calls == 1, "matching precondition must still restore"
     assert not journal.review_calls, "no quarantine on a matching precondition"
@@ -125,7 +133,7 @@ def test_already_applied_replay_still_short_circuits():
     coord, adapter, journal, request = _coordinator(_RESTORED, op_id, expected_before=None)
     request = _request(op_id=op_id, expected_before_sha256="irrelevant")
 
-    out = coord._apply(request, {})
+    out = coord._apply(request, {}, owner_token="tok")
 
     assert out["restored"] == 1 and out.get("replayed") is True
     assert adapter.restore_calls == 0, "already-applied replay must NOT mutate"

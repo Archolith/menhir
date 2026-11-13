@@ -238,7 +238,7 @@ def test_replay_of_prepared_row_releases_a_crashed_seal(
         assert rig.fence()["ops"] == [op]
         row = rig.journal.get(op)
         assert row is not None and row["state"] == "PREPARED"
-        rig.coord.replay_prepared_row(row)
+        rig.coord.replay_prepared_row(row, owner_token=row["owner_token"])
         assert rig.fence()["ops"] == []
     finally:
         rig.cleanup()

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.graph_operations_model import GraphOperationError
 from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
@@ -58,8 +59,9 @@ def test_lost_claim_writer_cannot_fail_a_committed_row(tmp_path):
     # A resumes and tries FAILED: 0 rows, reported, nothing changes.
     with pytest.raises(StaleTransitionError):
         journal.mark_failed(op_id, reason="late abstain", owner_token="owner-A")
-    with pytest.raises(StaleTransitionError):
-        journal.mark_failed(op_id, reason="late abstain")  # even without a token
+    # There is no tokenless path any more: the call is a TypeError and changes nothing.
+    with pytest.raises(TypeError):
+        journal.mark_failed(op_id, reason="late abstain")
     state, _owner, last_error = _row(journal, op_id)
     assert state == "COMMITTED"
     assert last_error is None
@@ -96,18 +98,19 @@ def test_wrong_owner_is_refused_and_right_owner_commits(tmp_path):
 @pytest.mark.unit
 def test_normal_paths_still_transition(tmp_path):
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
-    committed = _prepare(journal)
-    journal.mark_committed(committed)
-    journal.mark_committed(committed)  # idempotent re-commit stays a no-op
+    token = oo.process_owner_token()
+    committed = _prepare(journal, owner=token)
+    journal.mark_committed(committed, owner_token=token)
+    journal.mark_committed(committed, owner_token=token)  # idempotent re-commit stays a no-op
     assert _row(journal, committed)[0] == "COMMITTED"
-    journal.mark_reversed(committed)
+    journal.mark_reversed(committed, owner_token=token)
     assert _row(journal, committed)[0] == "REVERSED"
 
     failed = journal.prepare(
         operation_kind="ENTITY_MERGE",
         request_json=json.dumps({"absorbed_uuid": "x", "survivor_uuid": "y"}),
     )
-    journal.mark_failed(failed, reason="abstained")
+    journal.mark_failed(failed, owner_token=token, reason="abstained")
     assert _row(journal, failed)[0] == "FAILED"
     assert _lock_count(journal, failed) == 0
 
@@ -115,7 +118,7 @@ def test_normal_paths_still_transition(tmp_path):
         operation_kind="ENTITY_MERGE",
         request_json=json.dumps({"absorbed_uuid": "p", "survivor_uuid": "q"}),
     )
-    journal.mark_needs_review(review, observed_error="drift")
+    journal.mark_needs_review(review, owner_token=token, observed_error="drift")
     assert _row(journal, review)[0] == "NEEDS_REVIEW"
     assert _lock_count(journal, review) == 2  # quarantine keeps the fence
 
@@ -124,10 +127,10 @@ def test_normal_paths_still_transition(tmp_path):
 def test_unknown_op_and_illegal_transition_keep_graph_operation_error(tmp_path):
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
     with pytest.raises(GraphOperationError):
-        journal.mark_committed("missing")
-    op_id = _prepare(journal)
+        journal.mark_committed("missing", owner_token="t")
+    op_id = _prepare(journal, owner="t")
     with pytest.raises(GraphOperationError):  # PREPARED -> REVERSED is illegal
-        journal.mark_reversed(op_id)
+        journal.mark_reversed(op_id, owner_token="t")
     assert issubclass(StaleTransitionError, GraphOperationError)
 
 
@@ -157,7 +160,7 @@ def test_caller_stops_on_lost_cas_and_does_not_retry(tmp_path):
             "similarity": 0.9, "expected_fact_uuids": [],
         }
         with pytest.raises(StaleTransitionError):
-            coord._apply_owned(request)
+            coord._apply_owned(request, owner_token="tok")
     finally:
         mc.merge_state_fingerprint = original
     assert journal.mark_failed.call_count == 1

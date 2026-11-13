@@ -126,7 +126,9 @@ def test_crash_between_the_two_deletes_is_replayed_for_both(tmp_path) -> None:
     assert adapter.deleted == ["queue-1"]
 
     adapter.fail_delete.clear()  # the process restarts; the graph is reachable again
-    outcome, _diagnostics = coord.replay_prepared_row({"op_id": op_id})
+    outcome, _diagnostics = coord.replay_prepared_row(
+        {"op_id": op_id}, owner_token=coord.journal.get(op_id)["owner_token"]
+    )
 
     assert outcome == "REPLAYED"
     assert "graphiti-1" in adapter.deleted

@@ -98,6 +98,13 @@ def _state(db, op_id):
 # ------------------------------------------------------------------ 1-3 subject index
 
 
+def _row_token(db, op_id):
+    with sqlite3.connect(db) as conn:
+        return conn.execute(
+            "SELECT owner_token FROM graph_operations WHERE op_id = ?", (op_id,)
+        ).fetchone()[0]
+
+
 def test_snapshot_subject_uuids_delete_shape_includes_peers():
     out = _snapshot_subject_uuids({"targets": ["u1"]}, _delete_snapshot("u1", "p1"))
     assert out == {"u1", "p1"}
@@ -264,7 +271,8 @@ def test_own_row_last_error_is_cleared_after_replay(tmp_path):
     assert secret in last_error  # precondition: the attempt really stored it
 
     outcome, _ = coord.replay_prepared_row(
-        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"}
+        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"},
+        owner_token=_row_token(db, op_id),
     )
 
     assert outcome == "REPLAYED"
@@ -433,7 +441,8 @@ def test_absorbed_entity_snapshot_is_purged_when_first_erase_stays_prepared(
     assert state == "PREPARED"  # precondition: the first erase did not finish
 
     outcome, _ = coord.replay_prepared_row(
-        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"}
+        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"},
+        owner_token=_row_token(db, op_id),
     )
 
     assert outcome == "REPLAYED"

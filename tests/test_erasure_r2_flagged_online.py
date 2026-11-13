@@ -101,7 +101,7 @@ def test_cf335_flagged_items_are_recovered_when_the_erase_crashes_before_recordi
     )
     prepared = list(resumed.journal.list_by_state("PREPARED", limit=50))
     assert prepared
-    outcomes = [resumed.replay_prepared_row(row)[0] for row in prepared]
+    outcomes = [resumed.replay_prepared_row(row, owner_token=row["owner_token"])[0] for row in prepared]
 
     assert "REPLAYED" in outcomes, outcomes
     assert all_hits(repo, db, canary) == []

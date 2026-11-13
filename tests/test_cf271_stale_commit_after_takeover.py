@@ -78,6 +78,7 @@ def test_f1_commit_refused_event_keeps_op_identity_in_the_store(tmp_path, store)
         "op_id": op_id,
         "operation_kind": "ENTITY_MERGE",
         "journal_state": "FAILED",
+        "refusal": "illegal_transition",
     }]
 
 
@@ -116,14 +117,15 @@ def test_f2_guard_is_commit_only(tmp_path, store):
     assert _row(journal, op_id) == ("FAILED", "owner-B")
 
 
-def test_f2_tokenless_caller_on_a_row_another_owner_committed_stays_idempotent(tmp_path, store):
-    """Fix review FR-9: the guard applies only to a caller that presents a token."""
+def test_f2_tokenless_caller_is_a_type_error_and_leaves_the_other_owners_commit(tmp_path, store):
+    """There is no tokenless path any more (#406 F-6): the call fails and changes nothing."""
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
     op_id = _prepare(journal, "owner-A")
     _take_over(journal, op_id, "owner-B")
     journal.mark_committed(op_id, owner_token="owner-B")
 
-    journal.mark_committed(op_id)
+    with pytest.raises(TypeError):
+        journal.mark_committed(op_id)
     assert _row(journal, op_id) == ("COMMITTED", "owner-B")
     assert _commit_events(store) == []
 
@@ -138,26 +140,32 @@ def test_f2_same_owner_repeat_commit_stays_idempotent(tmp_path, store):
     assert _commit_events(store) == []
 
 
-def test_f2_tokenless_commit_has_no_owner_evidence_and_stays_idempotent(tmp_path, store):
+def test_f2_older_binary_commit_has_no_owner_evidence_and_stays_idempotent(tmp_path, store):
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
     op_id = _prepare(journal, "owner-A")
-    journal.mark_committed(op_id)  # no token: nothing recorded about who committed
+    # An older binary's tokenless commit: COMMITTED with resolved_by_token NULL.
+    with sqlite3.connect(journal.db_path) as conn:
+        conn.execute(
+            "UPDATE graph_operations SET state = 'COMMITTED', resolved_by_token = NULL "
+            "WHERE op_id = ?",
+            (op_id,),
+        )
 
     journal.mark_committed(op_id, owner_token="owner-A")
     assert _row(journal, op_id) == ("COMMITTED", None)
     assert _commit_events(store) == []
 
 
-def test_f2_operator_clear_to_committed_keeps_the_reviewer_token(tmp_path, store):
+def test_f2_operator_clear_to_committed_stamps_the_operator(tmp_path, store):
     journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
     op_id = _prepare(journal, "owner-A")
     _take_over(journal, op_id, "owner-B")
     journal.mark_needs_review(op_id, observed_error="drift", owner_token="owner-B")
-    journal.clear_needs_review(op_id, to_state="COMMITTED")  # operator, tokenless
+    journal.clear_needs_review(op_id, to_state="COMMITTED", operator="alice")
 
     with pytest.raises(StaleTransitionError):
         journal.mark_committed(op_id, owner_token="owner-A")
-    assert _row(journal, op_id) == ("COMMITTED", "owner-B")
+    assert _row(journal, op_id) == ("COMMITTED", "operator:alice")
 
 
 def test_pre_existing_journal_gains_the_column(tmp_path):

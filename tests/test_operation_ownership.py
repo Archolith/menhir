@@ -191,7 +191,7 @@ def test_prepare_stamps_a_live_claim(journal):
 @pytest.mark.unit
 def test_leaving_prepared_retires_the_claim(journal):
     _prepare(journal, "op-1")
-    journal.mark_committed("op-1")
+    journal.mark_committed("op-1", owner_token=oo.process_owner_token())
     row = journal.get("op-1")
 
     assert row["owner_token"] is None
@@ -207,7 +207,7 @@ def test_quarantining_also_retires_the_claim(journal):
     flight, and leaving the claim would make it read LIVE_OWNER indefinitely.
     """
     _prepare(journal, "op-1")
-    journal.mark_needs_review("op-1", observed_error="drift")
+    journal.mark_needs_review("op-1", owner_token=oo.process_owner_token(), observed_error="drift")
     row = journal.get("op-1")
 
     assert row["state"] == "NEEDS_REVIEW"
@@ -242,7 +242,7 @@ def test_heartbeat_renewal_fails_when_the_claim_is_not_ours(journal):
 @pytest.mark.unit
 def test_heartbeat_renewal_fails_once_the_row_is_no_longer_prepared(journal):
     _prepare(journal, "op-1")
-    journal.mark_committed("op-1")
+    journal.mark_committed("op-1", owner_token=oo.process_owner_token())
     assert journal.renew_owner_heartbeat("op-1") is False
 
 

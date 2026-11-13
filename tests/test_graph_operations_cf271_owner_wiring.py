@@ -26,7 +26,7 @@ from menhir.services.saga_reconcile_dispatcher import (
     NonReplayableKind,
     SagaReconcileDispatcher,
 )
-from menhir.services.saga_reconcile_outcomes import LIVE_OWNER
+from menhir.services.saga_reconcile_outcomes import STALE
 
 _PAST = "2000-01-01T00:00:00+00:00"
 _R_TOKEN = "instance-R:other-host:4242:rrrr"
@@ -78,11 +78,32 @@ def _real_takeover(journal, op_id, *, new_owner=_R_TOKEN):
 
 
 # ------------------------------------------------------------------------------ AST guard
-_MARKS = {"mark_committed", "mark_failed", "mark_needs_review"}
+#: Every journal transition that moves or touches a row, plus the #427/#404 helpers that call them.
+#: Matched on the called NAME, whatever the receiver (``self.journal``, an alias, a bare import), so
+#: renaming the receiver cannot hide a call from the guard (#406 F-10).
+_MARKS = {
+    "mark_committed", "mark_failed", "mark_needs_review", "mark_reversed", "record_attempt",
+    "commit_or_settle", "close_after_failed_mutation", "settle_refused_commit",
+    "escalate_after_refused_commit", "quarantine_after_graph_work",
+}
+
+
+def _owner_token_offence(node: ast.Call) -> str | None:
+    """Why this call's owner token is unacceptable, or None when it names a claim."""
+    token = next((kw.value for kw in node.keywords if kw.arg == "owner_token"), None)
+    if token is None:
+        return "no owner_token="
+    if isinstance(token, ast.Constant) and token.value is None:
+        return "owner_token=None"
+    # The bare process token is shared by every claim this process makes: passing it to a mark
+    # re-validates any older claim of this process (#404 F-3). Marks take the per-claim token.
+    if isinstance(token, ast.Call) and ast.unparse(token.func).endswith("process_owner_token"):
+        return "owner_token=process_owner_token()"
+    return None
 
 
 @pytest.mark.unit
-def test_every_production_terminal_mark_passes_owner_token():
+def test_every_production_terminal_mark_passes_a_claim_token():
     src_root = Path(menhir.__file__).parent
     offenders: list[str] = []
     seen = 0
@@ -91,18 +112,34 @@ def test_every_production_terminal_mark_passes_owner_token():
             continue  # the definitions themselves
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _MARKS
-                # journal calls only; migration_batches has its own unrelated mark_* methods
-                and "journal" in ast.unparse(node.func.value)
-            ):
-                seen += 1
-                if not any(kw.arg == "owner_token" for kw in node.keywords):
-                    offenders.append(f"{path.relative_to(src_root)}:{node.lineno} {node.func.attr}")
-    assert seen > 20, "the walker found suspiciously few call sites; the guard is not looking"
-    assert not offenders, "journal mark call(s) without owner_token=: " + ", ".join(offenders)
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name not in _MARKS:
+                continue
+            seen += 1
+            offence = _owner_token_offence(node)
+            if offence:
+                offenders.append(f"{path.relative_to(src_root)}:{node.lineno} {name} {offence}")
+    assert seen >= 40, "the walker found suspiciously few call sites; the guard is not looking"
+    assert not offenders, "journal mark call(s) without a claim token: " + ", ".join(offenders)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source, offence", [
+    ("self.journal.mark_failed(op, reason='x')", "no owner_token="),
+    ("j.record_attempt(op, owner_token=None)", "owner_token=None"),
+    ("store.mark_reversed(op, owner_token=oo.process_owner_token())",
+     "owner_token=process_owner_token()"),
+    ("commit_or_settle(j, op, owner_token=token, after_graph_work=True, observed='')", None),
+    ("quarantine_after_graph_work(self.journal, op, observed_error='x')", "no owner_token="),
+    ("quarantine_after_graph_work(j, op, owner_token=oo.process_owner_token(), observed_error='x')",
+     "owner_token=process_owner_token()"),
+])
+def test_the_guard_flags_each_unsafe_shape_on_any_receiver(source, offence):
+    call = ast.parse(source).body[0].value
+    assert _owner_token_offence(call) == offence
 
 
 # ------------------------------------------------------------------ S1: W stalls, R claims
@@ -136,7 +173,7 @@ def test_s1_stale_writer_mark_failed_cannot_release_a_row_the_reconciler_owns(
     # the real attest+claim hands the row to R.
     coord = _w_coordinator(journal, op_id, on_stall=lambda: _real_takeover(journal, op_id))
     with pytest.raises(StaleTransitionError):
-        coord._apply_owned(_request(op_id))
+        coord._apply_owned(_request(op_id), owner_token=oo.process_owner_token())
 
     state, owner, last_error, _ = _row(journal, op_id)
     assert state == "PREPARED"
@@ -209,7 +246,7 @@ def test_clear_needs_review_to_needs_review_is_a_noop(journal):
         before = conn.execute(
             "SELECT updated_at FROM graph_operations WHERE op_id = ?", (op_id,)
         ).fetchone()
-    journal.clear_needs_review(op_id, to_state="NEEDS_REVIEW")
+    journal.clear_needs_review(op_id, to_state="NEEDS_REVIEW", operator="op")
     with sqlite3.connect(journal.db_path) as conn:
         after = conn.execute(
             "SELECT updated_at FROM graph_operations WHERE op_id = ?", (op_id,)
@@ -224,7 +261,7 @@ def test_clear_needs_review_to_needs_review_is_a_noop(journal):
 def test_s5_record_attempt_does_not_overwrite_a_needs_review_row(journal):
     op_id = _prepare(journal)
     journal.mark_needs_review(op_id, observed_error="R evidence", owner_token=oo.process_owner_token())
-    assert journal.record_attempt(op_id, error="W stale exc") is False
+    assert journal.record_attempt(op_id, owner_token=oo.process_owner_token(), error="W stale exc") is False
     state, _o, last_error, attempts = _row(journal, op_id)
     assert (state, last_error, attempts) == ("NEEDS_REVIEW", "R evidence", 0)
 
@@ -233,7 +270,7 @@ def test_s5_record_attempt_does_not_overwrite_a_needs_review_row(journal):
 def test_s5b_record_attempt_does_not_touch_a_committed_row(journal):
     op_id = _prepare(journal)
     journal.mark_committed(op_id, owner_token=oo.process_owner_token())
-    assert journal.record_attempt(op_id, error="W stale exc") is False
+    assert journal.record_attempt(op_id, owner_token=oo.process_owner_token(), error="W stale exc") is False
     assert _row(journal, op_id)[2:] == (None, 0)
 
 
@@ -250,7 +287,7 @@ def test_record_attempt_wrong_owner_is_a_noop_and_right_owner_records(journal):
 @pytest.mark.unit
 def test_record_attempt_unknown_op_still_raises(journal):
     with pytest.raises(GraphOperationError):
-        journal.record_attempt("missing", error="x")
+        journal.record_attempt("missing", owner_token=oo.process_owner_token(), error="x")
 
 
 @pytest.mark.unit
@@ -264,7 +301,7 @@ def test_coordinator_reraises_original_error_when_record_attempt_is_a_noop(journ
         "WOULD_REPLAY", {"expected_before": "b", "expected_after": "a"}
     )
     with pytest.raises(RuntimeError, match="neo4j went away"):
-        coord._apply_owned(_request(op_id))
+        coord._apply_owned(_request(op_id), owner_token=oo.process_owner_token())
     assert _row(journal, op_id)[2:] == (None, 0)
 
 
@@ -285,14 +322,14 @@ def _abandoned_row(journal):
 def test_dispatcher_reports_a_stale_replay_as_stale_not_as_unresolved(journal):
     op_id, row = _abandoned_row(journal)
 
-    def replay(_row):
+    def replay(_row, *, owner_token):
         raise StaleTransitionError("moved under us")
 
     dispatcher = SagaReconcileDispatcher(
         journal=journal, handlers={"ENTITY_MERGE": SimpleNamespace(replay_prepared_row=replay)}
     )
     outcome, diag = dispatcher._replay_one(row, op_id=op_id, kind="ENTITY_MERGE")
-    assert outcome == LIVE_OWNER
+    assert outcome == STALE  # #404 FR-4: not LIVE_OWNER, which claimed a live writer exists
     assert diag["stale"] is True and diag["observed_error"].startswith("stale transition")
 
 
@@ -308,7 +345,9 @@ def test_dispatcher_stale_needs_review_on_non_replayable_kind_does_not_end_the_p
 
         def claim_abandoned_operation(self, op, **kw):
             claimed = self._inner.claim_abandoned_operation(op, **kw)
-            self._inner.mark_committed(op, owner_token=oo.process_owner_token())
+            # Commit under the claim token the dispatcher just minted, then the dispatcher's
+            # own NEEDS_REVIEW attempt sees a row already moved by another transition.
+            self._inner.mark_committed(op, owner_token=kw["owner_token"])
             return claimed
 
         def __getattr__(self, name):
@@ -319,5 +358,5 @@ def test_dispatcher_stale_needs_review_on_non_replayable_kind_does_not_end_the_p
         handlers={"ENTITY_MERGE": NonReplayableKind(kind="ENTITY_MERGE", reason="no replay")},
     )
     outcome, diag = dispatcher._replay_one(row, op_id=op_id, kind="ENTITY_MERGE")  # must not raise
-    assert outcome == LIVE_OWNER and diag["stale"] is True
+    assert outcome == STALE and diag["stale"] is True
     assert _row(journal, op_id)[0] == "COMMITTED"

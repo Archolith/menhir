@@ -33,6 +33,30 @@ serve-watch` if a local restart watchdog is desired. If readiness fails, run
 and server logs before retrying. The local Docker test-stack guidance is in
 [deploy/README.md](../../deploy/README.md).
 
+## Stranded saga rows
+
+A merge, unmerge, delete, erasure or metric write that failed ambiguously (the connection dropped
+mid-statement) stays `PREPARED` with its participants fenced, and in `live` startup mode it blocks
+boot. A failure the server itself rolled back closes `FAILED` on its own (#427). To inspect and
+close what is left:
+
+```bash
+menhir saga list                       # PREPARED and NEEDS_REVIEW rows, with ownership
+menhir saga show OP_ID                 # row, claim history, ownership, graph classification
+menhir saga attest OP_ID --owner-token TOKEN --by NAME
+menhir saga resolve OP_ID --by NAME            # dry run: prints the planned close
+menhir saga resolve OP_ID --by NAME --apply    # COMMITTED / FAILED / NEEDS_REVIEW from the graph
+menhir saga clear-review OP_ID --to FAILED|COMMITTED|REVERSED --by NAME
+```
+
+`attest` states that the writer process named by `TOKEN` has stopped, so it is true only once that
+process is gone: a container restarted after the row's `created_at`, or the host rebooted. If the
+row was written by the server that is still running, restart the server first, then attest the old
+token, then `resolve`. On a single-PID-namespace host, `MENHIR_HOST_PID_NAMESPACE_VERIFIABLE` lets
+a dead PID prove this without an attestation. `resolve` takes the reconciliation gate (briefly
+pausing new saga writes), refuses a row that is not abandoned, and never closes an erasure:
+complete a partial erasure with live replay instead. Rows with no owner token need direct repair.
+
 For MCP connection details, see [backend-first-mcp.md](backend-first-mcp.md).
 For log files, request IDs, and error envelopes, see
 [logging-and-troubleshooting.md](logging-and-troubleshooting.md). For

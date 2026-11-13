@@ -113,6 +113,11 @@ class _GraphOperationsOwnershipMixin:
             if row is None or row[3] != "PREPARED":
                 conn.commit()
                 return False
+            # Process-level, not token-level: with per-claim tokens (#404 F-3) a row this process
+            # still claims carries a token that differs from the one being minted now.
+            if oo.same_process(row[0], process_token=token):
+                conn.commit()
+                return False
             candidate = {
                 "owner_token": row[0],
                 "owner_lease_expires_at": row[1],
@@ -142,10 +147,18 @@ class _GraphOperationsOwnershipMixin:
                 "  AND owner_lease_expires_at <= ?",
                 (token, now, oo.lease_expiry_iso(seconds=claim_seconds), now, op_id, token, now),
             )
+            if cursor.rowcount == 1:
+                conn.execute(
+                    "INSERT OR IGNORE INTO graph_operation_claims "
+                    "(op_id, claim_token, claim_kind, claimed_at) VALUES (?, ?, 'takeover', ?)",
+                    (op_id, token, now),
+                )
             conn.commit()
             return cursor.rowcount == 1
 
-    def attest_owner_death(self, op_id: str, *, attested_by: str) -> bool:
+    def attest_owner_death(
+        self, op_id: str, *, attested_by: str, expected_owner_token: str | None = None
+    ) -> bool:
         """Record independent operator evidence that a PREPARED row's writer is gone.
 
         The sanctioned path for the case automation cannot decide: an owner on another host, or one
@@ -167,25 +180,33 @@ class _GraphOperationsOwnershipMixin:
 
         Both the name and the instant are stored, because an override that cannot be audited after
         the fact is indistinguishable from the clock-based inference this replaced.
+
+        ``expected_owner_token`` is the token the operator inspected. When given, the attestation
+        applies only if the row still carries it, so an ownership transfer between inspection and
+        attestation cannot redirect it at the new owner.
         """
         if not str(attested_by or "").strip():
             raise GraphOperationError("attested_by is required: attestation must name a person")
         self._ensure_ready()
         now = _utc_now_iso()
+        sql = (
+            "UPDATE graph_operations "
+            "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ?, "
+            # Bind the attestation to the EXACT token it is about. An operator attests that one
+            # named process is dead, never that "whoever holds this row" is dead.
+            "    owner_death_attested_for_token = owner_token "
+            "WHERE op_id = ? "
+            "  AND state = 'PREPARED' "
+            "  AND owner_token IS NOT NULL "
+            "  AND owner_lease_expires_at IS NOT NULL "
+            "  AND owner_lease_expires_at <= ?"
+        )
+        params: list[object] = [str(attested_by).strip(), now, now, op_id, now]
+        if expected_owner_token is not None:
+            sql += " AND owner_token = ?"
+            params.append(expected_owner_token)
         with connect_telemetry_db(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            cursor = conn.execute(
-                "UPDATE graph_operations "
-                "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ?, "
-                # Bind the attestation to the EXACT token it is about. An operator attests that one
-                # named process is dead, never that "whoever holds this row" is dead.
-                "    owner_death_attested_for_token = owner_token "
-                "WHERE op_id = ? "
-                "  AND state = 'PREPARED' "
-                "  AND owner_token IS NOT NULL "
-                "  AND owner_lease_expires_at IS NOT NULL "
-                "  AND owner_lease_expires_at <= ?",
-                (str(attested_by).strip(), now, now, op_id, now),
-            )
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount == 1

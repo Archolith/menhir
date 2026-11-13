@@ -180,7 +180,7 @@ def test_replay_after_a_crash_between_seal_and_record_deletes_the_closure_only_t
         row = rig.journal.get(op)
         assert row is not None and row["state"] == "PREPARED", row
 
-        rig.coord.replay_prepared_row(row)
+        rig.coord.replay_prepared_row(row, owner_token=row["owner_token"])
 
         survivors = test_neo4j_repo.execute(
             "MATCH (n:Episodic) WHERE n.uuid IN $u RETURN n.uuid AS uuid", params={"u": [q, twin]}

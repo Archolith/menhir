@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry.store import McpTelemetryStore
 from menhir.services.erasure_coordinator import (
@@ -293,7 +294,7 @@ def test_crashed_erasure_is_resumed_from_the_inventory(tmp_path):
         )
         conn.commit()
 
-    outcome, diagnostics = coord.replay_prepared_row({"op_id": op_id})
+    outcome, diagnostics = coord.replay_prepared_row({"op_id": op_id}, owner_token=oo.process_owner_token())
 
     assert outcome == "REPLAYED"
     assert _revision_values(db, "m-1") == [(None, None)]
@@ -322,7 +323,7 @@ def test_replay_of_an_already_purged_row_just_commits(tmp_path):
         conn.commit()
     coord.subjects.mark_purged(op_id)
 
-    outcome, _ = coord.replay_prepared_row({"op_id": op_id})
+    outcome, _ = coord.replay_prepared_row({"op_id": op_id}, owner_token=oo.process_owner_token())
 
     assert outcome == "SKIPPED"
     with sqlite3.connect(db) as conn:
@@ -770,7 +771,9 @@ def test_replayed_erasure_reaches_episode_keyed_content(tmp_path):
     )
     coord.subjects.record_subjects(op_id, [("NODE_UUID", "ep-crashed")])
 
-    coord.replay_prepared_row({"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"})
+    coord.replay_prepared_row(
+        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"}, owner_token=oo.process_owner_token()
+    )
 
     assert _failure_details(db, "ep-crashed") == [None]
 

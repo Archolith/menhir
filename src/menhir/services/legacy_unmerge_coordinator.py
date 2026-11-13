@@ -33,6 +33,12 @@ from menhir.domain import legacy_snapshot as ls
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    close_after_failed_mutation,
+    commit_or_settle,
+    quarantine_after_graph_work,
+)
 from menhir.services.merge_coordinator import (
     MergeDrift,
     _canonical,
@@ -193,6 +199,7 @@ class LegacyUnmergeCoordinator:
             "expected_before_sha256": merged_fp,
         }
 
+        token = oo.new_claim_token()
         try:
             self.journal.prepare(
                 operation_kind="LEGACY_ENTITY_UNMERGE",
@@ -202,6 +209,7 @@ class LegacyUnmergeCoordinator:
                 before_snapshot_json=rows[0]["snapshot_json"],
                 expected_after_sha256=restored_fp,
                 op_id=op_id,
+                owner_token=token,
             )
         except Exception as exc:  # noqa: BLE001
             return {
@@ -223,7 +231,9 @@ class LegacyUnmergeCoordinator:
         #
         # `LEGACY_ENTITY_UNMERGE` is already registered in `SAGA_STATEMENT_COUNTS` at 1, which is
         # correct: `correlation_queries.restore_merge_snapshot` issues exactly one `execute`.
-        with owned_mutation(self.journal, op_id, operation_kind="LEGACY_ENTITY_UNMERGE"):
+        with owned_mutation(
+            self.journal, op_id, operation_kind="LEGACY_ENTITY_UNMERGE", owner_token=token
+        ):
             try:
                 result = self.graph_adapter.restore_merge_snapshot(
                     survivor_uuid=survivor_uuid,
@@ -232,10 +242,15 @@ class LegacyUnmergeCoordinator:
                     **plan,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.journal.record_attempt(
+                close_after_failed_mutation(
+                    self.journal,
                     op_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                    owner_token=oo.process_owner_token(),
+                    owner_token=token,
+                    exc=exc,
+                    prove_before=lambda: merge_state_fingerprint(
+                        self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid),
+                        op_id=op_id,
+                    ) == request["expected_before_sha256"],
                 )
                 raise
 
@@ -243,15 +258,20 @@ class LegacyUnmergeCoordinator:
                 self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
             )
             if after_fp != restored_fp:
-                self.journal.mark_needs_review(
-                    op_id,
+                quarantine_after_graph_work(
+                    self.journal, op_id,
                     observed_error=f"legacy unmerge after-state mismatch: {after_fp}",
-                    owner_token=oo.process_owner_token(),
+                    owner_token=token,
                 )
                 raise MergeDrift(f"legacy unmerge after-state drift (op {op_id})")
 
-            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+            settled = commit_or_settle(
+                self.journal, op_id, owner_token=token, after_graph_work=True,
+                observed=f"legacy unmerge restore verified: {after_fp}",
+            )
         out = dict(result)
+        if settled == COMPLETED_BY_OTHER_OWNER:
+            out["completed_by_other_owner"] = True
         out.update({
             "op_id": op_id,
             # Non-negotiable: this lane NEVER reports an exact round trip.

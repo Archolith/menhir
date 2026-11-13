@@ -53,6 +53,7 @@ from menhir.services.saga_reconcile_outcomes import (
     FAILED,
     LIVE_OWNER,
     OWNER_UNKNOWN,
+    STALE,
     UNKNOWN_KIND,
     WOULD_NEEDS_REVIEW,
     summarize_live_outcomes,
@@ -297,11 +298,16 @@ class SagaReconcileDispatcher:
 
         # Claim BEFORE any graph access. The classification above is advisory; the claim re-runs
         # the same rule inside its own transaction and is the only authoritative answer.
-        if not self.journal.claim_abandoned_operation(op_id):
+        # A fresh token per claim (#404 F-3): this process's earlier writers must never match it.
+        claim_token = oo.new_claim_token()
+        if not self.journal.claim_abandoned_operation(op_id, owner_token=claim_token):
             return LIVE_OWNER, {
                 "observed_error": (
                     "claim lost between classification and claim; another reconciler owns this row"
-                )
+                ),
+                # The claim refuses this process's own rows (#404 F-3), so an attested row from an
+                # earlier startup attempt in this PID lands here; it must block readiness.
+                "own_claim": oo.is_own_claim(row),
             }
 
         # A recorded non-replayable kind quarantines here rather than inside the handler: the
@@ -312,15 +318,15 @@ class SagaReconcileDispatcher:
                 self.journal.mark_needs_review(
                     op_id,
                     observed_error=handler.reason,
-                    owner_token=oo.process_owner_token(),
+                    owner_token=claim_token,
                 )
                 return DRIFTED, {"observed_error": handler.reason, "non_replayable": True}
-            return handler.replay_prepared_row(row)
+            return handler.replay_prepared_row(row, owner_token=claim_token)
         except StaleTransitionError as exc:
             # CF-271: the row moved under us after the claim (a stale writer or another reconciler).
-            # It is no longer ours to touch; report it as stale rather than as an unresolved failure.
+            # Not a healthy peer, and possibly after graph work, so it blocks readiness (#404 F-4).
             logger.warning("saga reconcile: op %s moved under the reconciler: %s", op_id, exc)
-            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
+            return STALE, {"observed_error": f"stale transition: {exc}", "stale": True}
         except Exception as exc:  # noqa: BLE001 -- one defective handler must not abort the pass
             logger.warning(
                 "saga reconcile: handler for %s raised on op %s: %s", kind, op_id, exc
@@ -343,6 +349,8 @@ class SagaReconcileDispatcher:
             entry["observed_error"] = diagnostics["observed_error"]
         if diagnostics.get("own_claim"):
             entry["own_claim"] = True
+        if diagnostics.get("stale"):
+            entry["stale"] = True
         run.rows.append(entry)
         run.counts_by_kind[kind] = run.counts_by_kind.get(kind, 0) + 1
         examples = run.examples.setdefault(outcome, [])
@@ -364,6 +372,7 @@ class SagaReconcileDispatcher:
             (UNKNOWN_KIND, "PREPARED row(s) of a kind no reconciler claims"),
             (OWNER_UNKNOWN, "PREPARED row(s) with unprovable ownership"),
             (FAILED, "PREPARED row(s) whose replay failed and remain unresolved"),
+            (STALE, "row(s) moved under the reconciler's claim mid-replay (stale transition)"),
         ):
             count = run.counts.get(name, 0)
             if count:

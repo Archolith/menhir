@@ -383,7 +383,7 @@ def test_a_crash_after_prepare_replays_to_the_same_zero_content_state(product_st
     )
     prepared = list(resumed.journal.list_by_state("PREPARED", limit=50))
     assert prepared, "the crash left no PREPARED row, so there is nothing to replay"
-    replayed = [resumed.replay_prepared_row(row)[0] for row in prepared]
+    replayed = [resumed.replay_prepared_row(row, owner_token=row["owner_token"])[0] for row in prepared]
 
     assert "REPLAYED" in replayed, f"the prepared erasure was not replayed: {replayed}"
     assert _sentinel_hits(db, sentinel) == [], "content survived the replayed erasure"

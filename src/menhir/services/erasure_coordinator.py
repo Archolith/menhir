@@ -41,10 +41,16 @@ from menhir.services.saga_reconcile_outcomes import (
     REPLAYED,
     SKIP,
     SKIPPED,
+    STALE,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    commit_or_settle,
+    quarantine_after_graph_work,
+)
 from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -309,6 +315,7 @@ class ErasureCoordinator:
             **request,
         }
 
+        token = oo.new_claim_token()
         try:
             with self._connect() as conn:
                 self.journal.prepare(
@@ -317,6 +324,7 @@ class ErasureCoordinator:
                     target_uuid=target_uuid,
                     target_key=target_key,
                     op_id=op_id,
+                    owner_token=token,
                     conn=conn,
                 )
                 self.subjects.record_subjects(op_id, subjects, conn=conn)
@@ -328,9 +336,10 @@ class ErasureCoordinator:
                 "diagnostics": {"error": f"{type(exc).__name__}: {exc}"},
             }
 
-        with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
+        with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND, owner_token=token):
             return self._erase_and_verify(
                 op_id=op_id,
+                owner_token=token,
                 purge=purge,
                 delete_graph=delete_graph,
                 derived=derived,
@@ -384,6 +393,7 @@ class ErasureCoordinator:
         self,
         *,
         op_id: str,
+        owner_token: str,
         purge: ErasureSubjects,
         delete_graph: Any,
         derived: dict[str, Any] | None = None,
@@ -419,7 +429,7 @@ class ErasureCoordinator:
             self.journal.record_attempt(
                 op_id,
                 error=f"{type(exc).__name__}: {exc}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise
         finally:
@@ -469,8 +479,12 @@ class ErasureCoordinator:
             with self._connect() as conn:
                 # This erasure's own row is still PREPARED (the purge skips unresolved rows), but
                 # a recorded attempt's exception text can quote the content being erased.
+                # Bound to this writer's claim (#406): a writer that lost the row must not rewrite
+                # whatever evidence its new owner recorded.
                 conn.execute(
-                    "UPDATE graph_operations SET last_error = NULL WHERE op_id = ?", (op_id,)
+                    "UPDATE graph_operations SET last_error = NULL "
+                    "WHERE op_id = ? AND state = 'PREPARED' AND owner_token = ?",
+                    (op_id, owner_token),
                 )
                 # Op-keyed: the purge and census read subjects by subquery over erasure_subjects,
                 # never as one bound variable per member (40k-member erases). Rows are blanked,
@@ -484,7 +498,7 @@ class ErasureCoordinator:
             self.journal.record_attempt(
                 op_id,
                 error=f"{type(exc).__name__}: {exc}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise
 
@@ -514,10 +528,10 @@ class ErasureCoordinator:
             logger.warning("erasure %s: WAL checkpoint did not complete (busy reader/writer)", op_id)
 
         if leftover:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"{RESIDUAL_CONTENT}: {sorted(leftover)}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             return {
                 "reason": RESIDUAL_CONTENT,
@@ -538,7 +552,13 @@ class ErasureCoordinator:
             )
             stranded, stranded_known = {}, False
 
-        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+        settled = commit_or_settle(
+            self.journal,
+            op_id,
+            owner_token=owner_token,
+            after_graph_work=True,
+            observed="erasure graph and sidecar purge complete",
+        )
         purged_total = sum(result.rows_affected.values())
         if graph_deleted:
             reason = ERASED
@@ -573,6 +593,7 @@ class ErasureCoordinator:
             reason = ERASED_INCOMPLETE
 
         return {
+            **({"completed_by_other_owner": True} if settled == COMPLETED_BY_OTHER_OWNER else {}),
             **({"incomplete_reasons": incomplete_reasons} if reason == ERASED_INCOMPLETE else {}),
             "wal_checkpoint_complete": wal_checkpoint_complete,
             "derived": derived_summary,
@@ -606,7 +627,9 @@ class ErasureCoordinator:
             return SKIP, {"reason": "no unpurged subjects"}
         return WOULD_REPLAY, {"subjects": len(subjects)}
 
-    def replay_prepared_row(self, row: "Mapping[str, Any]") -> tuple[str, dict[str, Any]]:
+    def replay_prepared_row(
+        self, row: "Mapping[str, Any]", *, owner_token: str
+    ) -> tuple[str, dict[str, Any]]:
         """Resume one crashed erasure from its durable subject inventory.
 
         Graph deletion is part of the same fail-closed replay body as sidecar purge. The old replay
@@ -616,12 +639,19 @@ class ErasureCoordinator:
         op_id = str(row.get("op_id") or "")
         outcome, diagnostics = self.classify_prepared_row(row)
         if outcome == SKIP:
-            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+            if commit_or_settle(
+                self.journal,
+                op_id,
+                owner_token=owner_token,
+                after_graph_work=False,
+                observed="no unpurged subjects remain",
+            ) == COMPLETED_BY_OTHER_OWNER:
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return SKIPPED, dict(diagnostics)
         if outcome == WOULD_NEEDS_REVIEW:
             observed = str(diagnostics.get("observed_error"))
             self.journal.mark_needs_review(
-                op_id, observed_error=observed, owner_token=oo.process_owner_token()
+                op_id, observed_error=observed, owner_token=owner_token
             )
             return DRIFTED, {"observed_error": observed}
 
@@ -665,9 +695,10 @@ class ErasureCoordinator:
         # Still fenced: the row is PREPARED, so its participant locks (incl. fence_uuids) hold.
         derived["deletable"] = set(_request_fence_uuids(row))
         derived["caller_namespace"] = _request_caller_namespace(row)
-        with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
+        with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND, owner_token=owner_token):
             result = self._erase_and_verify(
                 op_id=op_id,
+                owner_token=owner_token,
                 purge=purge,
                 delete_graph=lambda closure=(): self._replay_graph_deletes(
                     namespaces, node_uuids, derived=derived
@@ -687,6 +718,8 @@ class ErasureCoordinator:
                     f"{RESIDUAL_CONTENT}: {sorted(result.get('residual') or {})}"
                 )
             }
+        if result.get("completed_by_other_owner"):
+            return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
         return REPLAYED, {"purged": result.get("purged", {})}
 
     # ------------------------------------------------------------------ helpers

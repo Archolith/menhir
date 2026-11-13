@@ -38,12 +38,18 @@ _BOTH_PRESENT = {"survivor_present": True, "absorbed_present": True, "lineage_re
 _ABSORBED_GONE = {"survivor_present": True, "absorbed_present": False, "lineage_recorded": True}
 
 
+_TOKEN = oo.new_claim_token()
+
+
 class _Journal:
     """Stub journal. Records renewals so the heartbeat's target is visible."""
 
-    def __init__(self, expected_after=None):
+    def __init__(self, expected_after=None, expected_token=None):
         self.expected_after = expected_after
+        #: The token PREPARE stored. ``prepare`` sets it; tests that call ``_apply`` directly pass it.
+        self.expected_token = expected_token
         self.renewals: list[str] = []
+        self.tokens: set[str] = set()
         self.committed: list[str] = []
         self.reviews: list[str] = []
         self.db_path = ":memory:"
@@ -54,26 +60,39 @@ class _Journal:
     def get(self, op_id):
         return {"expected_after_sha256": self.expected_after}
 
+    def _check(self, owner_token):
+        if self.expected_token is not None:
+            assert owner_token == self.expected_token, (
+                f"journal got owner_token {owner_token!r}, PREPARE stored {self.expected_token!r}"
+            )
+        self.tokens.add(owner_token)
+
     def renew_owner_heartbeat(self, op_id, *, seconds=None, owner_token=None):
         self.renewals.append(op_id)
+        self._check(owner_token)
         return True
 
-    def mark_committed(self, op_id, owner_token=None):
+    def mark_committed(self, op_id, *, owner_token, after_graph_work=True):
+        self._check(owner_token)
         self.committed.append(op_id)
 
-    def mark_needs_review(self, op_id, *, observed_error=None, owner_token=None):
+    def mark_needs_review(self, op_id, *, owner_token, observed_error=None):
+        self._check(owner_token)
         self.reviews.append(op_id)
 
-    def mark_failed(self, op_id, *, reason=None, owner_token=None):
-        pass
+    def mark_failed(self, op_id, *, owner_token, reason=None):
+        self._check(owner_token)
 
-    def mark_reversed(self, op_id):
-        pass
+    def mark_reversed(self, op_id, *, owner_token):
+        self._check(owner_token)
 
-    def record_attempt(self, op_id, *, error=None, owner_token=None):
-        pass
+    def record_attempt(self, op_id, *, owner_token, error=None):
+        self._check(owner_token)
+        return True
 
     def prepare(self, **kw):
+        if kw.get("owner_token") is not None:
+            self.expected_token = kw["owner_token"]
         return kw.get("op_id")
 
 
@@ -132,10 +151,10 @@ def _merge_request(op_id):
 @pytest.mark.unit
 def test_merge_publishes_the_revocation_predicate_across_its_mutation(kind_spy):
     op_id = "op-merge"
-    journal = _Journal(expected_after=merge_state_fingerprint(_ABSORBED_GONE, op_id=op_id))
+    journal = _Journal(expected_after=merge_state_fingerprint(_ABSORBED_GONE, op_id=op_id), expected_token=_TOKEN)
     adapter = _MergeAdapter()
 
-    MergeCoordinator(graph_adapter=adapter, journal=journal)._apply(_merge_request(op_id))
+    MergeCoordinator(graph_adapter=adapter, journal=journal)._apply(_merge_request(op_id), owner_token=_TOKEN)
 
     assert callable(adapter.predicate_at_mutation), (
         "a revocation predicate must be published while the merge mutates, not merely created"
@@ -147,9 +166,9 @@ def test_merge_publishes_the_revocation_predicate_across_its_mutation(kind_spy):
 @pytest.mark.unit
 def test_the_scope_is_closed_again_after_the_mutation(kind_spy):
     op_id = "op-merge"
-    journal = _Journal(expected_after=merge_state_fingerprint(_ABSORBED_GONE, op_id=op_id))
+    journal = _Journal(expected_after=merge_state_fingerprint(_ABSORBED_GONE, op_id=op_id), expected_token=_TOKEN)
 
-    MergeCoordinator(graph_adapter=_MergeAdapter(), journal=journal)._apply(_merge_request(op_id))
+    MergeCoordinator(graph_adapter=_MergeAdapter(), journal=journal)._apply(_merge_request(op_id), owner_token=_TOKEN)
 
     assert n4._revocation.get() is None, (
         "the predicate must not leak past the saga that published it"
@@ -176,14 +195,14 @@ class _UnmergeAdapter(_RevocationProbe):
 @pytest.mark.unit
 def test_unmerge_publishes_the_revocation_predicate_across_its_mutation(kind_spy):
     op_id = "op-unmerge"
-    journal = _Journal(expected_after=merge_state_fingerprint(_BOTH_PRESENT, op_id=op_id))
+    journal = _Journal(expected_after=merge_state_fingerprint(_BOTH_PRESENT, op_id=op_id), expected_token=_TOKEN)
     adapter = _UnmergeAdapter()
     request = {
         "op_id": op_id, "survivor_uuid": "s", "absorbed_uuid": "a", "merge_op_id": "m",
         "expected_before_sha256": merge_state_fingerprint(_ABSORBED_GONE, op_id=op_id),
     }
 
-    UnmergeCoordinator(graph_adapter=adapter, journal=journal)._apply(request, {})
+    UnmergeCoordinator(graph_adapter=adapter, journal=journal)._apply(request, {}, owner_token=_TOKEN)
 
     assert callable(adapter.predicate_at_mutation)
     assert kind_spy == ["ENTITY_UNMERGE"]
@@ -252,7 +271,7 @@ def test_metric_write_uses_its_own_two_statement_lease(kind_spy):
     key = "s|c"
     adapter = _MetricAdapter()
     coord = MetricWriteCoordinator(
-        graph_adapter=adapter, journal=_Journal(expected_after=None), receipts=_Receipts(),
+        graph_adapter=adapter, journal=_Journal(expected_after=None, expected_token=_TOKEN), receipts=_Receipts(),
         telemetry_db_path=":memory:",
     )
     request = {
@@ -262,7 +281,7 @@ def test_metric_write_uses_its_own_two_statement_lease(kind_spy):
         "expected_before_sha256": state_fingerprint(None, view_key=key),
     }
 
-    coord._apply(request)
+    coord._apply(request, owner_token=_TOKEN)
 
     assert callable(adapter.predicate_at_mutation)
     assert kind_spy == ["METRIC_WRITE"]

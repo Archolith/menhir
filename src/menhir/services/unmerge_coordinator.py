@@ -48,12 +48,18 @@ from menhir.services.merge_coordinator import (
     pair_key,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    close_after_failed_mutation,
+    commit_or_settle,
+    quarantine_after_graph_work,
+)
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
-    LIVE_OWNER,
     REPLAYED,
     SKIP,
+    STALE,
     SKIPPED,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
@@ -247,6 +253,7 @@ class UnmergeCoordinator:
 
         # --- PREPARED before any mutation (invariant 3). The forward merge is COMMITTED, so its pair
         # fence is released; this row re-fences the same pair for the duration of the unmerge.
+        token = oo.new_claim_token()
         try:
             self.journal.prepare(
                 operation_kind="ENTITY_UNMERGE",
@@ -257,11 +264,12 @@ class UnmergeCoordinator:
                 expected_after_sha256=restored_fp,
                 reverses_op_id=merge_op_id,
                 op_id=op_id,
+                owner_token=token,
             )
         except Exception as exc:  # noqa: BLE001
             return {"restored": 0, "reason": PREPARE_FAILED, "diagnostics": {"error": str(exc)}}
 
-        return self._apply(request, plan)
+        return self._apply(request, plan, owner_token=token)
 
     # ------------------------------------------------------------------ saga body
     def _build_restore_plan(
@@ -388,7 +396,9 @@ class UnmergeCoordinator:
             return (WOULD_NEEDS_REVIEW, diagnostics)
         return (WOULD_RESTORE, diagnostics)
 
-    def _apply(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    def _apply(
+        self, request: dict[str, Any], plan: dict[str, Any], *, owner_token: str
+    ) -> dict[str, Any]:
         """Run the saga body under this process's ownership heartbeat (CF-211 part 2).
 
         The heartbeat is what lets a reconciler tell "still running here" from "crashed midway": it
@@ -401,11 +411,14 @@ class UnmergeCoordinator:
         constant -- determines how long an expired claim takes to become recoverable.
         """
         with owned_mutation(
-            self.journal, str(request["op_id"]), operation_kind="ENTITY_UNMERGE"
+            self.journal, str(request["op_id"]), operation_kind="ENTITY_UNMERGE",
+            owner_token=owner_token,
         ):
-            return self._apply_owned(request, plan)
+            return self._apply_owned(request, plan, owner_token=owner_token)
 
-    def _apply_owned(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    def _apply_owned(
+        self, request: dict[str, Any], plan: dict[str, Any], *, owner_token: str
+    ) -> dict[str, Any]:
         outcome, diag = self._classify_replay(request)
         op_id = diag["op_id"]
         survivor_uuid = diag["survivor_uuid"]
@@ -416,12 +429,18 @@ class UnmergeCoordinator:
 
         if outcome == WOULD_MARK_ALREADY_APPLIED:
             # A previous attempt already restored it and crashed before COMMITTED.
-            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
-            self._mark_merge_reversed(str(request["merge_op_id"]))
+            settled = commit_or_settle(
+                self.journal, op_id, owner_token=owner_token, after_graph_work=False,
+                observed=f"unmerge already applied observed_fp={observed_fp}",
+            )
+            self._mark_merge_reversed(str(request["merge_op_id"]), owner_token=owner_token)
             self._fire_unmerge_hook(
                 survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
                 merge_op_id=str(request["merge_op_id"]), unmerge_op_id=op_id)
-            return {"restored": 1, "replayed": True, "op_id": op_id}
+            done = {"restored": 1, "replayed": True, "op_id": op_id}
+            if settled == COMPLETED_BY_OTHER_OWNER:
+                done["completed_by_other_owner"] = True
+            return done
 
         # --- GUARD 4: only the merge's exact before-state may be unmerged. A graph that drifted
         # since the snapshot is PRESERVED and routed to NEEDS_REVIEW, never overwritten (invariant 9).
@@ -432,7 +451,7 @@ class UnmergeCoordinator:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=diag["observed_error"],
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             if expected_before is None:
                 raise MergeDrift(
@@ -451,10 +470,16 @@ class UnmergeCoordinator:
                 **plan,
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(
-                op_id,
-                error=f"{type(exc).__name__}: {exc}",
-                owner_token=oo.process_owner_token(),
+            def _prove_before() -> bool:
+                before_fp = merge_state_fingerprint(
+                    self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid),
+                    op_id=op_id,
+                )
+                return expected_before is not None and before_fp == expected_before
+
+            close_after_failed_mutation(
+                self.journal, op_id, owner_token=owner_token, exc=exc,
+                prove_before=_prove_before,
             )
             raise
 
@@ -462,28 +487,33 @@ class UnmergeCoordinator:
             self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
         )
         if expected_after and after_fp != expected_after:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"unmerge after-state mismatch expected={expected_after} "
                                f"actual={after_fp}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MergeDrift(
                 f"unmerge after-state drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id})"
             )
 
-        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
-        self._mark_merge_reversed(str(request["merge_op_id"]))
+        settled = commit_or_settle(
+            self.journal, op_id, owner_token=owner_token, after_graph_work=True,
+            observed=f"unmerge restored and verified after_fp={after_fp}",
+        )
+        self._mark_merge_reversed(str(request["merge_op_id"]), owner_token=owner_token)
         self._fire_unmerge_hook(
             survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
             merge_op_id=str(request["merge_op_id"]), unmerge_op_id=op_id)
         out = dict(result)
         out["op_id"] = op_id
+        if settled == COMPLETED_BY_OTHER_OWNER:
+            out["completed_by_other_owner"] = True
         return out
 
-    def _mark_merge_reversed(self, merge_op_id: str) -> None:
+    def _mark_merge_reversed(self, merge_op_id: str, *, owner_token: str) -> None:
         try:
-            self.journal.mark_reversed(merge_op_id)
+            self.journal.mark_reversed(merge_op_id, owner_token=owner_token)
         except Exception as exc:  # noqa: BLE001
             # The unmerge itself is COMMITTED and verified; failing to stamp the forward row is an
             # audit-hygiene problem, not a correctness one. Report, do not raise.
@@ -586,7 +616,9 @@ class UnmergeCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
-    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    def replay_prepared_row(
+        self, row: Mapping[str, Any], *, owner_token: str
+    ) -> tuple[str, dict[str, Any]]:
         """Restore ONE PREPARED unmerge row. The live counterpart to :meth:`classify_prepared_row`.
 
         Extracted so the central dispatcher can act on a row it has just CLAIMED. A whole-backlog
@@ -613,15 +645,18 @@ class UnmergeCoordinator:
         except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
             observed = f"unreplayable row: {exc}"
             self.journal.mark_needs_review(
-                op_id, observed_error=observed, owner_token=oo.process_owner_token()
+                op_id, observed_error=observed, owner_token=owner_token
             )
             return DRIFTED, {"observed_error": observed}
         try:
-            self._apply(request, plan)
+            result = self._apply(request, plan, owner_token=owner_token)
+            if result.get("completed_by_other_owner"):
+                # The row moved under this claim (#404 F-4): not a clean replay.
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return REPLAYED, {}
         except StaleTransitionError as exc:
             logger.warning("unmerge saga: op %s moved under the replay (stale): %s", op_id, exc)
-            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
+            return STALE, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MergeDrift as exc:
             return DRIFTED, {"observed_error": str(exc)}
         except Exception as exc:  # noqa: BLE001 -- reported per row; one bad row must not abort
@@ -659,7 +694,10 @@ class UnmergeCoordinator:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            outcome = self.replay_prepared_row(row)[0]
+            # The sweep is only callable by an authority that already owns the rows: act as the row's owner.
+            outcome = self.replay_prepared_row(
+                row, owner_token=str(row.get("owner_token") or oo.process_owner_token())
+            )[0]
             if outcome == REPLAYED:
                 replayed += 1
             elif outcome == DRIFTED:

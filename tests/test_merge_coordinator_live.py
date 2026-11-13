@@ -150,14 +150,17 @@ def test_crash_after_mutation_replays_as_committed(coord, live_repo, pair):
     """Crash between the graph mutation and COMMITTED: reconcile must recognize its OWN work."""
     real_commit = coord.journal.mark_committed
     calls = {"n": 0}
+    seen: list[tuple] = []
 
-    def crash_once(op_id, owner_token=None):
+    def crash_once(op_id, *, owner_token, after_graph_work=True):
         calls["n"] += 1
+        seen.append((owner_token, coord.journal.get(op_id)["owner_token"]))
         raise RuntimeError("crash before COMMITTED")
 
     coord.journal.mark_committed = crash_once  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         coord.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
+    assert seen and all(got == stored for got, stored in seen), seen
 
     # The graph mutation DID land; the journal row is still PREPARED.
     assert not _absorbed_exists(live_repo, pair["a"])
@@ -275,10 +278,17 @@ def test_replay_after_another_merge_touched_survivor_is_not_false_drift(coord, l
     )
 
     real_commit = coord.journal.mark_committed
-    coord.journal.mark_committed = lambda op_id, owner_token=None: (_ for _ in ()).throw(RuntimeError("crash"))
+    seen: list[tuple] = []
+
+    def _crash(op_id, *, owner_token, after_graph_work=True):
+        seen.append((owner_token, coord.journal.get(op_id)["owner_token"]))
+        raise RuntimeError("crash")
+
+    coord.journal.mark_committed = _crash  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         coord.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
     coord.journal.mark_committed = real_commit  # type: ignore[method-assign]
+    assert seen and all(got == stored for got, stored in seen), seen
 
     op_a = coord.journal.list_by_state("PREPARED")[0]["op_id"]
     assert not _absorbed_exists(live_repo, pair["a"]), "op A's mutation landed"

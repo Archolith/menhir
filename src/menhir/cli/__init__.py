@@ -9,6 +9,7 @@ import typer
 from menhir.cli.artifacts import artifacts_app
 from menhir.cli.beacon import beacon_app
 from menhir.cli.hook import hook_app
+from menhir.cli.saga_ops import saga_app
 from menhir.cli.secrets_cmd import secrets_app
 from menhir.cli.serve_ops import (
     EXIT_EMBEDDING_MISMATCH,
@@ -49,6 +50,7 @@ app.add_typer(hook_app)
 app.add_typer(artifacts_app)
 app.add_typer(beacon_app)
 app.add_typer(secrets_app)
+app.add_typer(saga_app)
 app.command("setup")(setup_command)
 app.command("sync")(sync_command)
 app.command("up")(up_command)

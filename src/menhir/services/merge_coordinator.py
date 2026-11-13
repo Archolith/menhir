@@ -36,13 +36,19 @@ from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    close_after_failed_mutation,
+    commit_or_settle,
+    quarantine_after_graph_work,
+)
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
-    LIVE_OWNER,
     REPLAYED,
     SKIP,
     SKIPPED,
+    STALE,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
@@ -206,6 +212,8 @@ class MergeCoordinator:
             op_id=op_id,
         )
 
+        token = oo.new_claim_token()
+
         # (3) PREPARED -- the snapshot becomes durable HERE, before any mutation (invariant 3).
         try:
             self.journal.prepare(
@@ -216,13 +224,14 @@ class MergeCoordinator:
                 before_snapshot_json=snapshot_json,
                 expected_after_sha256=expected_after,
                 op_id=op_id,
+                owner_token=token,
             )
         except Exception as exc:  # noqa: BLE001 -- includes GraphOperationError (pair fenced)
             logger.warning("merge %s <- %s abstained: PREPARE failed: %s",
                            survivor_uuid, absorbed_uuid, exc)
             return {"merged": 0, "reason": "PREPARE_FAILED", "diagnostics": {"error": str(exc)}}
 
-        return self._apply(request)
+        return self._apply(request, owner_token=token)
 
     # ------------------------------------------------------------------ the saga body
     def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -304,7 +313,7 @@ class MergeCoordinator:
                 "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
             })
 
-    def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _apply(self, request: dict[str, Any], *, owner_token: str) -> dict[str, Any]:
         """Run the saga body under this process's ownership heartbeat (CF-211 part 2).
 
         The heartbeat is what lets a reconciler tell "still running here" from "crashed midway": it
@@ -317,11 +326,12 @@ class MergeCoordinator:
         constant -- determines how long an expired claim takes to become recoverable.
         """
         with owned_mutation(
-            self.journal, str(request["op_id"]), operation_kind="ENTITY_MERGE"
+            self.journal, str(request["op_id"]), operation_kind="ENTITY_MERGE",
+            owner_token=owner_token,
         ):
-            return self._apply_owned(request)
+            return self._apply_owned(request, owner_token=owner_token)
 
-    def _apply_owned(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _apply_owned(self, request: dict[str, Any], *, owner_token: str) -> dict[str, Any]:
         """Mutate + verify for a PREPARED request. Used by BOTH the first attempt and replay, so a
         replay can never diverge from the original path."""
         op_id = str(request["op_id"])
@@ -335,8 +345,14 @@ class MergeCoordinator:
         # Already applied by an attempt that crashed before COMMITTED: the survivor carries THIS
         # op's marker, so replaying is a no-op.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
-            return {"merged": 1, "replayed": True, "op_id": op_id}
+            settled = commit_or_settle(
+                self.journal, op_id, owner_token=owner_token, after_graph_work=False,
+                observed="merge already applied; survivor carries this op's marker",
+            )
+            done = {"merged": 1, "replayed": True, "op_id": op_id}
+            if settled == COMPLETED_BY_OTHER_OWNER:
+                done["completed_by_other_owner"] = True
+            return done
 
         # Neither expected state -> quarantine. A background replay must never paper over a graph
         # that some other writer changed.
@@ -349,7 +365,7 @@ class MergeCoordinator:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=diag["observed_error"],
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MergeDrift(
                 f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): "
@@ -370,10 +386,13 @@ class MergeCoordinator:
                 operation_id=op_id, expected_fact_uuids=expected_facts,
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(
-                op_id,
-                error=f"{type(exc).__name__}: {exc}",
-                owner_token=oo.process_owner_token(),
+            close_after_failed_mutation(
+                self.journal, op_id, owner_token=owner_token, exc=exc,
+                prove_before=lambda: expected_before is not None
+                and merge_state_fingerprint(
+                    self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid),
+                    op_id=op_id,
+                ) == expected_before,
             )
             raise
 
@@ -391,9 +410,25 @@ class MergeCoordinator:
                 self.journal.mark_failed(
                     op_id,
                     reason=f"repository abstained: {reason}",
-                    owner_token=oo.process_owner_token(),
+                    owner_token=owner_token,
                 )
                 return {"merged": 0, "reason": reason, "op_id": op_id}
+            if (
+                expected_after and post_fp == expected_after
+                # The fingerprint ignores the survivor's op stamp, so it cannot tell WHICH merge
+                # absorbed the node. Requiring this op's stamp fails closed: a later merge into the
+                # survivor (possible once another owner committed and released the fence) leaves
+                # a real success quarantined for review, never a foreign absorption reported as ours.
+                and post.get("last_merge_op_id") == op_id
+            ):
+                # Another owner already applied this very op, so this writer did no graph work.
+                settled = commit_or_settle(
+                    self.journal, op_id, owner_token=owner_token, after_graph_work=False,
+                    observed=f"repository abstained ({reason}); graph already at after-state={post_fp}",
+                )
+                if settled == COMPLETED_BY_OTHER_OWNER:
+                    return {"merged": 1, "op_id": op_id, "completed_by_other_owner": True}
+                return {"merged": 1, "replayed": True, "op_id": op_id}
             # It claimed to abstain but the graph moved: that is exactly the ambiguity NEEDS_REVIEW
             # exists for.
             self.journal.mark_needs_review(
@@ -402,7 +437,7 @@ class MergeCoordinator:
                     f"repository abstained ({reason}) but the graph is not at the expected "
                     f"before-state: observed={post_fp} expected_before={expected_before} state={post}"
                 ),
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MergeDrift(
                 f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): repository abstained but "
@@ -413,19 +448,24 @@ class MergeCoordinator:
         after = self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid)
         actual = merge_state_fingerprint(after, op_id=op_id)
         if expected_after and actual != expected_after:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"after-state mismatch expected={expected_after} actual={actual} "
                                f"state={after}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MergeDrift(
                 f"merge after-state drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id})"
             )
 
-        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+        settled = commit_or_settle(
+            self.journal, op_id, owner_token=owner_token, after_graph_work=True,
+            observed=f"merge verified after-state={actual}",
+        )
         out = dict(result)
         out["op_id"] = op_id
+        if settled == COMPLETED_BY_OTHER_OWNER:
+            out["completed_by_other_owner"] = True
         return out
 
     # ------------------------------------------------------------------ reconciliation
@@ -469,7 +509,9 @@ class MergeCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
-    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    def replay_prepared_row(
+        self, row: Mapping[str, Any], *, owner_token: str
+    ) -> tuple[str, dict[str, Any]]:
         """Replay ONE PREPARED row. The live counterpart to :meth:`classify_prepared_row`.
 
         Extracted so the central dispatcher can replay a row it has just CLAIMED. A whole-backlog
@@ -495,15 +537,18 @@ class MergeCoordinator:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error="unparseable request_json",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
-            self._apply(request)
+            result = self._apply(request, owner_token=owner_token)
+            if result.get("completed_by_other_owner"):
+                # The row moved under this claim (#404 F-4): not a clean replay.
+                return STALE, {"observed_error": "completed by another owner during this claim", "stale": True}
             return REPLAYED, {}
         except StaleTransitionError as exc:
             logger.warning("merge saga: op %s moved under the replay (stale): %s", op_id, exc)
-            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
+            return STALE, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MergeDrift as exc:
             logger.warning("merge saga: op %s drifted; left NEEDS_REVIEW", op_id)
             return DRIFTED, {"observed_error": str(exc)}
@@ -538,7 +583,10 @@ class MergeCoordinator:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            outcome = self.replay_prepared_row(row)[0]
+            # The sweep is callable only by an authority that already owns the rows, so it acts as the row's owner.
+            outcome = self.replay_prepared_row(
+                row, owner_token=str(row.get("owner_token") or oo.process_owner_token())
+            )[0]
             if outcome == REPLAYED:
                 replayed += 1
             elif outcome == DRIFTED:

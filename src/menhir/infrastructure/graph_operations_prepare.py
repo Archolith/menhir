@@ -154,6 +154,26 @@ class _GraphOperationsPrepareMixin:
                     add_column_if_missing(
                         conn, "graph_operations", column, "TEXT", operation_columns
                     )
+                # #404: whether the COMMITTED transition followed the committer's own graph work
+                # (1) or only observed an already-applied state (0). NULL = an older binary
+                # committed it, which readers treat as "did graph work" (fail closed).
+                add_column_if_missing(
+                    conn, "graph_operations", "commit_graph_work", "INTEGER", operation_columns
+                )
+                # #404: every token that ever held a claim on an op (PREPARE and each takeover),
+                # written in the same transaction as the claim. Binds an escalation to a writer
+                # that really held the row; also the audit chain of a takeover.
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS graph_operation_claims (
+                        op_id        TEXT NOT NULL,
+                        claim_token  TEXT NOT NULL,
+                        claim_kind   TEXT NOT NULL,
+                        claimed_at   TEXT NOT NULL,
+                        PRIMARY KEY (op_id, claim_token)
+                    )
+                    """
+                )
                 # Batch operations are unique per (kind, batch, target) so a migration
                 # cannot enqueue the same node twice.
                 conn.execute(
@@ -372,6 +392,11 @@ class _GraphOperationsPrepareMixin:
                     "(entity_uuid, op_id, operation_kind, created_at) VALUES (?, ?, ?, ?)",
                     (entity_uuid, op_id, operation_kind, now),
                 )
+            connection.execute(
+                "INSERT OR IGNORE INTO graph_operation_claims "
+                "(op_id, claim_token, claim_kind, claimed_at) VALUES (?, ?, 'prepare', ?)",
+                (op_id, claim_token, now),
+            )
             try:
                 request_obj = json.loads(request_json)
             except (TypeError, ValueError):

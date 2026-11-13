@@ -235,9 +235,13 @@ def owned_mutation(
     op_id: str,
     *,
     operation_kind: str,
+    owner_token: str | None = None,
     enabled: bool = True,
 ) -> Iterator[WriterHeartbeat | None]:
     """Hold the writer's claim AND publish its revocation predicate, for one saga operation.
+
+    ``owner_token`` must be the claim token the row was PREPAREd or claimed with (#404 F-3); the
+    process-token default only matches rows prepared without one.
 
     The single entry point a coordinator needs. Both halves belong together, and separating them is
     a footgun: a heartbeat without a published predicate detects revocation and cannot act on it,
@@ -255,6 +259,7 @@ def owned_mutation(
         journal,
         op_id,
         lease_seconds=oo.lease_seconds_for_kind(operation_kind),
+        owner_token=owner_token,
         required_headroom_s=oo.mutation_window_for_kind(operation_kind),
     )
     beat.start()

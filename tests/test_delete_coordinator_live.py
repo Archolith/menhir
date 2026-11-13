@@ -196,10 +196,17 @@ def test_crash_after_delete_commits_on_reconcile(coord, live_repo, nodes):
     """Crash between the delete and COMMITTED: reconcile observes the targets are gone and commits.
     It must NOT re-run the delete -- that could destroy nodes a crash spared."""
     real_commit = coord.journal.mark_committed
-    coord.journal.mark_committed = lambda op_id, owner_token=None: (_ for _ in ()).throw(RuntimeError("crash"))
+    seen: list[tuple] = []
+
+    def _crash(op_id, *, owner_token, after_graph_work=True):
+        seen.append((owner_token, coord.journal.get(op_id)["owner_token"]))
+        raise RuntimeError("crash")
+
+    coord.journal.mark_committed = _crash  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         coord.delete_entity(nodes["target"])
     coord.journal.mark_committed = real_commit  # type: ignore[method-assign]
+    assert seen and all(got == stored for got, stored in seen), seen
 
     assert not _exists(live_repo, nodes["target"]), "the delete landed"
     assert len(coord.journal.list_by_state("PREPARED")) == 1

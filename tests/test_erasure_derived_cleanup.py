@@ -485,7 +485,8 @@ def test_replay_flags_instead_of_deleting_an_entity_that_became_shared(
         )
 
         outcome, _diag = coord.replay_prepared_row(
-            {"op_id": op_id, "request_json": request_json}
+            {"op_id": op_id, "request_json": request_json},
+            owner_token=coord.journal.get(op_id)["owner_token"],
         )
 
         assert outcome == "REPLAYED"
