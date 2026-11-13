@@ -1,3 +1,20 @@
+## 2026-11-13 - The erasure fence has one node per namespace (#603, #602)
+
+- The uniqueness constraint on `EvidenceNamespaceFence.namespace_key` was defined but never
+  applied, so two first writers in a new namespace could each create a fence and lock different
+  nodes: an erase seal and a publish could both proceed. On a test Neo4j, six concurrent first
+  writers split the fence in 10 of 10 trials without the constraint.
+- Startup now brings the four evidence-lifecycle constraints (fence, publication intent,
+  tombstone, projection repair) online on every start, existing installs included, and refuses
+  writers if they cannot come online. Duplicate fences are merged first: the survivor keeps the
+  highest `erasure_epoch` and `generation` and every in-flight erase op, and the other copies are
+  relabelled `EvidenceNamespaceFenceDuplicate` rather than deleted. Duplicate intent, tombstone or
+  repair keys stop startup for operator review.
+- Every sync statement that writes a fence now runs the on-event-loop guard in the Neo4j wrapper,
+  so a writer can no longer miss it. The census test derives fence writers from the Cypher and
+  follows them transitively instead of using a hand-written list, and publication-intent `begin`
+  and `finalize_remote_outcome` now run off the loop.
+
 ## 2026-11-13 - The scalar gate keeps agreement when one sample reads a span twice (#564)
 
 - With aligned spans, a group of overlapping claims where one sample appears twice is now split

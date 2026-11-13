@@ -373,6 +373,7 @@ def _artifacts_with_edge_sync(side_effect=None, value=7):
     adapter = SimpleNamespace(
         retire_obsolete_indexes=lambda: [],
         ensure_vector_indexes=lambda: {},
+        ensure_evidence_lifecycle_schema=lambda: {},
         phase_one_schema_ready=lambda **_: next(readiness),  # bootstrap, then exact post-check
         bootstrap_phase_one=lambda: SimpleNamespace(
             success=True, queries_executed=1, failures=[]

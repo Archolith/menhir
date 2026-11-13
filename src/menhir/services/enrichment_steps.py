@@ -587,7 +587,9 @@ async def run_graphiti_extraction(
             )
             publication_intent = None
             if ctx.evidence_publication_intents is not None:
-                publication_intent = ctx.evidence_publication_intents.begin(
+                # #602: begin takes the namespace fence lock; keep it off the loop.
+                publication_intent = await asyncio.to_thread(
+                    ctx.evidence_publication_intents.begin,
                     episode_uuid=ctx.episode_uuid,
                     namespace=namespace,
                     expected_name=episode_name,
@@ -651,11 +653,10 @@ async def run_graphiti_extraction(
                 ),
             )
             if publication_intent is not None:
-                publication_transition = (
-                    ctx.evidence_publication_intents.finalize_remote_outcome(
-                        publication_intent,
-                        remote_episode_uuid=str(graphiti_result.episode.uuid),
-                    )
+                publication_transition = await asyncio.to_thread(
+                    ctx.evidence_publication_intents.finalize_remote_outcome,
+                    publication_intent,
+                    remote_episode_uuid=str(graphiti_result.episode.uuid),
                 )
                 if not publication_transition.finalized:
                     logger.warning(
@@ -1199,7 +1200,8 @@ async def stamp_and_finalize(
                 ctx.episode_uuid,
                 ctx.worker_id,
             )
-            _compensate(resolved_episode_uuid)
+            # #602: compensation can seal the namespace fence; keep it off the loop.
+            await asyncio.to_thread(_compensate, resolved_episode_uuid)
             return
         duration_ms = int((perf_counter() - ctx.started) * 1000)
         # Record as successful empty extraction with a reason receipt
@@ -1422,7 +1424,8 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
-        _compensate(resolved_episode_uuid)
+        # #602: compensation can seal the namespace fence; keep it off the loop.
+        await asyncio.to_thread(_compensate, resolved_episode_uuid)
         return
     record_lifecycle_event(
         component="ingest_worker",
