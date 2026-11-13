@@ -45,7 +45,11 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_REPLAY,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
-from menhir.services.saga_writer_outcomes import COMPLETED_BY_OTHER_OWNER, commit_or_settle
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    commit_or_settle,
+    quarantine_after_graph_work,
+)
 from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -474,8 +478,12 @@ class ErasureCoordinator:
             with self._connect() as conn:
                 # This erasure's own row is still PREPARED (the purge skips unresolved rows), but
                 # a recorded attempt's exception text can quote the content being erased.
+                # Bound to this writer's claim (#406): a writer that lost the row must not rewrite
+                # whatever evidence its new owner recorded.
                 conn.execute(
-                    "UPDATE graph_operations SET last_error = NULL WHERE op_id = ?", (op_id,)
+                    "UPDATE graph_operations SET last_error = NULL "
+                    "WHERE op_id = ? AND state = 'PREPARED' AND owner_token = ?",
+                    (op_id, owner_token),
                 )
                 # Op-keyed: the purge and census read subjects by subquery over erasure_subjects,
                 # never as one bound variable per member (40k-member erases). Rows are blanked,
@@ -519,8 +527,8 @@ class ErasureCoordinator:
             logger.warning("erasure %s: WAL checkpoint did not complete (busy reader/writer)", op_id)
 
         if leftover:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"{RESIDUAL_CONTENT}: {sorted(leftover)}",
                 owner_token=owner_token,
             )

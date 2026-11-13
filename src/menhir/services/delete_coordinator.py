@@ -35,6 +35,7 @@ from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
     close_after_failed_mutation,
     commit_or_settle,
+    quarantine_after_graph_work,
 )
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
@@ -235,15 +236,15 @@ class DeleteCoordinator:
         # VERIFY absence before COMMITTED. A target we believe we deleted must actually be gone.
         still_present = [u for u in deleted if self.graph_adapter.capture_node_state(u) is not None]
         if still_present:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"nodes reported deleted are still present: {still_present}",
                 owner_token=owner_token,
             )
             raise DeleteDrift(f"{kind} (op {op_id}): {still_present} still present after delete")
 
         settled = commit_or_settle(
-            self.journal, op_id, owner_token=owner_token, after_graph_work=True,
+            self.journal, op_id, owner_token=owner_token, after_graph_work=bool(deleted),
             observed=f"delete verified absent: {deleted}",
         )
         result: dict[str, Any] = {

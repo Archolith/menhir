@@ -233,3 +233,48 @@ def test_cli_help_lists_five_commands():
     out = CliRunner().invoke(app, ["saga", "--help"]).output
     for name in ("list", "show", "attest", "resolve", "clear-review"):
         assert name in out
+
+
+class _RaisingHandler:
+    """Classifies once (the dry-run read) and raises on the re-classify under the claim."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def classify_prepared_row(self, row):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("graph unreachable")
+        return WOULD_REPLAY, {}
+
+
+def test_a_failure_after_the_claim_quarantines_instead_of_stranding_the_row(journal):
+    """Review F2: a resolve that fails after claiming must not leave a PREPARED row owned by the
+    exited CLI process (it would read as a live owner and block a live boot)."""
+    op_id = _abandoned(journal)
+    gate = FakeGate()
+    res = ops.resolve(
+        journal, {"ENTITY_MERGE": _RaisingHandler()}, gate, op_id, by="me", apply=True
+    )
+    assert res["refused"] and res["quarantined"] is True and res["claim_token"]
+    row = _row(journal, op_id)
+    assert row["state"] == "NEEDS_REVIEW"
+    assert row["resolved_by_token"] == res["claim_token"]
+    assert gate.calls == ["acquire", "release"]
+
+
+def test_clear_review_refuses_failed_for_an_erasure(journal):
+    """Review F3: FAILED claims "no mutation" and frees the fence; a quarantined erasure has already
+    purged part of its subject, so an operator may not abandon it either."""
+    token = "instance-unset:otherhost:4242:feedfacefeedfacefeedfacefeedface"
+    op_id = journal.prepare(
+        operation_kind="EXPLICIT_ERASURE",
+        request_json=json.dumps({"targets": ["a"]}),
+        target_key="erase|a",
+        owner_token=token,
+    )
+    journal.mark_needs_review(op_id, owner_token=token, observed_error="residual content")
+    res = ops.clear_review(journal, op_id, to_state="FAILED", by="me")
+    assert res["refused"] and "erasure" in res["reason"]
+    assert _row(journal, op_id)["state"] == "NEEDS_REVIEW"
+    assert ops.clear_review(journal, op_id, to_state="COMMITTED", by="me")["ok"] is True

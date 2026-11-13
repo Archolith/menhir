@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure.graph_operations_model import GraphOperationError
+from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.infrastructure.telemetry.helpers import connect_telemetry_db
 from menhir.services.saga_reconcile_outcomes import (
     WOULD_MARK_ALREADY_APPLIED,
@@ -172,15 +174,28 @@ def resolve(
         claim = oo.new_claim_token()
         if not journal.claim_abandoned_operation(op_id, owner_token=claim):
             return _refuse("claim failed (row no longer abandoned or already claimed)", op_id=op_id)
-        outcome, diag = handler.classify_prepared_row(journal.get(op_id) or row)
-        planned = _planned_close(kind, row, by, outcome, diag)
-        action = planned["action"]
-        if action == "COMMITTED":
-            journal.mark_committed(op_id, owner_token=claim, after_graph_work=False)
-        elif action == "FAILED":
-            journal.mark_failed(op_id, owner_token=claim, reason=planned["reason"])
-        else:
-            journal.mark_needs_review(op_id, owner_token=claim, observed_error=planned["reason"])
+        try:
+            outcome, diag = handler.classify_prepared_row(journal.get(op_id) or row)
+            planned = _planned_close(kind, row, by, outcome, diag)
+            action = planned["action"]
+            if action == "COMMITTED":
+                journal.mark_committed(op_id, owner_token=claim, after_graph_work=False)
+            elif action == "FAILED":
+                journal.mark_failed(op_id, owner_token=claim, reason=planned["reason"])
+            else:
+                journal.mark_needs_review(
+                    op_id, owner_token=claim, observed_error=planned["reason"]
+                )
+        except Exception as exc:  # noqa: BLE001 -- the claim must not strand the row
+            # The row is now claimed by this short-lived process, and the claim cleared the
+            # attestation: left PREPARED it would read as a live owner and block a live boot.
+            error = f"operator {by}: resolve failed after the claim: {type(exc).__name__}: {exc}"
+            try:
+                journal.mark_needs_review(op_id, owner_token=claim, observed_error=error)
+                quarantined = True
+            except Exception:  # noqa: BLE001
+                quarantined = False
+            return _refuse(error, op_id=op_id, claim_token=claim, quarantined=quarantined)
         report.update(outcome=outcome, planned=action, applied=True, claim_token=claim)
         return report
     finally:
@@ -203,5 +218,8 @@ def _planned_close(
 def clear_review(journal: Any, op_id: str, *, to_state: str, by: str) -> dict[str, Any]:
     if not (by or "").strip():
         return _refuse("--by is required")
-    journal.clear_needs_review(op_id, to_state=to_state, operator=by)
+    try:
+        journal.clear_needs_review(op_id, to_state=to_state, operator=by)
+    except (GraphOperationError, StaleTransitionError) as exc:
+        return _refuse(str(exc), op_id=op_id, to_state=to_state)
     return {"ok": True, "op_id": op_id, "to_state": to_state, "operator": by}

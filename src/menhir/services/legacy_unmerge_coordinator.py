@@ -37,6 +37,7 @@ from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
     close_after_failed_mutation,
     commit_or_settle,
+    quarantine_after_graph_work,
 )
 from menhir.services.merge_coordinator import (
     MergeDrift,
@@ -257,8 +258,8 @@ class LegacyUnmergeCoordinator:
                 self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
             )
             if after_fp != restored_fp:
-                self.journal.mark_needs_review(
-                    op_id,
+                quarantine_after_graph_work(
+                    self.journal, op_id,
                     observed_error=f"legacy unmerge after-state mismatch: {after_fp}",
                     owner_token=token,
                 )

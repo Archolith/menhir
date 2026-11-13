@@ -62,8 +62,12 @@ def close_after_failed_mutation(
     if it raises, nothing is proven and the row stays PREPARED for a reconciler.
     """
     error = f"{type(exc).__name__}: {exc}"
-    if not journal.record_attempt(op_id, owner_token=owner_token, error=error):
-        return False  # the claim is gone; whoever holds the row now decides it
+    try:
+        if not journal.record_attempt(op_id, owner_token=owner_token, error=error):
+            return False  # the claim is gone; whoever holds the row now decides it
+    except Exception:  # the caller re-raises the mutation's error; this must not replace it
+        logger.warning("op %s: could not record the failed attempt", op_id, exc_info=True)
+        return False
     if not server_rolled_back(exc):
         return False
     try:
@@ -88,6 +92,9 @@ def close_after_failed_mutation(
         )
     except StaleTransitionError as stale:
         logger.warning("op %s: claim lost before FAILED could be written: %s", op_id, stale)
+        return False
+    except Exception:  # same: never replace the mutation's own error
+        logger.warning("op %s: could not write FAILED; leaving PREPARED", op_id, exc_info=True)
         return False
     logger.info("op %s closed FAILED after a server rollback (#427): %s", op_id, error)
     return True
@@ -183,11 +190,40 @@ def commit_or_settle(
     return COMMITTED_BY_THIS_WRITER
 
 
+def quarantine_after_graph_work(
+    journal: Any, op_id: str, *, owner_token: str, observed_error: str
+) -> None:
+    """``mark_needs_review`` after this writer's own graph work, escalating if it is refused.
+
+    A refusal here means another owner already closed the row while this writer's mutation landed
+    and then failed its own after-state check. FAILED would now claim "no graph mutation" over a
+    graph this writer changed, and COMMITTED would vouch for a state this writer just saw drift, so
+    either way the row is re-fenced and quarantined (#404). The refusal is re-raised regardless.
+    """
+    try:
+        journal.mark_needs_review(op_id, owner_token=owner_token, observed_error=observed_error)
+    except StaleTransitionError:
+        row = journal.get(op_id) or {}
+        if row.get("state") in ("FAILED", "COMMITTED") and (
+            row.get("resolved_by_token") != owner_token
+        ):
+            journal.escalate_after_refused_commit(
+                op_id,
+                owner_token=owner_token,
+                observed_error=(
+                    f"writer's after-state check failed after its graph work while the row was "
+                    f"{row.get('state')} by another owner (#404): {observed_error}"
+                ),
+            )
+        raise
+
+
 __all__ = [
     "COMMITTED_BY_THIS_WRITER",
     "COMPLETED_BY_OTHER_OWNER",
     "close_after_failed_mutation",
     "commit_or_settle",
+    "quarantine_after_graph_work",
     "server_rolled_back",
     "settle_refused_commit",
 ]

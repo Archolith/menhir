@@ -239,6 +239,12 @@ class _GraphOperationsTransitionsMixin:
         name = str(operator or "").strip()
         if not name:
             raise GraphOperationError("clear_needs_review requires the operator's name")
+        if to_state == "FAILED" and (self.get(op_id) or {}).get("operation_kind") == "EXPLICIT_ERASURE":
+            # FAILED asserts "no mutation" and releases the fence, but a quarantined erasure has
+            # already purged part of its subject: it must be completed, never abandoned.
+            raise GraphOperationError(
+                "clear_needs_review refuses FAILED for an erasure: complete it by live replay"
+            )
         self._transition(
             op_id,
             to_state=to_state,

@@ -52,6 +52,7 @@ from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
     close_after_failed_mutation,
     commit_or_settle,
+    quarantine_after_graph_work,
 )
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
@@ -486,8 +487,8 @@ class UnmergeCoordinator:
             self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
         )
         if expected_after and after_fp != expected_after:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"unmerge after-state mismatch expected={expected_after} "
                                f"actual={after_fp}",
                 owner_token=owner_token,

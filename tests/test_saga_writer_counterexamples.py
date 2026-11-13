@@ -33,7 +33,7 @@ from menhir.infrastructure.telemetry import recorders
 from menhir.infrastructure.telemetry.store import McpTelemetryStore
 from menhir.services.delete_coordinator import DeleteCoordinator
 from menhir.services.legacy_unmerge_coordinator import LegacyUnmergeCoordinator
-from menhir.services.merge_coordinator import MergeCoordinator
+from menhir.services.merge_coordinator import MergeCoordinator, MergeDrift
 from menhir.services.metric_write_coordinator import MetricWriteCoordinator
 from menhir.services.saga_reconcile_dispatcher import SagaReconcileDispatcher, build_handlers
 from menhir.services.unmerge_coordinator import UnmergeCoordinator
@@ -151,7 +151,8 @@ class _Graph:
     def fetch_merge_state(self, survivor_uuid, absorbed_uuid):
         if self.unreadable:
             raise RuntimeError("graph unreadable")
-        return dict(self.state)
+        # Like the real read (correlation_queries), report the survivor's op stamp alongside.
+        return {**self.state, "last_merge_op_id": self.stamp}
 
     def fetch_survivor_properties(self, survivor_uuid):
         return md.replay_survivor_merge({}, {})
@@ -573,6 +574,26 @@ def test_abstaining_writer_reports_success_when_a_reconciler_already_committed_i
     op_id = _only_op(journal, "ENTITY_MERGE")
     assert _row(journal, op_id)["state"] == "COMMITTED"
     assert _row(journal, op_id)["resolved_by_token"] == _REMOTE
+
+
+@pytest.mark.unit
+def test_abstention_at_the_after_state_of_another_merge_is_not_reported_as_this_merge(journal):
+    """Review F1: lineage left by an older merge plus an absorbed node deleted elsewhere matches the
+    after-state fingerprint; without this op's stamp the writer must quarantine, not report merged."""
+    graph = _Graph()
+    coord = MergeCoordinator(graph_adapter=graph, journal=journal)
+
+    def _someone_else_absorbed_it(op_id):
+        graph.state = dict(_ABSORBED_GONE)
+        graph.stamp = "an-older-merge"
+
+    graph.before_landing = _someone_else_absorbed_it
+    graph.abstain_reason = "ABSORBED_MISSING"
+
+    with pytest.raises(MergeDrift):
+        _merge(coord)
+    op_id = _only_op(journal, "ENTITY_MERGE")
+    assert _row(journal, op_id)["state"] == "NEEDS_REVIEW"
 
 
 # =========================================================================== 7. F-10 token identity

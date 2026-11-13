@@ -310,3 +310,45 @@ def test_a_stale_replay_blocks_a_live_boot_and_is_not_reported_as_a_live_owner(j
     assert len(handler.tokens) == 1
     assert journal.get(op_id)["owner_token"] == handler.tokens[0]
     assert oo.same_process(handler.tokens[0], process_token=oo.process_owner_token())
+
+
+# ------------------------------------------------------------------ review F4 / F14
+from menhir.services.saga_writer_outcomes import quarantine_after_graph_work  # noqa: E402
+
+
+@pytest.mark.parametrize("closer", ["failed", "committed"])
+def test_writer_after_state_drift_on_a_row_another_owner_closed_escalates(journal, closer):
+    """Review F4: the writer mutated, its after-state check failed, and a reconciler had already
+    closed the row; the refused NEEDS_REVIEW must re-fence and quarantine, not leave FAILED (no
+    mutation) or COMMITTED (verified) standing over a graph this writer just changed."""
+    op_id, writer = _taken_over(journal)
+    if closer == "failed":
+        journal.mark_failed(op_id, owner_token=_REMOTE, reason="reconciler: before-state")
+    else:
+        journal.mark_committed(op_id, owner_token=_REMOTE, after_graph_work=False)
+    with pytest.raises(StaleTransitionError):
+        quarantine_after_graph_work(
+            journal, op_id, owner_token=writer, observed_error="after-state mismatch",
+        )
+    assert journal.get(op_id)["state"] == "NEEDS_REVIEW"
+    assert _locks(journal, op_id) == {"sur", "abs"}
+
+
+def test_writer_quarantine_on_its_own_row_is_a_plain_needs_review(journal):
+    token = oo.new_claim_token()
+    op_id = _merge(journal, token)
+    quarantine_after_graph_work(journal, op_id, owner_token=token, observed_error="drift")
+    row = journal.get(op_id)
+    assert row["state"] == "NEEDS_REVIEW" and row["last_error"] == "drift"
+
+
+def test_bookkeeping_failure_never_replaces_the_mutation_error(journal):
+    """Review F14: if the journal itself fails, the caller still re-raises its own Neo4j error."""
+
+    class _Broken:
+        def record_attempt(self, *a, **k):
+            raise RuntimeError("sqlite locked")
+
+    assert close_after_failed_mutation(
+        _Broken(), "op", owner_token="t", exc=ClientError("x"), prove_before=lambda: True,
+    ) is False

@@ -40,6 +40,7 @@ from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
     close_after_failed_mutation,
     commit_or_settle,
+    quarantine_after_graph_work,
 )
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
@@ -409,9 +410,14 @@ class MergeCoordinator:
                     owner_token=owner_token,
                 )
                 return {"merged": 0, "reason": reason, "op_id": op_id}
-            if expected_after and post_fp == expected_after:
-                # Another owner already applied this very op (the survivor carries its marker), so
-                # this writer did no graph work.
+            if (
+                expected_after and post_fp == expected_after
+                # The fingerprint ignores the survivor's op stamp, so it cannot tell WHICH merge
+                # absorbed the node; this op's fence keeps every other merge off the survivor, so
+                # the stamp is exact here and is what proves this op was applied.
+                and post.get("last_merge_op_id") == op_id
+            ):
+                # Another owner already applied this very op, so this writer did no graph work.
                 settled = commit_or_settle(
                     self.journal, op_id, owner_token=owner_token, after_graph_work=False,
                     observed=f"repository abstained ({reason}); graph already at after-state={post_fp}",
@@ -438,8 +444,8 @@ class MergeCoordinator:
         after = self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid)
         actual = merge_state_fingerprint(after, op_id=op_id)
         if expected_after and actual != expected_after:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"after-state mismatch expected={expected_after} actual={actual} "
                                f"state={after}",
                 owner_token=owner_token,

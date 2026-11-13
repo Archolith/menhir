@@ -35,6 +35,7 @@ from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
     close_after_failed_mutation,
     commit_or_settle,
+    quarantine_after_graph_work,
 )
 
 # These methods used to live in the coordinator module; pin its logger namespace so log records
@@ -266,8 +267,8 @@ class MetricReconcileMixin:
         after = self.graph_adapter.fetch_metric_state(view_key=key)
         actual = state_fingerprint(after, view_key=key)
         if expected_after and actual != expected_after:
-            self.journal.mark_needs_review(
-                op_id,
+            quarantine_after_graph_work(
+                self.journal, op_id,
                 observed_error=f"after-state mismatch expected={expected_after} actual={actual}",
                 owner_token=owner_token,
             )
