@@ -64,6 +64,7 @@ class AssertionOutcome:
     admitted: list[AdmissionResult] = field(default_factory=list)   # current-truth context
     flagged: list[AdmissionResult] = field(default_factory=list)    # shown, labeled
     refused: list[AdmissionResult] = field(default_factory=list)    # kept out
+    oracle_failures: int = 0  # candidates with at least one failed oracle result
 
     @property
     def ranked(self) -> list[AdmissionResult]:
@@ -119,7 +120,9 @@ class AssertionPipeline:
         by_id = {c.id: c for c in candidates}
         intent = _INTENT.get(query.intent, QueryIntent.CURRENT)
 
-        outcome = AssertionOutcome()
+        outcome = AssertionOutcome(
+            oracle_failures=sum(1 for rs in grouped.values() if any(r.failed for r in rs)),
+        )
         q_scope = MemoryScope(repo=query.repo, project=query.project, branch=query.branch, namespace=query.namespace)
         for rank, cid in enumerate(ranked_ids):
             candidate = by_id[cid]

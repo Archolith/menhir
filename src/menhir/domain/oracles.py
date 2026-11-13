@@ -100,14 +100,15 @@ class OracleResult:
     scope_match: float = 1.0
     source_family: str = "semantic"
     note: str = ""
+    failed: bool = False
 
     @staticmethod
-    def neutral(oracle: str, *, note: str = "missing") -> "OracleResult":
+    def neutral(oracle: str, *, note: str = "missing", failed: bool = False) -> "OracleResult":
         """A neutral/missing result — what an oracle returns when it has nothing to say
         (or on executor timeout). Missing is not falsity."""
         return OracleResult(
             oracle=oracle, probability=0.5, confidence=0.0,
-            polarity=OraclePolarity.MISSING, note=note,
+            polarity=OraclePolarity.MISSING, note=note, failed=failed,
         )
 
 

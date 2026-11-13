@@ -146,7 +146,8 @@ class TemporalOracle:
 
     Builds a FactTemporal from the candidate's bitemporal metadata and routes the role to a
     target by intent. Directness is graded: an explicit timestamp role is direct (1.0); a
-    belief-bucket-only inference is softer (0.6)."""
+    belief-bucket-only inference is softer (0.6). Node-level supersession (superseded_by or
+    artifact_status=historical, no expired_at) is HISTORICALITY support so the warden flags it."""
 
     name = "temporal"
     source_family = "temporal"
@@ -175,6 +176,15 @@ class TemporalOracle:
             return OracleResult(oracle=self.name, probability=0.9, confidence=0.9,
                                 polarity=OraclePolarity.CONTRADICT, target=OracleTarget.CURRENTNESS,
                                 directness=directness, source_family=meta, note="not_yet_valid_at_as_of")
+        # Node-level supersession (Entity row only) is flagged historical, not refused.
+        node_superseded = bool(m.get("superseded_by")) or str(m.get("artifact_status") or "").lower() == "historical"
+        if (node_superseded and fact.expired_at is None
+                and role not in (TemporalRole.HISTORICAL, TemporalRole.EXPIRED_WORLD)):
+            return OracleResult(oracle=self.name, probability=1.0, confidence=0.9,
+                                polarity=OraclePolarity.SUPPORT, target=OracleTarget.HISTORICALITY,
+                                directness=1.0, source_family=meta,
+                                note="node_superseded_answers_historical" if intent == "historical"
+                                else "node_superseded_under_current_intent")
         if role in (TemporalRole.HISTORICAL, TemporalRole.EXPIRED_WORLD):
             if intent == "historical":
                 return OracleResult(oracle=self.name, probability=1.0, confidence=0.9,
