@@ -12,6 +12,7 @@ import pytest
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry import async_writer, helpers
+from menhir.infrastructure.telemetry import store as store_module
 from menhir.infrastructure.telemetry.async_writer import (
     TELEMETRY_WRITER,
     TelemetryDrainTimeout,
@@ -100,7 +101,10 @@ def test_locked_telemetry_db_does_not_stall_other_coroutines(tmp_path) -> None:
     assert len(rows) <= 3  # writes that hit the lock fail non-fatally; none block the loop
 
 
-def test_on_loop_writes_are_ordered_and_visible_to_the_next_read(tmp_path) -> None:
+def test_on_loop_writes_are_ordered_and_visible_to_the_next_read(tmp_path, monkeypatch) -> None:
+    # The read drains for up to the busy timeout and then proceeds; 5 s was too short for 25
+    # writes on a loaded Windows runner (#605). The ordering under test is unchanged.
+    monkeypatch.setattr(store_module, "_SQLITE_BUSY_TIMEOUT_S", 60.0)
     store = McpTelemetryStore(db_path=tmp_path / "telemetry.db")
 
     async def _scenario() -> list[dict]:
@@ -200,6 +204,8 @@ def test_erasure_purges_a_row_queued_before_it_and_fails_closed_until_drained(
             coord.erase_namespace("tenant-a", namespace="tenant-a")
     finally:
         release.set()
+    # Let the released writer finish before the replay's 0.1 s strict drain (#605).
+    assert TELEMETRY_WRITER.drain(30)
 
     # The refused attempt stays PREPARED and fences the target; recovery replays it.
     with sqlite3.connect(db) as conn:
@@ -246,6 +252,8 @@ def test_recall_query_log_is_offloaded_and_purged_by_erasure(tmp_path, monkeypat
             coord.erase_namespace("tenant-q", namespace="tenant-q")
     finally:
         release.set()
+    # Let the released writer finish before the replay's 0.1 s strict drain (#605).
+    assert TELEMETRY_WRITER.drain(30)
 
     with sqlite3.connect(db) as conn:
         op_id = conn.execute(

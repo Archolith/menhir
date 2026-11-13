@@ -12,6 +12,8 @@ Sub-repositories:
 from __future__ import annotations
 
 import logging
+import random
+import time
 import uuid as uuidlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -49,6 +51,12 @@ from menhir.infrastructure.schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: A writer can lose once per concurrent winner, and intake runs on the default thread pool, so
+#: the cap is generous and the budget bounds the wait (#604).
+_ADMISSION_AUDIT_MAX_ATTEMPTS = 50
+_ADMISSION_AUDIT_BUDGET_S = 10.0
+_sleep = time.sleep  # module seam so tests skip the backoff
 
 # Re-export so existing callers importing from this module still work.
 __all__ = [
@@ -2728,19 +2736,40 @@ class MemoryGraphAdapter:
         granted: bool = False, turn_evidence_uuid: str | None = None,
         reason: str = "", source: str = "admission_gate", source_confidence: float = 0.6,
     ) -> dict[str, Any]:
-        """Record an admission verdict audit row via View storage."""
-        return self._views.record(
-            "admission_audit",
-            subject=subject,
-            namespace=namespace,
-            source=source,
-            source_confidence=source_confidence,
-            requested_source=requested_source,
-            effective_source=effective_source,
-            granted=granted,
-            turn_evidence_uuid=turn_evidence_uuid,
-            reason=reason,
-        )
+        """Record an admission verdict audit row via View storage.
+
+        All of one subject's verdicts share a view key, so concurrent denials race on its
+        compare-and-set (#604). The audit is append-shaped, so a lost race re-reads and retries,
+        with jittered backoff, until it lands or the attempt cap or time budget runs out.
+        """
+        from menhir.infrastructure.view_write_repository import ViewWriteConflict
+
+        deadline = time.monotonic() + _ADMISSION_AUDIT_BUDGET_S
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return self._views.record(
+                    "admission_audit",
+                    subject=subject,
+                    namespace=namespace,
+                    source=source,
+                    source_confidence=source_confidence,
+                    requested_source=requested_source,
+                    effective_source=effective_source,
+                    granted=granted,
+                    turn_evidence_uuid=turn_evidence_uuid,
+                    reason=reason,
+                )
+            except ViewWriteConflict:
+                if attempt >= _ADMISSION_AUDIT_MAX_ATTEMPTS or time.monotonic() >= deadline:
+                    raise
+            # An erasure of the turn retires every audit view naming it and strips the id. The
+            # version we lost to may be that retired view, so a retry must not write the id back.
+            if turn_evidence_uuid and self.fetch_turn_evidence(turn_evidence_uuid) is None:
+                turn_evidence_uuid = None
+            logger.debug("Admission audit lost a concurrent write; retry %d", attempt)
+            _sleep(random.uniform(0, min(0.2, 0.005 * 2 ** attempt)))
 
     def merge_entity(
         self,

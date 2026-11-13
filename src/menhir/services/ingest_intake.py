@@ -436,9 +436,11 @@ class IngestIntakeMixin:
                         reason=verdict.reason,
                     )
                 except Exception:
-                    logger.debug(
-                        "Failed to record admission audit for session=%s; audit trail incomplete (non-fatal)",
-                        session.session_id, exc_info=True,
+                    # WARNING, not DEBUG: a dropped denial is a gap in the audit trail (#604).
+                    logger.warning(
+                        "Failed to record admission audit for session=%s (reason=%s); "
+                        "the audit record may be missing (non-fatal)",
+                        session.session_id, verdict.reason, exc_info=True,
                     )
             elif verdict is not None:
                 # Routine grant (admitted exactly as requested): intentionally no audit node.

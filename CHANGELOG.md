@@ -1,3 +1,28 @@
+## 2026-11-13 - Concurrent admission denials no longer drop audit records; Windows flakes fixed (#604, #605)
+
+- Since #600, intake runs in worker threads, so two admission denials for one subject could race
+  on the shared audit view's compare-and-set, and the loser's record was dropped with a DEBUG
+  log. A lost compare-and-set now raises `ViewWriteConflict` (still a `ValueError`). That covers
+  the create path, the unchanged-signature refresh of a View with no contributors, and any
+  zero-row write that declares no contributors, even when the diagnosis read fails. The
+  provenance-refresh paths still raise a plain `ValueError`.
+- The admission-audit writer retries a conflict with jittered backoff, up to 50 attempts or 10
+  s. Before each retry it re-checks the denial's turn: an erasure of that turn retires audit
+  views naming it and strips the id, so a retry writes the record without the erased id. Intake
+  and the temporal path log a write that still fails at WARNING (session id or namespace, and
+  the reason; not the user id). On a test Neo4j, four concurrent denials lost three records
+  with no retry, and eight lost one in 1 of 5 runs with 5 attempts and no backoff; with this
+  change all were kept. Unchanged: denials with identical fields (the same reason and turn id,
+  or no turn id) still share one record, as they did when written one at a time.
+- #605: none of the flakes is a product race. Sidecar compaction correctly skips an op committed
+  in the same ~15.6 ms clock tick it starts in (Python 3.12 on Windows); the test now waits for
+  the clock to pass the commit, and a new test pins the tie. The telemetry ordering test saw
+  writes in order but a read that gave up its 5 s drain on a loaded runner, the documented
+  stale-read fallback from #527; the test now allows 60 s. The erasure drain tests wait for the
+  released writer before replaying. The redirect test's server reads the request body before
+  answering (likely cause: Windows resets a socket closed with unread input). The lane-overlap
+  test checks that each lane sees the other start, instead of a wall-clock budget.
+
 ## 2026-11-13 - The erasure fence has one node per namespace (#603, #602)
 
 - The uniqueness constraint on `EvidenceNamespaceFence.namespace_key` was defined but never

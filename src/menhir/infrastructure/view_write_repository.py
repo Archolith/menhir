@@ -38,6 +38,19 @@ except Exception:  # pragma: no cover - driver always present in the running ser
 
 logger = logging.getLogger(__name__)
 
+_LOST_UPDATE_PREFIX = "View write refused: LOST UPDATE"
+
+
+class ViewWriteConflict(ValueError):
+    """The version this write was based on is no longer current (#604): a concurrent writer
+    superseded it, or it was retired.
+
+    No View node was created or changed; the namespace fence's lock stamp was. A caller whose
+    write is append-shaped can retry, re-reading the current version. A ``ValueError`` so
+    existing ``except ValueError`` callers still see it.
+    """
+
+
 # `_COUNT_TOKEN` is the placeholder for the supporting-event count inside a kind's
 # `summary_template`. Provenance refresh computes the count inside Cypher so the union remains
 # atomic, then substitutes the count into the template in the same statement.
@@ -379,7 +392,11 @@ class ViewWriteRepositoryMixin:
                     timeout_s=SAGA_MUTATION_TIMEOUT_S,
                 )
                 if not touched:
-                    raise ValueError("FACT View refresh refused after concurrent lifecycle change")
+                    # The version we read was superseded or retired after the read: the same
+                    # lost race as the create path below, so the same typed conflict (#604).
+                    raise ViewWriteConflict(
+                        "FACT View refresh refused after concurrent lifecycle change"
+                    )
                 prov = {}
             else:
                 self.neo4j.execute(
@@ -543,10 +560,15 @@ class ViewWriteRepositoryMixin:
                 create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
             )
         if not write_rows:
-            raise ValueError(self._diagnose_refusal(
+            reason = self._diagnose_refusal(
                 label=label, key=key, old_uuid=old_uuid, eps=eps,
                 namespace_key=namespace_key, evidence_scope=evidence_scope,
-            ))
+            )
+            # With no declared contributors the evidence gates pass trivially, so the
+            # compare-and-set is the only way to lose the row, even if the diagnosis read failed.
+            if not eps or reason.startswith(_LOST_UPDATE_PREFIX):
+                raise ViewWriteConflict(reason)
+            raise ValueError(reason)
         return {"uuid": new_uuid, "view_key": key, "kind": kind,
                 "created": True, "superseded": current is not None,
                 "episodes_present": len(eps), "episodes_missing": 0,
@@ -618,7 +640,7 @@ class ViewWriteRepositoryMixin:
         # (1) CAS: the current version is not the one we based this write on.
         if observed != old_uuid:
             return (
-                f"View write refused: LOST UPDATE on view_key={key}. Expected the current version to "
+                f"{_LOST_UPDATE_PREFIX} on view_key={key}. Expected the current version to "
                 f"be {old_uuid!r} but found {observed!r} -- a concurrent writer superseded it between "
                 f"our read and our write. This is NOT an evidence problem; retry from a fresh read."
             )

@@ -1,13 +1,13 @@
 """CF-175: the BM25 and cosine lanes of `search_ranked_by_method` run concurrently.
 
-Each lane is stubbed with a fixed delay; two lanes finishing in roughly one delay proves overlap,
-and the failure-isolation tests pin that one failing lane leaves the other's hits intact.
+The overlap test has each lane wait, while running, for the other to start, so serial lanes
+fail without a wall-clock budget. The failure-isolation tests pin that one failing lane leaves
+the other's hits intact.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 
@@ -15,7 +15,7 @@ from menhir.infrastructure.graphiti_client import GraphitiClient
 
 
 class _LaneClient:
-    """A GraphitiClient stub whose two lanes each sleep, so serialization is visible in the clock."""
+    """A GraphitiClient stub whose two lanes each sleep for a fixed delay."""
 
     def __init__(self, delay: float = 0.1) -> None:
         self.delay = delay
@@ -66,25 +66,44 @@ def _stub_lanes(monkeypatch: pytest.MonkeyPatch, *, delay: float = 0.1) -> dict[
 
 @pytest.mark.asyncio
 async def test_bm25_and_cosine_lanes_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE FINDING. bm25 (100 ms) plus embed (50 ms) plus cosine (50 ms) was 200 ms in series and
-    is max(100, 50 + 50) = 100 ms overlapped."""
+    """THE FINDING. The lanes ran in series. Each lane now waits, while running, for the other
+    to start; in series the first lane would time out. No wall-clock budget (#605)."""
+    from graphiti_core.search import search_utils
+
     _stub_lanes(monkeypatch)
     wrapper = _lane_wrapper(monkeypatch)
+    started = {"bm25": asyncio.Event(), "cosine": asyncio.Event()}
+    saw_other: dict[str, bool] = {}
+    bm25, cosine = search_utils.node_fulltext_search, search_utils.node_similarity_search
 
-    started = time.perf_counter()
+    def _meeting(name: str, other: str, inner):
+        async def lane(*args, **kwargs):
+            started[name].set()
+            try:
+                await asyncio.wait_for(started[other].wait(), timeout=10)
+                saw_other[name] = True
+            except asyncio.TimeoutError:
+                saw_other[name] = False
+            return await inner(*args, **kwargs)
+        return lane
+
+    monkeypatch.setattr(search_utils, "node_fulltext_search", _meeting("bm25", "cosine", bm25))
+    monkeypatch.setattr(
+        search_utils, "node_similarity_search", _meeting("cosine", "bm25", cosine)
+    )
+
     ranked = await wrapper.search_ranked_by_method(
         "q", methods=["bm25", "cosine_similarity"], num_results=5
     )
-    elapsed = time.perf_counter() - started
 
     assert set(ranked) == {"bm25", "cosine_similarity"}
-    assert elapsed < 0.17, f"lanes took {elapsed * 1000:.0f} ms; still serial"
+    assert saw_other == {"bm25": True, "cosine": True}, f"lanes ran in series: {saw_other}"
 
 
 @pytest.mark.asyncio
 async def test_both_lanes_still_return_their_own_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     """POSITIVE CONTROL. A version that dropped a lane, or let one lane's result overwrite the
-    other's key, would pass the timing test above."""
+    other's key, would pass the overlap test above."""
     _stub_lanes(monkeypatch)
     wrapper = _lane_wrapper(monkeypatch)
 

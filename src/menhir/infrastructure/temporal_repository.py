@@ -164,9 +164,11 @@ class TemporalRepository:
                     reason=verdict.reason,
                 )
             except Exception:
-                logger_temp.debug(
-                    "Failed to record admission audit for TEMPORAL (namespace=%s); audit trail incomplete (non-fatal)",
-                    namespace, exc_info=True,
+                # WARNING, not DEBUG: a dropped verdict is a gap in the audit trail (#604).
+                logger_temp.warning(
+                    "Failed to record admission audit for TEMPORAL (namespace=%s, reason=%s); "
+                    "the audit record may be missing (non-fatal)",
+                    namespace, verdict.reason, exc_info=True,
                 )
 
         return {
