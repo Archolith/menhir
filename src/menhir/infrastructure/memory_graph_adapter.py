@@ -50,6 +50,9 @@ from menhir.infrastructure.schema import (
 
 logger = logging.getLogger(__name__)
 
+#: Each concurrent loser re-reads and retries, so N racing denials need at most N attempts (#604).
+_ADMISSION_AUDIT_ATTEMPTS = 5
+
 # Re-export so existing callers importing from this module still work.
 __all__ = [
     "MemoryGraphAdapter",
@@ -2728,19 +2731,35 @@ class MemoryGraphAdapter:
         granted: bool = False, turn_evidence_uuid: str | None = None,
         reason: str = "", source: str = "admission_gate", source_confidence: float = 0.6,
     ) -> dict[str, Any]:
-        """Record an admission verdict audit row via View storage."""
-        return self._views.record(
-            "admission_audit",
-            subject=subject,
-            namespace=namespace,
-            source=source,
-            source_confidence=source_confidence,
-            requested_source=requested_source,
-            effective_source=effective_source,
-            granted=granted,
-            turn_evidence_uuid=turn_evidence_uuid,
-            reason=reason,
-        )
+        """Record an admission verdict audit row via View storage.
+
+        All of one subject's verdicts share a view key, so concurrent denials race on its
+        compare-and-set (#604). The audit is append-shaped, so a lost race re-reads and retries.
+        """
+        from menhir.infrastructure.view_write_repository import ViewWriteConflict
+
+        for attempt in range(1, _ADMISSION_AUDIT_ATTEMPTS + 1):
+            try:
+                return self._views.record(
+                    "admission_audit",
+                    subject=subject,
+                    namespace=namespace,
+                    source=source,
+                    source_confidence=source_confidence,
+                    requested_source=requested_source,
+                    effective_source=effective_source,
+                    granted=granted,
+                    turn_evidence_uuid=turn_evidence_uuid,
+                    reason=reason,
+                )
+            except ViewWriteConflict:
+                if attempt == _ADMISSION_AUDIT_ATTEMPTS:
+                    raise
+                logger.info(
+                    "Admission audit for subject=%s lost a concurrent write; retrying (%d/%d)",
+                    subject, attempt, _ADMISSION_AUDIT_ATTEMPTS,
+                )
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def merge_entity(
         self,

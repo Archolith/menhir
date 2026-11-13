@@ -78,10 +78,14 @@ def test_redirect_cannot_forward_the_operator_key() -> None:
     class SourceHandler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
             source_requests.append(self.headers.get("Authorization"))
+            # Read the body first: on Windows, closing a socket with unread input sends RST,
+            # and the client can see a reset instead of the 302 (#605).
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
             self.send_response(302)
             self.send_header(
                 "Location", f"http://127.0.0.1:{sink.server_port}/mcp-http"
             )
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def log_message(self, *_args: object) -> None:

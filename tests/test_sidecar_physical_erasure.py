@@ -8,11 +8,13 @@ purges, ``suppressed_node_uuids`` and the scheduled compaction job, including a 
 from __future__ import annotations
 
 import sqlite3
+import time
 import uuid
 from pathlib import Path
 
 import pytest
 
+from menhir.clock import utc_now_iso
 from menhir.domain.erasure import ERASED_MARKER
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore, suppressed_node_uuids
@@ -345,6 +347,21 @@ def _bytes(db: Path) -> bytes:
     )
 
 
+def _wait_for_clock_past_commit(db, op_id: str) -> None:
+    """Compaction stamps only ops with committed_at strictly before its start (#605). The
+    Windows clock on Python 3.12 ticks every ~15.6 ms, so an erase and a compaction started
+    right after it can share a timestamp; the op is then correctly left for the next run."""
+    with sqlite3.connect(db) as conn:
+        committed_at = conn.execute(
+            "SELECT committed_at FROM graph_operations WHERE op_id=?", (op_id,)
+        ).fetchone()[0]
+    assert committed_at is not None
+    deadline = time.monotonic() + 5
+    while utc_now_iso() <= committed_at:
+        assert time.monotonic() < deadline, "clock did not advance past committed_at"
+        time.sleep(0.005)
+
+
 def test_compaction_removes_nonsecure_deleted_and_purged_canaries_from_all_files(tmp_path):
     db = _db(tmp_path)
     legacy = f"CANARY-LEGACY-{uuid.uuid4()}"
@@ -372,6 +389,7 @@ def test_compaction_removes_nonsecure_deleted_and_purged_canaries_from_all_files
         subjects=ErasureSubjectStore(db_path=db),
     )
     reply = coord.erase_memory(target)
+    _wait_for_clock_past_commit(db, reply["op_id"])
     result = run_sidecar_compaction(db_path=db)
     assert result["status"] == COMPACTED, result
 
