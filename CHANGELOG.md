@@ -1,3 +1,12 @@
+## 2026-11-13 - The scalar gate keeps agreement when one sample reads a span twice (#564)
+
+- With aligned spans, a group of overlapping claims where one sample appears twice is now split
+  by claim kind, `(value_kind, unit)`, before it is given up. One sample reading
+  "pre-approved for $350,000" as both a status and an amount no longer voids the other samples'
+  agreement on the amount: 2/3 agreement commits instead of becoming three 1/3 vetoes.
+- A kind that one sample still reads twice stays ungrouped, as before. The counting lane keeps
+  its split by attribute.
+
 ## 2026-11-13 - Recall rerank uses ~90 MB less memory per process
 
 - ONNX Runtime's Python wrapper kept its own copy of the model bytes (~90 MB) for the life of
