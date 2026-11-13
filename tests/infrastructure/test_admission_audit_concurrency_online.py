@@ -12,11 +12,17 @@ import uuid
 
 import pytest
 
+from menhir.infrastructure import memory_graph_adapter as mga
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
 pytestmark = pytest.mark.online
 
-_WRITERS = 4
+#: More than the old fixed 5 attempts, so a fixed retry count without backoff could lose one.
+_WRITERS = 8
+
+_AUDITS = (
+    "MATCH (n:Entity {view_kind: 'admission_audit', view_subject: $s, group_id: $ns}) "
+)
 
 
 @pytest.fixture
@@ -27,8 +33,23 @@ def adapter_and_ns(test_neo4j_repo):
     ns = f"t604-{uuid.uuid4().hex[:10]}"
     yield adapter, ns
     test_neo4j_repo.execute(
-        "MATCH (n) WHERE n.group_id = $ns OR n.namespace_key = $ns DETACH DELETE n",
+        "MATCH (n:Entity {view_kind: 'admission_audit'}) WHERE n.group_id = $ns "
+        "DETACH DELETE n",
         params={"ns": ns},
+    )
+    test_neo4j_repo.execute(
+        "MATCH (n:TurnEvidence) WHERE n.namespace = $ns DETACH DELETE n", params={"ns": ns}
+    )
+    test_neo4j_repo.execute(
+        "MATCH (f:EvidenceNamespaceFence {namespace_key: $ns}) DETACH DELETE f",
+        params={"ns": ns},
+    )
+
+
+def _plant_turns(repo, ns: str, turn_ids: list[str]) -> None:
+    repo.execute(
+        "UNWIND $ids AS t CREATE (:TurnEvidence {turn_id: t, namespace: $ns, role: 'user'})",
+        params={"ids": turn_ids, "ns": ns},
     )
 
 
@@ -37,6 +58,7 @@ def test_concurrent_denials_for_one_subject_each_leave_an_audit_record(
 ) -> None:
     adapter, ns = adapter_and_ns
     subject = f"user-{uuid.uuid4().hex[:8]}"
+    _plant_turns(test_neo4j_repo, ns, [f"{ns}-turn-{i}" for i in range(_WRITERS)])
     barrier = threading.Barrier(_WRITERS)
     errors: list[BaseException] = []
 
@@ -46,29 +68,53 @@ def test_concurrent_denials_for_one_subject_each_leave_an_audit_record(
             adapter.record_admission_audit(
                 subject=subject, namespace=ns, requested_source="user",
                 effective_source="agent", granted=False,
-                turn_evidence_uuid=f"turn-{i}", reason=f"denied-{i}",
+                turn_evidence_uuid=f"{ns}-turn-{i}", reason=f"denied-{i}",
             )
         except BaseException as exc:  # noqa: BLE001 - surfaced by the assert below
             errors.append(exc)
 
-    caplog.set_level(logging.INFO, logger="menhir.infrastructure.memory_graph_adapter")
-    threads = [threading.Thread(target=deny, args=(i,)) for i in range(_WRITERS)]
+    caplog.set_level(logging.DEBUG, logger="menhir.infrastructure.memory_graph_adapter")
+    threads = [threading.Thread(target=deny, args=(i,), daemon=True) for i in range(_WRITERS)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(60)
+    assert not any(t.is_alive() for t in threads), "a writer hung"
 
     assert errors == []
     rows = test_neo4j_repo.execute(
-        "MATCH (n:Entity {view_kind: 'admission_audit', view_subject: $s, group_id: $ns}) "
-        "RETURN n.reason AS reason, coalesce(n.view_current, true) AS current",
+        _AUDITS + "RETURN n.reason AS reason, n.turn_evidence_uuid AS turn, "
+        "coalesce(n.view_current, true) AS current",
         params={"s": subject, "ns": ns},
     )
     assert sorted(r["reason"] for r in rows) == sorted(f"denied-{i}" for i in range(_WRITERS))
+    assert all(r["turn"] == f"{ns}-turn-{r['reason'].split('-')[1]}" for r in rows)
     assert sum(1 for r in rows if r["current"]) == 1
     # Not asserted (the scheduler decides), but recorded so a run shows the race was exercised.
     retries = sum("lost a concurrent write" in r.getMessage() for r in caplog.records)
     print(f"admission audit retries observed: {retries}")
+
+
+def _stale_first_read(monkeypatch, views, stale: dict) -> dict:
+    real_current = views._current_by_key
+    calls = {"n": 0}
+
+    def first_read_is_stale(key, *args, **kwargs):
+        calls["n"] += 1
+        return stale if calls["n"] == 1 else real_current(key, *args, **kwargs)
+
+    monkeypatch.setattr(views, "_current_by_key", first_read_is_stale)
+    return calls
+
+
+def _current_version(repo, subject: str, ns: str) -> dict:
+    rows = repo.execute(
+        _AUDITS + "WHERE coalesce(n.view_current, true) "
+        "RETURN n.uuid AS uuid, n.view_sig AS sig, toString(n.valid_at) AS valid_at",
+        params={"s": subject, "ns": ns},
+    )
+    assert len(rows) == 1
+    return dict(rows[0])
 
 
 def test_a_same_signature_write_based_on_a_superseded_version_is_retried(
@@ -79,35 +125,62 @@ def test_a_same_signature_write_based_on_a_superseded_version_is_retried(
     must be retried, not dropped (#604)."""
     adapter, ns = adapter_and_ns
     subject = f"user-{uuid.uuid4().hex[:8]}"
+    turn_a, turn_b = f"{ns}-turn-a", f"{ns}-turn-b"
+    _plant_turns(test_neo4j_repo, ns, [turn_a, turn_b])
     denial_a = dict(subject=subject, namespace=ns, requested_source="user",
-                    effective_source="agent", granted=False, turn_evidence_uuid="turn-a",
+                    effective_source="agent", granted=False, turn_evidence_uuid=turn_a,
                     reason="denied-a")
     adapter.record_admission_audit(**denial_a)
-    views = adapter._views
-    real_current = views._current_by_key
-    rows =test_neo4j_repo.execute(
-        "MATCH (n:Entity {view_kind: 'admission_audit', view_subject: $s, group_id: $ns}) "
-        "RETURN n.uuid AS uuid, n.view_sig AS sig, toString(n.valid_at) AS valid_at",
-        params={"s": subject, "ns": ns},
-    )
-    stale = dict(rows[0])
-    adapter.record_admission_audit(**{**denial_a, "turn_evidence_uuid": "turn-b",
+    stale = _current_version(test_neo4j_repo, subject, ns)
+    adapter.record_admission_audit(**{**denial_a, "turn_evidence_uuid": turn_b,
                                       "reason": "denied-b"})
 
-    calls = {"n": 0}
-
-    def first_read_is_stale(key, *args, **kwargs):
-        calls["n"] += 1
-        return stale if calls["n"] == 1 else real_current(key, *args, **kwargs)
-
-    monkeypatch.setattr(views, "_current_by_key", first_read_is_stale)
+    calls = _stale_first_read(monkeypatch, adapter._views, stale)
     adapter.record_admission_audit(**denial_a)
 
     assert calls["n"] == 2  # the stale attempt lost and was retried from a fresh read
     rows = test_neo4j_repo.execute(
-        "MATCH (n:Entity {view_kind: 'admission_audit', view_subject: $s, group_id: $ns}) "
-        "RETURN n.reason AS reason, coalesce(n.view_current, true) AS current",
+        _AUDITS + "RETURN n.reason AS reason, coalesce(n.view_current, true) AS current",
         params={"s": subject, "ns": ns},
     )
     assert sorted(r["reason"] for r in rows) == ["denied-a", "denied-a", "denied-b"]
     assert [r["reason"] for r in rows if r["current"]] == ["denied-a"]
+
+
+def test_a_retry_after_the_turn_is_erased_does_not_write_the_turn_id_back(
+    adapter_and_ns, test_neo4j_repo, monkeypatch
+) -> None:
+    """Denial D reads the current audit V naming turn T; an erasure of T then retires V and
+    strips the id (as turn_evidence_repository does). D's write loses and retries; the retry
+    must keep the record but not re-store the erased id."""
+    adapter, ns = adapter_and_ns
+    monkeypatch.setattr(mga, "_sleep", lambda _s: None)
+    subject = f"user-{uuid.uuid4().hex[:8]}"
+    turn = f"{ns}-turn-erased"
+    _plant_turns(test_neo4j_repo, ns, [turn])
+    denial = dict(subject=subject, namespace=ns, requested_source="user",
+                  effective_source="agent", granted=False, turn_evidence_uuid=turn,
+                  reason="denied")
+    adapter.record_admission_audit(**denial)
+    stale = _current_version(test_neo4j_repo, subject, ns)
+    test_neo4j_repo.execute(
+        "MATCH (t:TurnEvidence {turn_id: $t}) DETACH DELETE t", params={"t": turn}
+    )
+    test_neo4j_repo.execute(
+        "MATCH (v:Entity {uuid: $u}) SET v.view_current = false, v.qs_current = false, "
+        "v.retired = true, v.retired_reason = 'contributing_evidence_erased' "
+        "REMOVE v.turn_evidence_uuid",
+        params={"u": stale["uuid"]},
+    )
+
+    calls = _stale_first_read(monkeypatch, adapter._views, stale)
+    adapter.record_admission_audit(**denial)
+
+    assert calls["n"] == 2
+    rows = test_neo4j_repo.execute(
+        _AUDITS + "RETURN n.turn_evidence_uuid AS turn, coalesce(n.view_current, true) AS current",
+        params={"s": subject, "ns": ns},
+    )
+    assert len(rows) == 2
+    assert all(r["turn"] is None for r in rows)
+    assert sum(1 for r in rows if r["current"]) == 1

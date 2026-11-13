@@ -420,10 +420,12 @@ def test_an_op_committed_in_the_same_clock_tick_waits_for_the_next_compaction(
         ).fetchone()[0]
 
     monkeypatch.setattr(sidecar_compaction, "_utc_now_iso", lambda: committed_at)
-    assert run_sidecar_compaction(db_path=db)["ops_stamped"] == 0
+    tied = run_sidecar_compaction(db_path=db)
+    assert tied["status"] == COMPACTED and tied["ops_stamped"] == 0, tied
     monkeypatch.undo()
     _wait_for_clock_past_commit(db, op)
-    assert run_sidecar_compaction(db_path=db)["ops_stamped"] == 1
+    later = run_sidecar_compaction(db_path=db)
+    assert later["status"] == COMPACTED and later["ops_stamped"] == 1, later
 
 
 def test_compaction_stamps_only_ops_committed_before_it_started(tmp_path):

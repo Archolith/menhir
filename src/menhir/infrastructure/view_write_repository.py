@@ -42,10 +42,12 @@ _LOST_UPDATE_PREFIX = "View write refused: LOST UPDATE"
 
 
 class ViewWriteConflict(ValueError):
-    """A concurrent writer superseded the version this write was based on (#604).
+    """The version this write was based on is no longer current (#604): a concurrent writer
+    superseded it, or it was retired.
 
-    Nothing was written. A caller whose write is append-shaped can retry: the retry re-reads
-    the current version. A ``ValueError`` so existing ``except ValueError`` callers still see it.
+    No View node was created or changed; the namespace fence's lock stamp was. A caller whose
+    write is append-shaped can retry, re-reading the current version. A ``ValueError`` so
+    existing ``except ValueError`` callers still see it.
     """
 
 
@@ -562,7 +564,9 @@ class ViewWriteRepositoryMixin:
                 label=label, key=key, old_uuid=old_uuid, eps=eps,
                 namespace_key=namespace_key, evidence_scope=evidence_scope,
             )
-            if reason.startswith(_LOST_UPDATE_PREFIX):
+            # With no declared contributors the evidence gates pass trivially, so the
+            # compare-and-set is the only way to lose the row, even if the diagnosis read failed.
+            if not eps or reason.startswith(_LOST_UPDATE_PREFIX):
                 raise ViewWriteConflict(reason)
             raise ValueError(reason)
         return {"uuid": new_uuid, "view_key": key, "kind": kind,

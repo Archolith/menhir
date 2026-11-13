@@ -1,7 +1,8 @@
 """CF-175: the BM25 and cosine lanes of `search_ranked_by_method` run concurrently.
 
-Each lane is stubbed with a fixed delay; two lanes finishing in roughly one delay proves overlap,
-and the failure-isolation tests pin that one failing lane leaves the other's hits intact.
+The overlap test has each lane wait, while running, for the other to start, so serial lanes
+fail without a wall-clock budget. The failure-isolation tests pin that one failing lane leaves
+the other's hits intact.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from menhir.infrastructure.graphiti_client import GraphitiClient
 
 
 class _LaneClient:
-    """A GraphitiClient stub whose two lanes each sleep, so serialization is visible in the clock."""
+    """A GraphitiClient stub whose two lanes each sleep for a fixed delay."""
 
     def __init__(self, delay: float = 0.1) -> None:
         self.delay = delay
@@ -102,7 +103,7 @@ async def test_bm25_and_cosine_lanes_overlap(monkeypatch: pytest.MonkeyPatch) ->
 @pytest.mark.asyncio
 async def test_both_lanes_still_return_their_own_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     """POSITIVE CONTROL. A version that dropped a lane, or let one lane's result overwrite the
-    other's key, would pass the timing test above."""
+    other's key, would pass the overlap test above."""
     _stub_lanes(monkeypatch)
     wrapper = _lane_wrapper(monkeypatch)
 
