@@ -75,8 +75,13 @@ FAILED = "FAILED"
 #: forecast vocabulary and increments no counter.
 SKIPPED = "SKIPPED"
 
+#: The row moved under this reconciler's claim mid-replay (a compare-and-set was refused): a stale
+#: writer or another reconciler acted on it. Unlike LIVE_OWNER it is not a healthy peer, and it
+#: may follow graph work, so a live pass with one is not write-ready (#404 F-4).
+STALE = "STALE"
+
 #: Every live outcome. A replay result outside this set is a defect, not a new case.
-LIVE_OUTCOMES: frozenset[str] = frozenset({REPLAYED, DRIFTED, FAILED, SKIPPED})
+LIVE_OUTCOMES: frozenset[str] = frozenset({REPLAYED, DRIFTED, FAILED, SKIPPED, STALE})
 
 
 #: Every defined outcome. Useful for asserting a summary covers the whole vocabulary.
@@ -112,7 +117,7 @@ CF20A_REACHABLE_OUTCOMES: frozenset[str] = frozenset(
 #: for outcomes that mode cannot produce, which reads as "checked and found none" rather than
 #: "not applicable here".
 LIVE_REACHABLE_OUTCOMES: frozenset[str] = frozenset(
-    {REPLAYED, DRIFTED, FAILED, SKIPPED, LIVE_OWNER, OWNER_UNKNOWN, UNKNOWN_KIND}
+    {REPLAYED, DRIFTED, FAILED, SKIPPED, STALE, LIVE_OWNER, OWNER_UNKNOWN, UNKNOWN_KIND}
 )
 
 
@@ -167,6 +172,7 @@ __all__ = [
     "DRIFTED",
     "FAILED",
     "SKIPPED",
+    "STALE",
     "LIVE_OUTCOMES",
     "LIVE_REACHABLE_OUTCOMES",
     "summarize_live_outcomes",

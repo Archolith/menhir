@@ -26,7 +26,7 @@ from menhir.services.saga_reconcile_dispatcher import (
     NonReplayableKind,
     SagaReconcileDispatcher,
 )
-from menhir.services.saga_reconcile_outcomes import LIVE_OWNER
+from menhir.services.saga_reconcile_outcomes import STALE
 
 _PAST = "2000-01-01T00:00:00+00:00"
 _R_TOKEN = "instance-R:other-host:4242:rrrr"
@@ -285,14 +285,14 @@ def _abandoned_row(journal):
 def test_dispatcher_reports_a_stale_replay_as_stale_not_as_unresolved(journal):
     op_id, row = _abandoned_row(journal)
 
-    def replay(_row):
+    def replay(_row, *, owner_token):
         raise StaleTransitionError("moved under us")
 
     dispatcher = SagaReconcileDispatcher(
         journal=journal, handlers={"ENTITY_MERGE": SimpleNamespace(replay_prepared_row=replay)}
     )
     outcome, diag = dispatcher._replay_one(row, op_id=op_id, kind="ENTITY_MERGE")
-    assert outcome == LIVE_OWNER
+    assert outcome == STALE  # #404 FR-4: not LIVE_OWNER, which claimed a live writer exists
     assert diag["stale"] is True and diag["observed_error"].startswith("stale transition")
 
 
@@ -308,7 +308,9 @@ def test_dispatcher_stale_needs_review_on_non_replayable_kind_does_not_end_the_p
 
         def claim_abandoned_operation(self, op, **kw):
             claimed = self._inner.claim_abandoned_operation(op, **kw)
-            self._inner.mark_committed(op, owner_token=oo.process_owner_token())
+            # Commit under the claim token the dispatcher just minted, then the dispatcher's
+            # own NEEDS_REVIEW attempt sees a row already moved by another transition.
+            self._inner.mark_committed(op, owner_token=kw["owner_token"])
             return claimed
 
         def __getattr__(self, name):
@@ -319,5 +321,5 @@ def test_dispatcher_stale_needs_review_on_non_replayable_kind_does_not_end_the_p
         handlers={"ENTITY_MERGE": NonReplayableKind(kind="ENTITY_MERGE", reason="no replay")},
     )
     outcome, diag = dispatcher._replay_one(row, op_id=op_id, kind="ENTITY_MERGE")  # must not raise
-    assert outcome == LIVE_OWNER and diag["stale"] is True
+    assert outcome == STALE and diag["stale"] is True
     assert _row(journal, op_id)[0] == "COMMITTED"
