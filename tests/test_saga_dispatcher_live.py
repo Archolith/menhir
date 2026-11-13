@@ -99,7 +99,10 @@ def _kill_owner(journal: GraphOperationsJournal, op_id: str) -> None:
 
 def _crash_before_commit(coord, pair) -> str:
     """Perform a real merge against the real graph, crashing before the journal commits."""
-    def boom(op_id, owner_token=None, after_graph_work=True):
+    seen: list[tuple] = []
+
+    def boom(op_id, *, owner_token, after_graph_work=True):
+        seen.append((owner_token, coord.journal.get(op_id)["owner_token"]))
         raise RuntimeError("crash before COMMITTED")
 
     real = coord.journal.mark_committed
@@ -109,6 +112,8 @@ def _crash_before_commit(coord, pair) -> str:
             coord.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
     finally:
         coord.journal.mark_committed = real  # type: ignore[method-assign]
+    # Recorded then asserted here: the coordinator may swallow an assertion raised inside boom.
+    assert seen and all(got == stored for got, stored in seen), seen
 
     prepared = coord.journal.list_by_state("PREPARED")
     assert len(prepared) == 1, prepared

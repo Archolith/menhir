@@ -625,11 +625,13 @@ def test_unmerge_coordinator_fires_scalar_hook_on_commit():
         def get(self, oid):
             return {"expected_after_sha256": expected_after}
 
-        def mark_committed(self, oid, owner_token=None, after_graph_work=True):
-            pass
+        expected_token = "tok"
 
-        def mark_reversed(self, oid, owner_token=None):
-            pass
+        def mark_committed(self, oid, *, owner_token, after_graph_work=True):
+            assert owner_token == self.expected_token, (owner_token, self.expected_token)
+
+        def mark_reversed(self, oid, *, owner_token):
+            assert owner_token == self.expected_token, (owner_token, self.expected_token)
 
     seen = []
 
@@ -664,8 +666,13 @@ def test_unmerge_coordinator_hook_failure_does_not_break_commit():
     class _Journal:
         def _ensure_ready(self): pass
         def get(self, oid): return {"expected_after_sha256": expected_after}
-        def mark_committed(self, oid, owner_token=None, after_graph_work=True): pass
-        def mark_reversed(self, oid, owner_token=None): pass
+        expected_token = "tok"
+
+        def mark_committed(self, oid, *, owner_token, after_graph_work=True):
+            assert owner_token == self.expected_token, (owner_token, self.expected_token)
+
+        def mark_reversed(self, oid, *, owner_token):
+            assert owner_token == self.expected_token, (owner_token, self.expected_token)
 
     def _boom(*, survivor_uuid, absorbed_uuid, merge_op_id, unmerge_op_id):
         raise RuntimeError("restore blew up")

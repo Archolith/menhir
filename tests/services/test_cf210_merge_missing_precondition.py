@@ -23,13 +23,19 @@ pytestmark = pytest.mark.unit
 
 
 class _FakeJournal:
+    def __init__(self, expected_token=None):
+        self.expected_token = expected_token
+
     def _ensure_ready(self):
         return None
 
     def get(self, op_id):
         return {}
 
-    def mark_needs_review(self, op_id, observed_error, owner_token=None):
+    def mark_needs_review(self, op_id, observed_error, *, owner_token):
+        assert owner_token == self.expected_token, (
+            f"journal got owner_token {owner_token!r}, PREPARE stored {self.expected_token!r}"
+        )
         self.reviewed = observed_error
 
 
@@ -42,7 +48,7 @@ class _FakeAdapter:
 
 
 def _coordinator(state=None):
-    journal = _FakeJournal()
+    journal = _FakeJournal(expected_token="tok")
     adapter = _FakeAdapter(state if state is not None else {})
     return MergeCoordinator(graph_adapter=adapter, journal=journal), journal
 
