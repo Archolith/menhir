@@ -299,7 +299,9 @@ def test_unresolved_op_fences_competing_write(coord):
     with pytest.raises(RuntimeError):
         coord.record_run_tally(subject="s", counter="c", value=1.0, namespace="ns")
     op = coord.journal.list_by_state("PREPARED")[0]["op_id"]
-    coord.journal.mark_needs_review(op, owner_token=oo.process_owner_token(), observed_error="drift")
+    coord.journal.mark_needs_review(
+        op, owner_token=coord.journal.get(op)["owner_token"], observed_error="drift"
+    )
 
     from menhir.infrastructure.graph_operations import GraphOperationError
 
@@ -314,7 +316,9 @@ def test_needs_review_is_not_auto_replayed(coord):
     with pytest.raises(RuntimeError):
         coord.record_run_tally(subject="s", counter="c", value=1.0, namespace="ns")
     op = coord.journal.list_by_state("PREPARED")[0]["op_id"]
-    coord.journal.mark_needs_review(op, owner_token=oo.process_owner_token(), observed_error="operator hold")
+    coord.journal.mark_needs_review(
+        op, owner_token=coord.journal.get(op)["owner_token"], observed_error="operator hold"
+    )
 
     out = coord._replay_prepared()
     assert out == {"replayed": 0, "drifted": 0, "failed": 0}

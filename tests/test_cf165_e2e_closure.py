@@ -294,7 +294,9 @@ def test_replay_graph_failure_does_not_commit_erasure(tmp_path) -> None:
         conn.commit()
 
     with pytest.raises(RuntimeError, match="graph unavailable"):
-        coord.replay_prepared_row({"op_id": op_id})
+        coord.replay_prepared_row(
+            {"op_id": op_id}, owner_token=coord.journal.get(op_id)["owner_token"]
+        )
 
     with sqlite3.connect(tmp_path / "telemetry.db") as conn:
         state = conn.execute(

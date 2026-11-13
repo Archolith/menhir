@@ -72,7 +72,7 @@ def test_missing_precondition_raises_merge_drift_like_drift():
     must raise `MergeDrift` (DRIFTED), not a generic failure (FAILED)."""
     coordinator, journal = _coordinator()
     with pytest.raises(MergeDrift):
-        coordinator._apply_owned(_base_request())
+        coordinator._apply_owned(_base_request(), owner_token="tok")
     assert journal.reviewed is not None
 
 

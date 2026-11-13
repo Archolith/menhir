@@ -27,6 +27,7 @@ import uuid as uuidlib
 import pytest
 
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry.store import McpTelemetryStore
@@ -190,7 +191,9 @@ def test_crashed_erasure_resumes_from_the_inventory_against_a_real_graph(
             )
             conn.commit()
 
-        outcome, _diagnostics = coord.replay_prepared_row({"op_id": op_id})
+        outcome, _diagnostics = coord.replay_prepared_row(
+            {"op_id": op_id}, owner_token=oo.process_owner_token()
+        )
 
         assert outcome == "REPLAYED"
         assert _exists(live_repo, member) is False

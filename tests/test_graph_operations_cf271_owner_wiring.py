@@ -136,7 +136,7 @@ def test_s1_stale_writer_mark_failed_cannot_release_a_row_the_reconciler_owns(
     # the real attest+claim hands the row to R.
     coord = _w_coordinator(journal, op_id, on_stall=lambda: _real_takeover(journal, op_id))
     with pytest.raises(StaleTransitionError):
-        coord._apply_owned(_request(op_id))
+        coord._apply_owned(_request(op_id), owner_token=oo.process_owner_token())
 
     state, owner, last_error, _ = _row(journal, op_id)
     assert state == "PREPARED"
@@ -264,7 +264,7 @@ def test_coordinator_reraises_original_error_when_record_attempt_is_a_noop(journ
         "WOULD_REPLAY", {"expected_before": "b", "expected_after": "a"}
     )
     with pytest.raises(RuntimeError, match="neo4j went away"):
-        coord._apply_owned(_request(op_id))
+        coord._apply_owned(_request(op_id), owner_token=oo.process_owner_token())
     assert _row(journal, op_id)[2:] == (None, 0)
 
 

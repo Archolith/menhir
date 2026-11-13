@@ -207,7 +207,9 @@ def test_erasure_purges_a_row_queued_before_it_and_fails_closed_until_drained(
             "SELECT op_id, state FROM graph_operations WHERE operation_kind = 'EXPLICIT_ERASURE'"
         ).fetchone()
     assert state == "PREPARED"
-    outcome, _ = coord.replay_prepared_row({"op_id": op_id})
+    outcome, _ = coord.replay_prepared_row(
+        {"op_id": op_id}, owner_token=coord.journal.get(op_id)["owner_token"]
+    )
     assert outcome == REPLAYED
     with sqlite3.connect(db) as conn:
         previews = conn.execute(
@@ -249,7 +251,9 @@ def test_recall_query_log_is_offloaded_and_purged_by_erasure(tmp_path, monkeypat
         op_id = conn.execute(
             "SELECT op_id FROM graph_operations WHERE operation_kind = 'EXPLICIT_ERASURE'"
         ).fetchone()[0]
-    outcome, _ = coord.replay_prepared_row({"op_id": op_id})
+    outcome, _ = coord.replay_prepared_row(
+        {"op_id": op_id}, owner_token=coord.journal.get(op_id)["owner_token"]
+    )
     assert outcome == REPLAYED
     with sqlite3.connect(db) as conn:
         rows = conn.execute(

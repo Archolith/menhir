@@ -160,7 +160,7 @@ def test_caller_stops_on_lost_cas_and_does_not_retry(tmp_path):
             "similarity": 0.9, "expected_fact_uuids": [],
         }
         with pytest.raises(StaleTransitionError):
-            coord._apply_owned(request)
+            coord._apply_owned(request, owner_token="tok")
     finally:
         mc.merge_state_fingerprint = original
     assert journal.mark_failed.call_count == 1

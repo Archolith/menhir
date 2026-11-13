@@ -21,16 +21,21 @@ from menhir.services.metric_write_coordinator_common import MetricDrift, state_f
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
-    LIVE_OWNER,
     REPLAYED,
     SKIP,
     SKIPPED,
+    STALE,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
     summarize_outcomes,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_writer_outcomes import (
+    COMPLETED_BY_OTHER_OWNER,
+    close_after_failed_mutation,
+    commit_or_settle,
+)
 
 # These methods used to live in the coordinator module; pin its logger namespace so log records
 # stay attributable to menhir.services.metric_write_coordinator (same pattern as the
@@ -130,7 +135,7 @@ class MetricReconcileMixin:
         # (1) Expected before-state -> apply.
         return WOULD_REPLAY, diag
 
-    def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _apply(self, request: dict[str, Any], *, owner_token: str) -> dict[str, Any]:
         """Run the saga body under this process's ownership heartbeat (CF-211 part 2).
 
         The heartbeat is what lets a reconciler tell "still running here" from "crashed midway": it
@@ -143,11 +148,14 @@ class MetricReconcileMixin:
         constant -- determines how long an expired claim takes to become recoverable.
         """
         with owned_mutation(
-            self.journal, str(request["op_id"]), operation_kind="METRIC_WRITE"
+            self.journal,
+            str(request["op_id"]),
+            operation_kind="METRIC_WRITE",
+            owner_token=owner_token,
         ):
-            return self._apply_owned(request)
+            return self._apply_owned(request, owner_token=owner_token)
 
-    def _apply_owned(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _apply_owned(self, request: dict[str, Any], *, owner_token: str) -> dict[str, Any]:
         """Preconditioned, idempotent graph mutation for a PREPARED request (plan E3).
 
         Exactly three accepted states -- the precondition is checked BEFORE any mutation, so a
@@ -175,7 +183,13 @@ class MetricReconcileMixin:
         # (2) Already applied by a previous attempt that crashed before COMMITTED. The receipt
         # pointer proves THIS op produced it, so replaying is a no-op, not a conflict.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+            commit_or_settle(
+                self.journal,
+                op_id,
+                owner_token=owner_token,
+                after_graph_work=False,
+                observed="metric already at expected after-state",
+            )
             return {
                 "uuid": str(request["metric_uuid"]), "view_key": key, "op_id": op_id,
                 "created": False, "replayed": True,
@@ -191,7 +205,7 @@ class MetricReconcileMixin:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=diag["observed_error"],
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             if expected_before is None:
                 raise MetricDrift(
@@ -216,10 +230,16 @@ class MetricReconcileMixin:
                 node_uuid=str(request["metric_uuid"]),
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(
+            close_after_failed_mutation(
+                self.journal,
                 op_id,
-                error=f"{type(exc).__name__}: {exc}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
+                exc=exc,
+                prove_before=lambda: expected_before is not None
+                and state_fingerprint(
+                    self.graph_adapter.fetch_metric_state(view_key=key), view_key=key
+                )
+                == expected_before,
             )
             raise
 
@@ -236,7 +256,7 @@ class MetricReconcileMixin:
                     "LWW stale-skip: the graph holds a NEWER version than this operation's frozen "
                     f"valid_at ({request.get('valid_at')}); the write was refused, not applied"
                 ),
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MetricDrift(
                 f"stale replay for {key!r} (op {op_id}): a newer version is current; NOT applied"
@@ -249,15 +269,23 @@ class MetricReconcileMixin:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=f"after-state mismatch expected={expected_after} actual={actual}",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             raise MetricDrift(
                 f"after-state drift for {key!r} (op {op_id}): expected {expected_after}, "
                 f"observed {actual}"
             )
 
-        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+        settled = commit_or_settle(
+            self.journal,
+            op_id,
+            owner_token=owner_token,
+            after_graph_work=True,
+            observed="metric after-state verified",
+        )
         res["op_id"] = op_id
+        if settled == COMPLETED_BY_OTHER_OWNER:
+            res["completed_by_other_owner"] = True
         return res
 
     # ------------------------------------------------------------------ reconciliation
@@ -301,7 +329,9 @@ class MetricReconcileMixin:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
-    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    def replay_prepared_row(
+        self, row: Mapping[str, Any], *, owner_token: str
+    ) -> tuple[str, dict[str, Any]]:
         """Replay ONE PREPARED metric write. The live counterpart to :meth:`classify_prepared_row`.
 
         Extracted so the central dispatcher can replay a row it has just CLAIMED. A whole-backlog
@@ -321,18 +351,18 @@ class MetricReconcileMixin:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error="unparseable request_json",
-                owner_token=oo.process_owner_token(),
+                owner_token=owner_token,
             )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
-            self._apply(request)
+            self._apply(request, owner_token=owner_token)
             logger.info(
                 "metric saga: replayed PREPARED op %s (%s)", op_id, request.get("view_key")
             )
             return REPLAYED, {}
         except StaleTransitionError as exc:
             logger.warning("metric saga: op %s moved under the replay (stale): %s", op_id, exc)
-            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
+            return STALE, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MetricDrift as exc:
             logger.warning("metric saga: op %s drifted; left NEEDS_REVIEW", op_id)
             return DRIFTED, {"observed_error": str(exc)}
@@ -392,7 +422,10 @@ class MetricReconcileMixin:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            live = self.replay_prepared_row(row)[0]
+            # the sweep is only callable by an authority that already owns the rows: act as the owner
+            live = self.replay_prepared_row(
+                row, owner_token=str(row.get("owner_token") or oo.process_owner_token())
+            )[0]
             if live == REPLAYED:
                 replayed += 1
             elif live == DRIFTED:

@@ -625,10 +625,10 @@ def test_unmerge_coordinator_fires_scalar_hook_on_commit():
         def get(self, oid):
             return {"expected_after_sha256": expected_after}
 
-        def mark_committed(self, oid, owner_token=None):
+        def mark_committed(self, oid, owner_token=None, after_graph_work=True):
             pass
 
-        def mark_reversed(self, oid):
+        def mark_reversed(self, oid, owner_token=None):
             pass
 
     seen = []
@@ -641,7 +641,7 @@ def test_unmerge_coordinator_fires_scalar_hook_on_commit():
                                on_unmerge_committed=_hook)
     request = {"op_id": op_id, "survivor_uuid": "entB", "absorbed_uuid": "entA",
                "merge_op_id": "merge-op-1"}
-    out = coord._apply(request, {})
+    out = coord._apply(request, {}, owner_token="tok")
     assert out["restored"] == 1 and out.get("replayed") is True
     # the hook receives BOTH the forward merge id AND the unmerge's OWN op id (for its receipt).
     assert seen == [{"survivor": "entB", "absorbed": "entA",
@@ -664,8 +664,8 @@ def test_unmerge_coordinator_hook_failure_does_not_break_commit():
     class _Journal:
         def _ensure_ready(self): pass
         def get(self, oid): return {"expected_after_sha256": expected_after}
-        def mark_committed(self, oid, owner_token=None): pass
-        def mark_reversed(self, oid): pass
+        def mark_committed(self, oid, owner_token=None, after_graph_work=True): pass
+        def mark_reversed(self, oid, owner_token=None): pass
 
     def _boom(*, survivor_uuid, absorbed_uuid, merge_op_id, unmerge_op_id):
         raise RuntimeError("restore blew up")
@@ -673,7 +673,7 @@ def test_unmerge_coordinator_hook_failure_does_not_break_commit():
     coord = UnmergeCoordinator(graph_adapter=_Adapter(), journal=_Journal(),
                                on_unmerge_committed=_boom)
     out = coord._apply({"op_id": op_id, "survivor_uuid": "entB", "absorbed_uuid": "entA",
-                        "merge_op_id": "m1"}, {})
+                        "merge_op_id": "m1"}, {}, owner_token="tok")
     assert out["restored"] == 1   # unmerge still succeeds; hook error swallowed
 
 

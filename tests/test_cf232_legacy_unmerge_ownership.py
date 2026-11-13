@@ -66,7 +66,7 @@ class _Journal:
     def mark_needs_review(self, op_id: str, observed_error: str = "", owner_token=None) -> None:
         self.events.append(("needs_review", op_id))
 
-    def mark_committed(self, op_id: str, owner_token=None) -> None:
+    def mark_committed(self, op_id: str, owner_token=None, after_graph_work=True) -> None:
         self.events.append(("committed", op_id))
 
     # WriterHeartbeat renews through the journal; accept and record whatever it calls.

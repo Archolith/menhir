@@ -121,7 +121,9 @@ def test_crash_before_the_turn_delete_is_replayed_for_the_turn(tmp_path) -> None
     assert state == "PREPARED"
 
     adapter.fail_delete.clear()
-    outcome, _diagnostics = coord.replay_prepared_row({"op_id": op_id})
+    outcome, _diagnostics = coord.replay_prepared_row(
+        {"op_id": op_id}, owner_token=coord.journal.get(op_id)["owner_token"]
+    )
 
     assert outcome == "REPLAYED"
     assert {"turn-1", "proj-1"} <= set(adapter.deleted)

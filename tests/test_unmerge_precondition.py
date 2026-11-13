@@ -52,10 +52,10 @@ class _Journal:
     def mark_needs_review(self, op_id, observed_error, owner_token=None):
         self.review_calls.append((op_id, observed_error))
 
-    def mark_committed(self, op_id, owner_token=None):
+    def mark_committed(self, op_id, owner_token=None, after_graph_work=True):
         self.commits += 1
 
-    def mark_reversed(self, op_id):
+    def mark_reversed(self, op_id, owner_token=None):
         pass
 
 
@@ -81,7 +81,7 @@ def test_drift_quarantines_and_never_restores():
     coord, adapter, journal, request = _coordinator(_DRIFTED, op_id, expected_before)
 
     with pytest.raises(MergeDrift):
-        coord._apply(request, {})
+        coord._apply(request, {}, owner_token="tok")
 
     assert journal.review_calls, "drift must quarantine to NEEDS_REVIEW"
     assert journal.review_calls[0][0] == op_id
@@ -98,7 +98,7 @@ def test_missing_precondition_fails_closed_and_never_restores():
     request = _request(op_id=op_id)
 
     with pytest.raises(MergeDrift):
-        coord._apply(request, {})
+        coord._apply(request, {}, owner_token="tok")
 
     assert journal.review_calls, "missing precondition must quarantine to NEEDS_REVIEW"
     assert journal.review_calls[0][0] == op_id
@@ -111,7 +111,7 @@ def test_matching_precondition_still_applies():
     expected_before = merge_state_fingerprint(_MERGED, op_id=op_id)
     coord, adapter, journal, request = _coordinator(_MERGED, op_id, expected_before)
 
-    out = coord._apply(request, {})
+    out = coord._apply(request, {}, owner_token="tok")
 
     assert adapter.restore_calls == 1, "matching precondition must still restore"
     assert not journal.review_calls, "no quarantine on a matching precondition"
@@ -125,7 +125,7 @@ def test_already_applied_replay_still_short_circuits():
     coord, adapter, journal, request = _coordinator(_RESTORED, op_id, expected_before=None)
     request = _request(op_id=op_id, expected_before_sha256="irrelevant")
 
-    out = coord._apply(request, {})
+    out = coord._apply(request, {}, owner_token="tok")
 
     assert out["restored"] == 1 and out.get("replayed") is True
     assert adapter.restore_calls == 0, "already-applied replay must NOT mutate"

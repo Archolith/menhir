@@ -140,7 +140,10 @@ def test_t7_replay_purges_derived_item_deleted_before_second_delete_raised(tmp_p
 
     adapter.fail_on.clear()  # the replay's graph delete succeeds; X is already gone, so
     # the real graph reports no derived uuids for it any more.
-    coord.replay_prepared_row({"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"})
+    coord.replay_prepared_row(
+        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"},
+        owner_token=coord.journal.get(op_id)["owner_token"],
+    )
 
     rows = _failure_rows(db, derived_x)
     assert not rows, f"derived item's sidecar row survived the replayed erase: {rows!r}"

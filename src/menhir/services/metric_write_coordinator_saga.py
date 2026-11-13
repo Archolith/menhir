@@ -14,6 +14,7 @@ import uuid as uuidlib
 from typing import Any
 
 from menhir.clock import utc_now_iso as _utc_now_iso
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.services.metric_write_coordinator_common import (
     MetricChainConflict,
@@ -290,6 +291,7 @@ class MetricSagaWriteMixin:
                         f"{previous_receipt_op_id!r} but the committed head is now {head_op!r}; "
                         "the fold was not applied and is safe to retry"
                     )
+            token = oo.new_claim_token()
             self.journal.prepare(
                 operation_kind="METRIC_WRITE",
                 request_json=_canonical(request),
@@ -297,6 +299,7 @@ class MetricSagaWriteMixin:
                 target_key=key,
                 expected_after_sha256=expected_after,
                 op_id=op_id,
+                owner_token=token,
                 conn=conn,
             )
             self.receipts.append(
@@ -319,4 +322,4 @@ class MetricSagaWriteMixin:
             conn.commit()
 
         # (2) MUTATE + (3) VERIFY + (4) COMMITTED
-        return self._apply(request)
+        return self._apply(request, owner_token=token)
