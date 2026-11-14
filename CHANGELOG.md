@@ -8,7 +8,9 @@
   So an audit either commits before the erasure, which then retires it and strips the id, or
   after it, without the id. This covers all three erasure paths: `purge_namespace`,
   `delete_memory_with_scalar_cascade` and `delete_namespace_with_scalar_cascade`. The fence-key
-  rule is now `silo_key_cypher` in `domain/namespace.py`, shared with the erasure code.
+  rule is now `silo_key_cypher` in `domain/namespace.py`, also used by
+  `erase_target_namespace_keys`. An audit that has to wait behind a long erasure is bounded by the
+  30 s statement timeout; a timeout is not retried and is logged at WARNING, as before.
 - #622: identical denials, most often "no turn_evidence_uuid provided", shared one signature, so
   repeats only refreshed a single node. Each `record_admission_audit` call now has a
   `verdict_id` (stored as `admission_verdict_id`), which is the signature, so every verdict is

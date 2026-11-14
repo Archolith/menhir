@@ -476,8 +476,8 @@ class ViewWriteRepositoryMixin:
         # #623: a turn's erasure locks only that turn's namespace fence, then strips the turn id
         # from the views naming it. A view in another namespace may store the id only while this
         # statement holds that fence too and sees the turn live; otherwise the id is dropped and
-        # the record kept. Every fence is locked in sorted key order (deadlock-free against
-        # writers in other namespaces). Tests: test_admission_audit_erasure_race_online.py.
+        # the record kept. Fences are locked in sorted key order, the order seal/release in
+        # erasure_fence.py use. Tests: test_admission_audit_erasure_race_online.py.
         guard_prefix = carry = guard_set = guard_return = ""
         guard_params: dict[str, Any] = {}
         if guarded_turn_evidence_uuid:
