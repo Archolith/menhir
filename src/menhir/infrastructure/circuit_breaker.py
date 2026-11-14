@@ -26,8 +26,37 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-#: Hard-open cooldown after a billing refusal (402, or insufficient_quota 429): one half-open probe per hour, not per 30 s.
-QUOTA_COOLDOWN_SECONDS = 3600.0
+#: Hard-open cooldown after a billing refusal (402, or insufficient_quota 429): one half-open probe
+#: per 5 minutes, not per 30 s. A refused probe costs nothing, and this bounds how long the breaker
+#: stays open after credit is added (#492); there is no operator reset.
+QUOTA_COOLDOWN_SECONDS = 300.0
+
+#: Attribute set on an exception raised through a breaker, naming that breaker. An outer breaker
+#: wrapping a call that contains an inner one (add_episode runs the embedder) must not take the
+#: inner provider's failure as its own (#493).
+BREAKER_ORIGIN_ATTR = "_menhir_breaker"
+
+
+def breaker_origin(exc: BaseException) -> str | None:
+    """The breaker that raised ``exc`` or an exception in its cause/context chain, if any."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        origin = getattr(current, BREAKER_ORIGIN_ATTR, None)
+        if origin:
+            return str(origin)
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def tag_breaker_origin(exc: BaseException, name: str) -> None:
+    """Record that ``exc`` came out of breaker ``name``, unless an inner breaker already did."""
+    if breaker_origin(exc) is None:
+        try:
+            setattr(exc, BREAKER_ORIGIN_ATTR, name)
+        except (AttributeError, TypeError):  # pragma: no cover - exceptions with __slots__
+            pass
 
 
 class CircuitState(StrEnum):
@@ -170,6 +199,7 @@ class CircuitBreaker:
             self._state = CircuitState.CLOSED
             self._failures = 0
             self._opened_at = None
+            self._hard_open_reason = None
         else:
             self._state = CircuitState.OPEN
             self._opened_at = monotonic()
@@ -177,8 +207,17 @@ class CircuitBreaker:
     async def call(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Execute fn with circuit breaker state transitions.
 
-        All state transitions happen inside this method under _lock.
+        Every exception leaving here is tagged with this breaker's name unless an inner breaker
+        tagged it first, so an outer breaker can tell its own provider's failures from another's.
         """
+        try:
+            return await self._call(fn)
+        except Exception as exc:
+            tag_breaker_origin(exc, self.name)
+            raise
+
+    async def _call(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """All state transitions happen inside this method under _lock."""
 
         from menhir.infrastructure.telemetry import record_lifecycle_event
 
@@ -229,6 +268,23 @@ class CircuitBreaker:
             result = await fn()
         except Exception as exc:
             await self._acquire_or_abandon(is_probe, healthy=False)
+            origin = breaker_origin(exc)
+            if origin is not None and origin != self.name:
+                # Another breaker's provider failed inside this call. That says nothing about
+                # this breaker's provider: no failure counted, no hard-open. A probe learned
+                # nothing either, so the breaker returns to OPEN without restarting its
+                # cooldown, and the next caller probes again.
+                try:
+                    if is_probe:
+                        self._state = CircuitState.OPEN
+                        self._probe_in_flight = False
+                    logger.info(
+                        "Circuit breaker %s: %s from breaker %s (state unchanged)",
+                        self.name, type(exc).__name__, origin,
+                    )
+                finally:
+                    self._lock.release()
+                raise
             quota_error = quota_exhausted_error(exc)
             try:
                 if quota_error is not None:
@@ -255,11 +311,14 @@ class CircuitBreaker:
                 elif should_trip_circuit(exc):
                     self._failures += 1
                     if is_probe:
-                        # HALF_OPEN -> OPEN on failed probe
+                        # HALF_OPEN -> OPEN on failed probe. The provider did not refuse for
+                        # billing this time, so the billing hold ends: the normal cooldown
+                        # applies, not another quota interval (#492).
                         previous = self._state
                         self._state = CircuitState.OPEN
                         self._opened_at = monotonic()
                         self._probe_in_flight = False
+                        self._hard_open_reason = None
                         await asyncio.to_thread(
                             partial(
                                 record_lifecycle_event,

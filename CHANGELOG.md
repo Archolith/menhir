@@ -1,3 +1,20 @@
+## 2026-11-14 - Billing refusals: the embed breaker guards every embed, recovers on its own, and is reported
+
+- Graphiti now gets an embedder that runs every `create`/`create_batch` through the embed
+  breaker (#630). Fused search, the cosine lane and ingest's entity embeddings stopped while it
+  is open; search drops to BM25-only without logging the query or a traceback.
+- Each breaker tags the errors it raises. An outer breaker ignores another breaker's errors, so
+  an embedder billing refusal inside `add_episode` opens the embed breaker, not the LLM one
+  (#493).
+- A billing hard-open probes after 5 minutes instead of an hour. A successful probe closes it;
+  a probe that fails for another reason ends the billing hold and uses the normal cooldown
+  (#492: no operator reset tool; recovery after a top-up takes up to 5 minutes).
+- Recall's note says why semantic search is off, for example `semantic search off: embedding
+  provider refused for billing (next probe in 4m); results are keyword-only` (#632).
+- `/readyz` gives a token holder a `provider` block: `degraded` codes, the quota and auth
+  summaries, and the breakers hard-open for billing (#631). `status` and the status code do not
+  change; every deploy readiness check requires `status == "ready"`.
+
 ## 2026-11-14 - SESSION scope is a relevance scope, not access control
 
 - Reverts the SESSION-row filter that #635 added to `memory://recent`, `scope`, `type` and

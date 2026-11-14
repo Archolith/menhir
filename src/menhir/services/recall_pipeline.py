@@ -61,6 +61,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
 from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
@@ -195,6 +196,33 @@ def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
     enter context. Missing, false, or malformed status is ineligible.
     """
     return view.get("recall_eligible") is True
+
+
+def embed_breaker_note(graphiti_client: Any) -> str | None:
+    """Say why semantic matching is off when the embed breaker is not closed (#632).
+
+    Reads the breaker snapshot once per recall; None when closed or unreadable.
+    """
+    snapshots = getattr(graphiti_client, "circuit_breaker_snapshots", None)
+    if not callable(snapshots):
+        return None
+    try:
+        snap = snapshots().get("embed") or {}
+    except Exception:
+        return None
+    state = snap.get("state")
+    if state not in ("open", "half_open"):
+        return None
+    if snap.get("reason") == QUOTA_REASON_CODE:
+        cause = "embedding provider refused for billing"
+    else:
+        cause = "embedding provider unavailable"
+    remaining = float(snap.get("cooldown_remaining_s") or 0.0)
+    if state == "half_open" or remaining <= 0:
+        when = "probe due now"
+    else:
+        when = f"next probe in {max(1, math.ceil(remaining / 60))}m"
+    return f"semantic search off: {cause} ({when}); results are keyword-only"
 
 
 async def _build_source_memories(
@@ -1710,6 +1738,13 @@ async def _run_recall(
     source_memories, source_memory_note, source_memory_ms = await source_memory_task
     if source_memory_ms:
         _t_phases["source_memories"] = source_memory_ms
+    # Read after every lane ran, so a refusal during this recall is reflected; rides on
+    # source_memory_note so all three return paths carry it.
+    breaker_note = embed_breaker_note(service.graphiti_client)
+    if breaker_note:
+        source_memory_note = (
+            f"{breaker_note} | {source_memory_note}" if source_memory_note else breaker_note
+        )
 
     if not candidates:
         if visible_pending_rows:

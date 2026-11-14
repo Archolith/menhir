@@ -22,10 +22,12 @@ try:
     from graphiti_core import Graphiti
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     from graphiti_core.driver.neo4j_driver import Neo4jDriver
+    from graphiti_core.embedder.client import EmbedderClient
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     Graphiti = Any  # type: ignore[assignment]
+    EmbedderClient = object  # type: ignore[assignment,misc]
     OpenAIRerankerClient = None  # type: ignore[assignment]
     Neo4jDriver = None  # type: ignore[assignment]
     OpenAIEmbedder = None  # type: ignore[assignment]
@@ -59,7 +61,7 @@ else:
 
 from menhir.config import MemorySettings  # noqa: E402
 from menhir.config.settings_model import parse_extra_body  # noqa: E402
-from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
+from menhir.infrastructure.circuit_breaker import CircuitBreaker, CircuitOpenError  # noqa: E402
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
 from menhir.infrastructure.graphiti_edge_invalidation import (  # noqa: E402
@@ -250,6 +252,50 @@ def preserved_edge_attributes_kwargs(
     return {"preserved_edge_attributes": PRESERVED_EDGE_ATTRIBUTES}
 
 
+class BreakerGuardedEmbedder(EmbedderClient):  # type: ignore[misc,valid-type]
+    """The embedder Graphiti is handed: every embed goes through the embed breaker.
+
+    Graphiti embeds inside `search_` and `add_episode`, not through `embed_query`, so without
+    this an open embed breaker did not stop those calls (#630), and an embedder billing
+    refusal during ingest surfaced through the LLM breaker that wraps `add_episode` (#493).
+    The breaker is bound by GraphitiClient.__post_init__; until then calls pass straight through.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.breaker: CircuitBreaker | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        # config, client and model attributes read by Graphiti and Menhir's helpers.
+        if name == "inner":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
+    async def _guarded(self, fn: Any) -> Any:
+        if self.breaker is None:
+            return await fn()
+        return await self.breaker.call(fn)
+
+    async def create(self, input_data: Any) -> list[float]:
+        return await self._guarded(lambda: self.inner.create(input_data))
+
+    async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        return await self._guarded(lambda: self.inner.create_batch(input_data_list))
+
+
+def _circuit_open_cause(exc: BaseException) -> CircuitOpenError | None:
+    """Return the CircuitOpenError behind `exc`, if a breaker refused the call (#630)."""
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, CircuitOpenError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
 @dataclass
 class GraphitiClient:
     """Thin wrapper around a configured Graphiti client instance."""
@@ -275,6 +321,9 @@ class GraphitiClient:
         self._llm_breaker = CircuitBreaker(name=f"llm:{self.llm_base_url or 'default'}")
         self._embed_breaker = CircuitBreaker(name=f"embed:{self.embed_base_url or 'default'}")
         self._reranker_breaker = CircuitBreaker(name=f"reranker:{self.reranker_base_url or 'default'}")
+        guarded = getattr(self.client, "embedder", None)
+        if isinstance(guarded, BreakerGuardedEmbedder):
+            guarded.breaker = self._embed_breaker
 
     def _referenced_clients(self) -> list[Any]:
         """Clients still held by live llm/embed/reranker refs, for close-safety checks."""
@@ -521,7 +570,7 @@ class GraphitiClient:
                 password=settings.neo4j_password,
                 graph_driver=graph_driver,
                 llm_client=llm_client,
-                embedder=embedder,
+                embedder=BreakerGuardedEmbedder(embedder),
                 cross_encoder=cross_encoder,
                 single_episode_extraction_hook=MenhirExtractionHook(
                     anchored_time=anchored_time,
@@ -907,11 +956,20 @@ class GraphitiClient:
                 group_ids=group_ids,
             )
         except Exception as exc:
-            if _is_vector_dimension_mismatch_error(exc):
-                logger.warning(
-                    "Graphiti search_scored falling back to bm25-only after vector dimension mismatch: %s",
-                    exc,
-                )
+            breaker_refusal = _circuit_open_cause(exc)
+            if breaker_refusal is not None or _is_vector_dimension_mismatch_error(exc):
+                # An open embed breaker is an expected, already-reported state (#630): degrade to
+                # keyword-only quietly, without logging the query or a traceback per recall.
+                if breaker_refusal is not None:
+                    logger.info(
+                        "Graphiti search_scored using bm25-only: embed breaker open (%s)",
+                        (breaker_refusal.snapshot or {}).get("reason") or "open",
+                    )
+                else:
+                    logger.warning(
+                        "Graphiti search_scored falling back to bm25-only after vector dimension mismatch: %s",
+                        exc,
+                    )
                 fallback_config = SearchConfig(
                     node_config=NodeSearchConfig(
                         search_methods=[NodeSearchMethod.bm25],
@@ -1109,6 +1167,11 @@ class GraphitiClient:
                         2 * num_results,
                     )
             except Exception as exc:
+                if method == "cosine_similarity" and _circuit_open_cause(exc) is not None:
+                    logger.info("Graphiti cosine pass skipped: embed breaker open")
+                    ranked[method] = []
+                    failures[method] = exc
+                    return
                 if method == "cosine_similarity" and _is_vector_dimension_mismatch_error(exc):
                     logger.warning(
                         "Graphiti cosine pass skipped after vector dimension mismatch: %s", exc
