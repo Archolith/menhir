@@ -66,7 +66,7 @@ The plugin has no third-party Python dependencies.
    original user's session (and matching author identity, where Hermes supplies one), with a
    non-bot user-authored message. IDs expire after 24 hours. A failed server write retains the
    proposal; repeat the approval message after fixing connectivity. If Menhir refuses the write
-   outright (HTTP 400, 401, 403, 404, 409 or 422) the notice says so instead: repeating the message
+   outright (HTTP 400, 401, 403, 404 or 422) the notice says so instead: repeating the message
    does nothing until the credential, client registration or namespace is fixed. After approval, check the
    write `status`: `queued` means enrichment is pending, **not** that the memory is searchable.
    Use `menhir_recall` later to verify the completed result.

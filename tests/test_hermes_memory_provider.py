@@ -343,15 +343,35 @@ class HermesMenhirProviderTests(unittest.TestCase):
         self.assertEqual(opener.calls[0][2]["idempotency_key"], opener.calls[1][2]["idempotency_key"])
 
     def test_write_namespace_and_client_name_are_validated_before_any_request(self):
-        for bad in ["", "  ", "has space", "a/b", "a:b", "x" * 65, "new\nline", 7]:
+        for bad in ["has space", "a/b", "a:b", "x" * 65, "new\nline", 7]:
             with self.subTest(write_namespace=bad), self.assertRaises(ValueError):
                 self.provider.save_config({"write_namespace": bad}, self.temp.name)
-        for bad in ["", "has space", "a/b", "x" * 65, "line\r\nInjected: 1"]:
+        for bad in ["has space", "a/b", "x" * 65, "line\r\nInjected: 1"]:
             with self.subTest(client_name=bad), self.assertRaises(ValueError):
                 self.provider.save_config({"client_name": bad}, self.temp.name)
         with self.assertRaises(ValueError):  # the old single-namespace setting is gone, not aliased
             self.provider.save_config({"namespace": "work"}, self.temp.name)
         self.assertFalse((Path(self.temp.name) / "menhir" / "config.json").exists())
+
+    def test_blank_text_fields_reset_to_defaults_instead_of_writing_unscoped(self):
+        self.provider.save_config({"write_namespace": "work", "client_name": "hermes-vm"}, self.temp.name)
+        self.provider.save_config({"write_namespace": "", "client_name": "  "}, self.temp.name)
+        self.provider.initialize("s", hermes_home=self.temp.name)
+        self.assertEqual(self.provider._write_namespace, "hermes")
+        self.assertEqual(self.provider._client_name, "hermes")
+
+    def test_same_fact_in_two_sessions_uses_distinct_idempotency_keys(self):
+        # Menhir returns 409 when one key arrives with a different body; session_id is in the body.
+        self._init(write_enabled=True)
+        opener = _Opener({"episode_id": "e1", "status": "queued"})
+        self.provider._opener = opener
+        for turn, session in enumerate(("hermes-session-1", "hermes-session-2"), start=2):
+            self.provider.on_session_switch(session)
+            staged = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Same fact"}))
+            self.provider.on_turn_start(turn, f"Approve Menhir memory {staged['approval_id']}", author_is_bot=False)
+        first, second = (call[2] for call in opener.calls)
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
 
     def test_wizard_boolean_strings_and_timeout_stays_under_hermes_prefetch_join(self):
         for text, expected in [("yes", True), ("Y", True), ("1", True), ("on", True), (" True ", True),
@@ -373,7 +393,14 @@ class HermesMenhirProviderTests(unittest.TestCase):
         self._init(write_enabled=True)
         proposed = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "A preference"}))
         decision = f"Approve Menhir memory {proposed['approval_id']}"
-        for code in (400, 401, 403, 409, 422):
+        self.provider._opener = _Opener(HTTPError("http://test", 409, "conflict", {}, None))
+        with self.assertLogs(plugin.logger, level="WARNING"):
+            self.provider.on_turn_start(2, decision, author_is_bot=False)
+        conflict = self.provider.prefetch(decision)
+        self.assertIn("HTTP 409", conflict)
+        self.assertNotIn("to retry", conflict)
+        self.assertNotIn("nothing was stored", conflict)  # a 409 means something IS stored
+        for code in (400, 401, 403, 422):
             with self.subTest(code=code):
                 self.provider._opener = _Opener(HTTPError("http://test", code, "refused", {}, None))
                 with self.assertLogs(plugin.logger, level="WARNING"):
@@ -404,7 +431,7 @@ class HermesMenhirProviderTests(unittest.TestCase):
             self.provider.on_turn_start(2, decision, author_is_bot=False)
         notice = self.provider.prefetch(decision)
         self.assertNotIn("accepted", notice)
-        self.assertIn("failed", notice)
+        self.assertIn("reported that storing it failed", notice)
         self.assertTrue((Path(self.temp.name) / "menhir" / "pending" /
                          (proposed["approval_id"] + ".json")).exists())
 

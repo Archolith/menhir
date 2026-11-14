@@ -43,7 +43,8 @@ _CLIENT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 _TRUE_STRINGS = frozenset({"true", "yes", "y", "1", "on"})
 _FALSE_STRINGS = frozenset({"false", "no", "n", "0", "off"})
 # A retry cannot change these outcomes: the request itself, or this credential, was refused.
-_PERMANENT_WRITE_STATUSES = frozenset({400, 401, 403, 404, 409, 422})
+_PERMANENT_WRITE_STATUSES = frozenset({400, 401, 403, 404, 422})
+_SERVER_REPORTED_FAILURE = -1  # HTTP 200 whose receipt says status=failed; not an HTTP status
 
 
 class MenhirRequestError(Exception):
@@ -249,7 +250,11 @@ class MenhirMemoryProvider(MemoryProvider):
 
     def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
         # Hermes' setup wizard stores the secret separately in its scoped .env.
-        _write_config(hermes_home, {key: value for key, value in values.items() if key != "api_key"})
+        # A blank text field from the wizard or dashboard means "use the default", not "empty".
+        _write_config(hermes_home, {
+            key: None if key in {"write_namespace", "client_name"} and isinstance(value, str)
+            and not value.strip() else value
+            for key, value in values.items() if key != "api_key"})
 
     def read_config_fields(self, hermes_home: str) -> dict[str, Any]:
         return {"values": _read_config(hermes_home),
@@ -398,7 +403,11 @@ class MenhirMemoryProvider(MemoryProvider):
             notice = "Menhir memory proposal rejected; nothing was sent to Menhir."
         else:
             episode = pending["episode"]
-            digest = hashlib.sha256((self._write_namespace + "\x00" + episode).encode("utf-8")).hexdigest()
+            # The key covers everything that varies in the request body. Menhir answers 409 when a
+            # key is reused with a different body, so a key without the session would make the
+            # same fact approved in a second session look like a refusal.
+            digest = hashlib.sha256("\x00".join(
+                (self._write_namespace, self._session_id, episode)).encode("utf-8")).hexdigest()
             payload = {"episode": episode, "source": "hermes-agent", "role": "agent",
                        "namespace": self._write_namespace,
                        "idempotency_key": "hermes:" + digest, "session_id": self._session_id}
@@ -406,12 +415,19 @@ class MenhirMemoryProvider(MemoryProvider):
                 receipt = self._post("/memory", payload)
                 if str(receipt.get("status") or "").lower() == "failed":
                     # Menhir answers HTTP 200 with an empty episode_id when ingestion failed.
-                    raise MenhirRequestError("Menhir /memory reported a failed write")
+                    raise MenhirRequestError("Menhir /memory reported a failed write", _SERVER_REPORTED_FAILURE)
                 if not receipt.get("episode_id") or not receipt.get("status"):
                     raise MenhirRequestError("Menhir /memory returned an incomplete write receipt")
             except MenhirRequestError as exc:
                 logger.warning("Approved Menhir write failed: %s", exc)
-                if exc.status in _PERMANENT_WRITE_STATUSES:
+                if exc.status == _SERVER_REPORTED_FAILURE:
+                    notice = ("Menhir received the approved write but reported that storing it failed. "
+                              "The proposal is kept; resend the exact approval message to try again, and "
+                              "check the Menhir server log if it fails twice.")
+                elif exc.status == 409:
+                    notice = ("Menhir already holds a different write under this proposal's key (HTTP 409), "
+                              "so it was not written again. Reject this proposal and stage a new one.")
+                elif exc.status in _PERMANENT_WRITE_STATUSES:
                     # The proposal stays until it expires so it can be approved once the cause is fixed.
                     notice = (f"Menhir refused the approved write (HTTP {exc.status}); nothing was stored and "
                               "resending the approval will not help until the Menhir credential, client "

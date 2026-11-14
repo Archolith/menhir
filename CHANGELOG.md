@@ -9,8 +9,9 @@
   prefetch join.
 - Requests send `X-Menhir-Client-Name` from a new `client_name` setting; `menhir_status` reports
   the write namespace, client name and whether a token is configured.
-- A refused approved write (HTTP 400/401/403/404/409/422) or a `failed` receipt no longer reads as
-  retryable or stored.
+- A refused approved write (HTTP 400/401/403/404/422), a 409 key conflict and a `failed` receipt
+  each get their own notice instead of "resend to retry" or "accepted". The idempotency key now
+  covers the session, so the same fact approved in two sessions cannot collide.
 
 ## 2026-11-13 - Hermes memory writes require a user confirmation turn
 
