@@ -1,3 +1,20 @@
+## 2026-11-14 - SESSION rows stay with their session in resources; the internal dispatch refuses what it cannot scope
+
+- `memory://recent`, `memory://scope/{scope}` and `memory://type/{type}` drop SESSION-scoped
+  rows from other sessions, and `memory://node/{uuid}` reads one as not found. This is the
+  rule recall applies. A caller with no session id sees no SESSION rows. The listings filter
+  after the 10-row fetch, so they can return fewer than 10.
+- `/api/internal/backend/{operation}`:
+  - Refuses every operation to a client with a tool allowlist (client policy or
+    `MENHIR_CLIENT_TOOLS`): it names backend operations, not tools, so it cannot apply one.
+  - For a pinned client, keeps every operation that takes `namespace` (the pin is forced, as
+    before) and the deployment-wide stats `get_memory_stats` shows. It refuses the rest, which
+    address objects by uuid or read every silo; the tools that wrap them check ownership in
+    the tool, which a direct call skipped.
+  - Behaviour change: a pinned or allowlisted client running the stdio server against a
+    remote backend loses those operations and should connect over MCP instead. Production
+    does not mount this route.
+
 ## 2026-11-14 - MCP resources follow the client's tool allowlist and namespace pin
 
 - Each MCP resource now names a governing tool, and a client may read it only if the client
