@@ -103,12 +103,12 @@ def test_unknown_tool_is_refused() -> None:
 
 def test_v3_repin_grants_and_default_leaves_withheld() -> None:
     old = _load(V3)
-    old["profile_catalog"] = 2
+    old["profile_catalog"] = 3
     old = _redigest(old)
     same, changes = script.update_policy(old, production_tool_catalog())
     assert changes == [] and same == old and not _startup_refuses(same)
-    new, changes = script.update_policy(old, production_tool_catalog(), profile_catalog=3)
-    assert changes == ["profile_catalog: 2 -> 3"] and new == _load(V3)
+    new, changes = script.update_policy(old, production_tool_catalog(), profile_catalog=4)
+    assert changes == ["profile_catalog: 3 -> 4"] and new == _load(V3)
     assert not _startup_refuses(new)
 
 

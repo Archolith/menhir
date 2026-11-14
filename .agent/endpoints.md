@@ -273,7 +273,7 @@ Ingest a single document or text file into the memory graph.
 Concept id: `mcp.tool.add_candidate`
 
 Stage a low-trust memory/friction candidate for human review — not recalled until
-approved via `resolve_conflict`/the Explorer's candidate approval flow.
+approved with `review_candidate` (or the Explorer's candidate approval flow).
 - **`content`** (str): The candidate content to stage for review.
 - **`source`** (str): Source label for where this candidate originated.
 - **`cluster_id`** (str): Cluster identifier for grouping related candidates.
@@ -287,6 +287,35 @@ approved via `resolve_conflict`/the Explorer's candidate approval flow.
 - **`notes`** (list[str], optional): Supporting notes or context.
 - **`source_confidence`** (float, optional): Confidence level from 0.0 to 1.0 (default: 0.5).
 - Returns confirmation with the candidate uuid, cluster_id, and review status.
+
+### `list_candidates`
+Concept id: `mcp.tool.list_candidates`
+
+Read-only list of candidates awaiting review, newest activity first (#431).
+- **`namespace`** (str, optional): Silo. Empty spans all, and each candidate shows its
+  `namespace=`. A pinned client always gets its own silo.
+- **`limit`** (int, optional): Max rows (default 20, clamped to 1..100).
+- **`source`** (str, optional): Filter on the `add_candidate` source label.
+- Each candidate shows uuid, label, kind, type, source, evidence, sessions, last seen, a
+  content excerpt and up to three notes. The list opens with a line marking its text as
+  unreviewed and untrusted.
+
+### `review_candidate`
+Concept id: `mcp.tool.review_candidate`
+
+Approve or reject one candidate (operator tier, #431).
+- **`uuid`** (str): The candidate's uuid.
+- **`decision`** (str): `approve` or `reject`.
+- **`namespace`** (str, optional): Silo. A candidate that exists in another silo is refused;
+  the backend write is scoped in the same statement, so the read is never the authority.
+- `approve` embeds the candidate's name (candidates are written without one, so an approved
+  candidate would otherwise be invisible to vector recall), flips it to `PERSISTENT` in one
+  statement, then runs the contradiction check consolidation uses. The embed and the check are
+  best-effort: the reply says when the name could not be embedded and how many possible
+  contradictions were found.
+- `reject` deletes the candidate. No suppression is recorded, so the same emitter can stage
+  it again.
+- A candidate that is already approved, rejected or missing reads as not found.
 
 ### `get_enrichment_status`
 Concept id: `mcp.tool.get_enrichment_status`
@@ -760,7 +789,8 @@ One read-only view of everything waiting on the owner's decision.
   none stale reads `unknown` and points at `list_todos` rather than claiming `none`.
 - Each section's read is bounded at 20s. A failing or hung section renders
   `unavailable (<ExceptionType>)` (`TimeoutError` for a hang) and the rest still render.
-- The candidates section opens with a line marking its text as unreviewed and untrusted.
+- The candidates section opens with a line marking its text as unreviewed and untrusted, and
+  points at `review_candidate` to act.
 
 ### `get_artifact_relationships`
 Concept id: `mcp.tool.get_artifact_relationships`

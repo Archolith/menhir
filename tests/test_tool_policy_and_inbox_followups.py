@@ -175,9 +175,10 @@ def test_in_process_header_is_unchanged() -> None:
     assert _inbox(_empty_backend(MagicMock())).splitlines()[0] == "Review inbox (all namespaces)"
 
 
-def test_candidates_line_says_production_does_not_serve_the_explorer() -> None:
+def test_candidates_line_points_at_the_mcp_review_tools() -> None:
+    # #431: review now exists over MCP, so the inbox points there instead of the explorer.
     backend = _empty_backend(MagicMock())
     backend.list_candidates = AsyncMock(return_value=[{"uuid": "c-1", "label": "x"}])
     act = next(line for line in _inbox(backend).splitlines() if "Act with:" in line)
-    assert "#431" in act
-    assert "production does not" in act
+    assert "review_candidate" in act
+    assert "list_candidates" in act

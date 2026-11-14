@@ -1,3 +1,25 @@
+## 2026-11-13 - Candidates can be reviewed over MCP: list_candidates and review_candidate (#431)
+
+- #431: `add_candidate` staged claims that nothing on a production surface could list, approve
+  or reject; only the explorer could, and production does not serve it. Two tools close that:
+  - `list_candidates` (readonly, `curate`): candidates awaiting review, newest first, with
+    their silo, evidence, content excerpt and notes, under a line marking the text untrusted.
+  - `review_candidate(uuid, decision)` (operator, `curate`): `approve` or `reject`.
+- A scoped caller cannot approve or reject another silo's candidate. The silo is checked in the
+  write statement itself, and the candidate fetch, promote, reject and approve backend
+  operations now declare `namespace`, so the internal dispatch forces a pinned client's silo
+  onto them as it does for `list_candidates`. A candidate that exists in another silo is
+  refused by name; a missing one reads as not found.
+- Approval now embeds the candidate's name and writes the embedding with the scope flip.
+  Candidates are created without one, so an approved candidate was invisible to vector recall.
+  The embed is best-effort, and the reply says when it failed.
+- Approve and reject lock the candidate before re-reading its scope. Without that, a reject
+  queued behind an approve deleted the memory the approve had just made `PERSISTENT`.
+- Tool catalog 4. A client policy pinned to catalog 3, such as production's, withholds both
+  tools until it is re-pinned. `review_inbox` now points at these tools.
+- The keyless local default still leaves out `add_candidate`: in that profile the agent that
+  stages a claim could also approve it, and whether to allow that is undecided.
+
 ## 2026-11-13 - A keyless local agent gets the core and curate tools, not every tool (#439, #431, #430)
 
 - #439: with no keys configured, an agent connecting to a local install got the operator tier

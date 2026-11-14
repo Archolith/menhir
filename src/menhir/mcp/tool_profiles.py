@@ -13,6 +13,7 @@ where its catalog put it. Release notes list every bump.
 
 Catalog 2: ``get_client_context`` moved from operate to core.
 Catalog 3: ``delete_memories`` and ``list_namespace_memories`` added to curate (#476).
+Catalog 4: ``list_candidates`` and ``review_candidate`` added to curate (#431).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 
 from menhir.tiers import TIER_RANK, tier_allows
 
-CATALOG_VERSION = 3
+CATALOG_VERSION = 4
 
 CORE = "core"
 CURATE = "curate"
@@ -59,6 +60,8 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "delete_memories": (CURATE, 3),
     "list_namespace_memories": (CURATE, 3),
     "add_candidate": (CURATE, 1),
+    "list_candidates": (CURATE, 4),
+    "review_candidate": (CURATE, 4),
     "add_memory_and_track": (CURATE, 1),
     "rate_recall": (CURATE, 1),
     "review_inbox": (CURATE, 1),

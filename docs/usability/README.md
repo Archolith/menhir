@@ -50,8 +50,9 @@ Each principle has the rule, the reason, and an example from Menhir.
 
 4. **Every feature is reachable where it ships.** If a feature writes something a human must act
    on, the action must exist in every supported deployment.
-   *Why:* a queue nobody can drain is worse than no queue. *Example:* `add_candidate` stages
-   claims that can only be approved in the explorer, which production does not serve ([#431]).
+   *Why:* a queue nobody can drain is worse than no queue. *Example:* `add_candidate` staged
+   claims that could only be approved in the explorer, which production does not serve, until
+   `list_candidates` and `review_candidate` were added ([#431]).
 
 5. **Every error names the next step.** Say what failed, whether anything changed, and what to do.
    *Why:* the reader is often an agent that will otherwise retry or give up. *Example of the

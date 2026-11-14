@@ -823,21 +823,29 @@ class RuntimeProviderAdminOpsMixin:
             )
         )
 
-    async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
+    async def fetch_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        scope = {"namespace": namespace} if namespace else {}
         return _to_jsonable(
-            await self._off_loop(self.built.graph_adapter.fetch_candidate, uuid)
+            await self._off_loop(self.built.graph_adapter.fetch_candidate, uuid, **scope)
         )
 
-    async def promote_candidate(self, uuid: str) -> bool:
+    async def promote_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
+        scope = {"namespace": namespace} if namespace else {}
         return bool(
-            await self._off_loop(self.built.graph_adapter.promote_candidate, uuid)
+            await self._off_loop(self.built.graph_adapter.promote_candidate, uuid, **scope)
         )
 
-    async def reject_candidate(self, uuid: str) -> bool:
+    async def reject_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
+        scope = {"namespace": namespace} if namespace else {}
         return bool(
-            await self._off_loop(self.built.graph_adapter.reject_candidate, uuid)
+            await self._off_loop(self.built.graph_adapter.reject_candidate, uuid, **scope)
         )
 
-    async def approve_candidate(self, uuid: str) -> dict[str, Any]:
-        # Service-level approval: promote + synchronous contradiction check.
-        return _to_jsonable(await self.built.candidate_service.approve(uuid))
+    async def approve_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        # Service-level approval: name embedding + promote + synchronous contradiction check.
+        scope = {"namespace": namespace} if namespace else {}
+        return _to_jsonable(await self.built.candidate_service.approve(uuid, **scope))

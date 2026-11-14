@@ -82,7 +82,7 @@ async def test_all_sections_render_with_items_and_acting_tools() -> None:
     assert "Failed enrichments (1):" in out and "uuid=ep-1" in out and "llm timeout" in out
     assert "get_enrichment_status" in out and "force_reenrich" in out
     assert "Candidates awaiting review (1):" in out and "uuid=c-1" in out
-    assert "#431" in out and "explorer" in out
+    assert "list_candidates" in out and "review_candidate" in out
     assert "Stale TODOs (1" in out and "TODO" in out and "uuid=t-1" in out
     assert "resolve_todo, close_todo, supersede_todo" in out
     assert "Open artifact questions (1):" in out and "question_uuid=q-1" in out and "Plan A" in out

@@ -25,7 +25,9 @@ from menhir.mcp.tool_profiles import (
 )
 
 DEFAULT_PROFILES: tuple[str, ...] = (CORE, CURATE)
-#: add_candidate stages claims that no production path can list, approve or reject (#431).
+#: add_candidate stays out of the keyless default. Review exists now (list_candidates,
+#: review_candidate, #431), but in this profile the agent that stages a claim could also
+#: approve it; whether to allow that is an open decision.
 DEFAULT_DENY: tuple[str, ...] = ("add_candidate",)
 
 

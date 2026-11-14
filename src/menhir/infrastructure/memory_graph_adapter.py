@@ -2532,14 +2532,22 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, Any]]:
         return self._candidates.list_candidates(source=source, limit=limit, namespace=namespace)
 
-    def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
-        return self._candidates.fetch_candidate(uuid)
+    def fetch_candidate(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any] | None:
+        return self._candidates.fetch_candidate(uuid, namespace=namespace)
 
-    def promote_candidate(self, uuid: str) -> bool:
-        return self._candidates.promote_candidate(uuid)
+    def promote_candidate(
+        self,
+        uuid: str,
+        *,
+        namespace: str | None = None,
+        name_embedding: list[float] | None = None,
+    ) -> bool:
+        return self._candidates.promote_candidate(
+            uuid, namespace=namespace, name_embedding=name_embedding
+        )
 
-    def reject_candidate(self, uuid: str) -> bool:
-        return self._candidates.reject_candidate(uuid)
+    def reject_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
+        return self._candidates.reject_candidate(uuid, namespace=namespace)
 
     # -------------------------------------------------------------------------
     # L4 ARTIFACT delegates → ArtifactRepository

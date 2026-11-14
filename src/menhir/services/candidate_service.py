@@ -46,18 +46,45 @@ class CandidateService:
             self.graph_adapter.list_candidates, source=source, limit=limit, **scope
         )
 
-    async def approve(self, uuid: str) -> dict[str, Any]:
+    async def _name_embedding(self, name: str) -> list[float] | None:
+        """Embed the candidate's name the way Graphiti embeds an entity name, or None.
+
+        Candidates are written by raw Cypher with no ``name_embedding``; without one an approved
+        candidate is invisible to vector recall (#431). Best-effort: no embedder or a failed call
+        still approves, and the result reports ``name_embedded: false``.
+        """
+        text = (name or "").replace("\n", " ").strip()
+        client = getattr(self.lifecycle_service, "graphiti_client", None)
+        embed = getattr(client, "embed_query", None)
+        if not text or embed is None:
+            return None
+        try:
+            vector = await embed(text)
+        except Exception:  # best-effort: never fail an approval on an embed error
+            logger.warning("Name embedding failed for approved candidate", exc_info=True)
+            return None
+        return list(vector) if vector else None
+
+    async def approve(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any]:
         """Approve a candidate: promote to PERSISTENT, then run the contradiction check.
 
         Returns a status dict. The contradiction check is best-effort - if semantic
         search is unavailable the promotion still stands and conflicts are caught by
-        the next scheduled conflict scan.
+        the next scheduled conflict scan. ``namespace`` (opt-in) confines the fetch and the
+        promotion to that silo; a candidate in another silo reads as not_found.
         """
-        candidate = await asyncio.to_thread(self.graph_adapter.fetch_candidate, uuid)
+        scope: dict[str, Any] = {"namespace": namespace} if namespace else {}
+        candidate = await asyncio.to_thread(self.graph_adapter.fetch_candidate, uuid, **scope)
         if candidate is None:
             return {"status": "not_found", "uuid": uuid}
 
-        promoted = await asyncio.to_thread(self.graph_adapter.promote_candidate, uuid)
+        embedding = await self._name_embedding(str(candidate.get("name") or ""))
+        promote_kwargs = dict(scope)
+        if embedding is not None:
+            promote_kwargs["name_embedding"] = embedding
+        promoted = await asyncio.to_thread(
+            self.graph_adapter.promote_candidate, uuid, **promote_kwargs
+        )
         if not promoted:
             # Lost a race (already promoted/rejected) - treat as not found.
             return {"status": "not_found", "uuid": uuid}
@@ -86,15 +113,20 @@ class CandidateService:
             "scope": "PERSISTENT",
             "cluster_id": candidate.get("cluster_id"),
             "conflicts_detected": conflicts_detected,
+            "name_embedded": embedding is not None,
         }
 
-    async def reject(self, uuid: str) -> dict[str, Any]:
-        """Reject a candidate: delete the CANDIDATE node. Returns a status dict."""
-        candidate = await asyncio.to_thread(self.graph_adapter.fetch_candidate, uuid)
+    async def reject(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any]:
+        """Reject a candidate: delete the CANDIDATE node. Returns a status dict.
+
+        ``namespace`` (opt-in) confines the fetch and the delete to that silo.
+        """
+        scope: dict[str, Any] = {"namespace": namespace} if namespace else {}
+        candidate = await asyncio.to_thread(self.graph_adapter.fetch_candidate, uuid, **scope)
         if candidate is None:
             return {"status": "not_found", "uuid": uuid}
 
-        rejected = await asyncio.to_thread(self.graph_adapter.reject_candidate, uuid)
+        rejected = await asyncio.to_thread(self.graph_adapter.reject_candidate, uuid, **scope)
         if not rejected:
             return {"status": "not_found", "uuid": uuid}
 

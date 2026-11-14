@@ -180,10 +180,7 @@ class ReviewInboxTool(BaseTextTool):
             silo = "" if ns else f" namespace={_candidate_silo(row)}"
             label = _label(row.get("label") or row.get("name") or row.get("content"))
             items.append(f"  uuid={row.get('uuid') or '?'}{silo} - {label}")
-        items.append(
-            "  Act with: approval is not available over MCP yet (#431); the explorer can "
-            "approve them, but only on a server that serves it (production does not)"
-        )
+        items.append("  Act with: list_candidates (detail), review_candidate (approve or reject)")
         return f"Candidates awaiting review ({_count(len(rows), cap, more)}):", items
 
     async def _stale_todos(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
