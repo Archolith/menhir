@@ -414,3 +414,18 @@ def test_agent_smith_cimd_scope_falls_back_when_client_not_in_policy(tmp_path: P
     assert _metadata_scope(authority, "claude") == (
         "menhir:read menhir:write menhir:admin offline_access"
     )
+
+
+@pytest.mark.parametrize("value", ["silo-a", "  silo-a ", None, 7])
+def test_a_client_namespace_is_refused_because_nothing_enforces_it(tmp_path, value) -> None:
+    payload = _payload()
+    payload["clients"][CHATGPT]["namespace"] = value
+    with pytest.raises(ValueError, match="MENHIR_CLIENT_NAMESPACES"):
+        _load(tmp_path, payload)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_client_namespace_still_loads(tmp_path, value) -> None:
+    payload = _payload()
+    payload["clients"][CHATGPT]["namespace"] = value
+    assert _load(tmp_path, payload).clients[CHATGPT].namespace == ""

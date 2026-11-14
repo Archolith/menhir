@@ -1,3 +1,20 @@
+## 2026-11-14 - MCP resources follow the client's tool allowlist and namespace pin
+
+- Each MCP resource now names a governing tool, and a client may read it only if the client
+  policy (or `MENHIR_CLIENT_TOOLS` without one) allows that tool. Resources also check client
+  identity first, as tools do. The memory resources (`memory://recent`, `node`, `scope`,
+  `search`, `type`) follow `recall_memories`; `system/metadata` and `system/dependency-health`
+  follow `get_memory_stats`; `system/lifecycle-trace` follows `get_episode_trace`;
+  `system/processing-queue` follows `list_enrichment_queue`. Behaviour change: a client
+  restricted to the `core` profile, or to a short `MENHIR_CLIENT_TOOLS` list, can no longer
+  read the `system/*` resources.
+- A client pinned to a namespace is refused `system/lifecycle-trace` and
+  `system/processing-queue`, which have no per-namespace filter, and gets `system/metadata`'s
+  graph counts for its own namespace only. The lifecycle trace withholds tracebacks below
+  operator tier, as `get_episode_trace` does.
+- A production client policy that sets a non-empty `namespace` on a client now refuses to load.
+  Nothing enforced that field; pinning is `MENHIR_CLIENT_NAMESPACES`.
+
 ## 2026-11-13 - v0.3.11: candidate review over MCP, tool catalog 4
 
 - Ships every entry below back to v0.3.10. Deploy-relevant:
