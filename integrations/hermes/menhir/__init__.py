@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -30,11 +31,27 @@ _MAX_EPISODE_CHARS = 4_000
 _CACHE_SECONDS = 45.0
 _CIRCUIT_FAILURES = 3
 _CIRCUIT_COOLDOWN_SECONDS = 30.0
-_CONFIG_FIELDS = frozenset({"base_url", "namespace", "write_enabled", "max_tokens", "timeout_seconds"})
+DEFAULT_WRITE_NAMESPACE = "hermes"
+DEFAULT_CLIENT_NAME = "hermes"
+# Hermes joins the prefetch thread after 8 s; a slower call would be abandoned mid-request.
+_MAX_TIMEOUT_SECONDS = 6.0
+_CONFIG_FIELDS = frozenset({"base_url", "write_namespace", "client_name", "write_enabled",
+                            "max_tokens", "timeout_seconds"})
+# Menhir's REST layer does not validate a namespace; a bad one is accepted and fails in enrichment.
+_NAMESPACE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_CLIENT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+_TRUE_STRINGS = frozenset({"true", "yes", "y", "1", "on"})
+_FALSE_STRINGS = frozenset({"false", "no", "n", "0", "off"})
+# A retry cannot change these outcomes: the request itself, or this credential, was refused.
+_PERMANENT_WRITE_STATUSES = frozenset({400, 401, 403, 404, 409, 422})
 
 
 class MenhirRequestError(Exception):
     """A transport or protocol problem, with no response body or secret values in its message."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -69,8 +86,13 @@ def _api_url(value: str) -> str:
 def _bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.lower() in {"true", "false"}:
-        return value.lower() == "true"
+    # Hermes' setup wizard passes what the user typed (yes/no), not a JSON boolean.
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
     raise ValueError("write_enabled must be true or false")
 
 
@@ -81,11 +103,16 @@ def _validate_config(values: dict[str, Any]) -> dict[str, Any]:
     result = dict(values)
     if "base_url" in result:
         result["base_url"] = _api_url(result["base_url"])
-    if "namespace" in result:
-        namespace = result["namespace"]
-        if not isinstance(namespace, str) or len(namespace) > 128 or any(c in namespace for c in "\r\n\x00"):
-            raise ValueError("Menhir namespace must be a string up to 128 characters")
-        result["namespace"] = namespace.strip()
+    if "write_namespace" in result:
+        namespace = result["write_namespace"]
+        if not isinstance(namespace, str) or not _NAMESPACE_PATTERN.fullmatch(namespace.strip()):
+            raise ValueError("Menhir write_namespace must be 1-64 letters, digits, dashes or underscores")
+        result["write_namespace"] = namespace.strip()
+    if "client_name" in result:
+        client_name = result["client_name"]
+        if not isinstance(client_name, str) or not _CLIENT_NAME_PATTERN.fullmatch(client_name.strip()):
+            raise ValueError("Menhir client_name must be 1-64 letters, digits, dots, dashes or underscores")
+        result["client_name"] = client_name.strip()
     if "write_enabled" in result:
         result["write_enabled"] = _bool(result["write_enabled"])
     if "max_tokens" in result:
@@ -97,8 +124,8 @@ def _validate_config(values: dict[str, Any]) -> dict[str, Any]:
         result["max_tokens"] = number
     if "timeout_seconds" in result:
         number = result["timeout_seconds"]
-        if type(number) not in {int, float} or not 0.25 <= number <= 10:
-            raise ValueError("Menhir timeout_seconds must be between 0.25 and 10")
+        if type(number) not in {int, float} or not 0.25 <= number <= _MAX_TIMEOUT_SECONDS:
+            raise ValueError(f"Menhir timeout_seconds must be between 0.25 and {_MAX_TIMEOUT_SECONDS:g}")
     return result
 
 
@@ -178,7 +205,8 @@ class MenhirMemoryProvider(MemoryProvider):
 
     def __init__(self) -> None:
         self._base_url = DEFAULT_BASE_URL
-        self._namespace = ""
+        self._write_namespace = DEFAULT_WRITE_NAMESPACE
+        self._client_name = DEFAULT_CLIENT_NAME
         self._write_enabled = False
         self._max_tokens = 800
         self._timeout_seconds = 2.5
@@ -207,7 +235,12 @@ class MenhirMemoryProvider(MemoryProvider):
         return [
             {"key": "base_url", "description": "Menhir REST URL ending in /api",
              "default": DEFAULT_BASE_URL, "required": True},
-            {"key": "namespace", "description": "Menhir namespace (blank uses the server default)", "default": ""},
+            {"key": "write_namespace",
+             "description": "Namespace Hermes writes into (reads search every namespace the credential can see)",
+             "default": DEFAULT_WRITE_NAMESPACE},
+            {"key": "client_name", "description": "Client name sent to Menhir (must match a registered client "
+                                                  "when the server restricts clients)",
+             "default": DEFAULT_CLIENT_NAME},
             {"key": "api_key", "description": "Menhir agent-tier bearer key (optional for local no-auth mode)",
              "secret": True, "env_var": "HERMES_MENHIR_TOKEN"},
             {"key": "write_enabled", "description": "Expose the explicit menhir_remember tool (default off)",
@@ -220,7 +253,8 @@ class MenhirMemoryProvider(MemoryProvider):
 
     def read_config_fields(self, hermes_home: str) -> dict[str, Any]:
         return {"values": _read_config(hermes_home),
-                "placeholders": {"base_url": DEFAULT_BASE_URL, "namespace": "(server default)"}}
+                "placeholders": {"base_url": DEFAULT_BASE_URL, "write_namespace": DEFAULT_WRITE_NAMESPACE,
+                                 "client_name": DEFAULT_CLIENT_NAME}}
 
     def write_config_fields(self, values: dict[str, Any], hermes_home: str) -> None:
         self.save_config(values, hermes_home)
@@ -231,14 +265,15 @@ class MenhirMemoryProvider(MemoryProvider):
             raise ValueError("Hermes must supply its profile-specific hermes_home")
         config = _read_config(str(home))
         self._base_url = _api_url(config.get("base_url", DEFAULT_BASE_URL))
-        self._namespace = config.get("namespace", "")
+        self._write_namespace = config.get("write_namespace", DEFAULT_WRITE_NAMESPACE)
+        self._client_name = config.get("client_name", DEFAULT_CLIENT_NAME)
         self._write_enabled = config.get("write_enabled", False)
         self._max_tokens = config.get("max_tokens", 800)
         self._timeout_seconds = config.get("timeout_seconds", 2.5)
         self._token = (get_secret("HERMES_MENHIR_TOKEN") or "").strip()
         self._session_id = session_id
         self._agent_context = kwargs.get("agent_context", "primary")
-        self._approvals = PendingApprovalStore(str(home), self._namespace)
+        self._approvals = PendingApprovalStore(str(home), self._write_namespace)
         self._initialized = True
 
     def system_prompt_block(self) -> str:
@@ -246,7 +281,7 @@ class MenhirMemoryProvider(MemoryProvider):
             return ""
         writer = ("Use menhir_remember only on an explicit request to remember. It STAGES the memory; "
                   "only an actual user message approving its ID causes a write.") if self._write_enabled else (
-            "Writes to Menhir are disabled; do not claim to have saved a memory."
+            "Writes to Menhir are disabled; menhir_remember will refuse. Do not claim to have saved a memory."
         )
         return ("# Menhir long-term memory\n"
                 "Relevant historical context is recalled before substantive turns. "
@@ -257,7 +292,7 @@ class MenhirMemoryProvider(MemoryProvider):
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._initialized:
             raise MenhirRequestError("Menhir provider is not initialized")
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", "X-Menhir-Client-Name": self._client_name}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         if payload is not None:
@@ -268,7 +303,7 @@ class MenhirMemoryProvider(MemoryProvider):
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 data = response.read(_MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            raise MenhirRequestError(f"Menhir {path} returned HTTP {exc.code}") from None
+            raise MenhirRequestError(f"Menhir {path} returned HTTP {exc.code}", exc.code) from None
         except (URLError, TimeoutError, OSError) as exc:
             raise MenhirRequestError(f"Menhir {path} is unreachable ({type(exc).__name__})") from None
         if len(data) > _MAX_RESPONSE_BYTES:
@@ -286,11 +321,6 @@ class MenhirMemoryProvider(MemoryProvider):
 
     def _get(self, path: str) -> dict[str, Any]:
         return self._request("GET", path)
-
-    def _scope(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._namespace:
-            payload["namespace"] = self._namespace
-        return payload
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         if not self._initialized:
@@ -313,8 +343,9 @@ class MenhirMemoryProvider(MemoryProvider):
             if now < self._circuit_until:
                 return notice
         try:
-            result = self._post("/context", self._scope({"query": clean_query,
-                                                         "max_tokens": self._max_tokens, "preset": "knowledge"}))
+            # Reads carry no namespace: Menhir then searches every namespace this credential may see.
+            result = self._post("/context", {"query": clean_query,
+                                             "max_tokens": self._max_tokens, "preset": "knowledge"})
         except MenhirRequestError as exc:
             with self._cache_lock:
                 self._consecutive_failures += 1
@@ -340,7 +371,11 @@ class MenhirMemoryProvider(MemoryProvider):
         return "\n\n".join(part for part in (notice, context_block) if part)
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
-        return [_RECALL_TOOL, _STATUS_TOOL, _REMEMBER_TOOL] if self._write_enabled else [_RECALL_TOOL, _STATUS_TOOL]
+        # Hermes builds its tool routing table from this list when the provider is registered,
+        # before initialize() has read the profile config. The set must not depend on config,
+        # or menhir_remember would be advertised later with no route. The handler enforces
+        # write_enabled.
+        return [_RECALL_TOOL, _STATUS_TOOL, _REMEMBER_TOOL]
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs: Any) -> None:
         # A model cannot authorize its own memory writes by calling another tool. Only a
@@ -363,16 +398,26 @@ class MenhirMemoryProvider(MemoryProvider):
             notice = "Menhir memory proposal rejected; nothing was sent to Menhir."
         else:
             episode = pending["episode"]
-            digest = hashlib.sha256((self._namespace + "\x00" + episode).encode("utf-8")).hexdigest()
-            payload = self._scope({"episode": episode, "source": "hermes-agent", "role": "agent",
-                                   "idempotency_key": "hermes:" + digest, "session_id": self._session_id})
+            digest = hashlib.sha256((self._write_namespace + "\x00" + episode).encode("utf-8")).hexdigest()
+            payload = {"episode": episode, "source": "hermes-agent", "role": "agent",
+                       "namespace": self._write_namespace,
+                       "idempotency_key": "hermes:" + digest, "session_id": self._session_id}
             try:
                 receipt = self._post("/memory", payload)
+                if str(receipt.get("status") or "").lower() == "failed":
+                    # Menhir answers HTTP 200 with an empty episode_id when ingestion failed.
+                    raise MenhirRequestError("Menhir /memory reported a failed write")
                 if not receipt.get("episode_id") or not receipt.get("status"):
                     raise MenhirRequestError("Menhir /memory returned an incomplete write receipt")
             except MenhirRequestError as exc:
                 logger.warning("Approved Menhir write failed: %s", exc)
-                notice = "Approved Menhir write failed; resend the exact approval message to retry."
+                if exc.status in _PERMANENT_WRITE_STATUSES:
+                    # The proposal stays until it expires so it can be approved once the cause is fixed.
+                    notice = (f"Menhir refused the approved write (HTTP {exc.status}); nothing was stored and "
+                              "resending the approval will not help until the Menhir credential, client "
+                              "registration or namespace is fixed.")
+                else:
+                    notice = "Approved Menhir write failed; resend the exact approval message to retry."
             else:
                 self._approvals.remove(approval_id)
                 with self._cache_lock:
@@ -387,6 +432,13 @@ class MenhirMemoryProvider(MemoryProvider):
         self._session_id = new_session_id
         self._current_author_id = ""
 
+    def _local_status(self) -> dict[str, Any]:
+        # token_configured tells a gateway that did not inherit the profile .env from one that did.
+        return {"read_scope": "all namespaces this credential can see",
+                "write_namespace": self._write_namespace, "client_name": self._client_name,
+                "token_configured": bool(self._token), "write_enabled": self._write_enabled,
+                "writes_require_confirmation": True}
+
     def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs: Any) -> str:
         try:
             if not self._initialized:
@@ -395,14 +447,12 @@ class MenhirMemoryProvider(MemoryProvider):
                 try:
                     status = self._get("/ready")
                 except MenhirRequestError as exc:
-                    return json.dumps({"state": "unreachable", "error": str(exc),
-                                       "namespace": self._namespace or "(server default)"})
+                    return json.dumps({"state": "unreachable", "error": str(exc), **self._local_status()})
                 server_status = str(status.get("status") or "unknown").lower()
                 if server_status not in {"ready", "degraded", "starting"}:
                     server_status = "unknown"
                 return json.dumps({"state": "connected", "server_status": server_status,
-                                   "namespace": self._namespace or "(server default)",
-                                   "writes_require_confirmation": True})
+                                   **self._local_status()})
             if tool_name == "menhir_recall":
                 query = args.get("query")
                 if not isinstance(query, str) or not query.strip() or len(query) > 2500:
@@ -412,9 +462,9 @@ class MenhirMemoryProvider(MemoryProvider):
                 limit = args.get("limit", 5)
                 if type(limit) is not int or not 1 <= limit <= 15:
                     return json.dumps({"error": "limit must be an integer from 1 to 15"})
-                payload = self._scope({"query": query.strip(), "preset": "knowledge", "limit": limit,
-                                       "include_session": True, "include_superseded": False,
-                                       "include_invalidated": False})
+                payload = {"query": query.strip(), "preset": "knowledge", "limit": limit,
+                           "include_session": True, "include_superseded": False,
+                           "include_invalidated": False}
                 response = self._post("/recall", payload)
                 results = response.get("results", [])
                 if not isinstance(results, list):

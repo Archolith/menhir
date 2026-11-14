@@ -1,3 +1,17 @@
+## 2026-11-14 - Hermes reads every namespace and writes only to its own
+
+- `integrations/hermes/menhir/`: the `namespace` setting is replaced by `write_namespace` (default
+  `hermes`, validated). Context and recall requests carry no namespace; approved writes always
+  carry the write namespace, which also binds pending approvals and the idempotency key.
+- The provider now matches Hermes v0.23.1's contract: the tool list no longer changes after
+  `initialize()` (a write-enabled profile advertised `menhir_remember` with no route), the wizard's
+  yes/no answers are accepted, and `timeout_seconds` is capped at 6 to stay under Hermes' 8-second
+  prefetch join.
+- Requests send `X-Menhir-Client-Name` from a new `client_name` setting; `menhir_status` reports
+  the write namespace, client name and whether a token is configured.
+- A refused approved write (HTTP 400/401/403/404/409/422) or a `failed` receipt no longer reads as
+  retryable or stored.
+
 ## 2026-11-13 - Hermes memory writes require a user confirmation turn
 
 - `integrations/hermes/menhir/approval.py` and provider: `menhir_remember` now creates a

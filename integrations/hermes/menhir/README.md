@@ -34,8 +34,9 @@ The plugin has no third-party Python dependencies.
    hermes memory status
    ```
 
-   Select **menhir**. Enter the REST endpoint, optional namespace (blank for the server default),
-   and an agent-tier bearer key if your Menhir server requires authentication. The wizard stores
+   Select **menhir**. Enter the REST endpoint, the namespace Hermes should write into (default
+   `hermes`), the client name the server knows this Hermes by (default `hermes`), and an
+   agent-tier bearer key if your Menhir server requires authentication. The wizard stores
    the key as `HERMES_MENHIR_TOKEN` in Hermes' profile-scoped secret environment, not in this
    provider's JSON. For a hosted Menhir instance, use **HTTPS**, not plain HTTP.
 
@@ -45,7 +46,10 @@ The plugin has no third-party Python dependencies.
 
 4. Start a new Hermes chat and ask Hermes to call `menhir_status`, then discuss a subject
    you previously discussed with Menhir. For a specific check, ask `menhir_recall`. If it finds
-   nothing, verify the endpoint, token tier and namespace before assuming the data is missing.
+   nothing, verify the endpoint, token tier and any server-side namespace pin before assuming the
+   data is missing. `menhir_status` also reports `token_configured`: if it is `false` in a gateway
+   (Telegram, Discord) but `true` in the CLI, the gateway service is not seeing the profile's
+   secret environment.
    A failed explicit tool call reports an HTTP/connection error; a failed automatic prefetch logs
    a warning and lets the Hermes turn continue.
 
@@ -61,7 +65,9 @@ The plugin has no third-party Python dependencies.
    Or send `Reject Menhir memory <approval_id>` to discard it. Approval only works from the
    original user's session (and matching author identity, where Hermes supplies one), with a
    non-bot user-authored message. IDs expire after 24 hours. A failed server write retains the
-   proposal; repeat the approval message after fixing connectivity. After approval, check the
+   proposal; repeat the approval message after fixing connectivity. If Menhir refuses the write
+   outright (HTTP 400, 401, 403, 404, 409 or 422) the notice says so instead: repeating the message
+   does nothing until the credential, client registration or namespace is fixed. After approval, check the
    write `status`: `queued` means enrichment is pending, **not** that the memory is searchable.
    Use `menhir_recall` later to verify the completed result.
 
@@ -87,15 +93,27 @@ setup wizard and dashboard. They are validated when loaded:
 | Setting | Default | Effect |
 |---|---|---|
 | `base_url` | `http://127.0.0.1:8100/api` | Menhir REST endpoint; HTTPS required off loopback |
-| `namespace` | empty | Use Menhir server default, or choose an existing scope |
-| `write_enabled` | `false` | Expose `menhir_remember` proposals; user message required for every write |
+| `write_namespace` | `hermes` | The only namespace Hermes writes into; letters, digits, `-`, `_` (max 64) |
+| `client_name` | `hermes` | Sent as `X-Menhir-Client-Name`; must match a registered client if the server restricts clients |
+| `write_enabled` | `false` | Let `menhir_remember` stage proposals; user message required for every write |
 | `max_tokens` | `800` | `/api/context` budget; allowed 100–2000 |
-| `timeout_seconds` | `2.5` | Per HTTP call; allowed 0.25–10 seconds |
+| `timeout_seconds` | `2.5` | Per HTTP call; allowed 0.25–6 seconds (Hermes abandons a prefetch after 8) |
 
 `HERMES_MENHIR_TOKEN` is a **secret**, scoped by Hermes to the active profile. It is sent as a
-Bearer token; no credentials go in the URL or the JSON settings. Server-side pinned namespaces
-still take precedence over the requested namespace. The provider never offers a per-tool
-namespace override.
+Bearer token; no credentials go in the URL or the JSON settings.
+
+**Reads and writes are scoped differently.** `/api/context` and `/api/recall` requests carry no
+namespace, so Menhir searches every namespace the credential can see. `/api/memory` always carries
+`write_namespace`, so nothing Hermes writes lands in the server's default namespace or in another
+client's. The provider never offers a per-tool namespace override. Two consequences:
+
+- This split is enforced by the adapter, not by Menhir. The credential itself can still write to
+  any namespace; Menhir has no "read everywhere, write only here" permission.
+- Do **not** pin this client to a namespace server-side (`MENHIR_CLIENT_NAMESPACES`). A pin
+  overrides the request on reads as well as writes and would limit recall to that one namespace.
+
+`menhir_remember` is always listed as a tool, because Hermes builds its tool routing before the
+profile config is read; with `write_enabled` off it refuses and stages nothing.
 
 Every non-trivial user prompt sends up to 2,500 characters of **that prompt** to the configured
 Menhir endpoint for `/api/context`, unless a local heuristic spots an obvious credential.
@@ -132,6 +150,6 @@ python -m compileall -q integrations/hermes/menhir
 
 The unit tests validate the Hermes-facing provider contract using a fake SDK and mock responses;
 the HTTP test makes real loopback requests to a small Menhir-shaped test server, including
-authentication, namespace and the two-step write. They do **not** prove your real Hermes app,
+authentication, unscoped reads, the write namespace and the two-step write. They do **not** prove your real Hermes app,
 Menhir authentication policy, or graph-backed recall works. Check those manually with
 `hermes memory status`, `menhir_status` and a real `menhir_recall` after setup.

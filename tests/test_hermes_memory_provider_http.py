@@ -69,7 +69,7 @@ class HermesMenhirSocketTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as profile:
             provider = plugin.MenhirMemoryProvider()
             provider.save_config({"base_url": f"http://127.0.0.1:{server.server_port}/api",
-                                  "namespace": "project-a", "write_enabled": True}, profile)
+                                  "write_namespace": "project-a", "write_enabled": True}, profile)
             provider.initialize("conversation-1", hermes_home=profile, agent_context="primary")
             self.assertEqual(json.loads(provider.handle_tool_call("menhir_status", {}))["server_status"], "ready")
             self.assertIn("Known project convention", provider.prefetch("What coding style do I use?"))
@@ -79,6 +79,8 @@ class HermesMenhirSocketTests(unittest.TestCase):
             proposal = json.loads(provider.handle_tool_call("menhir_remember", {"episode": "Use tabs for code"}))
             self.assertEqual(proposal["status"], "pending_user_approval")
             self.assertEqual([path for path, _ in server.requests], ["/api/context", "/api/recall"])
+            for _, read_body in server.requests:
+                self.assertNotIn("namespace", read_body)  # reads span every namespace
 
             # Simulate a new Hermes process in the SAME profile/session after restart.
             resumed = plugin.MenhirMemoryProvider()

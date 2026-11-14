@@ -12,7 +12,8 @@ Status: Phase 1 built; P0/P1 hardening on `feat/hermes-memory-provider` (2026-11
 - Ship a standalone, user-installable Hermes `MemoryProvider` under `integrations/hermes/menhir/`.
 - Automatically inject bounded Menhir context for substantive prompts via `/api/context`.
 - Offer `menhir_recall`, `menhir_status` and an opt-in `menhir_remember` proposal tool.
-- Configure a fixed Menhir REST endpoint, namespace, and credentials per Hermes profile.
+- Configure a fixed Menhir REST endpoint, write namespace, client name and credentials per Hermes profile.
+- Read across every namespace the credential can see; write only into the profile's write namespace.
 - Keep transcript mirroring, automatic extraction, turn evidence, graph operations, and deletion **out** of Phase 1.
 
 ## Proposed design
@@ -25,7 +26,12 @@ by default, stages the caller's chosen episode in a private profile-local file. 
 separately authored approval turn must match its random ID, session, namespace and supplied author
 identity before the adapter sends it to Menhir as `source=hermes-agent`, `role=agent`, with a
 deterministic idempotency key. Rejection and expiry never write. Neither Hermes transcripts nor
-tool results are ingested automatically. Server-side namespace pins remain authoritative.
+tool results are ingested automatically.
+
+Read requests carry no namespace, so Menhir searches all of them; write requests always carry the
+profile's write namespace (default `hermes`). The adapter enforces this split, not the server: the
+credential could write elsewhere, and a server-side namespace pin on this client would override
+both directions and narrow recall to the pinned namespace.
 
 Configuration is local to the Hermes profile; all data egress uses an operator-configured endpoint.
 Loopback HTTP is allowed, remote transport requires HTTPS, and credentials stay in Hermes' scoped
@@ -44,8 +50,9 @@ prompts are skipped before any remote request.
 ## Risks
 
 - Context retrieval adds an HTTP request to a turn (bounded by a short timeout).
-- A user-selected namespace may not be the one their existing history occupies; the setup guide
-  requires a recall check.
+- Unscoped reads surface every namespace the credential can see in any Hermes chat, including
+  shared or group chats; the only narrowing available is server-side.
+- Menhir has no write-only-here permission, so the write namespace is an adapter guarantee only.
 - Remote endpoint and token configuration are sensitive. No token is persisted in provider JSON.
 - Phase 1 does not preserve complete transcripts or backfill Hermes' pre-existing memory files.
 - Graph-backed live validation remains pending; the loopback HTTP contract test is not a live
@@ -57,6 +64,8 @@ prompts are skipped before any remote request.
 - No automatic elevation to user-attested evidence; explicit episodes are agent-authored.
 - No cross-profile mutable globals, no cross-namespace tool argument override, and no stale recall
   results reused across sessions.
+- Every write carries the configured write namespace; no read carries one.
+- The tool list is identical before and after `initialize()` (Hermes routes from the earlier one).
 - Menhir REST response errors remain distinguishable from an empty result.
 
 ## Validation
