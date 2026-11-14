@@ -33,21 +33,28 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
    has already published to PyPI and burned the version (#613, #614).
 4. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
    service `neo4j-test`, container `menhir-neo4j-test`, bolt://127.0.0.1:7688). The online lane is mandatory; an
-   unreachable instance is a failure, not a skip.
+   unreachable instance is a failure, not a skip. Also set `MENHIR_TEST_BEACON_PYTHON` to the absolute path of an
+   interpreter with Beacon installed at the commit `tests.yml` pins, and install `ruff` into the
+   interpreter that runs the gate. The gate's first check, `preflight`, refuses in seconds when
+   any of these or `gh auth` is missing, and prints the command that fixes it.
 5. Check:
 
        python scripts/release.py vX.Y.Z
 
    It prints a PASS/FAIL table and stops at the first failure. Fix, push, re-run.
    `--only lint,offline` reruns a subset while iterating; `--only` is never allowed
-   with `--tag`.
+   with `--tag`. A full passing run writes a receipt to `.release-gate/vX.Y.Z.json`.
 6. Release:
 
        python scripts/release.py vX.Y.Z --tag
 
-   Re-runs every check, creates an annotated tag whose message is the CHANGELOG heading,
-   pushes it, watches `Publish to PyPI` until all its jobs finish, and confirms the version
-   on PyPI.
+   Within two hours of the start of a passing check run, on the same commit, interpreter,
+   Beacon interpreter and test Neo4j URI, it reuses that receipt's offline and online results
+   instead of running them again, and re-runs every other check. Any later run that executes
+   either lane deletes the receipt first, pass or fail. Otherwise, or with `--fresh`, it re-runs everything. Then it creates an
+   annotated tag whose message is the CHANGELOG heading, pushes it, watches `Publish to PyPI`
+   until all its jobs finish, and confirms the version on PyPI. Going straight to `--tag`
+   without a check run is fine too; it runs the full gate once.
 
 Only repository admins can create `v*` tags (the `release-tags` ruleset), and that one tag
 publishes everything. In order, `publish-pypi.yml` runs the test gate, verifies the artifacts,

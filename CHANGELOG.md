@@ -18,6 +18,12 @@
 - A production client policy that sets a non-empty `namespace` on a client now refuses to load.
   Nothing enforced that field; pinning is `MENHIR_CLIENT_NAMESPACES`.
 
+## 2026-11-14 - Release gate: preflight in seconds, and `--tag` reuses a fresh check run (#606, #607)
+
+- #606: `scripts/release.py` now runs `preflight` first. It checks only what the selected checks need: ruff for lint; an absolute `MENHIR_TEST_BEACON_PYTHON` that imports Beacon for offline and online (the online lane runs the Beacon E2E test); a reachable test Neo4j (3 s connect timeout) for online; `gh auth` for ci, image and `--tag`. It reports every problem at once with the command that fixes it, and the Beacon pin is read from `tests.yml`. A workstation missing them is refused in seconds, instead of after a 7-minute offline lane. Preflight checks that Beacon imports, not that it is at the pinned commit.
+- #607: a full passing check-only run writes `.release-gate/<tag>.json`. `--tag` on the same tag, HEAD, interpreter, Beacon interpreter and test Neo4j URI, within two hours of the check run's start, reuses that receipt's offline and online results and reruns every other check, including tree, branch, ci and image. Any run that executes either slow lane deletes the receipt first, so a later failure is never covered by an earlier pass. No receipt is written if HEAD or the tree changed during the run. `--fresh` ignores the receipt, and a release deletes it. The tag now names the checked commit explicitly, instead of whatever HEAD is when it is created. `docs/runbooks/release.md` describes both.
+- Tests: `tests/test_release_gate_preflight_receipt.py`.
+
 ## 2026-11-13 - v0.3.11: candidate review over MCP, tool catalog 4
 
 - Ships every entry below back to v0.3.10. Deploy-relevant:
