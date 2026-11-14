@@ -16,6 +16,7 @@ The 0.3.0 MVP release is governed by [`../../.agent/archive/plans/menhir-local-s
 | Doc | What it sequences |
 |---|---|
 | [`oracle-integration-plan.md`](oracle-integration-plan.md) | Buildable-now vs gated map + Context Engine sketch + first ColdStartBrief benchmark sketch. The retrieval oracle pieces (R0, R4, R6, R7) are in `src`; the L4 store, ColdStartOracle, Context Engine and brief benchmark are not built. |
+| [`hermes-memory-provider.md`](hermes-memory-provider.md) | Hermes Agent native adapter Phase 1: bounded context recall, targeted searches and opt-in explicit writes; no automatic transcripts. |
 
 ## L3/L4 GAP decision-support (proposals, NOT rungs)
 

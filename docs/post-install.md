@@ -189,6 +189,15 @@ and are not silently enabled by setup. Review and install only the integrations 
 Run each producer's `--health` and `--dry-run` checks before live use. The producers fail open, do not
 call an LLM, and must never block the host agent.
 
+### Hermes Agent memory provider (optional)
+
+To use Menhir for automatic context recall and explicit agent-requested memories in Hermes Agent,
+install the standalone directory provider in
+[`integrations/hermes/menhir`](../integrations/hermes/menhir/README.md). It uses the existing REST
+API, supports profile-scoped credentials and namespaces, and does **not** upload full Hermes
+transcripts. Writes are disabled until deliberately enabled. The provider is separate from the
+Claude/Codex/OpenCode evidence producers above.
+
 ## 5. Optional Windows service persistence
 
 To start and monitor Menhir after login:

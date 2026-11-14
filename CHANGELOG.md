@@ -1,3 +1,13 @@
+## 2026-11-13 - Hermes Agent can use Menhir as a memory provider
+
+- `integrations/hermes/menhir/`: new standalone Hermes `MemoryProvider` with per-profile connection
+  settings, scoped bearer token, bounded automatic context recall, `menhir_recall` and a disabled-by-
+  default `menhir_remember` tool. No transcripts, tool outputs or session-end hooks are mirrored.
+- `tests/test_hermes_memory_provider.py`: offline registration, safety, config isolation, request,
+  read/write, idempotency, failure and no-sync contract tests.
+- `docs/post-install.md`, `.agent/architecture.md` and `docs/roadmap/`: install guide and
+  implementation boundary. Hermes must reload its provider after setup/config changes.
+
 ## 2026-11-13 - The release image builds on ubuntu-26.04; a dry run gates every tag (#615, #613, #614)
 
 - #615: on Docker 29's containerd image store, `docker image inspect` gives the manifest digest
