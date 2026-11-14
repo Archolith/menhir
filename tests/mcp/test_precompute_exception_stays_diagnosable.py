@@ -112,6 +112,7 @@ class _ResourceCallPayloadBoom(C.BaseJsonResource):
     uri = "memory://test/precompute-boom"
     name = "precompute-boom"
     description = "probe"
+    governing_tool = "recall_memories"
 
     def call_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("call_payload is broken")

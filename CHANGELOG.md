@@ -1,3 +1,23 @@
+## 2026-11-14 - MCP resources follow the client's tool allowlist and namespace pin
+
+- Each MCP resource now names a governing tool, and a client may read it only if the client
+  policy (or `MENHIR_CLIENT_TOOLS` without one) allows that tool. Resources also check client
+  identity first, as tools do. `memory://recent`, `scope`, `search` and `type` follow
+  `recall_memories`; `memory://node/{uuid}`, whose detail row carries processing state and
+  session and user ids, follows `get_enrichment_status`; `system/metadata` and
+  `system/dependency-health` follow `get_memory_stats` and now need operator tier, since they
+  return infrastructure endpoints no tool returns; `system/lifecycle-trace` follows
+  `get_episode_trace`; `system/processing-queue` follows `list_enrichment_queue`. Behaviour
+  change: a client restricted to the `core` profile (including the keyless loopback default),
+  or to a short `MENHIR_CLIENT_TOOLS` list, can no longer read `memory://node` or the
+  `system/*` resources.
+- A client pinned to a namespace is refused `system/lifecycle-trace` and
+  `system/processing-queue`, which have no per-namespace filter, and gets `system/metadata`'s
+  graph counts for its own namespace only. The lifecycle trace withholds tracebacks below
+  operator tier, as `get_episode_trace` does.
+- A production client policy that sets a non-empty `namespace` on a client now refuses to load.
+  Nothing enforced that field; pinning is `MENHIR_CLIENT_NAMESPACES`.
+
 ## 2026-11-14 - Release gate: preflight in seconds, and `--tag` reuses a fresh check run (#606, #607)
 
 - #606: `scripts/release.py` now runs `preflight` first. It checks only what the selected checks need: ruff for lint; an absolute `MENHIR_TEST_BEACON_PYTHON` that imports Beacon for offline and online (the online lane runs the Beacon E2E test); a reachable test Neo4j (3 s connect timeout) for online; `gh auth` for ci, image and `--tag`. It reports every problem at once with the command that fixes it, and the Beacon pin is read from `tests.yml`. A workstation missing them is refused in seconds, instead of after a 7-minute offline lane. Preflight checks that Beacon imports, not that it is at the pinned commit.

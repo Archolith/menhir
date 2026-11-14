@@ -322,7 +322,15 @@ def load_client_policy(
         label = str(raw.get("label", "")).strip().lower()
         scopes = frozenset(str(value) for value in raw.get("scopes", ()))
         maximum_tier = str(raw.get("maximum_tier", ""))
-        namespace = str(raw.get("namespace", ""))
+        # Pinning comes only from MENHIR_CLIENT_NAMESPACES; nothing enforces this field. A
+        # value here would read as a pin that does not exist, so refuse it.
+        namespace = raw.get("namespace", "")
+        if not isinstance(namespace, str) or namespace.strip():
+            raise ValueError(
+                f"production client policy entry {client_id!r} sets `namespace`, which is not "
+                "enforced; pin the client with MENHIR_CLIENT_NAMESPACES and leave it empty"
+            )
+        namespace = ""
         registration = _parse_registration(raw.get("registration"))
         if version == 3:
             if maximum_tier not in _TIER_RANK:

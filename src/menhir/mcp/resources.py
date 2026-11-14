@@ -20,9 +20,10 @@ from menhir.domain.models import NodeScope, ProcessingState
 from menhir.domain.recall import QueryPreset
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.utils import decode_json_value, excerpt
-from menhir.mcp.contracts import BaseJsonResource
+from menhir.mcp.contracts import BaseJsonResource, _tier_allows
 from menhir.mcp.formatters import _memory_lifecycle_fields, _project_skipped_memory_rows
-from menhir.mcp.service_access import get_mcp_session
+from menhir.mcp.service_access import get_mcp_session, get_request_tier
+from menhir.mcp.tools.ops.get_episode_trace import _strip_tracebacks
 
 _TYPE_PATTERN = re.compile(r"^[A-Za-z0-9_\- ]{1,64}$")
 _BUILD_ID_CACHE: str | None = None
@@ -287,6 +288,9 @@ def _require_type(memory_type: str) -> str:
 
 class DependencyHealthResource(BaseJsonResource):
     uri = "memory://system/dependency-health"
+    governing_tool = "get_memory_stats"
+    # Returns infrastructure endpoints (Neo4j host, model URLs) that no tool returns.
+    required_tier = "operator"
     name = "memory-system-dependency-health"
     description = "Lightweight dependency health checks that do not require full service init."
 
@@ -302,6 +306,9 @@ class DependencyHealthResource(BaseJsonResource):
 
 class SystemMetadataResource(BaseJsonResource):
     uri = "memory://system/metadata"
+    governing_tool = "get_memory_stats"
+    # Returns infrastructure endpoints (Neo4j host, model URLs) that no tool returns.
+    required_tier = "operator"
     name = "memory-system-metadata"
     description = "Server runtime metadata and high-level graph counts."
 
@@ -311,7 +318,7 @@ class SystemMetadataResource(BaseJsonResource):
     async def build_payload(self) -> dict[str, Any]:
         backend = self.get_backend()
         session = get_mcp_session()
-        overview = await backend.fetch_memory_overview()
+        overview = await backend.fetch_memory_overview(namespace=self.pinned_namespace())
         provider_config = await backend.get_provider_config()
         build_id, runtime_fingerprint = _runtime_fingerprint(provider_config, session)
         return {
@@ -347,6 +354,7 @@ class SystemMetadataResource(BaseJsonResource):
 
 class RecentMemoriesResource(BaseJsonResource):
     uri = "memory://recent"
+    governing_tool = "recall_memories"
     name = "memory-recent"
     description = "Most recently accessed or created memory nodes."
 
@@ -363,6 +371,8 @@ class RecentMemoriesResource(BaseJsonResource):
 
 class LifecycleTraceResource(BaseJsonResource):
     uri = "memory://system/lifecycle-trace"
+    governing_tool = "get_episode_trace"
+    refuse_when_pinned = True
     name = "memory-system-lifecycle-trace"
     description = "Recent lifecycle/debug events captured by the MCP telemetry sidecar."
 
@@ -372,6 +382,8 @@ class LifecycleTraceResource(BaseJsonResource):
     async def build_payload(self) -> dict[str, Any]:
         backend = self.get_backend()
         rows = await backend.fetch_recent_lifecycle_events(limit=100)
+        # Same gate as get_episode_trace: a traceback on a lifecycle row is operator-only.
+        tracebacks_allowed = _tier_allows(get_request_tier(), "operator")
         return {
             "count": len(rows),
             "items": [
@@ -381,7 +393,9 @@ class LifecycleTraceResource(BaseJsonResource):
                     "event": row.get("event"),
                     "state": row.get("state"),
                     "episode_uuid": row.get("episode_uuid"),
-                    "details": decode_json_value(row.get("details_json")),
+                    "details": _strip_tracebacks(
+                        decode_json_value(row.get("details_json")), allowed=tracebacks_allowed
+                    ),
                 }
                 for row in rows
             ],
@@ -390,6 +404,8 @@ class LifecycleTraceResource(BaseJsonResource):
 
 class ProcessingQueueResource(BaseJsonResource):
     uri = "memory://system/processing-queue"
+    governing_tool = "list_enrichment_queue"
+    refuse_when_pinned = True
     name = "memory-system-processing-queue"
     description = "Compact processing queue snapshot with stale/exhausted hints."
 
@@ -426,6 +442,9 @@ class ProcessingQueueResource(BaseJsonResource):
 
 class MemoryByUuidResource(BaseJsonResource):
     uri = "memory://node/{node_uuid}"
+    # The detail row carries processing state, owner and session/user ids, which only the
+    # operate tools show; recall_memories returns none of them.
+    governing_tool = "get_enrichment_status"
     name = "memory-by-uuid"
     description = "Resolve a single memory node by UUID."
 
@@ -451,6 +470,7 @@ class MemoryByUuidResource(BaseJsonResource):
 
 class MemoriesByScopeResource(BaseJsonResource):
     uri = "memory://scope/{scope}"
+    governing_tool = "recall_memories"
     name = "memories-by-scope"
     description = "List memories filtered by scope."
 
@@ -475,6 +495,7 @@ class MemoriesByScopeResource(BaseJsonResource):
 
 class MemoriesBySearchResource(BaseJsonResource):
     uri = "memory://search/{term}"
+    governing_tool = "recall_memories"
     name = "memories-by-search"
     description = "Recall memories for a natural-language search term."
 
@@ -506,6 +527,7 @@ class MemoriesBySearchResource(BaseJsonResource):
 
 class MemoriesByTypeResource(BaseJsonResource):
     uri = "memory://type/{memory_type}"
+    governing_tool = "recall_memories"
     name = "memories-by-type"
     description = "List entity memories filtered by type."
 

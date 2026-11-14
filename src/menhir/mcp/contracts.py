@@ -358,6 +358,14 @@ class BaseJsonResource(ABC):
     #: (and so an unrecognised tier string is refused -- see _tier_allows).
     required_tier: str = "readonly"
 
+    #: The tool whose per-client allowlist decides who may read this resource. Every
+    #: resource must set it; a resource without one is refused.
+    governing_tool: str = ""
+
+    #: True for a system-wide view the backend cannot filter by namespace: a pinned
+    #: client is refused it instead of reading every silo's rows.
+    refuse_when_pinned: bool = False
+
     @property
     def kind(self) -> str:
         return "resource_template" if "{" in self.uri else "resource"
@@ -408,15 +416,40 @@ class BaseJsonResource(ABC):
                     "Every caller must bind one -- HTTP via the auth middleware, stdio via "
                     "bind_stdio_local_trust()."
                 )
+            # Same order as BaseTool.execute: identity, tier, then the per-client allowlist.
+            require_trusted_client_identity()
             if not _tier_allows(tier, self.required_tier):
                 raise PermissionError(
                     f"Token tier '{tier}' cannot read `{self.uri}` (requires '{self.required_tier}')"
                 )
-            # MENHIR_CLIENT_TOOLS is intentionally not consulted here. Its values are
-            # tool names and its catalog counterpart filters tools/list only; matching
-            # those values against resource names or URI templates would silently deny
-            # all resources for restricted clients. A resource ACL, if introduced, must
-            # be a distinct policy/config surface with explicit resource semantics.
+            # A resource is readable by exactly the clients allowed its governing tool, the
+            # tool that serves the same data. Without this a client restricted to one tool
+            # read every resource. Plain PermissionError: a resource renders a JSON error,
+            # not a CallToolResult.
+            governing = getattr(self, "governing_tool", "")
+            if not governing:
+                raise PermissionError(f"`{self.uri}` declares no governing tool; refusing")
+            policy_allowlist = get_request_tool_allowlist()
+            if policy_allowlist is not None:
+                if governing not in policy_allowlist:
+                    raise PermissionError(
+                        f"Client is not permitted to read `{self.uri}` (needs `{governing}`; "
+                        "restricted by the server's client policy)"
+                    )
+            else:
+                allowlist = get_client_tool_allowlist()
+                if allowlist and governing not in allowlist:
+                    raise PermissionError(
+                        f"Client is not permitted to read `{self.uri}` (needs `{governing}`; "
+                        "restricted by MENHIR_CLIENT_TOOLS allowlist)"
+                    )
+            # A system view with no per-namespace filter is refused to a pinned client
+            # before any backend read; the governing tool serves it scoped.
+            if self.refuse_when_pinned and self.pinned_namespace():
+                raise PermissionError(
+                    f"`{self.uri}` spans every namespace and this client is pinned to one; "
+                    f"use `{governing}`"
+                )
             telemetry_effective_payload = self.call_payload(*args, **kwargs)
             payload = await self.build_payload(*args, **kwargs)
             return render_json(payload)
