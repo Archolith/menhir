@@ -202,7 +202,8 @@ def test_permissions_and_registry_credentials_are_publication_only() -> None:
     assert "secrets.GITHUB_TOKEN" not in validate
     assert "docker/login-action@" in publish
     assert "secrets.GITHUB_TOKEN" in publish
-    assert TEXT.count("persist-credentials: false") == 2
+    # validate, the push-free verify job (#613), and publish.
+    assert TEXT.count("persist-credentials: false") == 3
     assert TEXT.count("packages: write") == 1
     assert TEXT.count("id-token: write") == 1
     assert TEXT.count("attestations: write") == 1

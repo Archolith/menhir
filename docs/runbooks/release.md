@@ -22,17 +22,26 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
    This updates `pyproject.toml`, `uv.lock`, `sbom.json`, the docs that state the current
    version and `CHANGELOG.md`. It writes nothing if any expected line has moved. Check the
    CHANGELOG entry in the PR before merging. Without `--pr`, the edits stay in the working tree.
-3. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
+3. Start the release image dry run on that commit, unless last night's run already covers it:
+
+       gh workflow run release-image-dryrun.yml --repo Archolith/menhir --ref main
+
+   It builds, scans, seals and re-verifies the image on ubuntu-24.04 and ubuntu-26.04 the way a
+   release does, and never logs in, pushes or attests. It also runs nightly and on PRs that touch
+   `deploy/`, the release workflows, `pyproject.toml` or `uv.lock`; PR runs build the merge
+   commit, so the gate only counts scheduled and dispatched runs. A tag whose image build fails
+   has already published to PyPI and burned the version (#613, #614).
+4. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
    service `neo4j-test`, container `menhir-neo4j-test`, bolt://127.0.0.1:7688). The online lane is mandatory; an
    unreachable instance is a failure, not a skip.
-4. Check:
+5. Check:
 
        python scripts/release.py vX.Y.Z
 
    It prints a PASS/FAIL table and stops at the first failure. Fix, push, re-run.
    `--only lint,offline` reruns a subset while iterating; `--only` is never allowed
    with `--tag`.
-5. Release:
+6. Release:
 
        python scripts/release.py vX.Y.Z --tag
 
@@ -90,6 +99,7 @@ digest.
 | offline   | `tests.yml` offline job                   |
 | online    | `tests.yml` online job                    |
 | ci        | `tests.yml` green on HEAD's SHA           |
+| image     | newest scheduled or dispatched `release-image-dryrun.yml` run on HEAD's SHA green, build and verify passed on both runners |
 
 Keep the `lint` command lines in `scripts/release.py` identical to `tests.yml`; that is the
 one place the two definitions can drift.

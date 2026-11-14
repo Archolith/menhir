@@ -35,6 +35,11 @@ on:
         required: false
         type: string
         default: "docker.io/anchore/grype@sha256:461c87fefcd20d133f4d99db4623608637eecb439045f9fc8d6eebbb4149e766"
+      runner:
+        description: GitHub-hosted runner for every job (ubuntu-24.04 or ubuntu-26.04)
+        required: false
+        type: string
+        default: ubuntu-24.04
     outputs:
       validation_metadata_artifact:
         description: Artifact containing the sealed image, identity, metadata, and evidence
@@ -82,20 +87,31 @@ on:
         required: false
         type: string
         default: "docker.io/anchore/grype@sha256:461c87fefcd20d133f4d99db4623608637eecb439045f9fc8d6eebbb4149e766"
+      runner:
+        description: GitHub-hosted runner for every job
+        required: false
+        type: choice
+        options:
+          - ubuntu-24.04
+          - ubuntu-26.04
+        default: ubuntu-24.04
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-image-${{ inputs.image }}-${{ inputs.version }}
+  # Publishing runs of one version serialize whatever their runner; a dry run (push false)
+  # never touches the registry, so its matrix legs only serialize per runner.
+  group: release-image-${{ inputs.image }}-${{ inputs.version }}-${{ inputs.push && 'publish' || inputs.runner }}
   cancel-in-progress: false
 
 jobs:
   validate:
     name: Build and seal candidate without publishing
     if: ${{ github.repository == 'Archolith/menhir' }}
-    # Pinned, not ubuntu-latest: ubuntu-26.04 broke the image SBOM identity check (#615).
-    runs-on: ubuntu-24.04
+    # Only the two allowlisted GitHub-hosted labels: anything else lands on ubuntu-24.04
+    # and the first step fails, so an input can never pick a self-hosted runner.
+    runs-on: ${{ inputs.runner == 'ubuntu-26.04' && 'ubuntu-26.04' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -104,6 +120,15 @@ jobs:
       commit_sha: ${{ steps.source.outputs.commit_sha }}
       identity_sha256: ${{ steps.identity.outputs.sha256 }}
     steps:
+      - name: Refuse an unlisted runner
+        env:
+          RUNNER_INPUT: ${{ inputs.runner }}
+        run: |
+          case "$RUNNER_INPUT" in
+            ubuntu-24.04|ubuntu-26.04) ;;
+            *) echo "::error title=Release image runner::unsupported runner '$RUNNER_INPUT'"; exit 1 ;;
+          esac
+
       - name: Checkout requested source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -306,6 +331,9 @@ jobs:
             diagnostic=${diagnostic:-$(tail -n 1 "$RUNNER_TEMP/release-image-build.log")}
             diagnostic=${diagnostic//'%'/'%25'}
             printf '::error title=Release image validation::%s\n' "$diagnostic"
+            # Which image store built it decides which image ID scanners report (#615).
+            docker version || true
+            docker info --format '{{.Driver}} {{json .DriverStatus}}' || true
             exit "$build_status"
           fi
 
@@ -385,7 +413,10 @@ jobs:
 
       - name: Name validation artifact
         id: artifact-name
-        run: echo "value=release-image-validation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+        env:
+          RUNNER_INPUT: ${{ inputs.runner }}
+        # The runner keeps the matrix legs of one dry run from uploading the same name.
+        run: echo "value=release-image-validation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RUNNER_INPUT}" >> "$GITHUB_OUTPUT"
 
       - name: Upload sealed candidate and evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -400,11 +431,67 @@ jobs:
           include-hidden-files: false
           retention-days: 30
 
+  verify:
+    name: Verify sealed candidate without publishing
+    needs: validate
+    if: ${{ !inputs.push }}
+    runs-on: ${{ inputs.runner == 'ubuntu-26.04' && 'ubuntu-26.04' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse an unlisted runner
+        env:
+          RUNNER_INPUT: ${{ inputs.runner }}
+        run: |
+          case "$RUNNER_INPUT" in
+            ubuntu-24.04|ubuntu-26.04) ;;
+            *) echo "::error title=Release image runner::unsupported runner '$RUNNER_INPUT'"; exit 1 ;;
+          esac
+
+      - name: Checkout exact validated commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Download sealed validation candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.validate.outputs.metadata_artifact }}
+          path: release-candidate
+
+      # The check publish runs before login, on a fresh runner; nothing here logs in.
+      - name: Verify identity, evidence, and loaded image
+        env:
+          EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
+          IMAGE: ${{ inputs.image }}
+          PYTHON_BASE: ${{ inputs.python_base }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python deploy/build_release_image.py \
+            --mode verify \
+            --version "$VERSION" \
+            --image "$IMAGE" \
+            --python-base "$PYTHON_BASE" \
+            --source-repository "$SOURCE_REPOSITORY" \
+            --metadata release-candidate/release-image-metadata.json \
+            --identity release-candidate/release-image-identity.json \
+            --image-archive release-candidate/release-image.tar \
+            --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256"
+
   publish:
     name: Publish approved sealed candidate
     needs: validate
     if: ${{ inputs.push && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
-    runs-on: ubuntu-24.04
+    # Same store as validation: an archive built on one image store does not verify on the other.
+    runs-on: ${{ inputs.runner == 'ubuntu-26.04' && 'ubuntu-26.04' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     environment: menhir-release-publication
     permissions:
@@ -417,6 +504,15 @@ jobs:
       image_ref: ${{ steps.release.outputs.image_ref }}
       registry_digest: ${{ steps.release.outputs.registry_digest }}
     steps:
+      - name: Refuse an unlisted runner
+        env:
+          RUNNER_INPUT: ${{ inputs.runner }}
+        run: |
+          case "$RUNNER_INPUT" in
+            ubuntu-24.04|ubuntu-26.04) ;;
+            *) echo "::error title=Release image runner::unsupported runner '$RUNNER_INPUT'"; exit 1 ;;
+          esac
+
       - name: Checkout exact validated commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
