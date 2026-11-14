@@ -2741,9 +2741,12 @@ class MemoryGraphAdapter:
         All of one subject's verdicts share a view key, so concurrent denials race on its
         compare-and-set (#604). The audit is append-shaped, so a lost race re-reads and retries,
         with jittered backoff, until it lands or the attempt cap or time budget runs out.
+
+        One call is one verdict and one record (#622); its retries share ``verdict_id``.
         """
         from menhir.infrastructure.view_write_repository import ViewWriteConflict
 
+        verdict_id = uuidlib.uuid4().hex
         deadline = time.monotonic() + _ADMISSION_AUDIT_BUDGET_S
         attempt = 0
         while True:
@@ -2760,6 +2763,7 @@ class MemoryGraphAdapter:
                     granted=granted,
                     turn_evidence_uuid=turn_evidence_uuid,
                     reason=reason,
+                    verdict_id=verdict_id,
                 )
             except ViewWriteConflict:
                 if attempt >= _ADMISSION_AUDIT_MAX_ATTEMPTS or time.monotonic() >= deadline:

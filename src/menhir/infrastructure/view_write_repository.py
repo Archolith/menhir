@@ -239,6 +239,10 @@ class ViewWriteRepositoryMixin:
         payload["episode_uuids"] = eps
         name, summary = kind.surface(subject, payload)
         props = kind.write_props(subject, key, payload)
+        guarded_turn: str | None = None
+        if kind.guards_turn_evidence_uuid:
+            props = dict(props)
+            guarded_turn = str(props.pop("turn_evidence_uuid", None) or "").strip() or None
         # A kind kept out of the :Entity full-text index carries its text in view_name/view_summary
         # (readers coalesce them over name/summary). content is not indexed and keeps the summary.
         index_name, index_summary = name, summary
@@ -271,6 +275,7 @@ class ViewWriteRepositoryMixin:
             replace_provenance=authoritative,
             summary_template=_checked_template(kind, subject, payload, summary, len(eps)),
             lifecycle_props=kind.view_stamps(payload),
+            guarded_turn_evidence_uuid=guarded_turn,
         )
         res["view_value"] = props.get("view_value")
         return res
@@ -300,6 +305,7 @@ class ViewWriteRepositoryMixin:
         refresh_props: dict[str, Any] | None = None, summary_template: str | None = None,
         subject_uuid: str | None = None, replace_provenance: bool = False,
         lifecycle_props: dict[str, str] | None = None, content: str | None = None,
+        guarded_turn_evidence_uuid: str | None = None,
     ) -> dict[str, Any]:
         """The one place a View version is written. Idempotent on `sig`: unchanged -> refresh
         provenance/access only; changed -> create a fresh current version and supersede the prior
@@ -321,6 +327,7 @@ class ViewWriteRepositoryMixin:
         authoritative. Without this the reconcile is arrival-ordered and installs stale totals."""
         from menhir.domain.namespace import (
             normalize_namespace,
+            silo_key_cypher,
             stamped_namespace,
             tenant_scope_cypher,
             tenant_scope_params,
@@ -466,15 +473,51 @@ class ViewWriteRepositoryMixin:
         # byte-identical off the scalar path. Still ONE statement, so the crash-atomicity that made
         # create-and-supersede a single execute() is preserved (a mid-statement crash rolls back both).
         clear_current_key = "REMOVE o.ss_view_key_current" if kind == "scalar_state" else ""
-        create_and_supersede = f"""
+        # #623: a turn's erasure locks only that turn's namespace fence, then strips the turn id
+        # from the views naming it. A view in another namespace may store the id only while this
+        # statement holds that fence too and sees the turn live; otherwise the id is dropped and
+        # the record kept. Every fence is locked in sorted key order (deadlock-free against
+        # writers in other namespaces). Tests: test_admission_audit_erasure_race_online.py.
+        guard_prefix = carry = guard_set = guard_return = ""
+        guard_params: dict[str, Any] = {}
+        if guarded_turn_evidence_uuid:
+            turn_keys = self._turn_fence_keys(guarded_turn_evidence_uuid)
+            if turn_keys:
+                guard_prefix = f"""
+            CALL {{
+                UNWIND $guard_fence_keys AS gk
+                WITH gk ORDER BY gk
+                MERGE (gf:EvidenceNamespaceFence {{namespace_key: gk}})
+                ON CREATE SET gf.generation = 0, gf.created_at = datetime($now)
+                SET gf.lock_nonce = $operation_id, gf.locked_at = datetime($now)
+                RETURN count(gf) AS guard_fences_locked
+            }}
+            OPTIONAL MATCH (live_turn:TurnEvidence {{turn_id: $guarded_turn}})
+            WITH collect(DISTINCT CASE WHEN live_turn IS NULL THEN null
+                                  ELSE {silo_key_cypher("live_turn")} END) AS live_turn_keys
+            WITH size(live_turn_keys) > 0
+                 AND all(k IN live_turn_keys WHERE k IN $guard_turn_keys) AS turn_ref_live
+            """
+                carry = ", turn_ref_live"
+                guard_set = (
+                    "FOREACH (_ IN CASE WHEN turn_ref_live THEN [1] ELSE [] END |\n"
+                    "                SET n.turn_evidence_uuid = $guarded_turn)"
+                )
+                guard_return = ", turn_ref_live AS turn_evidence_uuid_recorded"
+                guard_params = {
+                    "guard_fence_keys": sorted(set(turn_keys) | {namespace_key}),
+                    "guard_turn_keys": turn_keys,
+                    "guarded_turn": guarded_turn_evidence_uuid,
+                }
+        create_and_supersede = f"""{guard_prefix}
             MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
             ON CREATE SET f.generation = 0, f.created_at = datetime($now)
             SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
-            WITH f
+            WITH f{carry}
             OPTIONAL MATCH (actual:{label})
             WHERE (actual.view_key = $key OR actual.qs_key = $key)
               AND coalesce(actual.view_current, actual.qs_current, true)
-            WITH f, actual
+            WITH f, actual{carry}
             WHERE ($old IS NULL AND actual IS NULL) OR actual.uuid = $old
             CALL {{
                 UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
@@ -491,7 +534,7 @@ class ViewWriteRepositoryMixin:
                         head(row.candidates)] AS evidence,
                        size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
             }}
-            WITH f, actual, evidence, resolved_count
+            WITH f, actual, evidence, resolved_count{carry}
             WHERE resolved_count = size($eps)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
@@ -500,7 +543,7 @@ class ViewWriteRepositoryMixin:
                 SET o.view_current = false, o.qs_current = false, o.superseded_by = $uuid,
                     o.expired_at = datetime($now), o.last_accessed = datetime($now)
                 {clear_current_key})
-            WITH f, old, evidence
+            WITH f, old, evidence{carry}
             CREATE (n:{label} {{
                 uuid: $uuid, name: $name, summary: $summary, content: $content,
                 group_id: $ns, namespace: $ns_stamped, {_SHARED_STAMPS},
@@ -509,13 +552,14 @@ class ViewWriteRepositoryMixin:
             }})
             SET n += $extra
             SET n.view_fence_generation = f.generation
+            {guard_set}
             FOREACH (_ IN CASE WHEN $emb IS NULL THEN [] ELSE [1] END |
                 SET n.name_embedding = $emb)
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET n.supersedes = $old
                 MERGE (n)-[:SUPERSEDES]->(o))
             FOREACH (e IN evidence | MERGE (e)-[:MENTIONS]->(n))
-            RETURN n.uuid AS uuid
+            RETURN n.uuid AS uuid{guard_return}
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
                   "content": (summary if content is None else content)[:1000],
@@ -524,7 +568,7 @@ class ViewWriteRepositoryMixin:
                   "operation_id": new_uuid, "key": key, "eps": eps,
                   "source": source, "sc": float(source_confidence),
                   "valid_at": valid_at, "now": now, "extra": extra, "emb": name_embedding,
-                  "old": old_uuid}
+                  "old": old_uuid, **guard_params}
         if kind == "scalar_state":
             try:
                 write_rows = self.neo4j.execute(
@@ -569,10 +613,25 @@ class ViewWriteRepositoryMixin:
             if not eps or reason.startswith(_LOST_UPDATE_PREFIX):
                 raise ViewWriteConflict(reason)
             raise ValueError(reason)
-        return {"uuid": new_uuid, "view_key": key, "kind": kind,
-                "created": True, "superseded": current is not None,
-                "episodes_present": len(eps), "episodes_missing": 0,
-                "supporting_event_count": len(eps)}
+        result = {"uuid": new_uuid, "view_key": key, "kind": kind,
+                  "created": True, "superseded": current is not None,
+                  "episodes_present": len(eps), "episodes_missing": 0,
+                  "supporting_event_count": len(eps)}
+        if guarded_turn_evidence_uuid:
+            result["turn_evidence_uuid_recorded"] = bool(
+                write_rows[0].get("turn_evidence_uuid_recorded", False))
+        return result
+
+    def _turn_fence_keys(self, turn_id: str) -> list[str]:
+        """Sorted silo keys of every :TurnEvidence with this turn_id (#623)."""
+        from menhir.domain.namespace import silo_key_cypher
+
+        rows = self.neo4j.execute(
+            "MATCH (t:TurnEvidence {turn_id: $turn}) "
+            f"RETURN DISTINCT {silo_key_cypher('t')} AS k",
+            {"turn": turn_id},
+        )
+        return sorted({str(r["k"]) for r in rows if r.get("k")})
 
     def _diagnose_refusal(
         self, *, label: str, key: str, old_uuid: str | None, eps: list[str],

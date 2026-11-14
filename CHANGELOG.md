@@ -1,3 +1,20 @@
+## 2026-11-13 - An admission audit can't re-store an erased turn id; each verdict is its own record (#623, #622)
+
+- #623: an admission audit lives in its own namespace, while the turn it names lives in the
+  user's, and the turn's erasure locks only the user namespace's fence. An audit written just
+  after the erasure committed could store the erased id again, and nothing retired it. The audit
+  write now locks the turn's fence and its own fence, in sorted key order, and stores the id only
+  if the turn is still live under a fence it holds. Otherwise it keeps the record without the id.
+  So an audit either commits before the erasure, which then retires it and strips the id, or
+  after it, without the id. This covers all three erasure paths: `purge_namespace`,
+  `delete_memory_with_scalar_cascade` and `delete_namespace_with_scalar_cascade`. The fence-key
+  rule is now `silo_key_cypher` in `domain/namespace.py`, shared with the erasure code.
+- #622: identical denials, most often "no turn_evidence_uuid provided", shared one signature, so
+  repeats only refreshed a single node. Each `record_admission_audit` call now has a
+  `verdict_id` (stored as `admission_verdict_id`), which is the signature, so every verdict is
+  its own record. Retries of one call reuse the id. The signature no longer hashes the turn id.
+  Repeated denials now add one node each.
+
 ## 2026-11-13 - The release image builds on ubuntu-26.04; a dry run gates every tag (#615, #613, #614)
 
 - #615: on Docker 29's containerd image store, `docker image inspect` gives the manifest digest
