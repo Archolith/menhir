@@ -1,3 +1,23 @@
+## 2026-11-13 - The release image builds on ubuntu-26.04; a dry run gates every tag (#615, #613, #614)
+
+- #615: on Docker 29's containerd image store, `docker image inspect` gives the manifest digest
+  as the image ID, while Syft and Grype report the config digest, so the SBOM check refused every
+  build on ubuntu-26.04. A report is now also accepted when it names the config of the manifest
+  whose digest is the candidate's image ID, read from the sealed archive with the manifest's
+  hash checked. A report naming any other image is still refused, and the refusal now names the
+  expected ID, the candidate config and what the report named. Docker v2 manifests in the
+  archive index are now read, not only OCI ones. A failed build logs `docker version` and the
+  storage driver.
+- `release-image.yml` takes a `runner` input (ubuntu-24.04 by default, ubuntu-26.04 allowed;
+  any other value fails the first step) and, with `push` false, a `verify` job that reloads the
+  sealed archive on a fresh runner and runs publish's pre-login check without logging in.
+- #613: `release-image-dryrun.yml` runs that build and verify on both runners nightly, on PRs
+  touching `deploy/`, the release workflows, `pyproject.toml` or `uv.lock`, and by hand. It never
+  pushes or attests.
+- #614: `scripts/release.py` has a tenth check, `image`: the newest scheduled or dispatched dry
+  run on HEAD's SHA must be green with build and verify passed on both runners. With no run it
+  prints the `gh workflow run` command and refuses; while one runs it waits. No flag skips it.
+
 ## 2026-11-13 - Concurrent admission denials no longer drop audit records; Windows flakes fixed (#604, #605)
 
 - Since #600, intake runs in worker threads, so two admission denials for one subject could race

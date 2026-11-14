@@ -23,6 +23,10 @@ Checks (all mandatory; there is no flag that skips one and still allows `--tag`)
                  not a skip -- an unexecuted online lane is exactly how v0.2.1 shipped
   9. ci          every `tests` workflow run for HEAD's SHA is completed and green (waits
                  while runs are in progress)
+ 10. image       the newest scheduled or dispatched `release image dry run` for HEAD's SHA
+                 is green, with build and verify passing on every release runner (waits
+                 while it runs; with no run, prints the `gh workflow run` command). A tag
+                 whose image build fails has already burned the PyPI version (#614).
 
 Usage:
     python scripts/release.py v0.2.4            # check only, prints a summary table
@@ -74,6 +78,16 @@ CHECK_ORDER = (
     "offline",
     "online",
     "ci",
+    "image",
+)
+
+DRYRUN_WORKFLOW = "release-image-dryrun.yml"
+# Pull-request runs build the merge commit, not HEAD, so only these events count.
+DRYRUN_EVENTS = frozenset({"schedule", "workflow_dispatch"})
+DRYRUN_RUNNERS = ("ubuntu-24.04", "ubuntu-26.04")
+DRYRUN_STAGES = (
+    "Build and seal candidate without publishing",
+    "Verify sealed candidate without publishing",
 )
 
 
@@ -310,6 +324,60 @@ def check_ci(ctx: Context) -> str:
         return f"{len(runs)} tests.yml run(s) green on {sha[:8]}: {runs[0]['url']}"
 
 
+def _dryrun_job_problems(run_id: int) -> list[str]:
+    proc = run(["gh", "run", "view", str(run_id), "--json", "jobs", "-R", GH_REPO])
+    jobs = json.loads(proc.stdout or "{}").get("jobs", [])
+    problems = []
+    for runner in DRYRUN_RUNNERS:
+        for stage in DRYRUN_STAGES:
+            name = f"dry run {runner} / {stage}"
+            conclusions = [j.get("conclusion") for j in jobs if j.get("name") == name]
+            if not conclusions:
+                problems.append(f"{name}: missing")
+            elif any(c != "success" for c in conclusions):
+                problems.append(f"{name}: {', '.join(str(c) for c in conclusions)}")
+    return problems
+
+
+def check_image(ctx: Context) -> str:
+    sha = ctx.head or git("rev-parse", "HEAD")
+    deadline = time.monotonic() + 60 * 60
+    while True:
+        runs = [
+            r for r in gh_json(
+                "run", "list", "--commit", sha, "--workflow", DRYRUN_WORKFLOW,
+                "--json", "databaseId,status,conclusion,url,event,createdAt",
+            )
+            if r.get("event") in DRYRUN_EVENTS
+        ]
+        if not runs:
+            raise CheckFailed(
+                f"no release image dry run exists for {sha[:8]}; start one with\n"
+                f"`gh workflow run {DRYRUN_WORKFLOW} --ref main -R {GH_REPO}`\n"
+                "and re-run this gate once it is green"
+            )
+        # The newest run decides: a later red run is newer evidence than an older green one.
+        latest = max(runs, key=lambda r: r["createdAt"])
+        if latest["status"] != "completed":
+            if time.monotonic() > deadline:
+                raise CheckFailed(f"timed out waiting for the image dry run on {sha[:8]}")
+            print(f"    image dry run still running on {sha[:8]}: {latest['url']} ...")
+            time.sleep(30)
+            continue
+        if latest["conclusion"] != "success":
+            raise CheckFailed(
+                f"the image dry run is not green on {sha[:8]}: "
+                f"{latest['conclusion']} {latest['url']}"
+            )
+        problems = _dryrun_job_problems(latest["databaseId"])
+        if problems:
+            raise CheckFailed(
+                f"the image dry run on {sha[:8]} did not build and verify on every runner "
+                f"({latest['url']}):\n" + "\n".join(problems)
+            )
+        return f"image dry run green on {', '.join(DRYRUN_RUNNERS)} at {sha[:8]}: {latest['url']}"
+
+
 CHECKS = {
     "tree": check_tree,
     "branch": check_branch,
@@ -320,6 +388,7 @@ CHECKS = {
     "offline": check_offline,
     "online": check_online,
     "ci": check_ci,
+    "image": check_image,
 }
 
 

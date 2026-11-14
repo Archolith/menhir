@@ -254,7 +254,14 @@ def _scanner_descriptor(document: dict[str, Any], scanner: str) -> str:
 
 def _scanner_source_image_id(
     document: dict[str, Any], scanner: str, expected_image_id: str,
+    candidate_config_digest: str | None = None,
 ) -> str:
+    """The candidate identity the report names, or raise.
+
+    The classic image store's image ID is the config digest, which scanners report. The
+    containerd store's image ID is the manifest digest, which they do not (#615); then the
+    report must name ``candidate_config_digest``, the config of that exact manifest in the
+    hash-pinned archive (see :func:`archive_config_for_manifest`)."""
     source = document.get("source")
     if not isinstance(source, dict) or source.get("type") != "image":
         raise BuildImageError(f"{scanner} report source is not a container image")
@@ -268,11 +275,14 @@ def _scanner_source_image_id(
         value for value in candidates
         if isinstance(value, str) and DIGEST_RE.fullmatch(value) is not None
     }
-    if expected_image_id not in image_ids:
-        raise BuildImageError(
-            f"{scanner} report does not identify the expected candidate image"
-        )
-    return expected_image_id
+    for accepted in (expected_image_id, candidate_config_digest):
+        if accepted is not None and accepted in image_ids:
+            return accepted
+    raise BuildImageError(
+        f"{scanner} report does not identify the expected candidate image: expected "
+        f"{expected_image_id} (candidate config {candidate_config_digest or 'none'}), "
+        f"report names {sorted(image_ids) or 'no digest'}"
+    )
 
 
 def _parse_report(raw: bytes, scanner: str) -> dict[str, Any]:
@@ -287,10 +297,14 @@ def _parse_report(raw: bytes, scanner: str) -> dict[str, Any]:
     return document
 
 
-def validate_sbom(raw: bytes, expected_image_id: str) -> dict[str, Any]:
+def validate_sbom(
+    raw: bytes, expected_image_id: str, candidate_config_digest: str | None = None,
+) -> dict[str, Any]:
     document = _parse_report(raw, "syft")
     version = _scanner_descriptor(document, "syft")
-    source_image_id = _scanner_source_image_id(document, "syft", expected_image_id)
+    source_image_id = _scanner_source_image_id(
+        document, "syft", expected_image_id, candidate_config_digest,
+    )
     artifacts = document.get("artifacts")
     relationships = document.get("artifactRelationships")
     schema = document.get("schema")
@@ -312,10 +326,14 @@ def validate_sbom(raw: bytes, expected_image_id: str) -> dict[str, Any]:
     }
 
 
-def validate_vulnerability_scan(raw: bytes, expected_image_id: str) -> dict[str, Any]:
+def validate_vulnerability_scan(
+    raw: bytes, expected_image_id: str, candidate_config_digest: str | None = None,
+) -> dict[str, Any]:
     document = _parse_report(raw, "grype")
     version = _scanner_descriptor(document, "grype")
-    source_image_id = _scanner_source_image_id(document, "grype", expected_image_id)
+    source_image_id = _scanner_source_image_id(
+        document, "grype", expected_image_id, candidate_config_digest,
+    )
     descriptor = document["descriptor"]
     database = descriptor.get("db")
     if not isinstance(database, dict) or not database:
@@ -416,9 +434,10 @@ def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str
         ("sbom", "syft", syft_image, validate_sbom),
         ("vulnerability_scan", "grype", grype_image, validate_vulnerability_scan),
     )
+    candidate_config = archive_config_for_manifest(archive, image_id)
     for kind, scanner, scanner_image, validator in specifications:
         raw = _run_scanner(scanner=scanner, image=scanner_image, archive=archive)
-        summary = validator(raw, image_id)
+        summary = validator(raw, image_id, candidate_config)
         artifact_path = EVIDENCE_FILES[kind]
         result[kind] = {
             "artifact_path": artifact_path,
@@ -589,23 +608,27 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
 
 
 OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+DOCKER_MANIFEST_MEDIA_TYPE = "application/vnd.docker.distribution.manifest.v2+json"
+MANIFEST_MEDIA_TYPES = frozenset({OCI_MANIFEST_MEDIA_TYPE, DOCKER_MANIFEST_MEDIA_TYPE})
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 
 
-def archive_manifest_digests(archive: Path, config_digest: str) -> frozenset[str]:
-    """Digests of the image manifests in ``archive``'s OCI index whose config is
-    ``config_digest``. Each manifest blob must hash to its digest. An archive without an OCI
-    index, or one that cannot be read, yields no digests."""
-    found: set[str] = set()
+def _archive_manifests(archive: Path) -> list[tuple[str, str]]:
+    """``(manifest digest, config digest)`` for each image manifest in ``archive``'s index.
+
+    Each manifest blob must hash to its digest. Docker 29's containerd store saves Docker v2
+    manifests here, not OCI ones (#615). An archive without an index, or one that cannot be
+    read, yields nothing."""
+    found: list[tuple[str, str]] = []
     try:
         with tarfile.open(archive, mode="r:") as tar:
             index_member = tar.extractfile("index.json")
             if index_member is None:
-                return frozenset()
+                return []
             index = json.loads(index_member.read(MAX_MANIFEST_BYTES))
             entries = index.get("manifests") if isinstance(index, dict) else None
             for entry in entries if isinstance(entries, list) else []:
-                if not isinstance(entry, dict) or entry.get("mediaType") != OCI_MANIFEST_MEDIA_TYPE:
+                if not isinstance(entry, dict) or entry.get("mediaType") not in MANIFEST_MEDIA_TYPES:
                     continue
                 digest = entry.get("digest")
                 if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None:
@@ -616,11 +639,24 @@ def archive_manifest_digests(archive: Path, config_digest: str) -> frozenset[str
                     raise BuildImageError("image archive manifest does not match its digest")
                 manifest = json.loads(raw)
                 config = manifest.get("config") if isinstance(manifest, dict) else None
-                if isinstance(config, dict) and config.get("digest") == config_digest:
-                    found.add(digest)
+                config_digest = config.get("digest") if isinstance(config, dict) else None
+                if isinstance(config_digest, str) and DIGEST_RE.fullmatch(config_digest):
+                    found.append((digest, config_digest))
     except (KeyError, tarfile.TarError, ValueError):
-        return frozenset()
-    return frozenset(found)
+        return []
+    return found
+
+
+def archive_manifest_digests(archive: Path, config_digest: str) -> frozenset[str]:
+    """Digests of the image manifests in ``archive``'s index whose config is ``config_digest``."""
+    return frozenset(m for m, c in _archive_manifests(archive) if c == config_digest)
+
+
+def archive_config_for_manifest(archive: Path, manifest_digest: str) -> str | None:
+    """The config digest of ``archive``'s manifest ``manifest_digest``, or None if the archive
+    holds no such manifest (or more than one config claims it)."""
+    configs = {c for m, c in _archive_manifests(archive) if m == manifest_digest}
+    return configs.pop() if len(configs) == 1 else None
 
 
 def archive_image_config(archive: Path, config_digest: str) -> dict[str, Any]:
@@ -759,7 +795,10 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         }
         if entry.get("subject") != expected_subject:
             raise BuildImageError(f"{kind} evidence names the wrong candidate subject")
-        validation = validator(evidence_raw, expected_subject["image_id"])
+        validation = validator(
+            evidence_raw, expected_subject["image_id"],
+            archive_config_for_manifest(archive, str(expected_subject["image_id"])),
+        )
         if entry.get("validation") != validation:
             raise BuildImageError(f"{kind} parsed validation does not match its report")
 
