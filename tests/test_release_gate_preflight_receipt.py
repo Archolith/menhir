@@ -109,6 +109,7 @@ class FakeChecks:
         monkeypatch.setattr(release, "CHECKS", checks)
         monkeypatch.setattr(release, "do_tag", lambda ctx: None)
         monkeypatch.setattr(release, "watch_publish", lambda ctx: None)
+        monkeypatch.setattr(release, "_head_moved", lambda ctx: "")
 
     def _make(self, name):
         def check(ctx):
@@ -195,6 +196,7 @@ def _write(receipts, **overrides):
         "tag": "v9.9.9",
         "head": SHA,
         "python": release.PY,
+        "env": release._receipt_env(),
         "created": time.time(),
         "results": {"offline": "o", "online": "n"},
         **overrides,
@@ -215,6 +217,7 @@ def test_a_matching_recent_receipt_is_reused(receipts) -> None:
         ({"head": "c" * 40}, "HEAD is"),
         ({"tag": "v9.9.8"}, "another tag"),
         ({"python": "/other/python"}, "another interpreter"),
+        ({"env": {"MENHIR_TEST_NEO4J_URI": "bolt://elsewhere:7687"}}, "test Neo4j"),
         ({"created": time.time() - 3 * 3600}, "min old"),
         ({"created": time.time() + 3600}, "min old"),
         ({"results": {"offline": "o"}}, "every slow lane"),
@@ -239,3 +242,72 @@ def test_a_stale_receipt_makes_tag_run_the_slow_lanes(monkeypatch, receipts) -> 
     checks = FakeChecks(monkeypatch)
     assert release.main(["v9.9.9", "--tag"]) == 0
     assert checks.ran == list(release.CHECK_ORDER)
+
+
+# ---------------------------------------------------------------------------- review follow-ups
+
+
+def test_a_failing_rerun_discards_the_earlier_receipt(monkeypatch, receipts) -> None:
+    """A later failing offline run is newer evidence: --tag must not reuse the old pass."""
+    FakeChecks(monkeypatch)
+    assert release.main(["v9.9.9"]) == 0
+    FakeChecks(monkeypatch, fail={"offline"})
+    assert release.main(["v9.9.9", "--only", "offline"]) == 1
+    assert not (receipts / "v9.9.9.json").exists()
+    checks = FakeChecks(monkeypatch)
+    assert release.main(["v9.9.9", "--tag"]) == 0
+    assert "offline" in checks.ran and "online" in checks.ran
+
+
+def test_no_receipt_when_head_moved_during_the_run(monkeypatch, receipts) -> None:
+    FakeChecks(monkeypatch)
+    monkeypatch.setattr(release, "_head_moved", lambda ctx: "HEAD moved")
+    assert release.main(["v9.9.9"]) == 0
+    assert not (receipts / "v9.9.9.json").exists()
+
+
+def test_the_receipt_is_dated_from_the_start_of_the_run(monkeypatch, receipts) -> None:
+    """Every clock read is an hour later than the last: the receipt keeps the first."""
+    FakeChecks(monkeypatch)
+    ticks = iter(range(1_000_000, 10**9, 3600))
+    monkeypatch.setattr(release.time, "time", lambda: float(next(ticks)))
+    assert release.main(["v9.9.9"]) == 0
+    data = json.loads((receipts / "v9.9.9.json").read_text(encoding="utf-8"))
+    assert data["created"] == 1_000_000
+
+
+@pytest.mark.parametrize(
+    "overrides", [{"created": "abc"}, {"results": ["offline", "online"]}, {"results": 7}]
+)
+def test_a_wrong_typed_receipt_is_unreadable_not_a_crash(receipts, overrides) -> None:
+    _write(receipts, **overrides)
+    results, note = release.load_receipt(_ctx(set()))
+    assert results is None and "unreadable" in note
+
+
+def test_a_top_level_list_receipt_is_unreadable(receipts) -> None:
+    receipts.mkdir(parents=True)
+    (receipts / "v9.9.9.json").write_text("[]", encoding="utf-8")
+    assert release.load_receipt(_ctx(set()))[0] is None
+
+
+def test_the_online_lane_also_needs_beacon(monkeypatch) -> None:
+    monkeypatch.delenv("MENHIR_TEST_BEACON_PYTHON", raising=False)
+    monkeypatch.setattr(release, "_test_neo4j_problem", lambda env, **k: None)
+    with pytest.raises(release.CheckFailed, match="MENHIR_TEST_BEACON_PYTHON"):
+        release.check_preflight(_ctx({"online"}))
+
+
+def test_a_relative_beacon_path_is_refused(monkeypatch) -> None:
+    monkeypatch.setenv("MENHIR_TEST_BEACON_PYTHON", "venv/python")
+    with pytest.raises(release.CheckFailed, match="not an absolute path"):
+        release.check_preflight(_ctx({"offline"}))
+
+
+def test_the_tag_names_the_checked_commit(monkeypatch) -> None:
+    commands = []
+    monkeypatch.setattr(release, "run", lambda cmd, **k: commands.append(cmd))
+    monkeypatch.setattr(release, "git", lambda *a: SHA)
+    monkeypatch.setattr(release, "changelog_heading", lambda v: "## v9.9.9")
+    release.do_tag(_ctx(set()))
+    assert commands[0][:5] == ["git", "tag", "-a", "v9.9.9", SHA]

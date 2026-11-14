@@ -126,6 +126,8 @@ class Context:
     #: The selected checks other than preflight, which checks only what these need.
     lanes: frozenset[str] = frozenset()
     tagging: bool = False
+    #: When this run started; a receipt's age is measured from here, not from the end.
+    started: float = field(default_factory=lambda: time.time())
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +207,9 @@ def _probe(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str] |
 def _beacon_problem() -> str | None:
     python = os.environ.get("MENHIR_TEST_BEACON_PYTHON", "")
     if not python:
-        return "MENHIR_TEST_BEACON_PYTHON is not set (the offline lane's Beacon tests need it)"
+        return "MENHIR_TEST_BEACON_PYTHON is not set (the offline and online lanes' Beacon tests need it)"
+    if not Path(python).is_absolute():
+        return f"MENHIR_TEST_BEACON_PYTHON={python} is not an absolute path"
     if not Path(python).is_file():
         return f"MENHIR_TEST_BEACON_PYTHON={python} does not exist"
     probe = _probe([python, "-c", "import beacon"], timeout=30)
@@ -223,7 +227,7 @@ def check_preflight(ctx: Context) -> str:
         probe = _probe([PY, "-m", "ruff", "--version"], timeout=20)
         if probe is None or probe.returncode != 0:
             problems.append(f"ruff is not installed in {PY}\n  fix: {PY} -m pip install ruff")
-    if "offline" in ctx.lanes:
+    if ctx.lanes & {"offline", "online"}:
         checked.append("beacon")
         problem = _beacon_problem()
         if problem:
@@ -256,6 +260,23 @@ def receipt_path(tag: str) -> Path:
     return RECEIPT_DIR / f"{tag}.json"
 
 
+def _receipt_env() -> dict[str, str]:
+    """The lane inputs outside the commit that a reused result depends on."""
+    return {
+        "MENHIR_TEST_BEACON_PYTHON": os.environ.get("MENHIR_TEST_BEACON_PYTHON", ""),
+        "MENHIR_TEST_NEO4J_URI": os.environ.get(
+            "MENHIR_TEST_NEO4J_URI", ONLINE_ENV_DEFAULTS["MENHIR_TEST_NEO4J_URI"]
+        ),
+    }
+
+
+def discard_receipt(tag: str) -> None:
+    try:
+        receipt_path(tag).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def write_receipt(ctx: Context) -> Path:
     path = receipt_path(ctx.tag)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,10 +284,13 @@ def write_receipt(ctx: Context) -> Path:
         "tag": ctx.tag,
         "head": ctx.head,
         "python": PY,
-        "created": time.time(),
+        "env": _receipt_env(),
+        "created": ctx.started,
         "results": {r.name: r.detail for r in ctx.results if r.name in REUSABLE and r.ok},
     }
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
     return path
 
 
@@ -283,14 +307,19 @@ def load_receipt(ctx: Context, *, now: float | None = None) -> tuple[dict[str, s
         return None, "no receipt from a check-only run"
     except (OSError, ValueError):
         return None, f"receipt {path} is unreadable"
-    age = (time.time() if now is None else now) - float(data.get("created") or 0)
-    results = data.get("results") or {}
+    try:
+        age = (time.time() if now is None else now) - float(data.get("created") or 0)
+        results = dict(data.get("results") or {})
+    except (AttributeError, TypeError, ValueError):
+        return None, f"receipt {path} is unreadable"
     if data.get("tag") != ctx.tag:
         return None, "receipt is for another tag"
     if not ctx.head or data.get("head") != ctx.head:
         return None, f"receipt is for {str(data.get('head'))[:8]}, HEAD is {ctx.head[:8]}"
     if data.get("python") != PY:
         return None, "receipt was written by another interpreter"
+    if data.get("env") != _receipt_env():
+        return None, "receipt was written with another Beacon interpreter or test Neo4j"
     if not 0 <= age <= RECEIPT_MAX_AGE_S:
         return None, f"receipt is {age / 60:.0f} min old (limit {RECEIPT_MAX_AGE_S // 60:.0f})"
     if set(results) != set(REUSABLE):
@@ -543,7 +572,7 @@ CHECKS = {
 def do_tag(ctx: Context) -> None:
     print(f"\n==> tagging {ctx.tag} at {ctx.head[:8]} and pushing")
     heading = changelog_heading(ctx.version) or ctx.tag
-    run(["git", "tag", "-a", ctx.tag, "-m", heading.lstrip("# ").strip()])
+    run(["git", "tag", "-a", ctx.tag, ctx.head, "-m", heading.lstrip("# ").strip()])
     run(["git", "push", "origin", ctx.tag])
     peeled = git("rev-parse", f"{ctx.tag}^{{commit}}")
     if peeled != ctx.head:
@@ -594,6 +623,16 @@ def watch_publish(ctx: Context) -> None:
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+
+
+def _head_moved(ctx: Context) -> str:
+    """Why the checked commit is no longer what is checked out, or "" if it still is."""
+    head = git("rev-parse", "HEAD")
+    if head != ctx.head:
+        return f"HEAD moved from {ctx.head[:8]} to {head[:8]} during the run"
+    if git("status", "--porcelain", "--untracked-files=no"):
+        return "the working tree changed during the run"
+    return ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -657,6 +696,9 @@ def main(argv: list[str] | None = None) -> int:
                     time.monotonic() - started,
                 ))
                 continue
+        if name in REUSABLE:
+            # Newer evidence replaces the receipt: if this run fails, nothing reuses the old pass.
+            discard_receipt(ctx.tag)
         try:
             detail, ok = CHECKS[name](ctx), True
         except CheckFailed as exc:
@@ -686,7 +728,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NOT READY: {ctx.tag} must not be tagged.")
         return 1
     if not args.do_tag:
-        if full_set:
+        if full_set and (moved := _head_moved(ctx)):
+            print(f"READY, but no receipt: {moved}. `--tag` will rerun every check.")
+        elif full_set:
             path = write_receipt(ctx)
             print(
                 f"READY: every check passed. Receipt {path.as_posix()}: "
@@ -702,10 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     except CheckFailed as exc:
         print(f"RELEASE FAILED: {exc}", file=sys.stderr)
         return 1
-    try:
-        receipt_path(ctx.tag).unlink()
-    except OSError:
-        pass
+    discard_receipt(ctx.tag)
     print(f"RELEASED {ctx.tag}.")
     return 0
 
