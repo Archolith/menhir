@@ -219,8 +219,9 @@ class CandidateRepository:
 
         ``namespace`` (opt-in) is checked in the same statement as the write, so a scoped caller
         cannot promote another silo's candidate. ``name_embedding`` is written with the scope flip:
-        candidates are created without one, and an unembedded PERSISTENT node is invisible to
-        vector recall (#431).
+        candidates are created without one, the property vector recall reads (#431). An empty
+        ``summary`` takes the candidate's content (first 1000 chars): Graphiti's full-text index
+        covers ``name`` and ``summary`` only, and recall shows the summary.
         """
         now = datetime.now(timezone.utc).isoformat()
         ns = str(namespace).strip() if namespace is not None else ""
@@ -233,7 +234,9 @@ class CandidateRepository:
             SET n.scope = 'PERSISTENT',
                 n.freshness = 'ACTIVE',
                 n.promoted_at = datetime(),
-                n.last_accessed = datetime($now)
+                n.last_accessed = datetime($now),
+                n.summary = CASE WHEN trim(coalesce(n.summary, '')) = ''
+                                 THEN left(coalesce(n.content, ''), 1000) ELSE n.summary END
             FOREACH (_ IN CASE WHEN $emb IS NULL THEN [] ELSE [1] END |
                 SET n.name_embedding = $emb)
             RETURN count(n) AS promoted
@@ -295,6 +298,7 @@ class CandidateRepository:
                 n.candidate_cluster_id AS cluster_id,
                 n.candidate_kind AS kind,
                 n.candidate_type AS type,
+                n.type AS memory_type,
                 n.candidate_label AS label,
                 n.candidate_evidence_strength AS evidence_strength,
                 n.candidate_distinct_sessions AS distinct_sessions,

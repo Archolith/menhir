@@ -67,16 +67,23 @@ class ReviewCandidateTool(BaseTextTool):
         if ns is not None and await backend.fetch_candidate(uuid, namespace=ns) is None:
             if await backend.fetch_candidate(uuid) is not None:
                 return f"Refused: candidate {uuid} exists but is outside namespace {ns}."
-            return f"No candidate awaiting review with uuid={uuid}."
+            return await self._not_found(backend, uuid, scope)
 
         if choice == "reject":
             if await backend.reject_candidate(uuid, **scope):
                 return f"Rejected candidate {uuid}; it was deleted."
-            return f"No candidate awaiting review with uuid={uuid}."
+            return await self._not_found(backend, uuid, scope)
 
         result = await backend.approve_candidate(uuid, **scope)
         if not isinstance(result, dict) or result.get("status") != "approved":
-            return f"No candidate awaiting review with uuid={uuid}."
+            return await self._not_found(backend, uuid, scope)
+        # The contradiction check can merge the new memory into a near-duplicate, which deletes
+        # it; say so rather than report a memory that no longer exists.
+        if await backend.fetch_memory_by_uuid(uuid, **scope) is None:
+            return (
+                f"Approved candidate {uuid}, then the contradiction check merged it into an "
+                "existing near-duplicate memory; this uuid no longer exists."
+            )
         lines = [f"Approved candidate {uuid}; it is now a PERSISTENT memory."]
         conflicts = int(result.get("conflicts_detected") or 0)
         if conflicts:
@@ -90,3 +97,14 @@ class ReviewCandidateTool(BaseTextTool):
                 "re-embedded."
             )
         return "\n".join(lines)
+
+    @staticmethod
+    async def _not_found(backend: Any, uuid: str, scope: dict[str, Any]) -> str:
+        # A retry after a timed-out approval lands here; an existing memory with this uuid means
+        # the earlier approval committed.
+        if await backend.fetch_memory_by_uuid(uuid, **scope) is not None:
+            return (
+                f"Candidate {uuid} is no longer awaiting review: a memory with this uuid exists, "
+                "so it was already approved."
+            )
+        return f"No candidate awaiting review with uuid={uuid}."
