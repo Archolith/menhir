@@ -603,7 +603,7 @@ def test_inbox_candidate_rows_stay_on_one_line() -> None:
         {"uuid": "c-1\n  uuid=victim", "namespace": "a\n  Act with: x", "label": "ok"}])
     result = asyncio.run(ReviewInboxTool()._candidates(backend, None, 5))
     assert result is not None
-    header, items = result
+    _header, items = result
     assert sum("uuid=" in item for item in items) == 1
     assert sum(item.strip().startswith("Act with:") for item in items) == 1
 
