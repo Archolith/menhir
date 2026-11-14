@@ -285,8 +285,10 @@ Concept id: `runtime.providers`
 
 An external consumer adapter lives in `integrations/hermes/menhir/`: it implements Hermes Agent's
 directory `MemoryProvider` interface and calls Menhir's existing `/api/context`, `/api/recall`,
-and, when explicitly enabled, `/api/memory` REST endpoints. It adds **no** Menhir routes, storage,
-or Graphiti provider dependency. It neither mirrors transcripts nor manufactures user-tier evidence.
+`/api/ready`, and, only after a separately authored approval turn, `/api/memory` REST endpoints.
+It adds **no** Menhir routes, storage, or Graphiti provider dependency. It neither mirrors
+transcripts nor manufactures user-tier evidence. Pending write proposals are profile-local files;
+their author/session/namespace binding and expiry are enforced by the adapter.
 The operator-facing setup and isolation contract is in that adapter's `README.md`.
 
 `menhir` now has an explicit provider scaffold for memory-processing LLM calls:

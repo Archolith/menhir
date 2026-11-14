@@ -195,7 +195,8 @@ To use Menhir for automatic context recall and explicit agent-requested memories
 install the standalone directory provider in
 [`integrations/hermes/menhir`](../integrations/hermes/menhir/README.md). It uses the existing REST
 API, supports profile-scoped credentials and namespaces, and does **not** upload full Hermes
-transcripts. Writes are disabled until deliberately enabled. The provider is separate from the
+transcripts. Writes are disabled until deliberately enabled, and then require a separate
+user-authored approval message for each episode. The provider is separate from the
 Claude/Codex/OpenCode evidence producers above.
 
 ## 5. Optional Windows service persistence

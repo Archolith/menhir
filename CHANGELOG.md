@@ -1,3 +1,18 @@
+## 2026-11-13 - Hermes memory writes require a user confirmation turn
+
+- `integrations/hermes/menhir/approval.py` and provider: `menhir_remember` now creates a
+  profile-local, expiring proposal; a separate user-authored approval turn must match its random
+  ID, original session and optional author ID before the adapter can call `/api/memory`.
+  Rejections, bot turns and unknown or expired approvals cannot write; failed approved writes
+  preserve the proposal for retry. Automatic turn and transcript syncing remain off.
+- `integrations/hermes/menhir/privacy.py` and provider: credential-like content is skipped on
+  automatic recall and refused on explicit tools. `menhir_status` checks `/api/ready` without
+  revealing credentials; per-session context has a 45-second cache and a 30-second outage breaker.
+- `tests/test_hermes_memory_provider.py` and `tests/test_hermes_memory_provider_http.py` exercise
+  approval decisions, expiry, namespace/author isolation, retries and real loopback HTTP requests.
+- `integrations/hermes/menhir/README.md`, `docs/post-install.md`, `docs/roadmap/` and
+  `.agent/architecture.md` describe the two-step write and remaining live validation.
+
 ## 2026-11-13 - Hermes Agent can use Menhir as a memory provider
 
 - `integrations/hermes/menhir/`: new standalone Hermes `MemoryProvider` with per-profile connection

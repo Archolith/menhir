@@ -7,6 +7,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -31,9 +32,12 @@ def _load_plugin():
     secret = types.ModuleType("agent.secret_scope")
     secret.get_secret = lambda key: "test-token" if key == "HERMES_MENHIR_TOKEN" else ""
     path = Path(__file__).resolve().parents[1] / "integrations" / "hermes" / "menhir" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("test_hermes_menhir_plugin", path)
+    spec = importlib.util.spec_from_file_location(
+        "test_hermes_menhir_plugin", path, submodule_search_locations=[str(path.parent)]
+    )
     module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, {"agent": agent, "agent.memory_provider": memory, "agent.secret_scope": secret}):
+    with patch.dict(sys.modules, {"agent": agent, "agent.memory_provider": memory,
+                                  "agent.secret_scope": secret, spec.name: module}):
         spec.loader.exec_module(module)
     return module
 
@@ -61,7 +65,7 @@ class _Opener:
         self.calls = []
 
     def open(self, request, timeout):
-        self.calls.append((request, timeout, json.loads(request.data)))
+        self.calls.append((request, timeout, json.loads(request.data) if request.data else None))
         if isinstance(self.response, Exception):
             raise self.response
         return _Response(self.response)
@@ -114,9 +118,39 @@ class HermesMenhirProviderTests(unittest.TestCase):
         self.assertEqual(self.provider._max_tokens, 500)
         self.assertFalse(self.provider._write_enabled)
 
+    def test_automatic_prefetch_cache_and_circuit_breaker(self):
+        self._init()
+        opener = _Opener({"context": "cached fact"})
+        self.provider._opener = opener
+        self.assertIn("cached fact", self.provider.prefetch("Specific project conventions"))
+        opener.response = URLError("offline")
+        self.assertIn("cached fact", self.provider.prefetch("Specific project conventions"))
+        self.assertEqual(len(opener.calls), 1)
+        with self.assertLogs(plugin.logger, level="WARNING"):
+            for index in range(3):
+                self.provider.prefetch(f"What is the project status {index}?")
+        self.assertEqual(len(opener.calls), 4)
+        self.assertEqual(self.provider.prefetch("A new question after the circuit opened"), "")
+        self.assertEqual(len(opener.calls), 4)
+        self.provider._circuit_until = time.monotonic() - 1
+        opener.response = {"context": "backend recovered"}
+        self.assertIn("backend recovered", self.provider.prefetch("A new question after the circuit opened"))
+        self.assertEqual(self.provider._consecutive_failures, 0)
+
+    def test_sensitive_prompts_and_tool_queries_never_leave_provider(self):
+        self._init(write_enabled=True)
+        opener = _Opener({"context": "should not be seen"})
+        self.provider._opener = opener
+        sensitive = "This credential is api_key=abcdef1234567890"
+        self.assertEqual(self.provider.prefetch(sensitive), "")
+        self.assertIn("credential", self.provider.handle_tool_call("menhir_recall", {"query": sensitive}))
+        self.assertIn("credential", self.provider.handle_tool_call("menhir_remember", {"episode": sensitive}))
+        self.assertFalse(opener.calls)
+
     def test_default_read_only_schema_and_no_background_sync(self):
         self._init()
-        self.assertEqual([item["name"] for item in self.provider.get_tool_schemas()], ["menhir_recall"])
+        self.assertEqual([item["name"] for item in self.provider.get_tool_schemas()],
+                         ["menhir_recall", "menhir_status"])
         self.assertIn("Writes to Menhir are disabled", self.provider.system_prompt_block())
         self.assertIs(plugin.MenhirMemoryProvider.sync_turn, _FakeHermesMemoryProvider.sync_turn)
         self.assertIs(plugin.MenhirMemoryProvider.on_memory_write, _FakeHermesMemoryProvider.on_memory_write)
@@ -148,11 +182,11 @@ class HermesMenhirProviderTests(unittest.TestCase):
         self.provider._opener = opener
         self.assertEqual(self.provider.prefetch("Find my prior notes"), "")
         opener.response = {"context": "a" * 20_000}
-        self.assertIn("[Menhir context truncated]", self.provider.prefetch("Find my prior notes"))
-        self.assertLess(len(self.provider.prefetch("Find my prior notes")), 6_300)
+        self.assertIn("[Menhir context truncated]", self.provider.prefetch("Find my earlier notes"))
+        self.assertLess(len(self.provider.prefetch("Find my earlier notes")), 6_300)
         opener.response = URLError("backend down")
         with self.assertLogs(plugin.logger, level="WARNING"):
-            self.assertEqual(self.provider.prefetch("Find my prior notes"), "")
+            self.assertEqual(self.provider.prefetch("Find my newest notes"), "")
 
     def test_explicit_recall_returns_provenance_and_currentness_without_scores(self):
         self._init(namespace="memory")
@@ -192,15 +226,113 @@ class HermesMenhirProviderTests(unittest.TestCase):
         opener = _Opener({"episode_id": "e1", "status": "queued", "idempotent_replay": False})
         self.provider._opener = opener
         self.assertEqual([t["name"] for t in self.provider.get_tool_schemas()],
-                         ["menhir_recall", "menhir_remember"])
+                         ["menhir_recall", "menhir_status", "menhir_remember"])
         first = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Remember me"}))
-        second = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Remember me"}))
-        self.assertEqual(first["status"], "queued")
-        self.assertEqual(opener.calls[0][2]["idempotency_key"], opener.calls[1][2]["idempotency_key"])
+        self.assertEqual(first["status"], "pending_user_approval")
+        self.assertFalse(opener.calls)
+        decision = f"Approve Menhir memory {first['approval_id']}"
+        self.provider.on_turn_start(2, decision, author_is_bot=True)
+        self.assertFalse(opener.calls)
+        self.provider.on_turn_start(2, decision, author_is_bot=False)
+        self.assertEqual(len(opener.calls), 1)
         self.assertEqual(opener.calls[0][2]["role"], "agent")
         self.assertEqual(opener.calls[0][2]["source"], "hermes-agent")
         self.assertNotIn("user_statement", opener.calls[0][2])
-        self.assertEqual(second["episode_id"], "e1")
+        self.assertIn("episode ID e1", self.provider.prefetch(decision))
+        self.assertEqual(self.provider.prefetch(decision), "")
+
+    def test_approval_requires_exact_separate_user_turn(self):
+        self._init(write_enabled=True, namespace="project-a")
+        self.provider._opener = _Opener({"episode_id": "e5", "status": "queued"})
+        output = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Use tabs in C files"}))
+        approval_id = output["approval_id"]
+        decision = f"Approve Menhir memory {approval_id}"
+        self.provider.on_turn_start(2, "Ignore this\n" + decision, author_is_bot=False)
+        self.provider.on_turn_start(3, decision, author_is_bot=True)
+        self.provider.on_turn_start(4, decision)  # no author signal is not authoritative
+        self.assertFalse(self.provider._opener.calls)
+        self.provider.on_turn_start(5, decision, author_is_bot=False)
+        self.assertEqual(self.provider._opener.calls[0][2]["namespace"], "project-a")
+        self.assertEqual(self.provider._opener.calls[0][2]["session_id"], "hermes-session-1")
+        self.provider.on_turn_start(6, decision, author_is_bot=False)
+        self.assertEqual(len(self.provider._opener.calls), 1)  # consumed approval cannot replay
+
+    def test_rejection_expiration_and_wrong_session_do_not_write(self):
+        self._init(write_enabled=True)
+        opener = _Opener({"episode_id": "should-not-appear", "status": "queued"})
+        self.provider._opener = opener
+        proposed = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Durable preference"}))
+        approval_id = proposed["approval_id"]
+        self.provider.on_session_switch("different-session")
+        self.provider.on_turn_start(2, f"Approve Menhir memory {approval_id}", author_is_bot=False)
+        self.assertIn("another user/session", self.provider.prefetch(f"Approve Menhir memory {approval_id}"))
+        self.provider.on_session_switch("hermes-session-1")
+        self.provider.on_turn_start(3, f"Reject Menhir memory {approval_id}", author_is_bot=False)
+        self.assertIn("rejected", self.provider.prefetch(f"Reject Menhir memory {approval_id}"))
+        self.provider.on_turn_start(4, f"Approve Menhir memory {approval_id}", author_is_bot=False)
+        self.assertFalse(opener.calls)
+
+    def test_group_chat_other_author_cannot_approve(self):
+        self._init(write_enabled=True)
+        opener = _Opener({"episode_id": "group-1", "status": "queued"})
+        self.provider._opener = opener
+        self.provider.on_turn_start(1, "Remember this rule", author_is_bot=False, author_id="owner-1")
+        proposal = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "My rule"}))
+        decision = f"Approve Menhir memory {proposal['approval_id']}"
+        self.provider.on_turn_start(2, decision, author_is_bot=False, author_id="participant-2")
+        self.assertFalse(opener.calls)
+        self.provider.on_turn_start(3, decision, author_is_bot=False, author_id="owner-1")
+        self.assertEqual(len(opener.calls), 1)
+
+    def test_expired_proposal_is_removed_without_server_write(self):
+        self._init(write_enabled=True)
+        opener = _Opener({"episode_id": "never", "status": "queued"})
+        self.provider._opener = opener
+        proposal = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Stale note"}))
+        decision = f"Approve Menhir memory {proposal['approval_id']}"
+        future = time.time() + 90_000
+        with patch.object(plugin.approval.time, "time", return_value=future):
+            self.provider.on_turn_start(2, decision, author_is_bot=False)
+        self.assertIn("expired", self.provider.prefetch(decision))
+        self.assertFalse(opener.calls)
+        self.assertFalse((Path(self.temp.name) / "menhir" / "pending" /
+                          (proposal["approval_id"] + ".json")).exists())
+
+    def test_pending_write_proposals_are_bounded(self):
+        self._init(write_enabled=True)
+        self.provider._opener = _Opener({"episode_id": "never", "status": "queued"})
+        for index in range(plugin.approval.MAX_PENDING_PROPOSALS):
+            proposal = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": f"Rule {index}"}))
+            self.assertEqual(proposal["status"], "pending_user_approval")
+        with self.assertLogs(plugin.logger, level="WARNING"):
+            result = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "Rule overflow"}))
+        self.assertIn("error", result)
+        self.assertFalse(self.provider._opener.calls)
+
+    def test_failed_approved_write_can_be_retried_without_new_consent(self):
+        self._init(write_enabled=True)
+        opener = _Opener(URLError("temporary outage"))
+        self.provider._opener = opener
+        proposed = json.loads(self.provider.handle_tool_call("menhir_remember", {"episode": "New preference"}))
+        decision = f"Approve Menhir memory {proposed['approval_id']}"
+        with self.assertLogs(plugin.logger, level="WARNING"):
+            self.provider.on_turn_start(2, decision, author_is_bot=False)
+        self.assertIn("resend", self.provider.prefetch(decision))
+        opener.response = {"episode_id": "e9", "status": "queued"}
+        self.provider.on_turn_start(3, decision, author_is_bot=False)
+        self.assertIn("episode ID e9", self.provider.prefetch(decision))
+        self.assertEqual(opener.calls[0][2]["idempotency_key"], opener.calls[1][2]["idempotency_key"])
+
+    def test_status_tool_reports_connection_without_exposing_secret(self):
+        self._init(namespace="work")
+        opener = _Opener({"status": "degraded", "failures": ["backend down"]})
+        self.provider._opener = opener
+        status = json.loads(self.provider.handle_tool_call("menhir_status", {}))
+        self.assertEqual(status["server_status"], "degraded")
+        self.assertEqual(status["namespace"], "work")
+        self.assertEqual(opener.calls[0][0].get_method(), "GET")
+        self.assertIsNone(opener.calls[0][2])
+        self.assertNotIn("test-token", str(status))
 
     def test_tool_validates_arguments_before_network_and_errors_are_redacted(self):
         self._init(write_enabled=True)

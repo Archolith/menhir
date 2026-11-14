@@ -1,6 +1,6 @@
 # Hermes Agent memory-provider adapter
 
-Status: Phase 1 implementation on `feat/hermes-memory-provider` (2026-11-13).
+Status: Phase 1 built; P0/P1 hardening on `feat/hermes-memory-provider` (2026-11-13).
 
 ## Why
 
@@ -11,7 +11,7 @@ Status: Phase 1 implementation on `feat/hermes-memory-provider` (2026-11-13).
 
 - Ship a standalone, user-installable Hermes `MemoryProvider` under `integrations/hermes/menhir/`.
 - Automatically inject bounded Menhir context for substantive prompts via `/api/context`.
-- Offer explicit `menhir_recall` and opt-in `menhir_remember` tools via `/api/recall` and `/api/memory`.
+- Offer `menhir_recall`, `menhir_status` and an opt-in `menhir_remember` proposal tool.
 - Configure a fixed Menhir REST endpoint, namespace, and credentials per Hermes profile.
 - Keep transcript mirroring, automatic extraction, turn evidence, graph operations, and deletion **out** of Phase 1.
 
@@ -21,13 +21,18 @@ The Hermes `MemoryManager` discovers a directory plugin and invokes the `MemoryP
 The provider sends a single prompt query to Menhir's existing `/api/context` endpoint before an
 agent turn; Hermes receives a small, clearly marked historical-context block. Explicit recall
 returns compact ranked results with provenance and temporal markers. The explicit writer, disabled
-by default, sends only the caller's chosen episode to Menhir as `source=hermes-agent`, `role=agent`,
-with a deterministic idempotency key. Neither Hermes transcripts nor tool results are ingested
-automatically. Server-side namespace pins remain authoritative.
+by default, stages the caller's chosen episode in a private profile-local file. A subsequent,
+separately authored approval turn must match its random ID, session, namespace and supplied author
+identity before the adapter sends it to Menhir as `source=hermes-agent`, `role=agent`, with a
+deterministic idempotency key. Rejection and expiry never write. Neither Hermes transcripts nor
+tool results are ingested automatically. Server-side namespace pins remain authoritative.
 
 Configuration is local to the Hermes profile; all data egress uses an operator-configured endpoint.
 Loopback HTTP is allowed, remote transport requires HTTPS, and credentials stay in Hermes' scoped
 secret store. A failing backend does not stop the Hermes turn, but explicit tool calls report errors.
+`/api/ready` provides connection status; repeat queries are cached for 45 seconds per session,
+three failed automatic requests open a 30-second circuit breaker, and obviously credential-bearing
+prompts are skipped before any remote request.
 
 ## Alternatives considered
 
@@ -43,6 +48,8 @@ secret store. A failing backend does not stop the Hermes turn, but explicit tool
   requires a recall check.
 - Remote endpoint and token configuration are sensitive. No token is persisted in provider JSON.
 - Phase 1 does not preserve complete transcripts or backfill Hermes' pre-existing memory files.
+- Graph-backed live validation remains pending; the loopback HTTP contract test is not a live
+  Menhir deployment.
 
 ## Invariants
 
@@ -55,7 +62,9 @@ secret store. A failing backend does not stop the Hermes turn, but explicit tool
 ## Validation
 
 - Offline provider tests with a fake Hermes SDK and mock HTTP transport: setup/profile isolation,
-  automatic recall, empty/error cases, explicit recall/write, safety limits, idempotency and no sync.
+  automatic recall, empty/error cases, explicit recall/approval, safety limits, idempotency and no sync.
+- Socket-level HTTP tests with authorization, namespace, staged user approval, write receipt and
+  a resumed Hermes session.
 - Static compilation; where possible test plugin registration against the Hermes SDK.
 - Live verification is a separate opt-in step, requiring running Menhir and Hermes instances.
 
