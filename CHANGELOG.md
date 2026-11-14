@@ -1,3 +1,16 @@
+## 2026-11-14 - SESSION scope is a relevance scope, not access control
+
+- Reverts the SESSION-row filter that #635 added to `memory://recent`, `scope`, `type` and
+  `node`. It covered only those four resources: the context loaders, recall history and
+  timeline, and the internal dispatch's memory reads return SESSION rows from any session. The
+  session id is caller-chosen under static-key and loopback auth. It also hid a stdio client's
+  own unconsolidated rows after a restart, because each process gets a new session id.
+  `docs/your-data.md` now says SESSION is a relevance scope and that namespaces separate
+  clients. The internal-dispatch restrictions from #635 stay.
+- The internal dispatch counts a call to a deprecated operation as admitted only after the
+  client restriction passes; a refused call is counted as refused. The admitted count gates
+  removing `write_project_structure`.
+
 ## 2026-11-14 - SESSION rows stay with their session in resources; the internal dispatch refuses what it cannot scope
 
 - `memory://recent`, `memory://scope/{scope}` and `memory://type/{type}` drop SESSION-scoped

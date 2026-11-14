@@ -78,19 +78,6 @@ def _runtime_fingerprint(provider_config: dict[str, Any], session: Any) -> tuple
     return build_id, f"memory:{build_id}:{config_fingerprint}:{session.session_id[:8]}"
 
 
-def _session_visible(row: dict[str, Any] | None) -> bool:
-    """Whether the calling session may see this row: SESSION rows belong to their own session.
-
-    The same rule recall applies (`_session_scope_admitted`), without its anonymous opt-in: a
-    caller with no session id sees no SESSION rows. Rows carry `session_id` via
-    MEMORY_RETURN_FIELDS; a SESSION row without one is hidden.
-    """
-    if row is None or str(row.get("scope") or "") != NodeScope.SESSION:
-        return True
-    caller = str(getattr(get_mcp_session(), "session_id", "") or "")
-    return bool(caller) and str(row.get("session_id") or "") == caller
-
-
 def _normalize_memory_row(row: dict[str, Any] | None, *, detail: bool = False) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -379,7 +366,6 @@ class RecentMemoriesResource(BaseJsonResource):
         rows = await backend.fetch_recent_memories(
             limit=10, namespace=self.pinned_namespace()
         )
-        rows = [row for row in rows if _session_visible(row)]
         return {"count": len(rows), "items": [_normalize_memory_row(row) for row in rows]}
 
 
@@ -471,8 +457,6 @@ class MemoryByUuidResource(BaseJsonResource):
         row = await backend.fetch_memory_by_uuid(
             normalized_uuid, namespace=self.pinned_namespace()
         )
-        if not _session_visible(row):
-            row = None  # another session's SESSION row reads as not found
         if row is not None:
             [row] = await _project_skipped_memory_rows(backend, [row])
         return {
@@ -499,7 +483,6 @@ class MemoriesByScopeResource(BaseJsonResource):
         rows = await backend.fetch_memories_by_scope(
             normalized_scope, limit=10, namespace=self.pinned_namespace()
         )
-        rows = [row for row in rows if _session_visible(row)]
         return {
             "scope": normalized_scope,
             "count": len(rows),
@@ -557,7 +540,6 @@ class MemoriesByTypeResource(BaseJsonResource):
         rows = await backend.fetch_memories_by_type(
             normalized_type, limit=10, namespace=self.pinned_namespace()
         )
-        rows = [row for row in rows if _session_visible(row)]
         return {
             "type": normalized_type,
             "count": len(rows),

@@ -393,14 +393,22 @@ async def backend_invoke_impl(
                 status_code=exc.status_code,
                 detail=f"{exc.detail}. {deprecation_notice}",
             ) from exc
+
+    backend = get_backend(request)
+    method = getattr(backend, operation)
+    try:
+        _refuse_restricted_client(operation, method)
+    except HTTPException:
+        if deprecation_notice is not None:
+            record_deprecated_operation_call(operation, admitted=False)
+        raise
+    if deprecation_notice is not None:
+        # Counted only once every refusal has passed: the admitted count is the evidence of
+        # legitimate use that gates removing the operation.
         record_deprecated_operation_call(operation, admitted=True)
         logger.warning(
             "Deprecated operation invoked: operation=%s -- see DEPRECATED_OPERATIONS", operation
         )
-
-    backend = get_backend(request)
-    method = getattr(backend, operation)
-    _refuse_restricted_client(operation, method)
     if required_tier == "operator":
         try_record_destructive_op_rest(operation)
     caller_session = resolve_caller_session(request)

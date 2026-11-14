@@ -1,6 +1,7 @@
-"""Two isolation follow-ups to the resource gate.
+"""Isolation follow-ups to the resource gate.
 
-1. Memory resources hide another session's SESSION-scoped rows, as recall does.
+1. SESSION scope is a relevance scope, not access control: the memory resources return
+   SESSION rows from every session in the namespace (docs/your-data.md).
 2. The internal backend dispatch refuses what it cannot bound for a restricted client: every
    operation for a client with a tool allowlist, and, for a pinned client, every operation
    that takes no `namespace` other than the deployment-wide stats.
@@ -107,33 +108,16 @@ def _read(resource, *args) -> dict[str, Any]:
     ],
     ids=["recent", "scope", "type"],
 )
-def test_listing_resources_hide_other_sessions_session_rows(caller, resource, args) -> None:
+def test_listing_resources_return_session_rows_from_every_session(caller, resource, args) -> None:
+    """Decided 2026-11-14: SESSION is not access control; namespaces are."""
     caller(MINE)
     uuids = [item["uuid"] for item in _read(resource, *args)["items"]]
-    assert uuids == ["own-session", "persistent"]
+    assert uuids == [row["uuid"] for row in ROWS]
 
 
-def test_a_caller_without_a_session_id_sees_no_session_rows(caller) -> None:
-    caller(None)
-    uuids = [item["uuid"] for item in _read(RecentMemoriesResource())["items"]]
-    assert uuids == ["persistent"]
-
-
-@pytest.mark.parametrize(
-    "row,found",
-    [
-        (_row(UUID, "SESSION", "sess-other"), False),
-        (_row(UUID, "SESSION", MINE), True),
-        (_row(UUID, "PERSISTENT", "sess-other"), True),
-    ],
-)
-def test_node_resource_reads_another_sessions_session_row_as_not_found(
-    caller, row, found
-) -> None:
-    caller(MINE, _RowBackend(single=row))
-    payload = _read(MemoryByUuidResource(), UUID)
-    assert payload["found"] is found
-    assert (payload["memory"] is None) is (not found)
+def test_node_resource_returns_another_sessions_session_row(caller) -> None:
+    caller(MINE, _RowBackend(single=_row(UUID, "SESSION", "sess-other")))
+    assert _read(MemoryByUuidResource(), UUID)["found"] is True
 
 
 # ---------------------------------------------------------------------------- internal dispatch
@@ -250,3 +234,28 @@ def test_the_real_wrapped_backend_exposes_namespace_to_the_check() -> None:
     wrapped = wrap_backend(RuntimeProvider(SimpleNamespace(), process_session=None))
     assert "namespace" in inspect.signature(wrapped.fetch_recent_memories).parameters
     assert "namespace" not in inspect.signature(wrapped.fetch_recent_lifecycle_events).parameters
+
+
+# ---------------------------------------------------------------------------- deprecation evidence
+
+
+@pytest.mark.parametrize("pin,admitted", [("silo-a", False), ("", True)])
+def test_a_refused_deprecated_call_is_not_counted_as_admitted(
+    client, monkeypatch, pin, admitted
+) -> None:
+    """write_project_structure takes no namespace, so a pinned client is refused it."""
+    from menhir.api import routes_support
+
+    recorded: list[bool] = []
+    monkeypatch.setattr(
+        routes_support,
+        "record_deprecated_operation_call",
+        lambda _op, *, admitted: recorded.append(admitted),
+    )
+    backend = client(pin=pin)
+    if admitted:
+        _invoke(backend, "write_project_structure", {"scan": {}})
+    else:
+        with pytest.raises(HTTPException):
+            _invoke(backend, "write_project_structure", {"scan": {}})
+    assert recorded == [admitted]
