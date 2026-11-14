@@ -1,7 +1,7 @@
 """#439: an unauthenticated local agent gets the core and curate tools, not every tool.
 
 Covers both ways a keyless local agent connects: the backend's /mcp endpoints (auth mode NONE)
-and the stdio bridge. Also #431: add_candidate is withheld by default.
+and the stdio bridge. Also #431: add_candidate and review_candidate are withheld by default.
 """
 
 from __future__ import annotations
@@ -36,9 +36,10 @@ OPERATOR_ONLY = sorted(PROFILES[OPERATE] | PROFILES[ADMIN])
 # ------------------------------------------------------------------ the default tool set
 
 
-def test_default_is_core_and_curate_without_add_candidate() -> None:
-    assert DEFAULT == (PROFILES[CORE] | PROFILES[CURATE]) - {"add_candidate"}
-    assert DEFAULT_DENY == ("add_candidate",)
+def test_default_is_core_and_curate_without_candidate_staging_or_review() -> None:
+    assert DEFAULT == (PROFILES[CORE] | PROFILES[CURATE]) - {"add_candidate", "review_candidate"}
+    assert DEFAULT_DENY == ("add_candidate", "review_candidate")
+    assert "list_candidates" in DEFAULT
 
 
 def test_default_excludes_every_operate_and_admin_tool() -> None:
@@ -238,7 +239,7 @@ def test_stdio_search_and_call_cannot_reach_a_removed_tool() -> None:
     finally:
         reset_request_tool_allowlist(token)
     assert listed == {"recall_memories", "search_tools", "call_tool"}
-    for tool in [*OPERATOR_ONLY, "add_candidate"]:
+    for tool in [*OPERATOR_ONLY, "add_candidate", "review_candidate"]:
         assert f'"{tool}"' not in text and f"\\\"{tool}\\\"" not in text, tool
     refusal = " ".join(getattr(c, "text", "") for c in refused.content)
     assert "Unknown tool: 'pause_scheduler'" in refusal

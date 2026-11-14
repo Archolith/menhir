@@ -1,3 +1,33 @@
+## 2026-11-13 - Candidates can be reviewed over MCP: list_candidates and review_candidate (#431)
+
+- #431: `add_candidate` staged claims that nothing on a production surface could list, approve
+  or reject; only the explorer could, and production does not serve it. Two tools close that:
+  - `list_candidates` (readonly, `curate`): candidates awaiting review, newest first, with
+    their silo, evidence, content excerpt and notes, under a line marking the text untrusted.
+  - `review_candidate(uuid, decision)` (operator, `curate`): `approve` or `reject`.
+- A scoped caller cannot approve or reject another silo's candidate. The silo is checked in the
+  write statement itself, and the candidate fetch, promote, reject and approve backend
+  operations now declare `namespace`, so the internal dispatch forces a pinned client's silo
+  onto them as it does for `list_candidates`. A candidate that exists in another silo is
+  refused by name; a missing one reads as not found.
+- Approval now embeds the candidate's name and writes `name_embedding`, the property vector
+  recall reads, with the scope flip. Candidates are created without one. The embed is
+  best-effort and bounded at 10 s, and the reply says when it failed. Tests cover the write,
+  not a recall that returns the approved memory. A candidate with no summary gets its content
+  as one. The reply says when the contradiction check merged the new memory into a
+  near-duplicate, and a retry after a timed-out approval says it was already approved.
+- Approve and reject lock the candidate before re-reading its scope. Without that, a reject
+  queued behind an approve deleted the memory the approve had just made `PERSISTENT`.
+- Tool catalog 4. A v3 client policy pinned to an older catalog withholds both tools until
+  it is re-pinned (`scripts/update_client_policy.py --profile-catalog 4`). A v1 or v2 policy
+  lists every tool, so it refuses at startup until the same script adds the two decisions
+  (operators allowed, agent and readonly clients denied). `review_inbox` now points at these
+  tools.
+- The keyless local default leaves out `add_candidate` and `review_candidate`: approval turns
+  unreviewed emitter text into recallable memory, and with both tools the agent that stages a
+  claim could approve it itself. `MENHIR_LOOPBACK_PROFILE=operator` restores both; whether the
+  default should include either is undecided.
+
 ## 2026-11-13 - A keyless local agent gets the core and curate tools, not every tool (#439, #431, #430)
 
 - #439: with no keys configured, an agent connecting to a local install got the operator tier

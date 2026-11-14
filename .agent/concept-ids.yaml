@@ -233,6 +233,12 @@ mcp:
   mcp.tool.add_candidate:
     owner: endpoints.md
     meaning: Stage a low-trust memory/friction candidate for human review
+  mcp.tool.list_candidates:
+    owner: endpoints.md
+    meaning: List candidates staged with add_candidate that await review
+  mcp.tool.review_candidate:
+    owner: endpoints.md
+    meaning: Approve (PERSISTENT, embedded, contradiction-checked) or reject (delete) a staged candidate
   mcp.tool.force_reenrich:
     owner: endpoints.md
     meaning: Force a failed episode back into enrichment

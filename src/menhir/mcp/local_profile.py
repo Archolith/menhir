@@ -25,8 +25,11 @@ from menhir.mcp.tool_profiles import (
 )
 
 DEFAULT_PROFILES: tuple[str, ...] = (CORE, CURATE)
-#: add_candidate stages claims that no production path can list, approve or reject (#431).
-DEFAULT_DENY: tuple[str, ...] = ("add_candidate",)
+#: add_candidate and review_candidate stay out of the keyless default (#431). Approving a
+#: candidate turns unreviewed emitter text into recallable memory, so it stays an operator
+#: (or MENHIR_LOOPBACK_PROFILE=operator) action; and with both tools, the agent that stages a
+#: claim could approve it itself. Whether to allow either is an open decision.
+DEFAULT_DENY: tuple[str, ...] = ("add_candidate", "review_candidate")
 
 
 def loopback_tool_allowlist(

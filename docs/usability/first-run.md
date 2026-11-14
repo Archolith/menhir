@@ -67,7 +67,7 @@ the whole experience.
 | Tool choice | Operator clients get almost every tool, including scheduler and lease controls | Profiles ([#435]) |
 | Output size | Recall returns full diagnostics and source excerpts unless `compact` is set | Compact by default ([#434]) |
 | Reading results | Ranking scores are labelled like similarities | Clear score labels ([#433]) |
-| Human review | Staged candidates cannot be approved where production runs | Candidate review over MCP ([#431]) |
+| Human review | Staged candidates can be reviewed over MCP; a production client gets the tools once its policy opts into catalog 4 | Candidate review over MCP ([#431]) |
 
 **Target:** the model picks the right tool from a short list and can explain the result in plain
 words.
