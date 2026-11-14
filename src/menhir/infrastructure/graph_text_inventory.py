@@ -83,6 +83,8 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "rederive_pending", "rederive_reason", "rederive_flagged_at", "created_epoch",
         "erasure_scrubbed_epoch", "raw_capture", "raw_capture_for", "absorbed_from",
         "merged_from", "merge_irreversible",
+        # Write-lock tokens: a boolean set and removed in the same statement (#431), never stored.
+        "_candidate_review_lock",
         # Conflict and supersession links (uuids and enums).
         "conflict_group_id", "conflict_status", "conflict_created_at", "supersedes",
         "superseded_by", "resolution_status", "resolution_reason",
