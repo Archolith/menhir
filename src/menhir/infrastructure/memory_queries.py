@@ -21,6 +21,7 @@ from menhir.domain.namespace import (
     normalize_namespace,
     namespace_spellings,
     namespace_to_group_ids,
+    silo_key_cypher,
     tenant_scope_cypher,
     tenant_scope_params,
     tenant_scope_prefilter_cypher,
@@ -102,10 +103,7 @@ NAMESPACE_ERASE_PREDICATE = """n.group_id = $group_id
                OR (n:WorkArtifact AND n.namespace = $namespace)"""
 
 # A node's silo key over `n`: the rule erase_target_namespace_keys applies to an erase target.
-_SILO_KEY_CYPHER = (
-    "CASE WHEN trim(toString(coalesce(n.namespace, n.group_id, ''))) = '' THEN 'default'"
-    " ELSE trim(toString(coalesce(n.namespace, n.group_id))) END"
-)
+_SILO_KEY_CYPHER = silo_key_cypher("n")
 
 # list_namespace_records: per kind, the label, the id an erase accepts (erase_target_namespace_keys),
 # its time, a preview, and the filters that keep non-user rows out.

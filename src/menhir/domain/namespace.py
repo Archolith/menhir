@@ -185,6 +185,22 @@ def tenant_scope_cypher(variable: str = "n", *, scheme: TenancyScheme = TenancyS
     )
 
 
+def silo_key_cypher(variable: str = "n") -> str:
+    """Cypher for node *variable*'s silo key: the ``EvidenceNamespaceFence.namespace_key`` an
+    erasure of that node locks (``namespace``, else ``group_id``, trimmed; blank is the default).
+
+    A writer that must serialize with a node's erasure locks the fence this names.
+    """
+    if not variable or not variable.isidentifier():
+        raise ValueError(f"variable must be a Cypher identifier, got {variable!r}")
+    v = variable
+    return (
+        f"CASE WHEN trim(toString(coalesce({v}.namespace, {v}.group_id, ''))) = '' "
+        f"THEN '{DEFAULT_NAMESPACE}'"
+        f" ELSE trim(toString(coalesce({v}.namespace, {v}.group_id))) END"
+    )
+
+
 def tenant_scope_prefilter_cypher(variable: str = "n") -> str:
     """An index-friendly SUPERSET of :func:`tenant_scope_cypher` (menhir #171).
 
