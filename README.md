@@ -404,7 +404,7 @@ Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client 
 the stdio bridge with the same Python installation as Menhir. The bridge connects to the
 running backend; it does not start one. A fresh loopback install needs no key. With no key, an
 agent gets the `core` and `curate` tools: recall, context, memories, todos, conflicts, artifacts
-and ingest. It does not get `add_candidate`, the scheduler, lease and enrichment controls, or
+and ingest. It does not get `add_candidate` or `review_candidate`, the scheduler, lease and enrichment controls, or
 client and namespace administration. To give a keyless agent every tool, set
 `MENHIR_LOOPBACK_PROFILE=operator` on the backend and in the stdio client's `env`. The CLI and the
 explorer are not affected by this setting. With an agent key, described below, the key's tier

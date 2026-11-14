@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.core.tenancy import foreign_object_refusal
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.tools.base import BaseTextTool
 
@@ -62,12 +63,12 @@ class ReviewCandidateTool(BaseTextTool):
         scope: dict[str, Any] = {"namespace": ns} if ns else {}
         # Ownership guard (ET-002), as in promote_memory: a uuid is not proof of tenancy. The
         # write below is also scoped in the same statement, so this read only picks the message;
-        # it is never the authority. Only a candidate that demonstrably sits in another silo is
-        # refused; one that does not exist is reported as not found.
-        if ns is not None and await backend.fetch_candidate(uuid, namespace=ns) is None:
-            if await backend.fetch_candidate(uuid) is not None:
-                return f"Refused: candidate {uuid} exists but is outside namespace {ns}."
-            return await self._not_found(backend, uuid, scope)
+        # it is never the authority.
+        refusal = await foreign_object_refusal(
+            uuid=uuid, namespace=ns or "", lookup=backend.fetch_candidate, label="candidate"
+        )
+        if refusal:
+            return refusal
 
         if choice == "reject":
             if await backend.reject_candidate(uuid, **scope):

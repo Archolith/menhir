@@ -6,8 +6,8 @@ via Cypher, bypassing the Graphiti enrichment pipeline - exactly like TEMPORAL n
 
 A CANDIDATE is the low-trust "review tier": it is NOT recalled and NOT scored into
 context until a human approves it, at which point it is promoted to PERSISTENT scope
-(via the normal contradiction-checked promotion path). Rejection deletes it and records
-a suppression so the same signal does not silently reappear.
+(via the normal contradiction-checked promotion path). Rejection deletes it; nothing
+records the rejection, so re-emitting the same signal creates a new candidate.
 
 Writes are idempotent on (source, cluster_id): re-emitting the same cluster refreshes
 its provenance (evidence strength, distinct-session count, last_seen, notes) instead of
@@ -117,6 +117,8 @@ class CandidateRepository:
         """
         content = ensure_scrubbed(content)
         notes = [ensure_scrubbed(str(n)) for n in notes] if notes else notes
+        # The label becomes the node name, which approval embeds and recall returns (#431).
+        label = ensure_scrubbed(label) if label else label
         node_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         node_name = (label or content)[:120]

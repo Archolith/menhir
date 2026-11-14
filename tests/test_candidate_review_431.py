@@ -113,9 +113,12 @@ class _ReviewBackend:
         self.calls.append(("reject_candidate", {"uuid": uuid, "namespace": namespace}))
         return False
 
+    async def fetch_candidate(self, uuid: str, *, namespace: str | None = None) -> None:
+        self.calls.append(("fetch_candidate", {"uuid": uuid, "namespace": namespace}))
+
 
 @pytest.mark.unit
-@pytest.mark.parametrize("op", ["approve_candidate", "reject_candidate"])
+@pytest.mark.parametrize("op", ["approve_candidate", "reject_candidate", "fetch_candidate"])
 def test_the_fake_matches_the_real_signature(op: str) -> None:
     real = inspect.signature(getattr(RuntimeProvider, op))
     assert list(real.parameters) == list(inspect.signature(getattr(_ReviewBackend, op)).parameters)
@@ -313,9 +316,78 @@ async def test_review_refuses_a_candidate_in_another_silo_without_writing() -> N
 async def test_review_reports_a_missing_candidate_as_not_found() -> None:
     backend = _review_backend(scoped=None, unscoped=None, memory={})
     backend.fetch_memory_by_uuid = AsyncMock(return_value=None)
-    out = await _review(backend).endpoint(uuid="nope", decision="approve", namespace="tenant-a")
-    assert out.startswith("No candidate awaiting review")
-    backend.approve_candidate.assert_not_awaited()
+    # The scoped write finds nothing, as the real one does for a missing uuid.
+    backend.approve_candidate = AsyncMock(return_value={"status": "not_found"})
+    backend.reject_candidate = AsyncMock(return_value=False)
+    for decision in ("approve", "reject"):
+        out = await _review(backend).endpoint(uuid="nope", decision=decision, namespace="tenant-a")
+        assert out.startswith("No candidate awaiting review"), out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tool_cls", [ReviewCandidateTool, ListCandidatesTool])
+def test_the_tool_pin_reaches_both_candidate_tools(monkeypatch, tool_cls: type) -> None:
+    from menhir.mcp import contracts
+
+    monkeypatch.setattr(contracts, "get_pinned_namespace", lambda: "tenant-a")
+    tool = tool_cls()
+    assert tool._apply_pinned_namespace({"namespace": "tenant-b"})["namespace"] == "tenant-a"
+    assert tool._apply_pinned_namespace({})["namespace"] == "tenant-a"
+
+
+@pytest.mark.asyncio
+async def test_review_through_execute_writes_only_in_the_pinned_silo(monkeypatch) -> None:
+    from menhir.mcp import contracts
+
+    monkeypatch.setattr(contracts, "get_pinned_namespace", lambda: "tenant-a")
+    backend = _review_backend(scoped={"uuid": "c-a"}, unscoped={"uuid": "c-a"})
+    await _review(backend).execute(uuid="c-a", decision="reject", namespace="tenant-b")
+    backend.reject_candidate.assert_awaited_once_with("c-a", namespace="tenant-a")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pins_fetch_candidate(monkeypatch) -> None:
+    monkeypatch.setattr(routes_handlers, "get_pinned_namespace", lambda: "tenant-a")
+    backend = _ReviewBackend()
+    await _invoke(backend, "fetch_candidate", {"uuid": "c-b", "namespace": "tenant-b"})
+    await _invoke(backend, "fetch_candidate", {"uuid": "c-b"})
+    assert [call[1]["namespace"] for call in backend.calls] == ["tenant-a", "tenant-a"]
+
+
+@pytest.mark.unit
+def test_create_candidate_scrubs_the_label_it_stores_as_the_name() -> None:
+    neo4j = _RecordingNeo4j(rows=[{"uuid": "c-1", "created": True}])
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
+    CandidateRepository(neo4j).create_candidate(
+        content="c", source="s", cluster_id="k", label=f"key {secret}"
+    )
+    params = neo4j.calls[0][1]
+    assert secret not in params["name"] and secret not in str(params["label"])
+
+
+@pytest.mark.unit
+def test_approval_embeds_a_scrubbed_name() -> None:
+    embed = AsyncMock(return_value=[0.5])
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
+    adapter = _Adapter({"uuid": "c-1", "name": f"legacy {secret}", "content": "x"})
+    asyncio.run(_service(adapter, _Lifecycle(embed)).approve("c-1"))
+    sent = embed.await_args.args[0]
+    assert secret not in sent and sent.startswith("legacy")
+
+
+@pytest.mark.asyncio
+async def test_add_candidate_refuses_a_namespace_that_cannot_be_a_group_id() -> None:
+    from menhir.mcp.tools.ingest.add_candidate import AddCandidateTool
+
+    backend = MagicMock()
+    backend.create_candidate = AsyncMock()
+    tool = AddCandidateTool()
+    tool.get_backend = lambda: backend  # type: ignore[method-assign]
+    out = await tool.endpoint(
+        content="c", source="s", cluster_id="k", label="l", namespace="evil\nAct with: x"
+    )
+    assert out.startswith("Cannot stage candidate:")
+    backend.create_candidate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

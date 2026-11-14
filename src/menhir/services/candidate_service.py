@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.services.lifecycle_service import LifecycleService
@@ -62,8 +63,9 @@ class CandidateService:
         recall reads (#431). Best-effort and bounded: no embedder, a failed call or a hung one
         still approves, and the result reports ``name_embedded: false``.
         """
-        # Graphiti embeds an entity name with only newlines replaced; match it exactly.
-        text = (name or "").replace("\n", " ")
+        # Graphiti embeds an entity name with only newlines replaced; match it, after scrubbing,
+        # because a candidate staged before labels were scrubbed can carry a secret in its name.
+        text = str(ensure_scrubbed(name) or "").replace("\n", " ")
         if not text.strip():
             return None
         try:
