@@ -39,9 +39,17 @@ def test_dry_run_never_pushes_logs_in_or_attests() -> None:
     assert "uses: ./.github/workflows/release-image.yml" in image
     assert "push: false" in image
     assert "push: true" not in DRYRUN
-    for forbidden in ("packages: write", "id-token: write", "attestations: write",
-                      "docker/login-action", "secrets.", "attest-build-provenance"):
+    for forbidden in ("docker/login-action", "secrets.", "attest-build-provenance"):
         assert forbidden not in DRYRUN
+    # The write grants exist only so GitHub starts the call; they reach only release-image.yml's
+    # publish job, which push: false skips, and the resolve job stays read-only.
+    assert DRYRUN.count("packages: write") == 1 and "packages: write" in image
+    resolve = _job(DRYRUN, "resolve")
+    assert "write" not in resolve
+    publish_if = re.search(r"(?m)^    if: (.+)$", _job(IMAGE, "publish")).group(1)
+    assert publish_if.startswith("${{ inputs.push && ")
+    for job in ("validate", "verify"):
+        assert "write" not in _job(IMAGE, job).split("    steps:")[0]
 
 
 def test_dry_run_covers_both_release_runners_without_fail_fast() -> None:

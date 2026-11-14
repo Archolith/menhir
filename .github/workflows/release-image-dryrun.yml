@@ -64,8 +64,14 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-26.04]
+    # GitHub refuses to start a caller that grants less than any called job requests, even
+    # a job that will be skipped. Only release-image.yml's publish job asks for these, and it
+    # never runs here: push is false. validate and verify request contents: read only.
     permissions:
       contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/release-image.yml
     with:
       version: 0.0.0-${{ github.run_number }}
