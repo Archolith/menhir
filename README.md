@@ -23,7 +23,7 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.3.10`. Menhir is built for a single operator, requires
+The current package version is `0.3.11`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
 [known limitations](#known-limitations) before relying on it for personal memory.
 
@@ -680,7 +680,7 @@ the private `Archolith/menhir-deploy` repository.
 
 ## Known limitations
 
-These are known gaps in 0.3.10, each with a planned fix:
+These are known gaps in 0.3.11, each with a planned fix:
 
 - **Erasure can leave some derived text behind.** `delete_memory` removes the memory, its
   episode, evidence turns, projections and scalar assertions. Since 0.3.9, entities and facts

@@ -1,3 +1,11 @@
+## 2026-11-13 - v0.3.11: candidate review over MCP, tool catalog 4
+
+- Ships every entry below back to v0.3.10. Deploy-relevant:
+  - Tool catalog 4 (`list_candidates`, `review_candidate`, #431). A v3 policy pinned to catalog 3 withholds them until it is re-pinned. A v1 or v2 policy refuses to start until `scripts/update_client_policy.py` adds the two decisions.
+  - Startup applies the evidence-lifecycle uniqueness constraints (#603). Duplicate fences are merged. A duplicate intent, tombstone or repair key refuses writer startup.
+  - A keyless loopback agent gets core and curate, without `add_candidate` and `review_candidate` (#439). The explorer is off by default. Loopback servers refuse a non-loopback Host.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.11. No dependency changes in this commit.
+
 ## 2026-11-13 - Candidates can be reviewed over MCP: list_candidates and review_candidate (#431)
 
 - #431: `add_candidate` staged claims that nothing on a production surface could list, approve
