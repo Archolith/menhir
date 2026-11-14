@@ -152,7 +152,8 @@ def test_the_recall_only_probe_reads_content_resources_and_no_system_resource(ga
             assert not _denied(payload), resource_type.uri
         else:
             assert _denied(payload), resource_type.uri
-            assert "client policy" in payload["error"]["message"]
+            message = payload["error"]["message"]
+            assert "client policy" in message or "requires 'operator'" in message
             assert backend.calls == []
 
 
@@ -234,3 +235,20 @@ def test_lifecycle_trace_withholds_tracebacks_below_operator(
     payload = _read(LifecycleTraceResource)
     details = payload["items"][0]["details"]
     assert ("secret" not in json.dumps(details)) is withheld
+
+
+def test_node_detail_and_system_endpoints_need_more_than_recall(gate) -> None:
+    """memory://node carries processing and identity fields; system/* carry endpoints."""
+    from menhir.mcp.resources import (
+        DependencyHealthResource,
+        MemoryByUuidResource,
+        SystemMetadataResource,
+    )
+
+    assert MemoryByUuidResource.governing_tool == "get_enrichment_status"
+    for resource_type in (DependencyHealthResource, SystemMetadataResource):
+        gate(tier="agent", policy=frozenset({"get_memory_stats"}))
+        payload = _read(resource_type)
+        assert _denied(payload) and "requires 'operator'" in payload["error"]["message"]
+        gate(tier="operator", policy=frozenset({"get_memory_stats"}))
+        assert not _denied(_read(resource_type))

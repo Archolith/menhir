@@ -289,6 +289,8 @@ def _require_type(memory_type: str) -> str:
 class DependencyHealthResource(BaseJsonResource):
     uri = "memory://system/dependency-health"
     governing_tool = "get_memory_stats"
+    # Returns infrastructure endpoints (Neo4j host, model URLs) that no tool returns.
+    required_tier = "operator"
     name = "memory-system-dependency-health"
     description = "Lightweight dependency health checks that do not require full service init."
 
@@ -305,6 +307,8 @@ class DependencyHealthResource(BaseJsonResource):
 class SystemMetadataResource(BaseJsonResource):
     uri = "memory://system/metadata"
     governing_tool = "get_memory_stats"
+    # Returns infrastructure endpoints (Neo4j host, model URLs) that no tool returns.
+    required_tier = "operator"
     name = "memory-system-metadata"
     description = "Server runtime metadata and high-level graph counts."
 
@@ -438,7 +442,9 @@ class ProcessingQueueResource(BaseJsonResource):
 
 class MemoryByUuidResource(BaseJsonResource):
     uri = "memory://node/{node_uuid}"
-    governing_tool = "recall_memories"
+    # The detail row carries processing state, owner and session/user ids, which only the
+    # operate tools show; recall_memories returns none of them.
+    governing_tool = "get_enrichment_status"
     name = "memory-by-uuid"
     description = "Resolve a single memory node by UUID."
 
