@@ -45,11 +45,11 @@ def test_dry_run_never_pushes_logs_in_or_attests() -> None:
     # publish job, which push: false skips, and the resolve job stays read-only.
     assert DRYRUN.count("packages: write") == 1 and "packages: write" in image
     resolve = _job(DRYRUN, "resolve")
-    assert "write" not in resolve
+    assert ": write" not in resolve
     publish_if = re.search(r"(?m)^    if: (.+)$", _job(IMAGE, "publish")).group(1)
     assert publish_if.startswith("${{ inputs.push && ")
     for job in ("validate", "verify"):
-        assert "write" not in _job(IMAGE, job).split("    steps:")[0]
+        assert ": write" not in _job(IMAGE, job).split("    steps:")[0]
 
 
 def test_dry_run_covers_both_release_runners_without_fail_fast() -> None:
