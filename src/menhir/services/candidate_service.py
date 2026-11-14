@@ -26,9 +26,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.services.lifecycle_service import LifecycleService
 
 logger = logging.getLogger(__name__)
+
+#: A hung embedder must not hold an approval; past this the candidate is approved unembedded.
+_EMBED_TIMEOUT_S = 30.0
 
 
 @dataclass
@@ -49,18 +53,22 @@ class CandidateService:
     async def _name_embedding(self, name: str) -> list[float] | None:
         """Embed the candidate's name the way Graphiti embeds an entity name, or None.
 
-        Candidates are written by raw Cypher with no ``name_embedding``; without one an approved
-        candidate is invisible to vector recall (#431). Best-effort: no embedder or a failed call
+        Candidates are written by raw Cypher with no ``name_embedding``, the property vector
+        recall reads (#431). Best-effort and bounded: no embedder, a failed call or a hung one
         still approves, and the result reports ``name_embedded: false``.
         """
         text = (name or "").replace("\n", " ").strip()
-        client = getattr(self.lifecycle_service, "graphiti_client", None)
-        embed = getattr(client, "embed_query", None)
-        if not text or embed is None:
+        if not text:
             return None
         try:
-            vector = await embed(text)
-        except Exception:  # best-effort: never fail an approval on an embed error
+            client = getattr(self.lifecycle_service, "graphiti_client", None)
+            embed = getattr(client, "embed_query", None)
+            if embed is None:
+                return None
+            vector = await await_with_backoff_aware_timeout(
+                embed(text), timeout_s=_EMBED_TIMEOUT_S
+            )
+        except Exception:  # best-effort: never fail an approval on an embed error or timeout
             logger.warning("Name embedding failed for approved candidate", exc_info=True)
             return None
         return list(vector) if vector else None

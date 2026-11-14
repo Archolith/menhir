@@ -13,9 +13,9 @@ _DECISIONS = ("approve", "reject")
 async def review_candidate(uuid: str, decision: str, namespace: str = "") -> str:
     """Approve or reject a candidate staged with add_candidate.
 
-    Approve makes it an ordinary recallable memory: its name is embedded for recall,
-    it moves to PERSISTENT scope, and it is checked for contradictions with existing
-    memories. Reject deletes it. Find candidates with list_candidates or review_inbox.
+    Approve makes it an ordinary memory: its name is embedded, it moves to PERSISTENT
+    scope, and it is checked for contradictions with existing memories. Reject deletes it.
+    Find candidates with list_candidates or review_inbox.
 
     Args:
         uuid: The candidate's uuid.
@@ -38,7 +38,7 @@ class ReviewCandidateTool(BaseTextTool):
     destructive_hint = True
     open_world_hint = False
     description = (
-        "Approve (recallable memory, contradiction-checked) or reject (delete) a candidate "
+        "Approve (ordinary memory, contradiction-checked) or reject (delete) a candidate "
         "staged with add_candidate."
     )
 

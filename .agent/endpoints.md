@@ -308,11 +308,11 @@ Approve or reject one candidate (operator tier, #431).
 - **`decision`** (str): `approve` or `reject`.
 - **`namespace`** (str, optional): Silo. A candidate that exists in another silo is refused;
   the backend write is scoped in the same statement, so the read is never the authority.
-- `approve` embeds the candidate's name (candidates are written without one, so an approved
-  candidate would otherwise be invisible to vector recall), flips it to `PERSISTENT` in one
-  statement, then runs the contradiction check consolidation uses. The embed and the check are
-  best-effort: the reply says when the name could not be embedded and how many possible
-  contradictions were found.
+- `approve` embeds the candidate's name (candidates are written without `name_embedding`, the
+  property vector recall reads) and writes it with the `PERSISTENT` flip in one statement,
+  then runs the contradiction check consolidation uses. The embed (bounded at 30 s) and the
+  check are best-effort: the reply says when the name could not be embedded and how many
+  possible contradictions were found.
 - `reject` deletes the candidate. No suppression is recorded, so the same emitter can stage
   it again.
 - A candidate that is already approved, rejected or missing reads as not found.

@@ -745,7 +745,7 @@ set through the MCP gateway.
 | `ingest_document` | Ingest a document as memory episodes |
 | `add_candidate` | Stage low-trust context for human review without making it recallable. Keyless agents don't get this tool by default |
 | `list_candidates` | List staged candidates awaiting review (read-only) |
-| `review_candidate` | Approve a candidate (it becomes a recallable, contradiction-checked memory) or reject it (deleted). Operator tier |
+| `review_candidate` | Approve a candidate (it becomes an ordinary, contradiction-checked memory) or reject it (deleted). Operator tier |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
 | `promote_memory` | Mark persistent memory as operator-designated authority |
 | `delete_memory` | Delete a memory under operator control (extracted entities and facts remain; see [known limitations](#known-limitations)) |

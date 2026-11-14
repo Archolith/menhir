@@ -10,13 +10,17 @@
   operations now declare `namespace`, so the internal dispatch forces a pinned client's silo
   onto them as it does for `list_candidates`. A candidate that exists in another silo is
   refused by name; a missing one reads as not found.
-- Approval now embeds the candidate's name and writes the embedding with the scope flip.
-  Candidates are created without one, so an approved candidate was invisible to vector recall.
-  The embed is best-effort, and the reply says when it failed.
+- Approval now embeds the candidate's name and writes `name_embedding`, the property vector
+  recall reads, with the scope flip. Candidates are created without one. The embed is
+  best-effort and bounded at 30 s, and the reply says when it failed. Tests cover the write,
+  not a recall that returns the approved memory.
 - Approve and reject lock the candidate before re-reading its scope. Without that, a reject
   queued behind an approve deleted the memory the approve had just made `PERSISTENT`.
-- Tool catalog 4. A client policy pinned to catalog 3, such as production's, withholds both
-  tools until it is re-pinned. `review_inbox` now points at these tools.
+- Tool catalog 4. A v3 client policy pinned to an older catalog withholds both tools until
+  it is re-pinned (`scripts/update_client_policy.py --profile-catalog 4`). A v1 or v2 policy
+  lists every tool, so it refuses at startup until the same script adds the two decisions
+  (operators allowed, agent and readonly clients denied). `review_inbox` now points at these
+  tools.
 - The keyless local default still leaves out `add_candidate`: in that profile the agent that
   stages a claim could also approve it, and whether to allow that is undecided.
 

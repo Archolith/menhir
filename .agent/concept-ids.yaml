@@ -238,7 +238,7 @@ mcp:
     meaning: List candidates staged with add_candidate that await review
   mcp.tool.review_candidate:
     owner: endpoints.md
-    meaning: Approve (recallable, contradiction-checked) or reject (delete) a staged candidate
+    meaning: Approve (PERSISTENT, embedded, contradiction-checked) or reject (delete) a staged candidate
   mcp.tool.force_reenrich:
     owner: endpoints.md
     meaning: Force a failed episode back into enrichment

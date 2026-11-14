@@ -232,6 +232,35 @@ def test_an_embed_failure_still_approves_and_says_so() -> None:
 
 
 @pytest.mark.unit
+def test_a_hung_embedder_does_not_hold_the_approval(monkeypatch) -> None:
+    from menhir.services import candidate_service
+
+    monkeypatch.setattr(candidate_service, "_EMBED_TIMEOUT_S", 0.05)
+
+    async def hang(_text: str) -> list[float]:
+        await asyncio.sleep(30)
+        return [1.0]
+
+    adapter = _Adapter({"uuid": "c-1", "name": "n", "content": "x"})
+    result = asyncio.run(_service(adapter, _Lifecycle(hang)).approve("c-1"))
+    assert result["status"] == "approved" and result["name_embedded"] is False
+
+
+@pytest.mark.unit
+def test_an_unavailable_graphiti_client_still_approves() -> None:
+    class _Broken:
+        @property
+        def embed_query(self):
+            raise RuntimeError("graphiti unavailable")
+
+    lifecycle = _Lifecycle()
+    lifecycle.graphiti_client = _Broken()
+    adapter = _Adapter({"uuid": "c-1", "name": "n", "content": "x"})
+    result = asyncio.run(_service(adapter, lifecycle).approve("c-1"))
+    assert result["status"] == "approved" and result["name_embedded"] is False
+
+
+@pytest.mark.unit
 def test_reject_forwards_the_namespace_to_fetch_and_delete() -> None:
     adapter = _Adapter({"uuid": "c-1", "name": "n"})
     result = asyncio.run(_service(adapter, _Lifecycle()).reject("c-1", namespace="tenant-a"))
