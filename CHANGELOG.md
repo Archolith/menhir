@@ -1,3 +1,27 @@
+## 2026-11-13 - A keyless local agent gets the core and curate tools, not every tool (#439, #431, #430)
+
+- #439: with no keys configured, an agent connecting to a local install got the operator tier
+  and every registered tool, including the scheduler, lease, orphan-recovery, client and
+  namespace administration tools. Now a keyless agent gets the `core` and `curate` profiles.
+  This applies to both ways an agent connects:
+  - The stdio bridge, when it has no backend key, removes every other tool before it starts,
+    so `search_tools` can't find them and `call_tool` can't reach them. It also binds the
+    allowlist, so the tool gate refuses them too.
+  - The backend's `/mcp` and `/mcp-http`, in auth mode none, bind the same allowlist, which
+    filters `tools/list` and refuses calls.
+- `MENHIR_LOOPBACK_PROFILE=operator` restores every tool. Any other value except `default`
+  refuses to start. `/api/*` keeps the operator tier, so the CLI, hooks and explorer are
+  unchanged. A keyed caller, and any request #560's guard refuses (a non-loopback Host, or a
+  proxy forwarding header), is unaffected. This decides what an agent is offered; it is not a
+  boundary against local processes, which can already read the state directory (CT-002).
+- #431: the default leaves out `add_candidate`, because nothing on a production surface can
+  list, approve or reject what it stages.
+- #430: `recall_history`, `recall_timeline` and `get_scalar_view_items` are in `core`, so a
+  keyless agent keeps them. `.agent/tasks-mcp.md` now says that a policy client gets them only
+  by selecting `core`.
+- The E2E harness sets `MENHIR_LOOPBACK_PROFILE=operator` for its lanes. E2E-1 runs the
+  default and checks the fresh-install tool list.
+
 ## 2026-11-13 - An admission audit can't re-store an erased turn id; each verdict is its own record (#623, #622)
 
 - #623: an admission audit lives in its own namespace, while the turn it names lives in the

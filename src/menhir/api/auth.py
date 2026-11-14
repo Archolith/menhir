@@ -196,8 +196,11 @@ class BearerAuthMiddleware:
         auth_mode: AuthMode | None = None,
         force_readonly: bool = False,
         client_policy: ClientPolicyAuthority | None = None,
+        loopback_tool_allowlist: frozenset[str] | None = None,
     ) -> None:
         self.app = app
+        # #439: the MCP tools a keyless loopback caller may see and call; None is every tool.
+        self._loopback_tool_allowlist = loopback_tool_allowlist
         self._operator_key = operator_key or api_key  # backwards compat: api_key -> operator
         self._agent_key = agent_key
         self._readonly_key = readonly_key
@@ -555,7 +558,7 @@ class BearerAuthMiddleware:
             # Loopback no-auth: no tokens, but still capture self-declared per-client
             # identity for provenance/telemetry. Safe because startup guarantees a
             # loopback bind (bind-safety guard). Labels are cooperative, not an
-            # enforced security boundary. Access/tier behavior is unchanged.
+            # enforced security boundary.
             user_id, session_id, client_id, client_name = self._request_session_headers(
                 headers, path=path, api_key="", qs=qs, trust_identity_headers=True
             )
@@ -568,9 +571,18 @@ class BearerAuthMiddleware:
             # deployment -- the same authority the loopback bootstrap mint grants -- still
             # clamped to readonly while the candidate fence is active.
             tier_token = bind_request_tier(self._effective_tier("operator"))
+            # #439: on MCP paths a keyless caller gets the loopback tool set, not every tool.
+            # /api/* keeps the operator tier for the CLI and explorer.
+            allowlist_token = (
+                bind_request_tool_allowlist(self._loopback_tool_allowlist)
+                if is_mcp and self._loopback_tool_allowlist is not None
+                else None
+            )
             try:
                 await self.app(scope, receive, send)
             finally:
+                if allowlist_token is not None:
+                    reset_request_tool_allowlist(allowlist_token)
                 reset_request_tier(tier_token)
                 reset_request_session(session_token)
             return

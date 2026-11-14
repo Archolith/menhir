@@ -54,8 +54,30 @@ register_all_tools(mcp)
 register_memory_resources(mcp)
 
 
+def apply_loopback_profile(server, *, backend_key: str, loopback_profile: str | None):
+    """#439: with no backend key, offer a keyless local agent only the loopback tool set.
+
+    Removed tools are invisible to search_tools and unreachable through call_tool. The bound
+    allowlist makes BaseTool.execute refuse them too. Returns the allowlist token, or None
+    when nothing was restricted (a key is set, so the backend's tier decides, or the profile is
+    "operator").
+    """
+    from menhir.core.request_context import bind_request_tool_allowlist
+    from menhir.mcp.local_profile import loopback_tool_allowlist
+    from menhir.mcp.tools import ALL_TOOLS
+
+    allowlist = loopback_tool_allowlist(loopback_profile)
+    if backend_key or allowlist is None:
+        return None
+    registered = {getattr(tool_cls, "name", "") for tool_cls in ALL_TOOLS} - {""}
+    for name in sorted(registered - allowlist):
+        server.remove_tool(name)
+    return bind_request_tool_allowlist(allowlist)
+
+
 def main() -> None:
     import sys
+    from menhir.core.backend_config import resolve_backend_auth_key
     from menhir.mcp.service_access import bind_stdio_local_trust
 
     configure_logging(include_console=False)
@@ -65,6 +87,11 @@ def main() -> None:
     # rather than relying on the implicit empty-tier bypass (CT-002). The
     # context set here is inherited by the server's request-handling tasks.
     bind_stdio_local_trust()
+    apply_loopback_profile(
+        mcp,
+        backend_key=resolve_backend_auth_key(),
+        loopback_profile=os.environ.get("MENHIR_LOOPBACK_PROFILE"),
+    )
     run_server(mcp)
 
 

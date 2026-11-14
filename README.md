@@ -402,10 +402,13 @@ run them by hand.
 
 Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
 the stdio bridge with the same Python installation as Menhir. The bridge connects to the
-running backend; it does not start one. A fresh loopback install needs no key, but with no key
-every loopback request gets the operator tier: the agent sees every registered tool, including
-scheduler, lease, client and namespace administration. To give an agent a smaller tool set, set
-up an agent key as described below.
+running backend; it does not start one. A fresh loopback install needs no key. With no key, an
+agent gets the `core` and `curate` tools: recall, context, memories, todos, conflicts, artifacts
+and ingest. It does not get `add_candidate`, the scheduler, lease and enrichment controls, or
+client and namespace administration. To give a keyless agent every tool, set
+`MENHIR_LOOPBACK_PROFILE=operator` on the backend and in the stdio client's `env`. The CLI and the
+explorer are not affected by this setting. With an agent key, described below, the key's tier
+decides instead.
 
 ```json
 {
@@ -740,7 +743,7 @@ set through the MCP gateway.
 | `add_memory` | Queue a memory for enrichment |
 | `add_memory_and_track` | Queue a memory and wait for processing, returning the observed state transitions |
 | `ingest_document` | Ingest a document as memory episodes |
-| `add_candidate` | Stage low-trust context for human review without making it recallable |
+| `add_candidate` | Stage low-trust context for human review without making it recallable. Candidates can be reviewed only in the local explorer, so keyless agents don't get this tool by default |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
 | `promote_memory` | Mark persistent memory as operator-designated authority |
 | `delete_memory` | Delete a memory under operator control (extracted entities and facts remain; see [known limitations](#known-limitations)) |
