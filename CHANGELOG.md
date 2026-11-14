@@ -1,3 +1,9 @@
+## 2026-11-14 - Release gate: preflight in seconds, and `--tag` reuses a fresh check run (#606, #607)
+
+- #606: `scripts/release.py` now runs `preflight` first. It checks only what the selected checks need: ruff for lint; a `MENHIR_TEST_BEACON_PYTHON` that imports Beacon for offline; a reachable test Neo4j (3 s connect timeout) for online; `gh auth` for ci, image and `--tag`. It reports every problem at once with the command that fixes it, and the Beacon pin is read from `tests.yml`. A workstation missing all of them is refused in under 3 s, instead of after a 7-minute offline lane.
+- #607: a full passing check-only run writes `.release-gate/<tag>.json`. `--tag` on the same tag, HEAD and interpreter within two hours reuses that receipt's offline and online results and reruns every other check, including tree, branch, ci and image. `--fresh` ignores the receipt, and a release deletes it. `docs/runbooks/release.md` describes both.
+- Tests: `tests/test_release_gate_preflight_receipt.py`.
+
 ## 2026-11-13 - v0.3.11: candidate review over MCP, tool catalog 4
 
 - Ships every entry below back to v0.3.10. Deploy-relevant:
