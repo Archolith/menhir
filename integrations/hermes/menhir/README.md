@@ -69,7 +69,9 @@ The plugin has no third-party Python dependencies.
    outright (HTTP 400, 401, 403, 404 or 422) the notice says so instead: repeating the message
    does nothing until the credential, client registration or namespace is fixed. After approval, check the
    write `status`: `queued` means enrichment is pending, **not** that the memory is searchable.
-   Use `menhir_recall` later to verify the completed result.
+   Use `menhir_recall` later to verify the completed result. A recent memory usually shows up
+   under `source_memories` rather than `results`: Menhir ranks a new, session-scope memory only
+   for the session that wrote it, and returns its raw text in `source_memories` to everyone.
 
 ## Using Menhir instead of Hermes' two built-in memory files
 

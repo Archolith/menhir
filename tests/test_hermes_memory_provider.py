@@ -234,6 +234,37 @@ class HermesMenhirProviderTests(unittest.TestCase):
         self.assertLessEqual(len(result["results"]), 15)
         self.assertTrue(result["authority_layer"][0]["value"].startswith("X"))
 
+    def test_recall_returns_source_memories_when_ranked_results_are_empty(self):
+        # Menhir lists a session-scope memory under "results" only for the session that wrote it.
+        self._init()
+        self.provider._opener = _Opener({"results": [], "source_memories": [
+            {"uuid": "e1", "content": "Zolgrim prefers sunflower seeds." + "z" * 2000,
+             "reference_time": "2026-11-15T03:11:47Z", "cosine": 0.74, "source": "hermes-agent"},
+            "not-a-dict",
+            {"uuid": "e2", "content": "Adopted in March 2024.", "reference_time": None, "source": None},
+            {"uuid": "e3", "content": "beyond the limit"}]})
+        result = json.loads(self.provider.handle_tool_call("menhir_recall", {"query": "Zolgrim", "limit": 3}))
+        self.assertEqual((result["count"], result["source_count"]), (0, 2))
+        first, second = result["source_memories"]
+        self.assertEqual((first["uuid"], first["source"], len(first["content"])), ("e1", "hermes-agent", 800))
+        self.assertNotIn("cosine", first)
+        self.assertEqual(second, {"uuid": "e2", "content": "Adopted in March 2024."})
+
+    def test_recall_without_source_section_and_oversized_sources_stay_bounded(self):
+        self._init()
+        self.provider._opener = _Opener({"results": [], "source_memories": None})
+        result = json.loads(self.provider.handle_tool_call("menhir_recall", {"query": "anything"}))
+        self.assertEqual((result["source_memories"], result["source_count"]), ([], 0))
+        self.provider._opener = _Opener({
+            "results": [{"uuid": str(i), "name": "X" * 300, "content": "z" * 900} for i in range(15)],
+            "source_memories": [{"uuid": str(i), "content": "y" * 900, "source": "s" * 300} for i in range(15)]})
+        output = self.provider.handle_tool_call("menhir_recall", {"query": "record", "limit": 15})
+        result = json.loads(output)
+        self.assertLessEqual(len(output), 20_000)
+        self.assertTrue(result["truncated"])
+        self.assertTrue(result["results"] and result["source_memories"])
+        self.assertEqual(result["source_count"], len(result["source_memories"]))
+
     def test_write_requires_opt_in_and_primary_agent(self):
         self._init()
         self.assertIn("disabled", self.provider.handle_tool_call("menhir_remember", {"episode": "Remember me"}))

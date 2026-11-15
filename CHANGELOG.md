@@ -12,6 +12,10 @@
 - A refused approved write (HTTP 400/401/403/404/422), a 409 key conflict and a `failed` receipt
   each get their own notice instead of "resend to retry" or "accepted". The idempotency key now
   covers the session, so the same fact approved in two sessions cannot collide.
+- `menhir_recall` now returns Menhir's `source_memories` section (raw stored statements) next to
+  the ranked results. Menhir ranks a session-scope memory only for the session that wrote it, so
+  without this a recent write was invisible from any later Hermes conversation. Found by running
+  the provider against a live Menhir 0.3.11.
 
 ## 2026-11-13 - Hermes memory writes require a user confirmation turn
 

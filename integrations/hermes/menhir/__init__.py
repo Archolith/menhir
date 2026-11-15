@@ -181,7 +181,8 @@ def _tool(name: str, description: str, properties: dict[str, Any], required: lis
 _RECALL_TOOL = _tool(
     "menhir_recall",
     "Search Menhir's long-term memories for prior facts, preferences and decisions. "
-    "Results are historical claims: inspect source, dates and supersession; an empty search is not proof of absence.",
+    "Results are historical claims: inspect source, dates and supersession; an empty search is not proof of absence. "
+    "Recent memories may appear only under source_memories.",
     {"query": {"type": "string", "description": "A precise question or subject to look up."},
      "limit": {"type": "integer", "description": "Maximum results (1-15, default 5).", "minimum": 1, "maximum": 15}},
     ["query"],
@@ -525,15 +526,31 @@ class MenhirMemoryProvider(MemoryProvider):
                                  "has_foundation", "lower_bound") if key in item}
                     for item in authority[:5] if isinstance(item, dict)
                 ] if isinstance(authority, list) else []
+                # Menhir keeps a new memory at session scope and lists it under "results" only for
+                # the session that wrote it. Its raw text still arrives in source_memories, so
+                # dropping that section hides recent writes from every later Hermes conversation.
+                sources = response.get("source_memories")
+                source_summary = [
+                    {key: str(item[key])[:800 if key == "content" else 250]
+                     for key in ("uuid", "content", "reference_time", "source") if item.get(key) is not None}
+                    for item in sources[:limit] if isinstance(item, dict)
+                ] if isinstance(sources, list) else []
                 output = {
                     "results": memories, "count": len(memories),
+                    "source_memories": source_summary, "source_count": len(source_summary),
                     "authority_layer": authority_summary,
                     "warden_notice": str(response.get("warden_notice") or "")[:500],
-                    "note": "Historical claims; inspect provenance and validity before relying on them.",
+                    "note": ("Historical claims; inspect provenance and validity before relying on them. "
+                             "source_memories are raw stored statements, not yet consolidated."),
                 }
-                while len(json.dumps(output, ensure_ascii=False)) > 20_000 and output["results"]:
-                    output["results"].pop()
+                while len(json.dumps(output, ensure_ascii=False)) > 20_000 and (
+                        output["results"] or output["source_memories"]):
+                    # Shed the longer list first so neither section is emptied for the other.
+                    trimmed = "results" if len(output["results"]) >= len(output["source_memories"]) \
+                        else "source_memories"
+                    output[trimmed].pop()
                     output["count"] = len(output["results"])
+                    output["source_count"] = len(output["source_memories"])
                     output["truncated"] = True
                 return json.dumps(output, ensure_ascii=False)
             if tool_name == "menhir_remember":
