@@ -216,6 +216,12 @@ COPIERS: tuple[CopierEntry, ...] = (
         "were found by grep",
     ),
     CopierEntry(
+        _I + "candidate_repository", "CandidateRepository.promote_candidate",
+        "the candidate's own content copied to its own empty summary on approval", Gate.EXEMPT,
+        "same node and same caller-supplied text as create_candidate (#431): no episode text is "
+        "read, and deleting the node removes both properties",
+    ),
+    CopierEntry(
         _I + "temporal_repository", "TemporalRepository.create_temporal",
         "temporal item text from the caller", Gate.EXEMPT,
         "new caller-supplied text with a fresh uuid (lane G class 2 #29)",

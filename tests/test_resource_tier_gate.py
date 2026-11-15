@@ -24,6 +24,7 @@ class _StubResource(BaseJsonResource):
     uri = "memory://test/stub"
     name = "test-stub"
     description = "Test double resource."
+    governing_tool = "recall_memories"
 
     async def endpoint(self) -> dict[str, Any]:  # noqa: D102
         return await self.build_payload()

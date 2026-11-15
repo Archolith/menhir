@@ -91,6 +91,8 @@ _SETTINGS = (
     ('oauth_as_refresh_without_offline_access_enabled', 'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED',
         False, 'auth', 'Permit refresh tokens without offline_access consent.', False, ()),
     ('trusted_proxy', 'MENHIR_TRUSTED_PROXY', False, 'auth', 'Enable trusted proxy.', False, ()),
+    ('loopback_profile', 'MENHIR_LOOPBACK_PROFILE', 'default', 'auth',
+        'MCP tools offered to a keyless local agent: default (core + curate) or operator (every tool).', False, ()),
     ('oauth_as_dir', 'MENHIR_OAUTH_AS_DIR', '', 'auth', 'Configure oauth as dir.', False, ()),
     ('oauth_as_code_ttl_s', 'MENHIR_OAUTH_AS_CODE_TTL_S', 120.0, 'auth', 'Configure oauth as code ttl s.', False, ()),
     ('oauth_as_stale_client_max_age_s', 'MENHIR_OAUTH_AS_STALE_CLIENT_MAX_AGE_S', 86400, 'auth',

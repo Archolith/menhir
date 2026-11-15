@@ -897,14 +897,30 @@ class BackendClientOpsMixin:
             payload["namespace"] = namespace
         return await self._request("list_candidates", payload)
 
-    async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
-        return await self._request("fetch_candidate", {"uuid": uuid})
+    @staticmethod
+    def _candidate_payload(uuid: str, namespace: str | None) -> dict[str, Any]:
+        # Sent only when set, like list_candidates: an older server still answers.
+        payload: dict[str, Any] = {"uuid": uuid}
+        if namespace:
+            payload["namespace"] = namespace
+        return payload
 
-    async def promote_candidate(self, uuid: str) -> bool:
-        return bool(await self._request("promote_candidate", {"uuid": uuid}))
+    async def fetch_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        return await self._request("fetch_candidate", self._candidate_payload(uuid, namespace))
 
-    async def reject_candidate(self, uuid: str) -> bool:
-        return bool(await self._request("reject_candidate", {"uuid": uuid}))
+    async def promote_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
+        return bool(
+            await self._request("promote_candidate", self._candidate_payload(uuid, namespace))
+        )
 
-    async def approve_candidate(self, uuid: str) -> dict[str, Any]:
-        return await self._request("approve_candidate", {"uuid": uuid})
+    async def reject_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
+        return bool(
+            await self._request("reject_candidate", self._candidate_payload(uuid, namespace))
+        )
+
+    async def approve_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request("approve_candidate", self._candidate_payload(uuid, namespace))

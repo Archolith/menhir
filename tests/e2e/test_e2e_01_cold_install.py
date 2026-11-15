@@ -77,8 +77,11 @@ async def test_e2e_01_cold_install_and_protocol(
         detail={"url": running_stack.url, "features": feature_combo.label},
     )
 
+    # A fresh install's keyless bridge gets the default loopback tool set (#439), not the
+    # operator set the harness gives other lanes.
     async with stdio_session(
-        e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=feature_env
+        e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=feature_env,
+        extra_env={"MENHIR_LOOPBACK_PROFILE": "default"},
     ) as client:
         # initialize() already ran inside stdio_session; reaching here means the
         # handshake completed against the documented `python -m menhir.mcp.server`.

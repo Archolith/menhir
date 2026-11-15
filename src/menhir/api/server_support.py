@@ -401,6 +401,8 @@ def wrap_server_middlewares(
     oauth_verifier: Any = None,
 ) -> Any:
     """Wrap the FastAPI app with auth + request-context middleware."""
+    from menhir.mcp.local_profile import loopback_tool_allowlist
+
     app = BearerAuthMiddleware(  # type: ignore[assignment]
         app,
         api_key=settings.api_key,
@@ -417,6 +419,7 @@ def wrap_server_middlewares(
             and settings.runtime_mode == "candidate-readonly"
         ),
         client_policy=client_policy,
+        loopback_tool_allowlist=loopback_tool_allowlist(settings.loopback_profile),
     )
     app = RequestContextMiddleware(app)  # type: ignore[assignment]
     return app

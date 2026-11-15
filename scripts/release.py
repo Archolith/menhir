@@ -10,7 +10,10 @@ Default mode is check-only. Nothing is tagged or pushed unless `--tag` is passed
 
 Checks (all mandatory; there is no flag that skips one and still allows `--tag`):
 
-  1. tree        working tree clean (no modified, staged, or deleted tracked files)
+  0. preflight   in seconds, before any lane: whatever the selected checks need is present --
+                 ruff, a Beacon interpreter (MENHIR_TEST_BEACON_PYTHON, pin read from
+                 tests.yml), a reachable test Neo4j, an authenticated `gh` (#606)
+  1. tree       working tree clean (no modified, staged, or deleted tracked files)
   2. branch      on `main`, HEAD pushed and equal to `origin/main` after a fetch
   3. version     pyproject version == requested tag, tag does not exist locally or on
                  the remote, and version is greater than the newest existing v* tag
@@ -27,6 +30,11 @@ Checks (all mandatory; there is no flag that skips one and still allows `--tag`)
                  is green, with build and verify passing on every release runner (waits
                  while it runs; with no run, prints the `gh workflow run` command). A tag
                  whose image build fails has already burned the PyPI version (#614).
+
+A full check-only run that passes writes a receipt (.release-gate/<tag>.json, gitignored).
+`--tag` on the same tag, HEAD and interpreter within two hours reuses the receipt's offline
+and online results and reruns every other check, so the slow lanes do not run twice (#607).
+`--fresh` ignores the receipt.
 
 Usage:
     python scripts/release.py v0.2.4            # check only, prints a summary table
@@ -69,6 +77,7 @@ ONLINE_ENV_DEFAULTS = {
 }
 
 CHECK_ORDER = (
+    "preflight",
     "tree",
     "branch",
     "version",
@@ -80,6 +89,11 @@ CHECK_ORDER = (
     "ci",
     "image",
 )
+
+#: #607: the slow lanes a check-only run's receipt lets `--tag` reuse; every other check reruns.
+REUSABLE = ("offline", "online")
+RECEIPT_DIR = REPO / ".release-gate"
+RECEIPT_MAX_AGE_S = 2 * 3600
 
 DRYRUN_WORKFLOW = "release-image-dryrun.yml"
 # Pull-request runs build the merge commit, not HEAD, so only these events count.
@@ -109,6 +123,11 @@ class Context:
     version: str
     head: str = ""
     results: list[Result] = field(default_factory=list)
+    #: The selected checks other than preflight, which checks only what these need.
+    lanes: frozenset[str] = frozenset()
+    tagging: bool = False
+    #: When this run started; a receipt's age is measured from here, not from the end.
+    started: float = field(default_factory=lambda: time.time())
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +174,157 @@ def tail(text: str, lines: int = 3) -> str:
 # ---------------------------------------------------------------------------
 # checks
 # ---------------------------------------------------------------------------
+
+
+def beacon_pins() -> set[str]:
+    """The Beacon commit(s) tests.yml installs; the gate reads them so the two cannot drift."""
+    text = (REPO / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    return set(re.findall(r"Archolith/beacon\.git@([0-9a-f]{7,40})", text))
+
+
+def _beacon_fix_command() -> str:
+    pins = sorted(beacon_pins())
+    if len(pins) != 1:
+        return f"(tests.yml pins Beacon at {pins or 'nothing'}; fix the workflow first)"
+    pin = pins[0]
+    venv = f".release-gate/beacon-{pin[:8]}"
+    python = f"{venv}/Scripts/python.exe" if os.name == "nt" else f"{venv}/bin/python"
+    return (
+        f'python -m venv {venv} && {python} -m pip install '
+        f'"git+https://github.com/Archolith/beacon.git@{pin}"\n'
+        f"then set MENHIR_TEST_BEACON_PYTHON={REPO.as_posix()}/{python}"
+    )
+
+
+def _probe(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str] | None:
+    """Run a quick probe; None when it could not start or did not finish in time."""
+    try:
+        return run(cmd, check=False, timeout=timeout)  # type: ignore[arg-type]
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _beacon_problem() -> str | None:
+    python = os.environ.get("MENHIR_TEST_BEACON_PYTHON", "")
+    if not python:
+        return "MENHIR_TEST_BEACON_PYTHON is not set (the offline and online lanes' Beacon tests need it)"
+    if not Path(python).is_absolute():
+        return f"MENHIR_TEST_BEACON_PYTHON={python} is not an absolute path"
+    if not Path(python).is_file():
+        return f"MENHIR_TEST_BEACON_PYTHON={python} does not exist"
+    probe = _probe([python, "-c", "import beacon"], timeout=30)
+    if probe is None or probe.returncode != 0:
+        return f"MENHIR_TEST_BEACON_PYTHON={python} cannot import beacon"
+    return None
+
+
+def check_preflight(ctx: Context) -> str:
+    """#606: refuse in seconds, before any lane, when a selected lane cannot run here."""
+    problems: list[str] = []
+    checked: list[str] = []
+    if "lint" in ctx.lanes:
+        checked.append("ruff")
+        probe = _probe([PY, "-m", "ruff", "--version"], timeout=20)
+        if probe is None or probe.returncode != 0:
+            problems.append(f"ruff is not installed in {PY}\n  fix: {PY} -m pip install ruff")
+    if ctx.lanes & {"offline", "online"}:
+        checked.append("beacon")
+        problem = _beacon_problem()
+        if problem:
+            problems.append(f"{problem}\n  fix: {_beacon_fix_command()}")
+    if "online" in ctx.lanes:
+        checked.append("test neo4j")
+        env = {k: os.environ.get(k, v) for k, v in ONLINE_ENV_DEFAULTS.items()}
+        problem = _test_neo4j_problem(env, connect_timeout=3.0)
+        if problem:
+            problems.append(
+                f"test Neo4j at {env['MENHIR_TEST_NEO4J_URI']} is not usable ({problem})\n"
+                "  fix: start a disposable test Neo4j and set MENHIR_TEST_NEO4J_URI to it"
+            )
+    if ctx.lanes & {"ci", "image"} or ctx.tagging:
+        checked.append("gh auth")
+        probe = _probe(["gh", "auth", "status"], timeout=20)
+        if probe is None or probe.returncode != 0:
+            problems.append("gh is not installed or not authenticated\n  fix: gh auth login")
+    if problems:
+        raise CheckFailed("\n".join(problems))
+    return "ok: " + (", ".join(checked) or "nothing the selected checks need")
+
+
+# ---------------------------------------------------------------------------
+# #607: a passing check-only run's slow lanes are reused by --tag on the same commit
+# ---------------------------------------------------------------------------
+
+
+def receipt_path(tag: str) -> Path:
+    return RECEIPT_DIR / f"{tag}.json"
+
+
+def _receipt_env() -> dict[str, str]:
+    """The lane inputs outside the commit that a reused result depends on."""
+    return {
+        "MENHIR_TEST_BEACON_PYTHON": os.environ.get("MENHIR_TEST_BEACON_PYTHON", ""),
+        "MENHIR_TEST_NEO4J_URI": os.environ.get(
+            "MENHIR_TEST_NEO4J_URI", ONLINE_ENV_DEFAULTS["MENHIR_TEST_NEO4J_URI"]
+        ),
+    }
+
+
+def discard_receipt(tag: str) -> None:
+    try:
+        receipt_path(tag).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def write_receipt(ctx: Context) -> Path:
+    path = receipt_path(ctx.tag)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "tag": ctx.tag,
+        "head": ctx.head,
+        "python": PY,
+        "env": _receipt_env(),
+        "created": ctx.started,
+        "results": {r.name: r.detail for r in ctx.results if r.name in REUSABLE and r.ok},
+    }
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def load_receipt(ctx: Context, *, now: float | None = None) -> tuple[dict[str, str] | None, str]:
+    """The reusable lane results, or None and the reason they cannot be reused.
+
+    Only valid for the same tag, the same HEAD (which `branch` has just proven equals
+    origin/main, with `tree` proving it clean), the same interpreter, and a recent run.
+    """
+    path = receipt_path(ctx.tag)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, "no receipt from a check-only run"
+    except (OSError, ValueError):
+        return None, f"receipt {path} is unreadable"
+    try:
+        age = (time.time() if now is None else now) - float(data.get("created") or 0)
+        results = dict(data.get("results") or {})
+    except (AttributeError, TypeError, ValueError):
+        return None, f"receipt {path} is unreadable"
+    if data.get("tag") != ctx.tag:
+        return None, "receipt is for another tag"
+    if not ctx.head or data.get("head") != ctx.head:
+        return None, f"receipt is for {str(data.get('head'))[:8]}, HEAD is {ctx.head[:8]}"
+    if data.get("python") != PY:
+        return None, "receipt was written by another interpreter"
+    if data.get("env") != _receipt_env():
+        return None, "receipt was written with another Beacon interpreter or test Neo4j"
+    if not 0 <= age <= RECEIPT_MAX_AGE_S:
+        return None, f"receipt is {age / 60:.0f} min old (limit {RECEIPT_MAX_AGE_S // 60:.0f})"
+    if set(results) != set(REUSABLE):
+        return None, "receipt does not cover every slow lane"
+    return {name: str(results[name]) for name in REUSABLE}, f"{age / 60:.0f} min old"
 
 
 def check_tree(ctx: Context) -> str:
@@ -251,7 +421,7 @@ def check_offline(ctx: Context) -> str:
     return tail(proc.stdout, 1)
 
 
-def _test_neo4j_problem(env: dict[str, str]) -> str | None:
+def _test_neo4j_problem(env: dict[str, str], *, connect_timeout: float | None = None) -> str | None:
     try:
         from neo4j import GraphDatabase  # type: ignore[import-not-found]
     except ImportError:
@@ -260,6 +430,7 @@ def _test_neo4j_problem(env: dict[str, str]) -> str | None:
         driver = GraphDatabase.driver(
             env["MENHIR_TEST_NEO4J_URI"],
             auth=(env["MENHIR_TEST_NEO4J_USER"], env["MENHIR_TEST_NEO4J_PASSWORD"]),
+            **({"connection_timeout": connect_timeout} if connect_timeout else {}),
         )
         with driver.session(database=env["MENHIR_TEST_NEO4J_DATABASE"]) as session:
             session.run("RETURN 1").single()
@@ -379,6 +550,7 @@ def check_image(ctx: Context) -> str:
 
 
 CHECKS = {
+    "preflight": check_preflight,
     "tree": check_tree,
     "branch": check_branch,
     "version": check_version,
@@ -400,7 +572,7 @@ CHECKS = {
 def do_tag(ctx: Context) -> None:
     print(f"\n==> tagging {ctx.tag} at {ctx.head[:8]} and pushing")
     heading = changelog_heading(ctx.version) or ctx.tag
-    run(["git", "tag", "-a", ctx.tag, "-m", heading.lstrip("# ").strip()])
+    run(["git", "tag", "-a", ctx.tag, ctx.head, "-m", heading.lstrip("# ").strip()])
     run(["git", "push", "origin", ctx.tag])
     peeled = git("rev-parse", f"{ctx.tag}^{{commit}}")
     if peeled != ctx.head:
@@ -453,6 +625,16 @@ def watch_publish(ctx: Context) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _head_moved(ctx: Context) -> str:
+    """Why the checked commit is no longer what is checked out, or "" if it still is."""
+    head = git("rev-parse", "HEAD")
+    if head != ctx.head:
+        return f"HEAD moved from {ctx.head[:8]} to {head[:8]} during the run"
+    if git("status", "--porcelain", "--untracked-files=no"):
+        return "the working tree changed during the run"
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -466,12 +648,15 @@ def main(argv: list[str] | None = None) -> int:
         "--only", default="",
         help="comma-separated subset of checks to run (never allowed with --tag)",
     )
+    ap.add_argument(
+        "--fresh", action="store_true",
+        help="with --tag: rerun the offline and online lanes even if a check-only receipt covers them",
+    )
     args = ap.parse_args(argv)
 
     if not TAG_RE.match(args.tag):
         print(f"tag must look like vX.Y.Z, got {args.tag!r}", file=sys.stderr)
         return 2
-    ctx = Context(tag=args.tag, version=args.tag[1:])
 
     selected = [c.strip() for c in args.only.split(",") if c.strip()] or list(CHECK_ORDER)
     unknown = [c for c in selected if c not in CHECKS]
@@ -481,13 +666,39 @@ def main(argv: list[str] | None = None) -> int:
     if args.do_tag and args.only:
         print("--tag requires the full check set; drop --only", file=sys.stderr)
         return 2
+    # Preflight always runs, scoped to what the selected checks need.
+    if "preflight" not in selected:
+        selected.insert(0, "preflight")
+    ctx = Context(
+        tag=args.tag,
+        version=args.tag[1:],
+        lanes=frozenset(selected) - {"preflight"},
+        tagging=args.do_tag,
+    )
+    full_set = set(selected) == set(CHECK_ORDER)
 
     print(f"release gate for {ctx.tag} in {REPO}")
+    reuse: dict[str, str] | None = None
+    reuse_note = "--fresh" if args.fresh else ""
     for name in CHECK_ORDER:
         if name not in selected:
             continue
         started = time.monotonic()
         print(f"--> {name}", flush=True)
+        if name in REUSABLE and args.do_tag and not args.fresh:
+            if reuse is None and not reuse_note:
+                # Loaded only here, after `tree` and `branch` passed: HEAD is clean and pushed.
+                reuse, reuse_note = load_receipt(ctx)
+                print(f"    receipt: {'reusing, ' if reuse else 'not reused: '}{reuse_note}")
+            if reuse is not None:
+                ctx.results.append(Result(
+                    name, True, f"reused ({reuse_note}): {reuse[name]}",
+                    time.monotonic() - started,
+                ))
+                continue
+        if name in REUSABLE:
+            # Newer evidence replaces the receipt: if this run fails, nothing reuses the old pass.
+            discard_receipt(ctx.tag)
         try:
             detail, ok = CHECKS[name](ctx), True
         except CheckFailed as exc:
@@ -517,7 +728,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NOT READY: {ctx.tag} must not be tagged.")
         return 1
     if not args.do_tag:
-        print(f"READY: every selected check passed. Re-run with --tag to release {ctx.tag}.")
+        if full_set and (moved := _head_moved(ctx)):
+            print(f"READY, but no receipt: {moved}. `--tag` will rerun every check.")
+        elif full_set:
+            path = write_receipt(ctx)
+            print(
+                f"READY: every check passed. Receipt {path.as_posix()}: "
+                f"`--tag` within {RECEIPT_MAX_AGE_S // 3600:.0f}h on this commit reuses the "
+                "offline and online lanes and reruns the rest."
+            )
+        else:
+            print(f"READY: every selected check passed. Re-run with --tag to release {ctx.tag}.")
         return 0
     try:
         do_tag(ctx)
@@ -525,6 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     except CheckFailed as exc:
         print(f"RELEASE FAILED: {exc}", file=sys.stderr)
         return 1
+    discard_receipt(ctx.tag)
     print(f"RELEASED {ctx.tag}.")
     return 0
 

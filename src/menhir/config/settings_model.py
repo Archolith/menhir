@@ -32,6 +32,19 @@ if TYPE_CHECKING:
 ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_apply"})
 
 
+#: MENHIR_LOOPBACK_PROFILE values (#439); menhir.mcp.local_profile gives them meaning.
+LOOPBACK_PROFILES: tuple[str, ...] = ("default", "operator")
+
+
+def _normalize_loopback_profile(raw: str | None) -> str:
+    text = (raw or "").strip().lower() or "default"
+    if text not in LOOPBACK_PROFILES:
+        raise ValueError(
+            f"MENHIR_LOOPBACK_PROFILE must be one of {list(LOOPBACK_PROFILES)}, got {raw!r}"
+        )
+    return text
+
+
 def _normalize_reconcile_mode(raw: str) -> str:
     mode = (raw or "").strip().lower()
     return mode if mode in ARTIFACT_RECONCILE_MODES else "audit"
@@ -458,6 +471,10 @@ class MemorySettings:
     # per-tier catalog filter. Empty (the default) leaves every client
     # unrestricted, preserving existing behavior.
     client_tools: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    # MENHIR_LOOPBACK_PROFILE -- the MCP tools an unauthenticated local agent gets (#439):
+    # "default" is the core and curate profiles without add_candidate; "operator" is every tool.
+    loopback_profile: str = "default"
 
     # MENHIR_KNOWN_CLIENTS -- comma-separated client names that are RECOGNIZED but carry no
     # restriction. Exists because "known" and "restricted" are different facts, and CF-32's
@@ -984,6 +1001,7 @@ class MemorySettings:
             ),
             client_namespaces=parse_client_namespaces(_getenv("MENHIR_CLIENT_NAMESPACES", default="")),
             client_tools=parse_client_tools(_getenv("MENHIR_CLIENT_TOOLS", default="")),
+            loopback_profile=_normalize_loopback_profile(_getenv("MENHIR_LOOPBACK_PROFILE", default="")),
             known_clients=frozenset(
                 part.strip().lower()
                 for part in (_getenv("MENHIR_KNOWN_CLIENTS", default="") or "").split(",")

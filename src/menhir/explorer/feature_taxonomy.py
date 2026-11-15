@@ -39,6 +39,7 @@ PARENTS: dict[str, list[str]] = {
         "ingest_document",
         "ingest_project",
         "add_candidate",
+        "review_candidate",
     ],
     "structure": [
         "query_structure",
@@ -87,6 +88,7 @@ PARENTS: dict[str, list[str]] = {
         "get_client_context",
         "rate_recall",
         "review_inbox",
+        "list_candidates",
         "view_entropy",
     ],
     "lifecycle": [

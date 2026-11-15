@@ -23,7 +23,7 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.3.10`. Menhir is built for a single operator, requires
+The current package version is `0.3.12`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
 [known limitations](#known-limitations) before relying on it for personal memory.
 
@@ -402,10 +402,13 @@ run them by hand.
 
 Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
 the stdio bridge with the same Python installation as Menhir. The bridge connects to the
-running backend; it does not start one. A fresh loopback install needs no key, but with no key
-every loopback request gets the operator tier: the agent sees every registered tool, including
-scheduler, lease, client and namespace administration. To give an agent a smaller tool set, set
-up an agent key as described below.
+running backend; it does not start one. A fresh loopback install needs no key. With no key, an
+agent gets the `core` and `curate` tools: recall, context, memories, todos, conflicts, artifacts
+and ingest. It does not get `add_candidate` or `review_candidate`, the scheduler, lease and enrichment controls, or
+client and namespace administration. To give a keyless agent every tool, set
+`MENHIR_LOOPBACK_PROFILE=operator` on the backend and in the stdio client's `env`. The CLI and the
+explorer are not affected by this setting. With an agent key, described below, the key's tier
+decides instead.
 
 ```json
 {
@@ -677,7 +680,7 @@ the private `Archolith/menhir-deploy` repository.
 
 ## Known limitations
 
-These are known gaps in 0.3.10, each with a planned fix:
+These are known gaps in 0.3.12, each with a planned fix:
 
 - **Erasure can leave some derived text behind.** `delete_memory` removes the memory, its
   episode, evidence turns, projections and scalar assertions. Since 0.3.9, entities and facts
@@ -740,7 +743,9 @@ set through the MCP gateway.
 | `add_memory` | Queue a memory for enrichment |
 | `add_memory_and_track` | Queue a memory and wait for processing, returning the observed state transitions |
 | `ingest_document` | Ingest a document as memory episodes |
-| `add_candidate` | Stage low-trust context for human review without making it recallable |
+| `add_candidate` | Stage low-trust context for human review without making it recallable. Keyless agents don't get this tool by default |
+| `list_candidates` | List staged candidates awaiting review (read-only) |
+| `review_candidate` | Approve a candidate (it becomes an ordinary, contradiction-checked memory) or reject it (deleted). Operator tier |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
 | `promote_memory` | Mark persistent memory as operator-designated authority |
 | `delete_memory` | Delete a memory under operator control (extracted entities and facts remain; see [known limitations](#known-limitations)) |

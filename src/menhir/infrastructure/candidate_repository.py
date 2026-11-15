@@ -6,8 +6,8 @@ via Cypher, bypassing the Graphiti enrichment pipeline - exactly like TEMPORAL n
 
 A CANDIDATE is the low-trust "review tier": it is NOT recalled and NOT scored into
 context until a human approves it, at which point it is promoted to PERSISTENT scope
-(via the normal contradiction-checked promotion path). Rejection deletes it and records
-a suppression so the same signal does not silently reappear.
+(via the normal contradiction-checked promotion path). Rejection deletes it; nothing
+records the rejection, so re-emitting the same signal creates a new candidate.
 
 Writes are idempotent on (source, cluster_id): re-emitting the same cluster refreshes
 its provenance (evidence strength, distinct-session count, last_seen, notes) instead of
@@ -33,6 +33,15 @@ from uuid import uuid4
 # surface readable; painscan clusters can accrue dozens of evidence rows.
 _MAX_NOTES = 12
 _MAX_NOTE_LEN = 280
+
+# The MATCH above it reads without a lock, and Neo4j does not re-check a WHERE after a later
+# write waits for one. Without this, a reject queued behind an approve deletes the memory the
+# approve just made PERSISTENT. Writing a throwaway property takes the node's write lock; the
+# scope is then read again under it. tests/test_candidate_review_431.py races both orders.
+_REVIEW_LOCK = """SET n._candidate_review_lock = true
+            REMOVE n._candidate_review_lock
+            WITH n
+            WHERE n.scope = 'CANDIDATE'"""
 
 
 def _cap_notes(notes: list[str] | None) -> list[str]:
@@ -108,6 +117,8 @@ class CandidateRepository:
         """
         content = ensure_scrubbed(content)
         notes = [ensure_scrubbed(str(n)) for n in notes] if notes else notes
+        # The label becomes the node name, which approval embeds and recall returns (#431).
+        label = ensure_scrubbed(label) if label else label
         node_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         node_name = (label or content)[:120]
@@ -194,45 +205,67 @@ class CandidateRepository:
     # Approve / reject (review-tier transitions)
     # ------------------------------------------------------------------
 
-    def promote_candidate(self, uuid: str) -> bool:
+    def promote_candidate(
+        self,
+        uuid: str,
+        *,
+        namespace: str | None = None,
+        name_embedding: list[float] | None = None,
+    ) -> bool:
         """Approve: flip a CANDIDATE node to PERSISTENT scope (now recallable).
 
         Guarded on scope='CANDIDATE' so this never touches SESSION/PERSISTENT nodes.
         Candidate provenance (source, cluster_id, evidence_strength, ...) is retained
         for traceability. The caller is responsible for running the contradiction
         check first - this method only performs the scope transition.
+
+        ``namespace`` (opt-in) is checked in the same statement as the write, so a scoped caller
+        cannot promote another silo's candidate. ``name_embedding`` is written with the scope flip:
+        candidates are created without one, the property vector recall reads (#431). An empty
+        ``summary`` takes the candidate's content (first 1000 chars): Graphiti's full-text index
+        covers ``name`` and ``summary`` only, and recall shows the summary.
         """
         now = datetime.now(timezone.utc).isoformat()
+        ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {uuid: $uuid})
+            f"""
+            MATCH (n:Entity {{uuid: $uuid}})
             WHERE n.scope = 'CANDIDATE'
+              AND {tenant_scope_cypher("n")}
+            {_REVIEW_LOCK}
             SET n.scope = 'PERSISTENT',
                 n.freshness = 'ACTIVE',
                 n.promoted_at = datetime(),
-                n.last_accessed = datetime($now)
+                n.last_accessed = datetime($now),
+                n.summary = CASE WHEN trim(coalesce(n.summary, '')) = ''
+                                 THEN left(coalesce(n.content, ''), 1000) ELSE n.summary END
+            FOREACH (_ IN CASE WHEN $emb IS NULL THEN [] ELSE [1] END |
+                SET n.name_embedding = $emb)
             RETURN count(n) AS promoted
             """,
-            {"uuid": uuid, "now": now},
+            {"uuid": uuid, "now": now, "emb": name_embedding, **tenant_scope_params(ns or None)},
         )
         return bool(rows and int(rows[0].get("promoted", 0)) > 0)
 
-    def reject_candidate(self, uuid: str) -> bool:
+    def reject_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
         """Reject: DETACH DELETE a CANDIDATE node. Returns True if one was removed.
 
-        Guarded on scope='CANDIDATE' so only review-tier nodes can be deleted here.
-        Suppression bookkeeping (so a rejected signal does not silently reappear) is
-        the caller's responsibility.
+        Guarded on scope='CANDIDATE' so only review-tier nodes can be deleted here, and on the
+        caller's silo when ``namespace`` is supplied. Suppression bookkeeping (so a rejected
+        signal does not silently reappear) is the caller's responsibility.
         """
+        ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {uuid: $uuid})
+            f"""
+            MATCH (n:Entity {{uuid: $uuid}})
             WHERE n.scope = 'CANDIDATE'
+              AND {tenant_scope_cypher("n")}
+            {_REVIEW_LOCK}
             WITH n, n.uuid AS removed
             DETACH DELETE n
             RETURN count(removed) AS rejected
             """,
-            {"uuid": uuid},
+            {"uuid": uuid, **tenant_scope_params(ns or None)},
         )
         return bool(rows and int(rows[0].get("rejected", 0)) > 0)
 
@@ -267,6 +300,7 @@ class CandidateRepository:
                 n.candidate_cluster_id AS cluster_id,
                 n.candidate_kind AS kind,
                 n.candidate_type AS type,
+                n.type AS memory_type,
                 n.candidate_label AS label,
                 n.candidate_evidence_strength AS evidence_strength,
                 n.candidate_distinct_sessions AS distinct_sessions,
@@ -280,12 +314,17 @@ class CandidateRepository:
             {"source": source, "limit": safe_limit, **tenant_scope_params(ns or None)},
         )
 
-    def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
-        """Return a single CANDIDATE node by uuid, or None if not a candidate."""
+    def fetch_candidate(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any] | None:
+        """Return a single CANDIDATE node by uuid, or None if not a candidate.
+
+        ``namespace`` is opt-in: supplied, a candidate in another silo reads as None.
+        """
+        ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {uuid: $uuid})
+            f"""
+            MATCH (n:Entity {{uuid: $uuid}})
             WHERE n.scope = 'CANDIDATE'
+              AND {tenant_scope_cypher("n")}
             RETURN
                 n.uuid AS uuid,
                 n.name AS name,
@@ -303,6 +342,6 @@ class CandidateRepository:
                 n.candidate_notes AS notes,
                 n.created_at AS created_at
             """,
-            {"uuid": uuid},
+            {"uuid": uuid, **tenant_scope_params(ns or None)},
         )
         return dict(rows[0]) if rows else None

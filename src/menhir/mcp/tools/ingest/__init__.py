@@ -9,7 +9,9 @@ from .delete_memory import DeleteMemoryTool
 from .flag_memory import FlagMemoryTool
 from .ingest_document import IngestDocumentTool
 from .ingest_project import IngestProjectTool
+from .list_candidates import ListCandidatesTool
 from .promote_memory import PromoteMemoryTool
+from .review_candidate import ReviewCandidateTool
 from .unflag_memory import UnflagMemoryTool
 
-INGEST_TOOLS = [AddMemoryTool, AddMemoryAndTrackTool, FlagMemoryTool, UnflagMemoryTool, PromoteMemoryTool, DeleteMemoryTool, DeleteMemoriesTool, IngestProjectTool, IngestDocumentTool, CloseMemoryTool, AddCandidateTool]
+INGEST_TOOLS = [AddMemoryTool, AddMemoryAndTrackTool, FlagMemoryTool, UnflagMemoryTool, PromoteMemoryTool, DeleteMemoryTool, DeleteMemoriesTool, IngestProjectTool, IngestDocumentTool, CloseMemoryTool, AddCandidateTool, ListCandidatesTool, ReviewCandidateTool]

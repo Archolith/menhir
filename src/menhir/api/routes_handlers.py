@@ -12,7 +12,8 @@ from fastapi.responses import JSONResponse
 
 from menhir.domain.recall import InvalidQueryPresetError
 from menhir.core.tenancy import require_namespace_target, resolve_namespace_filter
-from menhir.mcp.service_access import get_pinned_namespace
+from menhir.core.request_context import get_request_tool_allowlist
+from menhir.mcp.service_access import get_client_tool_allowlist, get_pinned_namespace
 from menhir.services.counting_consolidation import effective_counting_perceiver_version
 
 from .routes_support import (
@@ -252,6 +253,52 @@ async def phase3_reset_impl(
     )
 
 
+#: Operations without `namespace` that a pinned client may still call: deployment-wide numbers
+#: and summaries, the operational sections `get_memory_stats` already shows a pinned client.
+PINNED_GLOBAL_OPERATIONS = frozenset({
+    "fetch_operation_stats",
+    "fetch_failure_summary",
+    "fetch_enrichment_rate",
+    "fetch_lifecycle_summary",
+    "get_queue_depth",
+    "get_max_enrichment_attempts",
+    "circuit_breaker_snapshots",
+})
+
+
+def _refuse_restricted_client(operation: str, method: Any) -> None:
+    """Refuse what the generic dispatch cannot bound for a restricted client.
+
+    A tool allowlist names tools, and this route names backend operations, so an allowlisted
+    client is refused the route. A pinned client keeps every operation that takes `namespace`
+    (`_pin_backend_invoke_namespace` forces its silo); the rest address objects by uuid or read
+    every silo, and the tools that wrap them check ownership in the tool, which a direct caller
+    skips. Those are refused unless listed in PINNED_GLOBAL_OPERATIONS.
+    """
+    if get_request_tool_allowlist() is not None or get_client_tool_allowlist():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"`{operation}`: this client has a tool allowlist, which the internal backend "
+                "route cannot apply; use the MCP endpoint"
+            ),
+        )
+    if not get_pinned_namespace() or operation in PINNED_GLOBAL_OPERATIONS:
+        return
+    try:
+        accepts_namespace = "namespace" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        accepts_namespace = False
+    if not accepts_namespace:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"`{operation}` is not scoped to a namespace and this client is pinned to one; "
+                "use the MCP endpoint"
+            ),
+        )
+
+
 def _pin_backend_invoke_namespace(
     operation: str,
     method: Any,
@@ -346,16 +393,25 @@ async def backend_invoke_impl(
                 status_code=exc.status_code,
                 detail=f"{exc.detail}. {deprecation_notice}",
             ) from exc
+
+    backend = get_backend(request)
+    method = getattr(backend, operation)
+    try:
+        _refuse_restricted_client(operation, method)
+    except HTTPException:
+        if deprecation_notice is not None:
+            record_deprecated_operation_call(operation, admitted=False)
+        raise
+    if deprecation_notice is not None:
+        # Counted only once every refusal has passed: the admitted count is the evidence of
+        # legitimate use that gates removing the operation.
         record_deprecated_operation_call(operation, admitted=True)
         logger.warning(
             "Deprecated operation invoked: operation=%s -- see DEPRECATED_OPERATIONS", operation
         )
-
     if required_tier == "operator":
         try_record_destructive_op_rest(operation)
     caller_session = resolve_caller_session(request)
-    backend = get_backend(request)
-    method = getattr(backend, operation)
     call_kwargs = _pin_backend_invoke_namespace(operation, method, dict(body or {}), logger)
     try:
         result = await method(**call_kwargs)

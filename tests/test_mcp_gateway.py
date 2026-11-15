@@ -23,6 +23,8 @@ from menhir.mcp.tools.ops.recover_orphans import RecoverOrphansTool
 EXPECTED_TOOL_NAMES = frozenset({
     "acknowledge_warning",
     "add_candidate",
+    "list_candidates",
+    "review_candidate",
     "add_memory",
     "add_memory_and_track",
     "add_todo",

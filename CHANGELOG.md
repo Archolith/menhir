@@ -42,6 +42,171 @@
 - `docs/post-install.md`, `.agent/architecture.md` and `docs/roadmap/`: install guide and
   implementation boundary. Hermes must reload its provider after setup/config changes.
 
+## 2026-11-15 - v0.3.12: resources follow the client allowlist and pin, billing breakers recover on their own
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.12. No dependency changes in this commit.
+
+## 2026-11-14 - Billing refusals: the embed breaker guards every embed, recovers on its own, and is reported
+
+- Graphiti now gets an embedder that runs every `create`/`create_batch` through the embed
+  breaker (#630). Fused search, the cosine lane and ingest's entity embeddings stopped while it
+  is open; search drops to BM25-only without logging the query or a traceback, including on the
+  call that trips the breaker. Vectors already in the embedding cache are served before the
+  breaker, so a cache hit is neither refused nor counted as a probe.
+- While the embed breaker refuses, `add_episode` refuses before Graphiti's LLM extraction runs,
+  so a requeued episode no longer pays for extraction on every attempt. The worker requeues it
+  for the breaker's remaining cooldown.
+- Each breaker tags the errors it raises. An outer breaker ignores another breaker's errors, so
+  an embedder billing refusal inside `add_episode` opens the embed breaker, not the LLM one
+  (#493). Only explicit `__cause__` chains count; a probe that hits another breaker's error
+  restarts the normal cooldown. A billing refusal that lands while a probe runs keeps the
+  billing hold and the probe slot.
+- A billing hard-open probes after 5 minutes instead of an hour. A successful probe closes it;
+  a probe that fails for another reason ends the billing hold and uses the normal cooldown
+  (#492: no operator reset tool; recovery after a top-up takes up to 5 minutes).
+- Recall's note says why semantic search is off, for example `semantic search off: embedding
+  provider refused for billing (next probe in 4m); results are keyword-only` (#632).
+- `/readyz` gives a token holder a `provider` block: `degraded` codes, the quota and auth
+  summaries, and the breakers hard-open for billing (#631). `status` and the status code do not
+  change; every deploy readiness check requires `status == "ready"`.
+
+## 2026-11-14 - SESSION scope is a relevance scope, not access control
+
+- Reverts the SESSION-row filter that #635 added to `memory://recent`, `scope`, `type` and
+  `node`. It covered only those four resources: the context loaders, recall history and
+  timeline, and the internal dispatch's memory reads return SESSION rows from any session. The
+  session id is caller-chosen under static-key and loopback auth. It also hid a stdio client's
+  own unconsolidated rows after a restart, because each process gets a new session id.
+  `docs/your-data.md` now says SESSION is a relevance scope and that namespaces separate
+  clients. The internal-dispatch restrictions from #635 stay.
+- The internal dispatch counts a call to a deprecated operation as admitted only after the
+  client restriction passes; a refused call is counted as refused. The admitted count gates
+  removing `write_project_structure`.
+
+## 2026-11-14 - SESSION rows stay with their session in resources; the internal dispatch refuses what it cannot scope
+
+- `memory://recent`, `memory://scope/{scope}` and `memory://type/{type}` drop SESSION-scoped
+  rows from other sessions, and `memory://node/{uuid}` reads one as not found. This is the
+  rule recall applies. A caller with no session id sees no SESSION rows. The listings filter
+  after the 10-row fetch, so they can return fewer than 10.
+- `/api/internal/backend/{operation}`:
+  - Refuses every operation to a client with a tool allowlist (client policy or
+    `MENHIR_CLIENT_TOOLS`): it names backend operations, not tools, so it cannot apply one.
+  - For a pinned client, keeps every operation that takes `namespace` (the pin is forced, as
+    before) and the deployment-wide stats `get_memory_stats` shows. It refuses the rest, which
+    address objects by uuid or read every silo; the tools that wrap them check ownership in
+    the tool, which a direct call skipped.
+  - Behaviour change: a pinned or allowlisted client running the stdio server against a
+    remote backend loses those operations and should connect over MCP instead. Production
+    does not mount this route.
+
+## 2026-11-14 - MCP resources follow the client's tool allowlist and namespace pin
+
+- Each MCP resource now names a governing tool, and a client may read it only if the client
+  policy (or `MENHIR_CLIENT_TOOLS` without one) allows that tool. Resources also check client
+  identity first, as tools do. `memory://recent`, `scope`, `search` and `type` follow
+  `recall_memories`; `memory://node/{uuid}`, whose detail row carries processing state and
+  session and user ids, follows `get_enrichment_status`; `system/metadata` and
+  `system/dependency-health` follow `get_memory_stats` and now need operator tier, since they
+  return infrastructure endpoints no tool returns; `system/lifecycle-trace` follows
+  `get_episode_trace`; `system/processing-queue` follows `list_enrichment_queue`. Behaviour
+  change: a client restricted to the `core` profile (including the keyless loopback default),
+  or to a short `MENHIR_CLIENT_TOOLS` list, can no longer read `memory://node` or the
+  `system/*` resources.
+- A client pinned to a namespace is refused `system/lifecycle-trace` and
+  `system/processing-queue`, which have no per-namespace filter, and gets `system/metadata`'s
+  graph counts for its own namespace only. The lifecycle trace withholds tracebacks below
+  operator tier, as `get_episode_trace` does.
+- A production client policy that sets a non-empty `namespace` on a client now refuses to load.
+  Nothing enforced that field; pinning is `MENHIR_CLIENT_NAMESPACES`.
+
+## 2026-11-14 - Release gate: preflight in seconds, and `--tag` reuses a fresh check run (#606, #607)
+
+- #606: `scripts/release.py` now runs `preflight` first. It checks only what the selected checks need: ruff for lint; an absolute `MENHIR_TEST_BEACON_PYTHON` that imports Beacon for offline and online (the online lane runs the Beacon E2E test); a reachable test Neo4j (3 s connect timeout) for online; `gh auth` for ci, image and `--tag`. It reports every problem at once with the command that fixes it, and the Beacon pin is read from `tests.yml`. A workstation missing them is refused in seconds, instead of after a 7-minute offline lane. Preflight checks that Beacon imports, not that it is at the pinned commit.
+- #607: a full passing check-only run writes `.release-gate/<tag>.json`. `--tag` on the same tag, HEAD, interpreter, Beacon interpreter and test Neo4j URI, within two hours of the check run's start, reuses that receipt's offline and online results and reruns every other check, including tree, branch, ci and image. Any run that executes either slow lane deletes the receipt first, so a later failure is never covered by an earlier pass. No receipt is written if HEAD or the tree changed during the run. `--fresh` ignores the receipt, and a release deletes it. The tag now names the checked commit explicitly, instead of whatever HEAD is when it is created. `docs/runbooks/release.md` describes both.
+- Tests: `tests/test_release_gate_preflight_receipt.py`.
+
+## 2026-11-13 - v0.3.11: candidate review over MCP, tool catalog 4
+
+- Ships every entry below back to v0.3.10. Deploy-relevant:
+  - Tool catalog 4 (`list_candidates`, `review_candidate`, #431). A v3 policy pinned to catalog 3 withholds them until it is re-pinned. A v1 or v2 policy refuses to start until `scripts/update_client_policy.py` adds the two decisions.
+  - Startup applies the evidence-lifecycle uniqueness constraints (#603). Duplicate fences are merged. A duplicate intent, tombstone or repair key refuses writer startup.
+  - A keyless loopback agent gets core and curate, without `add_candidate` and `review_candidate` (#439). The explorer is off by default. Loopback servers refuse a non-loopback Host.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.11. No dependency changes in this commit.
+
+## 2026-11-13 - Candidates can be reviewed over MCP: list_candidates and review_candidate (#431)
+
+- #431: `add_candidate` staged claims that nothing on a production surface could list, approve
+  or reject; only the explorer could, and production does not serve it. Two tools close that:
+  - `list_candidates` (readonly, `curate`): candidates awaiting review, newest first, with
+    their silo, evidence, content excerpt and notes, under a line marking the text untrusted.
+  - `review_candidate(uuid, decision)` (operator, `curate`): `approve` or `reject`.
+- A scoped caller cannot approve or reject another silo's candidate. The silo is checked in the
+  write statement itself, and the candidate fetch, promote, reject and approve backend
+  operations now declare `namespace`, so the internal dispatch forces a pinned client's silo
+  onto them as it does for `list_candidates`. A candidate that exists in another silo is
+  refused by name; a missing one reads as not found.
+- Approval now embeds the candidate's name and writes `name_embedding`, the property vector
+  recall reads, with the scope flip. Candidates are created without one. The embed is
+  best-effort and bounded at 10 s, and the reply says when it failed. Tests cover the write,
+  not a recall that returns the approved memory. A candidate with no summary gets its content
+  as one. The reply says when the contradiction check merged the new memory into a
+  near-duplicate, and a retry after a timed-out approval says it was already approved.
+- Approve and reject lock the candidate before re-reading its scope. Without that, a reject
+  queued behind an approve deleted the memory the approve had just made `PERSISTENT`.
+- Tool catalog 4. A v3 client policy pinned to an older catalog withholds both tools until
+  it is re-pinned (`scripts/update_client_policy.py --profile-catalog 4`). A v1 or v2 policy
+  lists every tool, so it refuses at startup until the same script adds the two decisions
+  (operators allowed, agent and readonly clients denied). `review_inbox` now points at these
+  tools.
+- The keyless local default leaves out `add_candidate` and `review_candidate`: approval turns
+  unreviewed emitter text into recallable memory, and with both tools the agent that stages a
+  claim could approve it itself. `MENHIR_LOOPBACK_PROFILE=operator` restores both; whether the
+  default should include either is undecided.
+
+## 2026-11-13 - A keyless local agent gets the core and curate tools, not every tool (#439, #431, #430)
+
+- #439: with no keys configured, an agent connecting to a local install got the operator tier
+  and every registered tool, including the scheduler, lease, orphan-recovery, client and
+  namespace administration tools. Now a keyless agent gets the `core` and `curate` profiles.
+  This applies to both ways an agent connects:
+  - The stdio bridge, when it has no backend key, removes every other tool before it starts,
+    so `search_tools` can't find them and `call_tool` can't reach them. It also binds the
+    allowlist, so the tool gate refuses them too.
+  - The backend's `/mcp` and `/mcp-http`, in auth mode none, bind the same allowlist, which
+    filters `tools/list` and refuses calls.
+- `MENHIR_LOOPBACK_PROFILE=operator` restores every tool. Any other value except `default`
+  refuses to start. `/api/*` keeps the operator tier, so the CLI, hooks and explorer are
+  unchanged. A keyed caller, and any request #560's guard refuses (a non-loopback Host, or a
+  proxy forwarding header), is unaffected. This decides what an agent is offered; it is not a
+  boundary against local processes, which can already read the state directory (CT-002).
+- #431: the default leaves out `add_candidate`, because nothing on a production surface can
+  list, approve or reject what it stages.
+- #430: `recall_history`, `recall_timeline` and `get_scalar_view_items` are in `core`, so a
+  keyless agent keeps them. `.agent/tasks-mcp.md` now says that a policy client gets them only
+  by selecting `core`.
+- The E2E harness sets `MENHIR_LOOPBACK_PROFILE=operator` for its lanes. E2E-1 runs the
+  default and checks the fresh-install tool list.
+
+## 2026-11-13 - An admission audit can't re-store an erased turn id; each verdict is its own record (#623, #622)
+
+- #623: an admission audit lives in its own namespace, while the turn it names lives in the
+  user's, and the turn's erasure locks only the user namespace's fence. An audit written just
+  after the erasure committed could store the erased id again, and nothing retired it. The audit
+  write now locks the turn's fence and its own fence, in sorted key order, and stores the id only
+  if the turn is still live under a fence it holds. Otherwise it keeps the record without the id.
+  So an audit either commits before the erasure, which then retires it and strips the id, or
+  after it, without the id. This covers all three erasure paths: `purge_namespace`,
+  `delete_memory_with_scalar_cascade` and `delete_namespace_with_scalar_cascade`. The fence-key
+  rule is now `silo_key_cypher` in `domain/namespace.py`, also used by
+  `erase_target_namespace_keys`. An audit that has to wait behind a long erasure is bounded by the
+  30 s statement timeout; a timeout is not retried and is logged at WARNING, as before.
+- #622: identical denials, most often "no turn_evidence_uuid provided", shared one signature, so
+  repeats only refreshed a single node. Each `record_admission_audit` call now has a
+  `verdict_id` (stored as `admission_verdict_id`), which is the signature, so every verdict is
+  its own record. Retries of one call reuse the id. The signature no longer hashes the turn id.
+  Repeated denials now add one node each.
+
 ## 2026-11-13 - The release image builds on ubuntu-26.04; a dry run gates every tag (#615, #613, #614)
 
 - #615: on Docker 29's containerd image store, `docker image inspect` gives the manifest digest

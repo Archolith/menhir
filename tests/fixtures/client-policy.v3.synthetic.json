@@ -39,7 +39,7 @@
       }
     }
   },
-  "canonical_digest": "a092dde7b9399cc34f903ba4543ee4c741456584252e443ba2fcf065ca47ad3c",
+  "canonical_digest": "b35a037656f7bb409c928078de39de95e0e020b6e184f1524f2d4eb555e472ab",
   "clients": {
     "example-chatgpt-web": {
       "label": "chatgpt-chat",
@@ -268,6 +268,6 @@
       ]
     }
   },
-  "profile_catalog": 3,
+  "profile_catalog": 4,
   "version": 3
 }

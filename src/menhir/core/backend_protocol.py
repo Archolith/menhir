@@ -819,18 +819,26 @@ class MemoryBackend(Protocol):
         """
         ...
 
-    async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
-        """Return a single CANDIDATE node by uuid, or None if not a candidate."""
+    async def fetch_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return a single CANDIDATE node by uuid, or None if not a candidate.
+
+        ``namespace`` is opt-in; supplied, a candidate in another silo reads as None. It is
+        declared so the internal backend dispatch can force a pinned client's silo onto it.
+        """
         ...
 
-    async def promote_candidate(self, uuid: str) -> bool:
+    async def promote_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
         """Approve: flip a CANDIDATE node to PERSISTENT scope. Returns True on success."""
         ...
 
-    async def reject_candidate(self, uuid: str) -> bool:
+    async def reject_candidate(self, uuid: str, *, namespace: str | None = None) -> bool:
         """Reject: DETACH DELETE a CANDIDATE node. Returns True if one was removed."""
         ...
 
-    async def approve_candidate(self, uuid: str) -> dict[str, Any]:
-        """Approve via the service path: promote + synchronous contradiction check."""
+    async def approve_candidate(
+        self, uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """Approve via the service path: embed the name, promote, then the contradiction check."""
         ...

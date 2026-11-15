@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
+from uuid import uuid4
 
 from menhir.domain.exact_json import dumps_exact
 from menhir.domain.temporal import parse_iso8601
@@ -136,6 +137,10 @@ class ViewKind(ABC):
     #: node adds no terms to Graphiti's shared :Entity full-text index (node_name_and_summary).
     #: Every version stays an :Entity; only its keyword-index footprint changes.
     keyword_indexed: bool = True
+
+    #: True: the kind's ``turn_evidence_uuid`` property is written only under the turn's namespace
+    #: fence while the turn is live (see ``_write_version``), never through ``write_props`` alone.
+    guards_turn_evidence_uuid: bool = False
 
     @abstractmethod
     def key_discriminator(self, payload: dict[str, Any]) -> str:
@@ -311,12 +316,17 @@ class TimelineKind(ViewKind):
 
 class AdmissionAuditKind(ViewKind):
     """kind='admission_audit': a record of an admission verdict on a user-tier claim.
-    Payload: {requested_source, effective_source, granted, turn_evidence_uuid, reason}.
-    Non-idempotent: every verdict creates a new row (always supersedes prior).
+    Payload: {requested_source, effective_source, granted, turn_evidence_uuid, reason, verdict_id}.
+    Every verdict creates a new row (#622): the signature is the per-verdict ``verdict_id``, so two
+    identical denials are two records. A retry of one verdict reuses its id, so a retry after a
+    write that did commit refreshes that row instead of duplicating it.
     """
 
     name = "admission_audit"
     lww_register = False  # Every audit entry is a separate event, not a value register.
+    # The writer stores turn_evidence_uuid only while holding the turn's namespace fence and
+    # seeing the turn live, so it serializes with that turn's erasure (#623).
+    guards_turn_evidence_uuid = True
     read_fields = (
         "n.uuid AS uuid, n.view_subject AS subject, n.view_value AS granted, "
         "n.requested_source AS requested_source, n.effective_source AS effective_source, "
@@ -328,16 +338,10 @@ class AdmissionAuditKind(ViewKind):
         return "admission_audit"
 
     def signature(self, payload: dict[str, Any]) -> str:
-        # Non-idempotent: every verdict is unique (timestamp-based), so hash all audit fields.
-        import hashlib
-        basis = "|".join(str(v) for v in [
-            payload.get("requested_source", ""),
-            payload.get("effective_source", ""),
-            payload.get("granted", False),
-            payload.get("turn_evidence_uuid", ""),
-            payload.get("reason", ""),
-        ])
-        return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+        # One verdict, one signature. Not derived from turn_evidence_uuid, so view_sig never
+        # carries a trace of a turn that is later erased.
+        verdict_id = str(payload.get("verdict_id") or "").strip()
+        return verdict_id or uuid4().hex
 
     def surface(self, subject: str, payload: dict[str, Any]) -> tuple[str, str]:
         granted = bool(payload.get("granted", False))
@@ -358,6 +362,7 @@ class AdmissionAuditKind(ViewKind):
             "requested_source": str(payload.get("requested_source", "")),
             "effective_source": str(payload.get("effective_source", "")),
             "reason": str(payload.get("reason", "")),
+            "admission_verdict_id": str(payload.get("verdict_id") or "") or None,
             "turn_evidence_uuid": (
                 str(payload["turn_evidence_uuid"]) if payload.get("turn_evidence_uuid") else None
             ),

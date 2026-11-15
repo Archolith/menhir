@@ -329,6 +329,9 @@ def child_environment(config: E2EConfig, **extra: str) -> dict[str, str]:
             "MENHIR_API_PORT": str(config.backend_port),
             "MENHIR_LOG_DIR": str(config.state_dir / "logs"),
             "MENHIR_AUTH_MODE": "none",
+            # Lanes drive operate and admin tools through a keyless bridge, which since #439
+            # gets only core and curate by default. E2E-1 checks that default itself.
+            "MENHIR_LOOPBACK_PROFILE": "operator",
             "PYTHONUNBUFFERED": "1",
             "PYTHONIOENCODING": "utf-8",
             # Blanked rather than omitted, from the #118 stdio harness. The allow-list

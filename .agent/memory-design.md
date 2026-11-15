@@ -179,9 +179,11 @@ Transitions:
 - **Reject** -> `DETACH DELETE`. (Re-emit after reject recreates the candidate; emitter-
   side run-state dedup is responsible for not re-staging rejected clusters.)
 
-Entry points: MCP tool `add_candidate`; HTTP `backend_invoke` ops `create_candidate`,
-`list_candidates`, `fetch_candidate`, `promote_candidate`, `reject_candidate`,
-`approve_candidate`.
+Entry points: MCP tools `add_candidate`, `list_candidates`, `review_candidate` (#431); HTTP
+`backend_invoke` ops `create_candidate`, `list_candidates`, `fetch_candidate`,
+`promote_candidate`, `reject_candidate`, `approve_candidate`. The review ops take an opt-in
+`namespace` enforced in the write; approval also embeds the candidate's name, and approve and
+reject lock the node before re-reading its scope.
 
 Read [memory-policy.md](memory-policy.md) for session-vs-persistent behavior, consolidation
 thresholds, lease-safe session ingest, sidecar split direction, and why one semantic store is

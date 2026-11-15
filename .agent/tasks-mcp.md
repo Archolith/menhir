@@ -42,6 +42,10 @@ receipt feature (#116) is deferred for MVP; these corrections do not add a scope
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
 - **How something changed / sequence of states** → `recall_history` (time-ordered drill-down, oldest first)
 - **What was known at a time / how a thread unfolded** → `recall_timeline` (recorded-time navigation: at/window/around/cursor/query, optional subject thread, typed histories)
+- `recall_history`, `recall_timeline` and `get_scalar_view_items` are in the `core` profile
+  (`src/menhir/mcp/tool_profiles.py`). A keyless local agent gets them (#439). A client under a
+  version 3 client policy gets them only if its policy selects `core`; an older policy that
+  lists tools by name may leave them out (#430).
 - **Token-budgeted context block** → `build_context` (packs memories + TODOs within a token limit)
 - **How long since last access** → `get_client_context` (no recall, just identity + elapsed time)
 
