@@ -17,6 +17,10 @@ Policy (secure-by-default, operator bypass):
   exposed the server's own tree (config, logs, ``.env``) to agent credentials. When the
   variable is unset, every non-operator ingest is refused with the setup message.
 
+Denied system trees (every tier): ``/proc``, ``/sys``, ``/dev``, ``/run``, ``/var/run`` and
+``/etc`` on the resolved path, so an operator credential cannot read the server's environment
+or mounted secrets.
+
 Denied by name (#83, second layer): ``logs/``, ``backups/``, and ``.git/`` anywhere
 in the resolved path, regardless of tier or configured root. Other dotfiles/directories are
 checked at the artifact and its immediate parent for operator/no-auth, and at the configured
@@ -74,6 +78,26 @@ def _has_denied_named_ancestor(parts: tuple[str, ...]) -> bool:
     return any(part.lower() in _DENIED_DIR_NAMES or part.lower() == ".git" for part in parts)
 
 
+# Host system trees refused for every tier, operator included: process environments
+# (/proc/self/environ), kernel and device files, mounted secrets (/run/secrets) and system config.
+# Operator reach covers the user's files, not the server's own credentials.
+_DENIED_SYSTEM_TOP_DIRS = frozenset({"proc", "sys", "dev", "run", "etc"})
+
+
+def _is_system_path(parts: tuple[str, ...]) -> bool:
+    """Return True for a POSIX path under a denied system tree (``/proc``, ``/var/run``...)."""
+    if len(parts) < 2 or parts[0] != "/":
+        return False
+    if parts[1].lower() == "private":  # macOS: /etc and /var/run resolve under /private
+        parts = ("/", *parts[2:])
+        if len(parts) < 2:
+            return False
+    top = parts[1].lower()
+    return top in _DENIED_SYSTEM_TOP_DIRS or (
+        top == "var" and len(parts) > 2 and parts[2].lower() == "run"
+    )
+
+
 def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     """Resolve *path* (following symlinks) and enforce the containment policy.
 
@@ -82,6 +106,11 @@ def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     caller, sits outside the configured allowed roots.
     """
     resolved = Path(path).resolve()
+    if _is_system_path(resolved.parts):
+        raise IngestPathNotAllowedError(
+            f"ingest path {resolved} is under a host system directory "
+            "(/proc, /sys, /dev, /run, /var/run, /etc); these are refused for every tier"
+        )
     if _has_denied_named_ancestor(resolved.parts):
         raise IngestPathNotAllowedError(_DENIED_MESSAGE.format(resolved=resolved))
     if not tier or tier == "operator":
