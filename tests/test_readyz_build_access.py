@@ -164,7 +164,7 @@ def test_a_valid_token_sees_the_build_and_the_response_is_not_cached(
     stack: SimpleNamespace, signing_key: Any
 ) -> None:
     response = _get(stack, _token(signing_key))
-    assert set(response.json()) == PUBLIC_KEYS | {"build"}
+    assert set(response.json()) == PUBLIC_KEYS | {"build", "provider"}
     assert set(response.json()["build"]) == {"version", "commit", "mcp_metadata_sha256"}
     assert response.headers["cache-control"] == "no-store"
 

@@ -23,6 +23,7 @@ from menhir.api.auth import (
     authenticate_oauth_bearer,
 )
 from menhir.api.oauth import JWKS_REFRESH_STATS, OAuthAuthenticationError
+from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
 from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
 
 
@@ -110,6 +111,43 @@ async def _build_block(request: Request) -> dict[str, str]:
     }
 
 
+def _provider_block(request: Request) -> dict[str, Any]:
+    """Provider billing/auth state for an authenticated caller (#631). Never affects readiness.
+
+    A billing refusal leaves the app serving keyword recall and a restart does not fix it, so it
+    is reported here for operator checks instead of failing readiness or the 200/503 code.
+    """
+
+    from menhir.infrastructure.observability import (
+        last_provider_auth_failure,
+        last_provider_quota_exhaustion,
+    )
+
+    exhaustion = last_provider_quota_exhaustion()
+    auth_failure = last_provider_auth_failure()
+    hard_open: list[str] = []
+    try:
+        built = getattr(getattr(request.app.state, "runtime_ctx", None), "built", None)
+        snapshots = built.graphiti_client.circuit_breaker_snapshots()
+        hard_open = sorted(
+            key for key, snap in snapshots.items()
+            if isinstance(snap, dict) and snap.get("reason") == QUOTA_REASON_CODE
+        )
+    except Exception as exc:  # a broken check must not break readiness
+        _LOG.warning("readyz breaker snapshot unavailable: %s", type(exc).__name__)
+    degraded: list[str] = []
+    if exhaustion is not None or hard_open:
+        degraded.append(QUOTA_REASON_CODE)
+    if auth_failure is not None:
+        degraded.append("provider_auth_failure")
+    return {
+        "degraded": degraded,
+        "provider_quota_exhausted": exhaustion.summary() if exhaustion is not None else None,
+        "provider_auth_failure": auth_failure.summary() if auth_failure is not None else None,
+        "breakers_hard_open": hard_open,
+    }
+
+
 @router.get("/readyz", include_in_schema=False)
 async def readyz(request: Request) -> JSONResponse:
     """Report mode-aware readiness; the build block goes only to a caller with a valid token."""
@@ -155,6 +193,7 @@ async def readyz(request: Request) -> JSONResponse:
     }
     if build is not None:
         content["build"] = build
+        content["provider"] = _provider_block(request)
     # Required because the body differs by caller; a shared cache must not replay either version.
     return JSONResponse(
         status_code=200 if ready else 503,

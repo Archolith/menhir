@@ -202,6 +202,12 @@ after it republishes even though the scan fingerprint is unchanged.
   for a caller sending a bearer access token the MCP endpoint would accept. The built-in authorization
   server issues those only through the authorization code and refresh token grants, so use a token from a
   client's OAuth sign-in.
+- The same caller also gets a `provider` block. `provider.degraded` lists `provider_quota_exhausted`
+  when the LLM or embedding provider refused for billing (or a breaker is hard-open for it), and
+  `provider_auth_failure` when it rejected the credentials. Neither changes `status` or the 200/503
+  code: the server still answers recall from keyword search, and a restart does not fix billing. The
+  billing breaker probes the provider again every 5 minutes and closes once a call succeeds, so adding
+  credit needs no restart.
 - After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
   `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
   the server serves the instructions and tools this package expects. The script sends the token only over
