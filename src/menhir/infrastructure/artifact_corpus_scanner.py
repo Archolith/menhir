@@ -28,6 +28,7 @@ from menhir.domain.artifact_reconciliation import (
     sha256_bytes,
 )
 from menhir.domain.work_artifact import ArtifactMedium
+from menhir.infrastructure.path_containment import is_contained_regular_file
 
 #: Anything a scan must never treat as a document.
 _SKIP_PREFIXES = (".", "~", "#")
@@ -220,6 +221,9 @@ def build_entry(
         return None
 
     path = Path(repo_root) / rel_path
+    # A symlink out of the repository or a FIFO/device is not corpus material, whatever the tier.
+    if not is_contained_regular_file(path, repo_root):
+        return None
     try:
         payload = path.read_bytes()
     except OSError:
@@ -268,7 +272,7 @@ def read_index_links(repo_root: Path, directory: str) -> frozenset[str]:
     """
     for candidate in ("README.md", "index.md"):
         index = Path(repo_root) / directory / candidate
-        if index.is_file():
+        if is_contained_regular_file(index, repo_root):
             try:
                 text = index.read_text(encoding="utf-8", errors="replace")
             except OSError:

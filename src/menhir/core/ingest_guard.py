@@ -33,6 +33,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from menhir.infrastructure.path_containment import is_host_system_path as _is_system_path
+
 INGEST_ALLOWED_ROOTS_ENV = "MENHIR_INGEST_ALLOWED_ROOTS"
 
 _DENIED_DIR_NAMES = frozenset({"logs", "backups"})
@@ -77,25 +79,6 @@ def _has_denied_component(parts: tuple[str, ...]) -> bool:
 def _has_denied_named_ancestor(parts: tuple[str, ...]) -> bool:
     return any(part.lower() in _DENIED_DIR_NAMES or part.lower() == ".git" for part in parts)
 
-
-# Host system trees refused for every tier, operator included: process environments
-# (/proc/self/environ), kernel and device files, mounted secrets (/run/secrets) and system config.
-# Operator reach covers the user's files, not the server's own credentials.
-_DENIED_SYSTEM_TOP_DIRS = frozenset({"proc", "sys", "dev", "run", "etc"})
-
-
-def _is_system_path(parts: tuple[str, ...]) -> bool:
-    """Return True for a POSIX path under a denied system tree (``/proc``, ``/var/run``...)."""
-    if len(parts) < 2 or parts[0] != "/":
-        return False
-    if parts[1].lower() == "private":  # macOS: /etc and /var/run resolve under /private
-        parts = ("/", *parts[2:])
-        if len(parts) < 2:
-            return False
-    top = parts[1].lower()
-    return top in _DENIED_SYSTEM_TOP_DIRS or (
-        top == "var" and len(parts) > 2 and parts[2].lower() == "run"
-    )
 
 
 def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
