@@ -839,3 +839,10 @@ def test_verification_with_the_config_digest_does_not_open_the_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert _verify_with_loaded_id(tmp_path, monkeypatch, IMAGE_ID, frozenset()) == []
+
+
+def test_runtime_image_does_not_require_retired_remote_fence_secret() -> None:
+    # Moved from menhir-deploy's deployment-contract tests, which cannot see this file (deploy#22).
+    source = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    assert "source-fence-token" not in source
+    assert "MENHIR_SOURCE_FENCE_TOKEN" not in source
