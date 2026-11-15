@@ -1,0 +1,3 @@
+name: menhir
+version: 0.1.0
+description: "Menhir long-term context, targeted recall, and opt-in explicit writes for Hermes Agent."

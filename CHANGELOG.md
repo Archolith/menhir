@@ -1,3 +1,47 @@
+## 2026-11-14 - Hermes reads every namespace and writes only to its own
+
+- `integrations/hermes/menhir/`: the `namespace` setting is replaced by `write_namespace` (default
+  `hermes`, validated). Context and recall requests carry no namespace; approved writes always
+  carry the write namespace, which also binds pending approvals and the idempotency key.
+- The provider now matches Hermes v0.23.1's contract: the tool list no longer changes after
+  `initialize()` (a write-enabled profile advertised `menhir_remember` with no route), the wizard's
+  yes/no answers are accepted, and `timeout_seconds` is capped at 6 to stay under Hermes' 8-second
+  prefetch join.
+- Requests send `X-Menhir-Client-Name` from a new `client_name` setting; `menhir_status` reports
+  the write namespace, client name and whether a token is configured.
+- A refused approved write (HTTP 400/401/403/404/422), a 409 key conflict and a `failed` receipt
+  each get their own notice instead of "resend to retry" or "accepted". The idempotency key now
+  covers the session, so the same fact approved in two sessions cannot collide.
+- `menhir_recall` now returns Menhir's `source_memories` section (raw stored statements) next to
+  the ranked results. Menhir ranks a session-scope memory only for the session that wrote it, so
+  without this a recent write was invisible from any later Hermes conversation. Found by running
+  the provider against a live Menhir 0.3.11.
+
+## 2026-11-13 - Hermes memory writes require a user confirmation turn
+
+- `integrations/hermes/menhir/approval.py` and provider: `menhir_remember` now creates a
+  profile-local, expiring proposal; a separate user-authored approval turn must match its random
+  ID, original session and optional author ID before the adapter can call `/api/memory`.
+  Rejections, bot turns and unknown or expired approvals cannot write; failed approved writes
+  preserve the proposal for retry. Automatic turn and transcript syncing remain off.
+- `integrations/hermes/menhir/privacy.py` and provider: credential-like content is skipped on
+  automatic recall and refused on explicit tools. `menhir_status` checks `/api/ready` without
+  revealing credentials; per-session context has a 45-second cache and a 30-second outage breaker.
+- `tests/test_hermes_memory_provider.py` and `tests/test_hermes_memory_provider_http.py` exercise
+  approval decisions, expiry, namespace/author isolation, retries and real loopback HTTP requests.
+- `integrations/hermes/menhir/README.md`, `docs/post-install.md`, `docs/roadmap/` and
+  `.agent/architecture.md` describe the two-step write and remaining live validation.
+
+## 2026-11-13 - Hermes Agent can use Menhir as a memory provider
+
+- `integrations/hermes/menhir/`: new standalone Hermes `MemoryProvider` with per-profile connection
+  settings, scoped bearer token, bounded automatic context recall, `menhir_recall` and a disabled-by-
+  default `menhir_remember` tool. No transcripts, tool outputs or session-end hooks are mirrored.
+- `tests/test_hermes_memory_provider.py`: offline registration, safety, config isolation, request,
+  read/write, idempotency, failure and no-sync contract tests.
+- `docs/post-install.md`, `.agent/architecture.md` and `docs/roadmap/`: install guide and
+  implementation boundary. Hermes must reload its provider after setup/config changes.
+
 ## 2026-11-15 - v0.3.12: resources follow the client allowlist and pin, billing breakers recover on their own
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.12. No dependency changes in this commit.
