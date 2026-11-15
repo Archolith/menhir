@@ -2,10 +2,17 @@
 
 - Graphiti now gets an embedder that runs every `create`/`create_batch` through the embed
   breaker (#630). Fused search, the cosine lane and ingest's entity embeddings stopped while it
-  is open; search drops to BM25-only without logging the query or a traceback.
+  is open; search drops to BM25-only without logging the query or a traceback, including on the
+  call that trips the breaker. Vectors already in the embedding cache are served before the
+  breaker, so a cache hit is neither refused nor counted as a probe.
+- While the embed breaker refuses, `add_episode` refuses before Graphiti's LLM extraction runs,
+  so a requeued episode no longer pays for extraction on every attempt. The worker requeues it
+  for the breaker's remaining cooldown.
 - Each breaker tags the errors it raises. An outer breaker ignores another breaker's errors, so
   an embedder billing refusal inside `add_episode` opens the embed breaker, not the LLM one
-  (#493).
+  (#493). Only explicit `__cause__` chains count; a probe that hits another breaker's error
+  restarts the normal cooldown. A billing refusal that lands while a probe runs keeps the
+  billing hold and the probe slot.
 - A billing hard-open probes after 5 minutes instead of an hour. A successful probe closes it;
   a probe that fails for another reason ends the billing hold and uses the normal cooldown
   (#492: no operator reset tool; recovery after a top-up takes up to 5 minutes).

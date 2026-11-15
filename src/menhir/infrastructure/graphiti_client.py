@@ -61,7 +61,12 @@ else:
 
 from menhir.config import MemorySettings  # noqa: E402
 from menhir.config.settings_model import parse_extra_body  # noqa: E402
-from menhir.infrastructure.circuit_breaker import CircuitBreaker, CircuitOpenError  # noqa: E402
+from menhir.infrastructure.circuit_breaker import (  # noqa: E402
+    CircuitBreaker,
+    CircuitOpenError,
+    breaker_origin,
+    tag_breaker_origin,
+)
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
 from menhir.infrastructure.graphiti_edge_invalidation import (  # noqa: E402
@@ -259,10 +264,14 @@ class BreakerGuardedEmbedder(EmbedderClient):  # type: ignore[misc,valid-type]
     this an open embed breaker did not stop those calls (#630), and an embedder billing
     refusal during ingest surfaced through the LLM breaker that wraps `add_episode` (#493).
     The breaker is bound by GraphitiClient.__post_init__; until then calls pass straight through.
+    Vectors already in the embedding cache are served here, before the breaker: a cache hit is not
+    a provider call, so it must neither be refused while the breaker is open nor count as a
+    successful probe.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, cache: Any = None) -> None:
         self.inner = inner
+        self.cache = cache
         self.breaker: CircuitBreaker | None = None
 
     def __getattr__(self, name: str) -> Any:
@@ -276,10 +285,30 @@ class BreakerGuardedEmbedder(EmbedderClient):  # type: ignore[misc,valid-type]
             return await fn()
         return await self.breaker.call(fn)
 
+    def _cached(self, texts: Any) -> list[list[float]] | None:
+        """All vectors from the cache, cut to the embedder's dimension, or None on any miss."""
+        if self.cache is None or not isinstance(texts, list) or not texts:
+            return None
+        if not all(isinstance(text, str) for text in texts):
+            return None
+        config = getattr(self.inner, "config", None)
+        vectors = self.cache.get_all(texts, model=getattr(config, "embedding_model", "") or "")
+        if vectors is None:
+            return None
+        dim = getattr(config, "embedding_dim", None)
+        return [list(vector[:dim]) if dim else list(vector) for vector in vectors]
+
     async def create(self, input_data: Any) -> list[float]:
+        # Mirrors OpenAIEmbedder.create: the first input's vector.
+        cached = self._cached([input_data] if isinstance(input_data, str) else input_data)
+        if cached is not None:
+            return cached[0]
         return await self._guarded(lambda: self.inner.create(input_data))
 
     async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        cached = self._cached(input_data_list)
+        if cached is not None:
+            return cached
         return await self._guarded(lambda: self.inner.create_batch(input_data_list))
 
 
@@ -570,7 +599,7 @@ class GraphitiClient:
                 password=settings.neo4j_password,
                 graph_driver=graph_driver,
                 llm_client=llm_client,
-                embedder=BreakerGuardedEmbedder(embedder),
+                embedder=BreakerGuardedEmbedder(embedder, cache=_embed_cache),
                 cross_encoder=cross_encoder,
                 single_episode_extraction_hook=MenhirExtractionHook(
                     anchored_time=anchored_time,
@@ -837,6 +866,18 @@ class GraphitiClient:
                     "policy hooks to be installed on the Graphiti instance"
                 )
         task = "memory: graphiti add_episode"
+        # Graphiti extracts with the LLM before it embeds, so with the embed breaker refusing an
+        # episode would pay for extraction on every requeue and then fail. Refuse it up front;
+        # the ingest worker requeues a CircuitOpenError for the breaker's remaining cooldown.
+        embed_breaker = getattr(self, "_embed_breaker", None)
+        embed_refusal = embed_breaker.refusal_snapshot() if embed_breaker is not None else None
+        if embed_refusal is not None:
+            refused = CircuitOpenError(
+                f"Circuit breaker open for {self._embed_breaker.name}; episode needs embeddings",
+                snapshot=embed_refusal,
+            )
+            tag_breaker_origin(refused, self._embed_breaker.name)
+            raise refused
         child_task_id = f"{(episode_uuid or name).replace('-', '')[:8]}:graphiti:add-episode:{int(perf_counter() * 1000)}"
         request_started = perf_counter()
         logger.debug("Graphiti add_episode request begin name=%s", name)
@@ -913,10 +954,29 @@ class GraphitiClient:
         """Embed a retrieval query with Graphiti's already-resolved embedder."""
         if self.embedder_ref is None:
             raise RuntimeError("Graphiti embedder is unavailable")
-        vector = await self._embed_breaker.call(
-            lambda: self.embedder_ref.create(query)
-        )
+        guarded = getattr(self.client, "embedder", None)
+        if isinstance(guarded, BreakerGuardedEmbedder) and guarded.breaker is self._embed_breaker:
+            # Cache first, then the breaker: the same path Graphiti's own embeds take.
+            vector = await guarded.create(query)
+        else:
+            vector = await self._embed_breaker.call(
+                lambda: self.embedder_ref.create(query)
+            )
         return [float(value) for value in vector]
+
+    def _embed_unavailable(self, exc: BaseException) -> str | None:
+        """Why the embed breaker stopped this call, or None if the failure is something else.
+
+        Covers both a refusal (CircuitOpenError) and the embed provider's own error, which is
+        what the call that trips the breaker, and every failed probe, raise.
+        """
+        refusal = _circuit_open_cause(exc)
+        if refusal is not None:
+            return (refusal.snapshot or {}).get("reason") or "open"
+        name = getattr(getattr(self, "_embed_breaker", None), "name", None)
+        if name is not None and breaker_origin(exc) == name:
+            return "embed_provider_error"
+        return None
 
     async def search_scored(
         self,
@@ -956,14 +1016,14 @@ class GraphitiClient:
                 group_ids=group_ids,
             )
         except Exception as exc:
-            breaker_refusal = _circuit_open_cause(exc)
-            if breaker_refusal is not None or _is_vector_dimension_mismatch_error(exc):
-                # An open embed breaker is an expected, already-reported state (#630): degrade to
-                # keyword-only quietly, without logging the query or a traceback per recall.
-                if breaker_refusal is not None:
+            embed_down = self._embed_unavailable(exc)
+            if embed_down is not None or _is_vector_dimension_mismatch_error(exc):
+                # The embed breaker reports its own state (#630): degrade to keyword-only quietly,
+                # without logging the query or a traceback, and without embedding again.
+                if embed_down is not None:
                     logger.info(
-                        "Graphiti search_scored using bm25-only: embed breaker open (%s)",
-                        (breaker_refusal.snapshot or {}).get("reason") or "open",
+                        "Graphiti search_scored using bm25-only: embedding unavailable (%s)",
+                        embed_down,
                     )
                 else:
                     logger.warning(
@@ -1167,8 +1227,8 @@ class GraphitiClient:
                         2 * num_results,
                     )
             except Exception as exc:
-                if method == "cosine_similarity" and _circuit_open_cause(exc) is not None:
-                    logger.info("Graphiti cosine pass skipped: embed breaker open")
+                if method == "cosine_similarity" and self._embed_unavailable(exc) is not None:
+                    logger.info("Graphiti cosine pass skipped: embedding unavailable")
                     ranked[method] = []
                     failures[method] = exc
                     return

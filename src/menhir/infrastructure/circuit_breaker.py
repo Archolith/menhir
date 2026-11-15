@@ -38,15 +38,23 @@ BREAKER_ORIGIN_ATTR = "_menhir_breaker"
 
 
 def breaker_origin(exc: BaseException) -> str | None:
-    """The breaker that raised ``exc`` or an exception in its cause/context chain, if any."""
+    """The breaker that raised ``exc`` or an exception in its explicit ``__cause__`` chain.
+
+    Implicit ``__context__`` is not followed: an error raised while another breaker's error was
+    being handled is still this call's own failure, and counting it as foreign would keep the
+    outer breaker from opening.
+    """
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        origin = getattr(current, BREAKER_ORIGIN_ATTR, None)
+        try:
+            origin = getattr(current, BREAKER_ORIGIN_ATTR, None)
+        except Exception:
+            return None
         if origin:
             return str(origin)
-        current = current.__cause__ or current.__context__
+        current = current.__cause__
     return None
 
 
@@ -137,6 +145,8 @@ class CircuitBreaker:
     _opened_at: float | None = field(default=None, init=False)
     _probe_in_flight: bool = field(default=False, init=False)
     _hard_open_reason: str | None = field(default=None, init=False)
+    # Bumped on every billing hard-open, so a probe can tell whether one happened while it ran.
+    _hard_open_seq: int = field(default=0, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     def _effective_cooldown(self) -> float:
@@ -158,8 +168,22 @@ class CircuitBreaker:
             snapshot["reason"] = self._hard_open_reason
         return snapshot
 
+    def refusal_snapshot(self) -> dict[str, Any] | None:
+        """The snapshot a call made now would be refused with, or None if it would run.
+
+        Reads state only. Lets a caller skip work that needs this breaker's provider later, before
+        spending on another provider first.
+        """
+        if self._state == CircuitState.OPEN:
+            elapsed = monotonic() - (self._opened_at or monotonic())
+            if elapsed < self._effective_cooldown() or self._probe_in_flight:
+                return self.state_snapshot()
+        elif self._state == CircuitState.HALF_OPEN and self._probe_in_flight:
+            return self.state_snapshot()
+        return None
+
     def reset(self) -> None:
-        """Close the breaker now (operator reset); a process restart does the same."""
+        """Close the breaker now; a process restart does the same. Nothing calls it today."""
         self._state = CircuitState.CLOSED
         self._failures = 0
         self._opened_at = None
@@ -225,7 +249,9 @@ class CircuitBreaker:
             if self._state == CircuitState.OPEN:
                 now = monotonic()
                 elapsed = now - (self._opened_at or now)
-                if elapsed >= self._effective_cooldown():
+                # A probe still running (a concurrent billing refusal re-opened the breaker under
+                # it) keeps the slot: only one probe at a time.
+                if elapsed >= self._effective_cooldown() and not self._probe_in_flight:
                     # Transition to HALF_OPEN — this caller is the probe
                     previous = self._state
                     self._state = CircuitState.HALF_OPEN
@@ -248,7 +274,7 @@ class CircuitBreaker:
                     raise CircuitOpenError(
                         f"Circuit breaker open for {self.name}; "
                         f"state={self._state.value} failures={self._failures} "
-                        f"cooldown_remaining_s={self._effective_cooldown() - elapsed:.0f}",
+                        f"cooldown_remaining_s={max(0.0, self._effective_cooldown() - elapsed):.0f}",
                         snapshot=self.state_snapshot(),
                     )
             elif self._state == CircuitState.HALF_OPEN:
@@ -262,22 +288,32 @@ class CircuitBreaker:
                 self._probe_in_flight = True
 
             is_probe = self._state == CircuitState.HALF_OPEN
+            probe_seq = self._hard_open_seq
 
         # Execute outside the lock
         try:
             result = await fn()
         except Exception as exc:
+            # Classified before taking the lock: nothing between the acquire and the try/finally
+            # below may raise, or the lock leaks and every later call hangs.
+            try:
+                origin = breaker_origin(exc)
+                quota_error = quota_exhausted_error(exc)
+            except Exception:
+                origin, quota_error = None, None
             await self._acquire_or_abandon(is_probe, healthy=False)
-            origin = breaker_origin(exc)
             if origin is not None and origin != self.name:
-                # Another breaker's provider failed inside this call. That says nothing about
-                # this breaker's provider: no failure counted, no hard-open. A probe learned
-                # nothing either, so the breaker returns to OPEN without restarting its
-                # cooldown, and the next caller probes again.
+                # Another breaker's provider failed inside this call: no failure counted, no
+                # hard-open. A probe learned nothing about this provider, so the billing hold
+                # (if any) ends and the normal cooldown restarts: the next probe re-hard-opens if
+                # this provider still refuses, and back-to-back probes cannot pile up.
                 try:
                     if is_probe:
                         self._state = CircuitState.OPEN
                         self._probe_in_flight = False
+                        self._opened_at = monotonic()
+                        if self._hard_open_seq == probe_seq:
+                            self._hard_open_reason = None
                     logger.info(
                         "Circuit breaker %s: %s from breaker %s (state unchanged)",
                         self.name, type(exc).__name__, origin,
@@ -285,7 +321,6 @@ class CircuitBreaker:
                 finally:
                     self._lock.release()
                 raise
-            quota_error = quota_exhausted_error(exc)
             try:
                 if quota_error is not None:
                     # Billing state: hard-open now, no failure threshold and no 30 s probes.
@@ -293,8 +328,12 @@ class CircuitBreaker:
                     self._failures += 1
                     self._state = CircuitState.OPEN
                     self._opened_at = monotonic()
-                    self._probe_in_flight = False
+                    if is_probe:
+                        # A non-probe call refused while a probe runs must not free the probe
+                        # slot, or a second probe can start beside the first.
+                        self._probe_in_flight = False
                     self._hard_open_reason = QUOTA_REASON_CODE
+                    self._hard_open_seq += 1
                     await asyncio.to_thread(
                         partial(
                             record_lifecycle_event,
@@ -318,7 +357,9 @@ class CircuitBreaker:
                         self._state = CircuitState.OPEN
                         self._opened_at = monotonic()
                         self._probe_in_flight = False
-                        self._hard_open_reason = None
+                        if self._hard_open_seq == probe_seq:
+                            # A billing refusal recorded while this probe ran still stands.
+                            self._hard_open_reason = None
                         await asyncio.to_thread(
                             partial(
                                 record_lifecycle_event,

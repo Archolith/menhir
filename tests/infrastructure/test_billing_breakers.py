@@ -74,9 +74,12 @@ class _Native:
     def __init__(self, embedder, *, llm_error=None) -> None:
         self.embedder = embedder
         self.llm_error = llm_error
+        self.llm_calls = 0
         self.searches: list[list[str]] = []
 
     async def add_episode(self, **kwargs):
+        # Graphiti's order: LLM extraction first (the spend), then entity embeddings.
+        self.llm_calls += 1
         if self.llm_error is not None:
             raise self.llm_error()
         await self.embedder.create_batch(["entity a", "entity b"])
@@ -90,8 +93,22 @@ class _Native:
         return SimpleNamespace(nodes=[node], node_reranker_scores=[1.0])
 
 
-def _client(inner: _FakeEmbedder, **native_kwargs) -> GraphitiClient:
-    native = _Native(BreakerGuardedEmbedder(inner), **native_kwargs)
+class _Cache:
+    """EmbeddingCache stand-in keyed like the real one (text, model)."""
+
+    def __init__(self, entries: dict[str, list[float]] | None = None) -> None:
+        self.entries = dict(entries or {})
+
+    def get_all(self, texts, model=""):
+        if model != "text-embedding-3-small":
+            return None
+        if not texts or any(t not in self.entries for t in texts):
+            return None
+        return [self.entries[t] for t in texts]
+
+
+def _client(inner: _FakeEmbedder, *, cache=None, **native_kwargs) -> GraphitiClient:
+    native = _Native(BreakerGuardedEmbedder(inner, cache=cache), **native_kwargs)
     return GraphitiClient(client=native, embedder_ref=inner)
 
 
@@ -140,16 +157,30 @@ async def test_embed_billing_refusal_during_ingest_opens_embed_not_llm(error, cl
     assert "reason" not in snaps["llm"]
 
 
-async def test_open_embed_breaker_during_ingest_raises_circuit_open_and_spares_llm(clock) -> None:
+async def test_open_embed_breaker_refuses_ingest_before_any_llm_spend(clock) -> None:
     inner = _FakeEmbedder()
     client = _client(inner)
     await _open_embed_for_billing(client, inner)
 
-    with pytest.raises(CircuitOpenError):
-        await _add(client)
+    for _ in range(5):
+        with pytest.raises(CircuitOpenError) as caught:
+            await _add(client)
 
-    assert inner.calls == 0
+    assert client.client.llm_calls == 0 and inner.calls == 0
+    assert caught.value.snapshot["reason"] == QUOTA_REASON_CODE  # the worker waits out the cooldown
     assert client.circuit_breaker_snapshots()["llm"]["state"] == "closed"
+
+
+async def test_ingest_runs_again_once_the_embed_cooldown_has_elapsed(clock) -> None:
+    inner = _FakeEmbedder()
+    client = _client(inner)
+    await _open_embed_for_billing(client, inner)
+    clock[0] += cb.QUOTA_COOLDOWN_SECONDS
+
+    await _add(client)  # this episode's embed is the probe
+
+    assert client.client.llm_calls == 1 and inner.calls == 1
+    assert client.circuit_breaker_snapshots()["embed"]["state"] == "closed"
 
 
 async def test_llm_billing_refusal_still_hard_opens_the_llm_breaker(clock) -> None:
@@ -367,15 +398,10 @@ async def test_foreign_breaker_error_changes_nothing(clock) -> None:
     assert outer.state_snapshot()["state"] == "closed" and outer.state_snapshot()["failures"] == 0
 
 
-async def test_foreign_error_during_probe_returns_to_open_and_next_caller_probes(clock) -> None:
-    outer = CircuitBreaker(name="llm:x", failure_threshold=1, cooldown_seconds=30.0)
-
-    async def down():
-        raise TimeoutError("llm down")
-
-    with pytest.raises(TimeoutError):
-        await outer.call(down)
-    clock[0] += 30.0
+async def test_foreign_error_during_probe_restarts_normal_cooldown_and_ends_billing_hold(clock) -> None:
+    outer = CircuitBreaker(name="llm:x", cooldown_seconds=30.0)
+    await _billing_open(outer)
+    clock[0] += cb.QUOTA_COOLDOWN_SECONDS
 
     async def foreign():
         exc = TimeoutError("embed down")
@@ -384,8 +410,13 @@ async def test_foreign_error_during_probe_returns_to_open_and_next_caller_probes
 
     with pytest.raises(TimeoutError):
         await outer.call(foreign)
-    assert outer.state_snapshot()["state"] == "open" and outer._probe_in_flight is False
 
+    state = outer.state_snapshot()
+    assert state["state"] == "open" and "reason" not in state and outer._probe_in_flight is False
+    assert state["cooldown_remaining_s"] == pytest.approx(30.0)
+    with pytest.raises(CircuitOpenError):  # no back-to-back probe
+        await outer.call(lambda: asyncio.sleep(0))
+    clock[0] += 30.0
     assert await outer.call(lambda: asyncio.sleep(0, "ok")) == "ok"
     assert outer._state == CircuitState.CLOSED
 

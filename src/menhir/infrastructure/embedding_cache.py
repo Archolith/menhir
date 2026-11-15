@@ -74,6 +74,18 @@ class EmbeddingCache:
                 self._misses += 1
         return result
 
+    def get_all(self, texts: list[str], model: str = "") -> list[list[float]] | None:
+        """Every text's vector, or None (and no counter change) unless all are cached."""
+        keys = [self._key(text, model) for text in texts]
+        with self._lock:
+            vectors = [self._cache.get(key) for key in keys]
+            if not keys or any(vector is None for vector in vectors):
+                return None
+            for key in keys:
+                self._cache.move_to_end(key)
+            self._hits += len(keys)
+        return vectors  # type: ignore[return-value]
+
     def set(self, text: str, embedding: list[float], model: str = "") -> None:
         key = self._key(text, model)
         with self._lock:
