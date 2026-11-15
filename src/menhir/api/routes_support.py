@@ -847,10 +847,8 @@ _BACKEND_METHODS = {
     "link_artifacts",
     "supersede_artifact",
     "transition_artifact_status",
-    # Named `fetch_` rather than `audit_` so the read-only remainder rule below
-    # classifies it by convention instead of by exception. The MCP tool it backs
-    # is still called `audit_artifact_corpus`: the agent-facing name describes
-    # the task, the dispatch name has to obey the tier-naming policy.
+    # Backs the MCP tool `audit_artifact_corpus`. It reads a caller-named server
+    # directory, so it is listed in _OP_TIER_AGENT below despite the read prefix.
     "fetch_artifact_corpus_audit",
     "relocate_artifact_source",
     "close_todo",
