@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import Callable, Sequence
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from menhir.api.client_policy import ClientPolicyAuthority
 from menhir.api.client_token_store import ClientTokenStore
@@ -197,8 +197,14 @@ class BearerAuthMiddleware:
         force_readonly: bool = False,
         client_policy: ClientPolicyAuthority | None = None,
         loopback_tool_allowlist: frozenset[str] | None = None,
+        allowed_origins: Sequence[str] = (),
     ) -> None:
         self.app = app
+        # Browser origins a credential-free loopback grant accepts besides loopback ones
+        # (MENHIR_CORS_ORIGINS). Compared exactly, case-insensitively, without a trailing slash.
+        self._allowed_origins = frozenset(
+            o.strip().lower().rstrip("/") for o in allowed_origins if o.strip()
+        )
         # #439: the MCP tools a keyless loopback caller may see and call; None is every tool.
         self._loopback_tool_allowlist = loopback_tool_allowlist
         self._operator_key = operator_key or api_key  # backwards compat: api_key -> operator
@@ -302,6 +308,39 @@ class BearerAuthMiddleware:
             return ipaddress.ip_address(host).is_loopback
         except ValueError:
             return False
+
+    def _is_cross_origin_browser_request(
+        self, scope: Scope, headers: dict[bytes, bytes]
+    ) -> bool:
+        """Return True when a browser page on another origin sent this request.
+
+        The Host check stops DNS rebinding, but a page on any site can still send a body-less
+        cross-site POST to http://localhost:<port>/ (Host is localhost). Every credential-free
+        loopback grant must refuse it. Non-browser clients (stdio bridge, CLI, BackendClient)
+        send no Origin and no Sec-Fetch-Site, so they are unaffected.
+        """
+        raw_origin = headers.get(b"origin")
+        if raw_origin is not None:
+            origin = raw_origin.decode("latin-1").strip().lower().rstrip("/")
+            if origin in self._allowed_origins:
+                return False
+            parts = urlsplit(origin)
+            host = parts.hostname or ""
+            if parts.scheme not in ("http", "https") or not host:
+                return True  # includes the opaque "null" origin
+            if host == "localhost":
+                return False
+            try:
+                return not ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                return True
+        # Origin can be absent on older browsers; Sec-Fetch-Site still marks a cross-site
+        # request. GET/HEAD are excluded so following a link to the explorer keeps working.
+        site = headers.get(b"sec-fetch-site", b"").decode("latin-1").strip().lower()
+        if site != "cross-site":
+            return False
+        method = str(scope.get("method", "GET")).upper()
+        return scope.get("type") == "websocket" or method not in ("GET", "HEAD")
 
     @staticmethod
     def _has_proxy_forwarding_header(headers: dict[bytes, bytes]) -> bool:
@@ -475,6 +514,7 @@ class BearerAuthMiddleware:
             (self._loopback_admin_ok or self._client_is_loopback(scope))
             and not self._has_proxy_forwarding_header(headers)
             and self._host_header_is_loopback(headers)
+            and not self._is_cross_origin_browser_request(scope, headers)
         )
         if is_explorer and explorer_loopback_ok:
             await self.app(scope, receive, send)
@@ -552,6 +592,21 @@ class BearerAuthMiddleware:
                         "host. Configure an API key or per-client tokens to serve other hosts."
                     ),
                     code="non_loopback_host_without_auth",
+                )
+                return
+            # A page on another site can reach a loopback bind from the user's browser with a
+            # loopback Host; only its Origin (or Sec-Fetch-Site) says where it came from.
+            if self._is_cross_origin_browser_request(scope, headers):
+                await self._send_auth_error(
+                    scope,
+                    send,
+                    status_code=403,
+                    detail=(
+                        "This server runs with authentication disabled and does not accept "
+                        "requests from web pages on other origins. Add the origin to "
+                        "MENHIR_CORS_ORIGINS, or configure an API key or per-client tokens."
+                    ),
+                    code="cross_origin_without_auth",
                 )
                 return
 
@@ -678,6 +733,7 @@ class BearerAuthMiddleware:
                 and self._client_is_loopback(scope)
                 and not self._has_proxy_forwarding_header(headers)
                 and self._host_header_is_loopback(headers)
+                and not self._is_cross_origin_browser_request(scope, headers)
             )
 
             admin_identity: tuple[str, str] | None = None  # (client_id, client_name)
