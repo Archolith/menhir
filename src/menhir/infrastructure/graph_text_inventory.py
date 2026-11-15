@@ -128,7 +128,7 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "last_value", "last_display",
         # Structure-graph project bookkeeping.
         "files_discovered", "files_eligible", "files_indexed", "partial_index",
-        "scan_fingerprint", "symbols_truncated",
+        "scan_fingerprint", "scanner_schema", "symbols_truncated",
         # Episode processing fields the cascade tombstone writes.
         "processing_state", "processing_stage", "processing_substage",
         "processing_substage_started_at", "processing_progress", "processing_error",

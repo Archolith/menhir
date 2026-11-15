@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import logging
 import os
@@ -248,7 +249,7 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 10  # v10: traversal/stat failures refuse publication
+SCANNER_SCHEMA_VERSION = 11  # v11: text literals elided from stored signature defaults
 # (v9: the legacy `.agent/project-id` identity file is scan-invisible)
 
 # Beacon publication and evidence scratch files live at the repository root. They are
@@ -1503,9 +1504,35 @@ def _make_symbol(
     )
 
 
+class _ElideTextLiterals(ast.NodeTransformer):
+    """Replace string, bytes and f-string literals with ``...``."""
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, (str, bytes)):
+            return ast.copy_location(ast.Constant(value=...), node)
+        return node
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.AST:
+        return ast.copy_location(ast.Constant(value=...), node)
+
+
+def _signature_args(args: ast.arguments) -> ast.arguments:
+    """Copy *args* with text literals in default values elided.
+
+    Signatures are stored in the structure graph and returned to every caller, and a default
+    such as ``password: str = "..."`` is a common place for a hard-coded credential that no
+    detector recognises. Annotations are left alone, so forward-reference types still read.
+    """
+    copied = copy.deepcopy(args)
+    elide = _ElideTextLiterals()
+    copied.defaults = [elide.visit(d) for d in copied.defaults]
+    copied.kw_defaults = [None if d is None else elide.visit(d) for d in copied.kw_defaults]
+    return copied
+
+
 def _build_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     try:
-        args = ast.unparse(node.args)
+        args = ast.unparse(_signature_args(node.args))
         ret = f" -> {ast.unparse(node.returns)}" if node.returns else ""
         prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
         return f"{prefix} {node.name}({args}){ret}"

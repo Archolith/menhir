@@ -14,14 +14,18 @@ from typing import Any
 from uuid import UUID, uuid4, uuid5
 
 from menhir.domain.namespace import namespace_to_group_ids
-from menhir.domain.secret_scrub import ensure_scrubbed
+from menhir.domain.secret_scrub import ensure_scrubbed, redact, resolve_policy
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE,
 )
 from menhir.domain.truth.kinds import SOURCE_CONFIDENCE_AGENT
 from menhir.domain.utils import source_confidence_for, symbol_structure_path
 from menhir.infrastructure.neo4j import Neo4jRepository
-from menhir.infrastructure.project_scanner import ProjectScanResult, SymbolEntry
+from menhir.infrastructure.project_scanner import (
+    SCANNER_SCHEMA_VERSION,
+    ProjectScanResult,
+    SymbolEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,20 @@ def _normalize_structure_path(path: str) -> str:
     while p.startswith("./"):
         p = p[2:]
     return p.lstrip("/").rstrip("/")
+
+
+def _scrub_signature(signature: str) -> str:
+    """Redact recognised credentials in a symbol signature before it is stored.
+
+    The scanner already elides text literals from defaults; this covers signatures that reach
+    the writer another way (caller-built structure payloads). A signature with no quote has no
+    string literal left to hold a credential, so the detector is skipped for speed.
+    """
+    if not signature or ("'" not in signature and '"' not in signature):
+        return signature
+    if resolve_policy() == "off":
+        return signature
+    return redact(signature)[0]
 
 
 def _set_properties(record: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str]:
@@ -168,6 +186,12 @@ class StructureGraphWriter:
                 for p, mtime in scan_mtime_map.items()
                 if stored_mtimes.get(p) != mtime
             }
+            edited_paths = set(changed_paths)
+            # A scanner rules change rewrites what a symbol stores (e.g. v11 elides text
+            # literals from signatures), so an unchanged mtime no longer proves the stored
+            # symbols are current: rewrite every scanned file once. Heat still counts edits only.
+            if self._stored_scanner_schema(scan.name, project_id) != SCANNER_SCHEMA_VERSION:
+                changed_paths = set(scan_mtime_map)
             deleted_paths = set(stored_mtimes.keys()) - set(scan_mtime_map.keys())
             logger.debug(
                 "Incremental diff: project=%s changed=%s deleted=%s",
@@ -186,8 +210,8 @@ class StructureGraphWriter:
                     scan.name,
                     len(deleted_paths),
                 )
-            if changed_paths:
-                self._increment_heat(scan.name, list(changed_paths))
+            if edited_paths:
+                self._increment_heat(scan.name, list(edited_paths))
         else:
             # A first complete scan can replace all symbols. A partial scan cannot: older
             # symbols may lack file_mtime, so an empty mtime map does not prove that no
@@ -506,6 +530,7 @@ class StructureGraphWriter:
             MATCH (p:Entity {structure_project: $name, structure_role: 'project'})
             WHERE p.structure_project_id = $project_id
             SET p.scan_fingerprint = $fingerprint,
+                p.scanner_schema = $scanner_schema,
                 p.files_discovered = $discovered,
                 p.files_eligible = $eligible,
                 p.files_indexed = $indexed,
@@ -517,6 +542,7 @@ class StructureGraphWriter:
             """,
             {"name": scan.name, "project_id": project_id,
              "fingerprint": scan.scan_fingerprint,
+             "scanner_schema": SCANNER_SCHEMA_VERSION,
              "discovered": scan.files_discovered, "eligible": scan.files_eligible,
              "indexed": scan.files_indexed, "partial": scan.partial_index,
              "commit": getattr(scan, "indexed_commit", "") or "",
@@ -884,6 +910,19 @@ class StructureGraphWriter:
     def _owner_params(self, project_name: str, project_id: str | None) -> dict[str, Any]:
         """The parameters both arms read. Values stay parameterised; only the predicate is spliced."""
         return {"project": project_name, "project_id": project_id}
+
+    def _stored_scanner_schema(self, project_name: str, project_id: str | None) -> int | None:
+        """The scanner schema the project's stored symbols were written with (None: unknown)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (p:Entity {structure_project: $name, structure_role: 'project'})
+            WHERE p.structure_project_id = $project_id
+            RETURN p.scanner_schema AS schema
+            """,
+            {"name": project_name, "project_id": project_id},
+        )
+        value = rows[0].get("schema") if rows else None
+        return int(value) if value is not None else None
 
     def get_file_mtimes(
         self, project_name: str, project_id: str | None = None
@@ -2100,7 +2139,7 @@ class StructureGraphWriter:
                 "content": sym.docstring[:120] if sym.docstring else "",
                 "symbol_kind": sym.kind,
                 "symbol_line": sym.line_no,
-                "symbol_signature": sym.signature,
+                "symbol_signature": _scrub_signature(sym.signature),
                 "symbol_parent": sym.parent,
                 "symbol_decorator": sym.decorator,
                 "session_id": session_id,
