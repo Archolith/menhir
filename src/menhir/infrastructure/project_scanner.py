@@ -63,6 +63,11 @@ def _refuse_uncontained(path: str | Path) -> None:
         raise ScanPathRefused(f"{path} is not a regular file")
 
 
+def _is_dir_link(path: str) -> bool:
+    """True for a symlinked directory or a Windows junction (including volume mount points)."""
+    return os.path.islink(path) or bool(getattr(os.path, "isjunction", lambda _p: False)(path))
+
+
 def _read_text_for_scan(path: str | Path) -> str:
     _refuse_uncontained(path)
     try:
@@ -374,8 +379,9 @@ class ProjectScanner:
                     continue
                 if _matches_gitignore(full_d, root, gitignore_patterns):
                     continue
-                if not is_contained_dir(full_d, root):
-                    # os.walk does not follow symlinks but does enter Windows junctions.
+                if _is_dir_link(full_d) or not is_contained_dir(full_d, root):
+                    # os.walk does not follow symlinks but does enter Windows junctions; one
+                    # pointing back into the root would loop or index files twice.
                     continue
                 kept_dirs.append(d)
             dirnames[:] = kept_dirs
@@ -535,8 +541,15 @@ class ProjectScanner:
 
 def _load_gitignore(root: Path) -> list[str]:
     gi = root / ".gitignore"
-    if not gi.is_file():  # follows symlinks; False for FIFOs and devices
+    if not os.path.lexists(gi):
         return []
+    try:
+        regular = stat.S_ISREG(os.stat(gi).st_mode)
+    except OSError as error:
+        # A dangling or unreadable link to a shared .gitignore must not run the scan unfiltered.
+        raise ScanReadError(f"Project scan could not examine {gi}: {error}") from error
+    if not regular:
+        raise ScanReadError(f"Project scan refused {gi}: not a regular file")
     # A shared .gitignore may live outside the root: only its patterns are used, never stored.
     # It is not optional, though: without it ignored files (local secrets) would be indexed.
     real = Path(os.path.realpath(gi))

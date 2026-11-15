@@ -305,6 +305,24 @@ def _dir_link(target: Path, link: Path) -> None:
         _symlink(target, link)
 
 
+def test_dangling_gitignore_link_refuses_the_scan(repo: Path, tmp_path: Path) -> None:
+    _symlink(tmp_path / "missing-shared-gitignore", repo / ".gitignore")
+    (repo / "local_secrets.py").write_text('"""API_KEY=abc"""\n', encoding="utf-8")
+    with pytest.raises(project_scanner.ScanReadError):
+        ProjectScanner().scan(repo, name="dangling-gitignore")
+
+
+def test_directory_link_back_into_the_root_is_not_walked(repo: Path) -> None:
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text('"""x"""\n', encoding="utf-8")
+    _dir_link(repo, repo / "loop")
+    _dir_link(repo / "pkg", repo / "pkg_alias")
+    scan = _scan_with_timeout(repo)
+    files = {f.rel_path for f in scan.files}
+    assert "pkg/mod.py" in files
+    assert not any(p.startswith(("loop/", "pkg_alias/")) for p in files), files
+
+
 def test_directory_link_out_of_the_root_is_not_walked(repo: Path, tmp_path: Path) -> None:
     outside_dir = tmp_path / "outside-tree"
     (outside_dir / "private_dir_name").mkdir(parents=True)
