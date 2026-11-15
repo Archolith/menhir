@@ -11,7 +11,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from test_hermes_memory_provider import plugin
+from tests.test_hermes_memory_provider import plugin
 
 
 class _MenhirStub(BaseHTTPRequestHandler):
