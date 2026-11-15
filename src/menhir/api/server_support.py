@@ -413,6 +413,7 @@ def wrap_server_middlewares(
         oauth_verifier=oauth_verifier,
         client_token_store=client_token_store,
         loopback_bound=is_loopback_host(settings.api_host),
+        allowed_origins=tuple(settings.cors_origins),
         auth_mode=resolve_auth_mode(settings),
         force_readonly=(
             settings.startup_scope == "production"
