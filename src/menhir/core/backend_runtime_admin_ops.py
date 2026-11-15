@@ -609,6 +609,12 @@ class RuntimeProviderAdminOpsMixin:
         # Both the in-process adapter transport and the HTTP route (which dispatches onto this
         # same method by operation name) funnel through here, so this is the only place the
         # namespace pin can be honoured.
+        from menhir.core.ingest_guard import ensure_ingest_path_allowed
+        from menhir.core.request_context import get_request_tier
+
+        # The audit walks a caller-named directory on the server, so it gets the same path
+        # containment as every other server-side read (SEC-02).
+        ensure_ingest_path_allowed(repo_path, tier=get_request_tier())
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.fetch_artifact_corpus_audit,
