@@ -1,3 +1,7 @@
+## 2026-11-15 - v0.3.12: resources follow the client allowlist and pin, billing breakers recover on their own
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.12. No dependency changes in this commit.
+
 ## 2026-11-14 - Billing refusals: the embed breaker guards every embed, recovers on its own, and is reported
 
 - Graphiti now gets an embedder that runs every `create`/`create_batch` through the embed
