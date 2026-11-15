@@ -683,6 +683,12 @@ class RuntimeProviderDataOpsMixin:
         # SEC-02: confine non-operator callers to the allowed ingest roots before reading.
         tier = get_request_tier()
         p = ensure_ingest_path_allowed(path, tier=tier)
+        # A FIFO or device file would block or never end the read below. A missing path keeps
+        # its ordinary not-found error from the read.
+        if p.exists() and not p.is_file():
+            from menhir.core.ingest_guard import IngestPathNotAllowedError
+
+            raise IngestPathNotAllowedError(f"ingest path {p} is not a regular file")
         structure_project = project or p.parent.name or p.stem
         structure_path = str(p.resolve())
         recorded_root_path = await self._off_loop(

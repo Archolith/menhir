@@ -17,6 +17,10 @@ Policy (secure-by-default, operator bypass):
   exposed the server's own tree (config, logs, ``.env``) to agent credentials. When the
   variable is unset, every non-operator ingest is refused with the setup message.
 
+Denied system trees (every tier): ``/proc``, ``/sys``, ``/dev``, ``/run``, ``/var/run`` and
+``/etc`` on the resolved path, so an operator credential cannot read the server's environment
+or mounted secrets.
+
 Denied by name (#83, second layer): ``logs/``, ``backups/``, and ``.git/`` anywhere
 in the resolved path, regardless of tier or configured root. Other dotfiles/directories are
 checked at the artifact and its immediate parent for operator/no-auth, and at the configured
@@ -28,6 +32,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from menhir.infrastructure.path_containment import is_host_system_path as _is_system_path
 
 INGEST_ALLOWED_ROOTS_ENV = "MENHIR_INGEST_ALLOWED_ROOTS"
 
@@ -74,6 +80,7 @@ def _has_denied_named_ancestor(parts: tuple[str, ...]) -> bool:
     return any(part.lower() in _DENIED_DIR_NAMES or part.lower() == ".git" for part in parts)
 
 
+
 def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     """Resolve *path* (following symlinks) and enforce the containment policy.
 
@@ -82,6 +89,11 @@ def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     caller, sits outside the configured allowed roots.
     """
     resolved = Path(path).resolve()
+    if _is_system_path(resolved.parts):
+        raise IngestPathNotAllowedError(
+            f"ingest path {resolved} is under a host system directory "
+            "(/proc, /sys, /dev, /run, /var/run, /etc); these are refused for every tier"
+        )
     if _has_denied_named_ancestor(resolved.parts):
         raise IngestPathNotAllowedError(_DENIED_MESSAGE.format(resolved=resolved))
     if not tier or tier == "operator":

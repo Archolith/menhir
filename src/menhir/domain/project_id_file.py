@@ -15,8 +15,11 @@ they were always git-ignored.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from menhir.infrastructure.path_containment import is_contained_regular_file
 
 __all__ = [
     "ProjectIdFile",
@@ -58,8 +61,12 @@ def read_identity(root: str | Path) -> ProjectIdFile | None:
     Raises :class:`MalformedIdentityFile` when a file exists but is unusable.
     """
     path = identity_path(root)
-    if not path.exists():
+    if not os.path.lexists(path):
         return None
+    # A checkout may carry this path as a symlink (to /dev/zero, to a host secret): read only a
+    # regular file inside the root, before any scan-level containment applies.
+    if not is_contained_regular_file(path, root):
+        raise MalformedIdentityFile(f"{path} is not a regular file inside the project.")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

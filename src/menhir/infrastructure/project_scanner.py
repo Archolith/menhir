@@ -7,12 +7,19 @@ import hashlib
 import logging
 import os
 import re
+import stat
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
 from menhir.domain.utils import symbol_structure_path
 from menhir.infrastructure.git_binding import read_git_binding as _read_git_binding
+from menhir.infrastructure.path_containment import (
+    check_contained_regular_file,
+    is_contained_dir,
+    is_host_system_path,
+)
 from menhir.infrastructure.text_io import read_text_utf8
 
 logger = logging.getLogger(__name__)
@@ -22,7 +29,47 @@ class ScanReadError(RuntimeError):
     """A required source file could not be read, so absence cannot authorize pruning."""
 
 
+class ScanPathRefused(OSError):
+    """A path resolves outside the scan root or is not a regular file; treated as absent.
+
+    An OSError so callers' existing absent-file handling applies. Raised outside the
+    ScanReadError wrapping, which would otherwise abort the whole scan.
+    """
+
+
+# The root of the scan in progress. Every scanner read checks against it, including fixed-name
+# reads (README.md, pyproject.toml) and files swapped after the walk.
+_SCAN_ROOT: ContextVar[Path | None] = ContextVar("menhir_scan_root", default=None)
+
+
+def _refuse_uncontained(path: str | Path) -> None:
+    if not os.path.lexists(path):
+        return  # a missing file keeps its ordinary read error
+    root = _SCAN_ROOT.get()
+    if root is not None:
+        try:
+            contained = check_contained_regular_file(path, root)
+        except OSError as error:
+            # Not proof of absence: refuse the scan rather than treat the file as missing.
+            raise ScanReadError(f"Project scan could not examine {path}: {error}") from error
+        if not contained:
+            raise ScanPathRefused(f"{path} is not a regular file inside the scan root")
+        return
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        return
+    if not regular:
+        raise ScanPathRefused(f"{path} is not a regular file")
+
+
+def _is_dir_link(path: str) -> bool:
+    """True for a symlinked directory or a Windows junction (including volume mount points)."""
+    return os.path.islink(path) or bool(getattr(os.path, "isjunction", lambda _p: False)(path))
+
+
 def _read_text_for_scan(path: str | Path) -> str:
+    _refuse_uncontained(path)
     try:
         return read_text_utf8(path)
     except OSError as error:
@@ -30,6 +77,7 @@ def _read_text_for_scan(path: str | Path) -> str:
 
 
 def _getsize_for_scan(path: str | Path) -> int:
+    _refuse_uncontained(path)
     try:
         return os.path.getsize(path)
     except OSError as error:
@@ -274,6 +322,13 @@ class ProjectScanner:
 
     def scan(self, root: str | Path, name: str | None = None) -> ProjectScanResult:
         root = Path(root).resolve()
+        token = _SCAN_ROOT.set(root)
+        try:
+            return self._scan(root, name)
+        finally:
+            _SCAN_ROOT.reset(token)
+
+    def _scan(self, root: Path, name: str | None) -> ProjectScanResult:
         if not root.is_dir():
             raise ValueError(f"Not a directory: {root}")
 
@@ -324,6 +379,10 @@ class ProjectScanner:
                     continue
                 if _matches_gitignore(full_d, root, gitignore_patterns):
                     continue
+                if _is_dir_link(full_d) or not is_contained_dir(full_d, root):
+                    # os.walk does not follow symlinks but does enter Windows junctions; one
+                    # pointing back into the root would loop or index files twice.
+                    continue
                 kept_dirs.append(d)
             dirnames[:] = kept_dirs
 
@@ -340,6 +399,15 @@ class ProjectScanner:
                 if _is_beacon_root_artifact(rel) or rel == _LEGACY_IDENTITY_FILE:
                     continue
                 if _matches_gitignore(full, root, gitignore_patterns):
+                    continue
+                try:
+                    contained = check_contained_regular_file(full, root)
+                except OSError as error:
+                    # Absence must not authorize pruning: an unexaminable file refuses the scan.
+                    raise OSError(f"Project scan could not stat {full}: {error}") from error
+                if not contained:
+                    # A symlink out of the root, or a FIFO/device: never index or read it.
+                    logger.info("Project scan skipped %s: not a regular file inside the root", rel)
                     continue
                 all_rel_paths.append(rel)
 
@@ -473,17 +541,30 @@ class ProjectScanner:
 
 def _load_gitignore(root: Path) -> list[str]:
     gi = root / ".gitignore"
-    if not gi.is_file():
+    if not os.path.lexists(gi):
         return []
-    patterns: list[str] = []
     try:
-        for line in _read_text_for_scan(gi).splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            patterns.append(line)
-    except OSError:
-        pass
+        regular = stat.S_ISREG(os.stat(gi).st_mode)
+    except OSError as error:
+        # A dangling or unreadable link to a shared .gitignore must not run the scan unfiltered.
+        raise ScanReadError(f"Project scan could not examine {gi}: {error}") from error
+    if not regular:
+        raise ScanReadError(f"Project scan refused {gi}: not a regular file")
+    # A shared .gitignore may live outside the root: only its patterns are used, never stored.
+    # It is not optional, though: without it ignored files (local secrets) would be indexed.
+    real = Path(os.path.realpath(gi))
+    if is_host_system_path(real.parts) and not is_host_system_path(Path(os.path.realpath(root)).parts):
+        raise ScanReadError(f"Project scan refused {gi}: it resolves to host system file {real}")
+    try:
+        text = read_text_utf8(gi)
+    except OSError as error:
+        raise ScanReadError(f"Project scan could not read {gi}: {error}") from error
+    patterns: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line)
     return patterns
 
 
