@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID, uuid4, uuid5
 
 from menhir.domain.namespace import namespace_to_group_ids
-from menhir.domain.secret_scrub import ensure_scrubbed
+from menhir.domain.secret_scrub import ensure_scrubbed, redact, resolve_policy
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE,
 )
@@ -37,6 +37,20 @@ def _normalize_structure_path(path: str) -> str:
     while p.startswith("./"):
         p = p[2:]
     return p.lstrip("/").rstrip("/")
+
+
+def _scrub_signature(signature: str) -> str:
+    """Redact recognised credentials in a symbol signature before it is stored.
+
+    The scanner already elides text literals from defaults; this covers signatures that reach
+    the writer another way (caller-built structure payloads). A signature with no quote has no
+    string literal left to hold a credential, so the detector is skipped for speed.
+    """
+    if not signature or ("'" not in signature and '"' not in signature):
+        return signature
+    if resolve_policy() == "off":
+        return signature
+    return redact(signature)[0]
 
 
 def _set_properties(record: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str]:
@@ -2100,7 +2114,7 @@ class StructureGraphWriter:
                 "content": sym.docstring[:120] if sym.docstring else "",
                 "symbol_kind": sym.kind,
                 "symbol_line": sym.line_no,
-                "symbol_signature": sym.signature,
+                "symbol_signature": _scrub_signature(sym.signature),
                 "symbol_parent": sym.parent,
                 "symbol_decorator": sym.decorator,
                 "session_id": session_id,
