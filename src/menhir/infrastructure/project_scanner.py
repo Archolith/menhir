@@ -15,7 +15,11 @@ from pathlib import Path
 
 from menhir.domain.utils import symbol_structure_path
 from menhir.infrastructure.git_binding import read_git_binding as _read_git_binding
-from menhir.infrastructure.path_containment import is_contained_regular_file
+from menhir.infrastructure.path_containment import (
+    check_contained_regular_file,
+    is_contained_dir,
+    is_host_system_path,
+)
 from menhir.infrastructure.text_io import read_text_utf8
 
 logger = logging.getLogger(__name__)
@@ -43,7 +47,12 @@ def _refuse_uncontained(path: str | Path) -> None:
         return  # a missing file keeps its ordinary read error
     root = _SCAN_ROOT.get()
     if root is not None:
-        if not is_contained_regular_file(path, root):
+        try:
+            contained = check_contained_regular_file(path, root)
+        except OSError as error:
+            # Not proof of absence: refuse the scan rather than treat the file as missing.
+            raise ScanReadError(f"Project scan could not examine {path}: {error}") from error
+        if not contained:
             raise ScanPathRefused(f"{path} is not a regular file inside the scan root")
         return
     try:
@@ -365,6 +374,9 @@ class ProjectScanner:
                     continue
                 if _matches_gitignore(full_d, root, gitignore_patterns):
                     continue
+                if not is_contained_dir(full_d, root):
+                    # os.walk does not follow symlinks but does enter Windows junctions.
+                    continue
                 kept_dirs.append(d)
             dirnames[:] = kept_dirs
 
@@ -382,7 +394,12 @@ class ProjectScanner:
                     continue
                 if _matches_gitignore(full, root, gitignore_patterns):
                     continue
-                if not is_contained_regular_file(full, root):
+                try:
+                    contained = check_contained_regular_file(full, root)
+                except OSError as error:
+                    # Absence must not authorize pruning: an unexaminable file refuses the scan.
+                    raise OSError(f"Project scan could not stat {full}: {error}") from error
+                if not contained:
                     # A symlink out of the root, or a FIFO/device: never index or read it.
                     logger.info("Project scan skipped %s: not a regular file inside the root", rel)
                     continue
@@ -518,17 +535,23 @@ class ProjectScanner:
 
 def _load_gitignore(root: Path) -> list[str]:
     gi = root / ".gitignore"
-    if not gi.is_file():
+    if not gi.is_file():  # follows symlinks; False for FIFOs and devices
         return []
-    patterns: list[str] = []
+    # A shared .gitignore may live outside the root: only its patterns are used, never stored.
+    # It is not optional, though: without it ignored files (local secrets) would be indexed.
+    real = Path(os.path.realpath(gi))
+    if is_host_system_path(real.parts) and not is_host_system_path(Path(os.path.realpath(root)).parts):
+        raise ScanReadError(f"Project scan refused {gi}: it resolves to host system file {real}")
     try:
-        for line in _read_text_for_scan(gi).splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            patterns.append(line)
-    except OSError:
-        pass
+        text = read_text_utf8(gi)
+    except OSError as error:
+        raise ScanReadError(f"Project scan could not read {gi}: {error}") from error
+    patterns: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line)
     return patterns
 
 
