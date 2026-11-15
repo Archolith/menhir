@@ -88,3 +88,8 @@ def test_local_backup_wrapper_has_valid_bash_syntax() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_local_backup_uses_strict_release_validation() -> None:
+    # Moved from menhir-deploy's deployment-contract tests, which cannot see this file (deploy#22).
+    assert "validate-release" in _source()
