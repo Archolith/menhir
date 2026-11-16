@@ -533,21 +533,24 @@ class MemoryQueryRepository:
         """
         if namespace in ("", DEFAULT_NAMESPACE):
             return {"namespace": namespace, "known": True, "similar": []}
-        probes = [f"MATCH (n:{label}) WHERE n.namespace = $ns" for label in self._NAMESPACE_LABELS]
-        probes.append("MATCH (n:Episodic) WHERE n.group_id = $ns")
+        # The same silo predicate reads use (CF-127), so "known" means "a read would find it".
+        scope = tenant_scope_cypher("n")
         known = any(
-            self.neo4j.execute(f"{probe} RETURN 1 AS hit LIMIT 1", params={"ns": namespace})
-            for probe in probes
+            self.neo4j.execute(
+                f"MATCH (n:{label}) WHERE {scope} RETURN 1 AS hit LIMIT 1",
+                params=tenant_scope_params(namespace),
+            )
+            for label in self._NAMESPACE_LABELS
         )
         similar: list[str] = []
         if not known and include_similar:
             key = namespace.strip().casefold()
             values: set[str] = {DEFAULT_NAMESPACE}
-            sources = [f"MATCH (n:{label}) WITH n.namespace AS v" for label in self._NAMESPACE_LABELS]
-            sources.append("MATCH (n:Episodic) WITH n.group_id AS v")
-            for source in sources:
+            for label in self._NAMESPACE_LABELS:
                 rows = self.neo4j.execute(
-                    f"{source} WHERE v IS NOT NULL RETURN DISTINCT v LIMIT 1000", params={}
+                    f"MATCH (n:{label}) WITH coalesce(n.namespace, n.group_id) AS v "
+                    "WHERE v IS NOT NULL RETURN DISTINCT v LIMIT 1000",
+                    params={},
                 )
                 values.update(str(r["v"]) for r in rows if r.get("v") is not None)
             similar = sorted(v for v in values if v != namespace and v.strip().casefold() == key)
