@@ -63,6 +63,22 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
+def _as_fastmcp_tool_result(result: Any) -> Any:
+    """A CallToolResult as standalone fastmcp's ToolResult, keeping isError (#669)."""
+    from mcp.types import CallToolResult
+
+    if not isinstance(result, CallToolResult):
+        return result
+    from fastmcp.tools.base import ToolResult
+
+    return ToolResult(
+        content=list(result.content),
+        structured_content=result.structuredContent,
+        meta=result.meta,
+        is_error=bool(result.isError),
+    )
+
+
 def render_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True, default=_json_default)
 
@@ -853,9 +869,17 @@ class BaseTool:
     def register(self, mcp: FastMCP) -> None:
         target = self.endpoint
 
+        # Standalone fastmcp (the stdio gateway) serializes a returned CallToolResult into the
+        # text and leaves isError unset; its own ToolResult carries isError through, directly
+        # and via the gateway's call_tool proxy (#669). The MCP SDK passes CallToolResult as is.
+        standalone_fastmcp = "structured_output" not in inspect.signature(mcp.tool).parameters
+
         @wraps(target)
         async def handler(*args: Any, **kwargs: Any) -> str:
-            return await self.execute(*args, **kwargs)
+            result = await self.execute(*args, **kwargs)
+            if standalone_fastmcp:
+                return _as_fastmcp_tool_result(result)
+            return result
 
         handler.__name__ = self.name
         handler.__qualname__ = self.name
