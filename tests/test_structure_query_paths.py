@@ -96,8 +96,19 @@ class _RecordingNeo4j:
             return [{"root_path": ROOT}]
         if "RETURN DISTINCT n.structure_path AS path" in query:
             return [{"path": p} for p in params.get("paths", []) if p in self.indexed]
-        if "[:IMPORTS*1..]" in query:
-            return list(self.traversal)
+        if "UNWIND $layer" in query:
+            # One reverse-import hop per call: serve the rows at this hop, plus a pass-through
+            # node while deeper rows remain, so `traversal` still reads as hop -> importers.
+            hop = sum(1 for q, _ in self.calls if "UNWIND $layer" in q)
+            target = params["layer"][0]
+            rows = [
+                {"target": target, "importer_path": r["importer_path"], "importer_role": r.get("importer_role")}
+                for r in self.traversal
+                if r.get("hop_distance") == hop
+            ]
+            if not rows and any(r.get("hop_distance", 0) > hop for r in self.traversal):
+                rows = [{"target": target, "importer_path": f"_hop{hop}.py", "importer_role": "file"}]
+            return rows
         if "UNWIND $frontier" in query:
             return list(self.beyond)
         if "caller_sym.name AS caller_name" in query:

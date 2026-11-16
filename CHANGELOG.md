@@ -1,3 +1,28 @@
+## 2026-11-16 - Tests that import changed code are selected; rescans drop stale edges (#681, #680)
+
+- Python imports are read with `ast`. Relative imports resolve; `from pkg import sub` links
+  `pkg/sub.py` and the package `__init__.py` it executes; every name in `import a, b` is linked;
+  a file `ast` cannot parse falls back to a line match that joins continued lines. Stacks are
+  detected per directory (a `setup.py` or `requirements.txt` inside a package is not a project),
+  so a monorepo with no root `pyproject.toml` gets import and call edges, and a sub-project's
+  module names resolve only for importers inside it (#681).
+- `blast_radius` / `affected_tests` select a test that imports the changed code directly, or
+  through test helpers only, whatever its name; a `conftest.py` (now a test anywhere) selects
+  its directory. Tests reached only through other source files stay in the transitive list.
+  Duplicate-basename test links prefer the source the test imports, then the mirroring
+  directory. `affected_tests` emits one shell-quoted command per stack root and runner
+  (`pytest`, `npx vitest run`, `npx jest`, `go test`, `cargo test`, `./gradlew :sub:test` from
+  the wrapper's directory, Maven); with no selection it suggests the changed files' own suite,
+  and nothing for a language with no manifest. `test_commands` lists the commands (#681).
+- A rescan deletes IMPORTS and TESTS edges between scanned files that the scan no longer
+  derives, keyed by project identity; edges into files a capped scan dropped, and from files it
+  could not read, are kept (#680).
+- The per-function call cap counts distinct callees, not call sites.
+- `blast_radius` walks reverse imports one hop per query instead of matching variable-length
+  paths, which enumerated every path through import cycles: one call on menhir's own graph ran
+  16+ minutes; the slowest is now about half a second.
+- Scanner schema 12: every stored project is rewritten once on its next scan.
+
 ## 2026-11-15 - query_structure answers for the stored path and says what it cut (#679, #683)
 
 - New `domain/structure_paths.py` maps caller spellings (`./a.py`, `src\a.py`, absolute paths
