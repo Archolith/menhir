@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import os
 
+from menhir.domain.structure_paths import (
+    is_absolute_spelling,
+    normalize_query_path,
+    normalize_query_paths,
+)
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -223,13 +228,19 @@ class QueryStructureTool(BaseTextTool):
             else ""
         )
 
+        # #679: answer for the stored spelling and say so, rather than letting `src\a.py` or
+        # `./src/a.py` miss the index and read as "nothing depends on this".
+        root = str(_meta.get("root_path", "") or "")
+        path, rewrites = _normalize_for_query(query_type, path, root)
+        notes = _rewrite_notes(rewrites, root)
+
         try:
             text = await self._dispatch(
                 query_type, project, path, backend, namespace, neg=neg
             )
         except ValueError as e:
             return f"Error: {e}"
-        return stale_banner + text if stale_banner else text
+        return stale_banner + notes + text
 
     async def _dispatch(
         self,
@@ -255,6 +266,8 @@ class QueryStructureTool(BaseTextTool):
             if query_type == "files":
                 kwargs = {"path_filter": path} if path else {}
                 files = await backend.query_structure(project, "files", kwargs)
+                if not files and path:
+                    return _empty_prefix(f"No indexed files in {project} match '{path}'", neg)
                 if not files:
                     return (
                         f"No files found in {project}{neg}"
@@ -281,6 +294,9 @@ class QueryStructureTool(BaseTextTool):
                 result = await backend.query_structure(
                     project, "imports", {"file_path": path}
                 )
+                if not result["imports"] and not result["imported_by"]:
+                    if await _path_indexed(backend, project, path) is False:
+                        return _not_indexed(project, path, "imports")
                 lines = [f"Import graph for {path}:"]
                 if result["imports"]:
                     lines.append(f"  Imports ({len(result['imports'])}):")
@@ -299,6 +315,8 @@ class QueryStructureTool(BaseTextTool):
             if query_type == "tests":
                 kwargs = {"file_path": path} if path else {}
                 tests = await backend.query_structure(project, "tests", kwargs)
+                if not tests and path and await _path_indexed(backend, project, path) is False:
+                    return _not_indexed(project, path, "test mappings")
                 if not tests:
                     return (
                         f"No test mappings found{neg}"
@@ -367,6 +385,11 @@ class QueryStructureTool(BaseTextTool):
                 result = await backend.query_structure(
                     project, "symbols", {"path": path}
                 )
+                if path and not (result or {}).get("symbols"):
+                    if path.endswith("/"):
+                        return _empty_prefix(f"No indexed symbols in {project} under '{path}'", neg)
+                    if await _path_indexed(backend, project, path) is False:
+                        return _not_indexed(project, path, "symbols")
                 return _format_symbols(result, path, project, neg=neg)
 
             if query_type == "context":
@@ -400,6 +423,75 @@ class QueryStructureTool(BaseTextTool):
                 f"tests, endpoints, dependencies, cross_refs, blast_radius, affected_tests, "
                 f"symbols, context, documents."
             )
+
+
+_NORMALIZED_QUERY_TYPES = frozenset({"files", "imports", "tests", "symbols", "context"})
+_PREFIX_QUERY_TYPES = frozenset({"files", "symbols"})
+_MULTI_PATH_QUERY_TYPES = frozenset({"blast_radius", "affected_tests"})
+
+
+def _normalize_for_query(query_type: str, path: str, root: str) -> tuple[str, dict[str, str]]:
+    """Return the path argument in stored spelling plus each caller spelling that changed."""
+    if not path:
+        return path, {}
+    if query_type in _MULTI_PATH_QUERY_TYPES:
+        paths, rewrites = normalize_query_paths(path.split(","), root)
+        return ",".join(paths), rewrites
+    if query_type in _NORMALIZED_QUERY_TYPES:
+        original = path.strip()
+        new = normalize_query_path(original, root, prefix=query_type in _PREFIX_QUERY_TYPES)
+        return new, ({original: new} if new != original else {})
+    return path, {}
+
+
+def _rewrite_notes(rewrites: dict[str, str], root: str) -> str:
+    lines = []
+    for original, new in rewrites.items():
+        if is_absolute_spelling(new):
+            lines.append(
+                f"Note: '{original}' is an absolute path outside this project's recorded root "
+                f"({root or 'unknown'}); pass a path relative to the project root."
+            )
+        else:
+            lines.append(f"Note: read '{original}' as '{new}' (the stored, repo-relative spelling).")
+    return "\n".join(lines) + "\n\n" if lines else ""
+
+
+async def _path_indexed(backend, project: str, path: str) -> bool | None:
+    """True/False when the index says whether *path* is a file in it, None when it cannot tell.
+
+    Reuses the `context` query, which answers "File not found in structure graph" for an
+    unknown path, so an older backend needs no new query type.
+    """
+    try:
+        result = await backend.query_structure(project, "context", {"path": path})
+    except Exception:  # noqa: BLE001 -- a failed probe must not replace the real answer
+        return None
+    if isinstance(result, dict) and "error" in result:
+        return False
+    if isinstance(result, dict) and "path" in result:
+        return True
+    return None
+
+
+def _not_indexed(project: str, path: str, what: str) -> str:
+    return (
+        f"Cannot answer {what} for {project}: not indexed.\n\n  ? {path}\n\n"
+        "This path is absent from the structure graph, so no import, test or symbol "
+        "conclusion can be drawn about it -- an empty result would be misleading rather than "
+        "reassuring. Check the spelling (repo-relative, e.g. src/pkg/mod.py), or re-scan with "
+        "ingest_project(path=..., force=True), then retry."
+    )
+
+
+def _empty_prefix(head: str, neg: str) -> str:
+    """An empty prefix filter: the prefix is not in the index. Never "(project fully indexed)",
+    which would read as proof that the directory does not exist (#683)."""
+    qualifier = "" if neg == " (project fully indexed)" else neg
+    return (
+        f"{head}{qualifier}. The prefix is not in the index: it may not exist, may be excluded "
+        "from scanning, or may be spelled differently (paths are repo-relative)."
+    )
 
 
 def _coverage_caveat(data: dict) -> str | None:
@@ -492,6 +584,11 @@ def _format_blast_radius(data: dict, project: str) -> str:
         lines.append(f"\nTransitively affected ({len(data['transitively_affected'])}):")
         for f in data["transitively_affected"]:
             lines.append(f"  <<- {f}")
+    if data.get("depth_truncated"):
+        lines.append(
+            f"  DEPTH LIMIT: the import trace stopped at {data.get('max_depth')} hops and more "
+            "importers exist beyond it, so this list (and the tests below) is incomplete."
+        )
 
     if data["affected_tests"]:
         lines.append(f"\nAffected tests ({len(data['affected_tests'])}):")
@@ -509,19 +606,34 @@ def _format_blast_radius(data: dict, project: str) -> str:
 
     fn_callers = data.get("function_callers", [])
     if fn_callers:
-        lines.append(f"\nFunction-level callers ({len(fn_callers)}):")
-        for fc in fn_callers[:20]:
+        more = " [first results only; more exist]" if data.get("function_callers_truncated") else ""
+        lines.append(f"\nFunction-level callers ({len(fn_callers)}){more}:")
+        for fc in fn_callers:
             lines.append(
                 f"  {fc['caller_file']}::{fc['caller']} → calls {fc['callee']}"
             )
 
     memories = data.get("related_memories", [])
     if memories:
-        lines.append(f"\nRelated memories ({len(memories)}):")
+        more = (
+            " [most recent only; more exist -- use recall_memories with file_context]"
+            if data.get("related_memories_truncated")
+            else ""
+        )
+        lines.append(f"\nRelated memories ({len(memories)}){more}:")
         for m in memories:
             prov = f" [{m['anchor_source']}]" if m.get("anchor_source") else ""
             lines.append(
                 f"  [{m['name']}] {m.get('preview', '')}{prov}  (via {m['linked_file']})"
+            )
+
+    todos = data.get("open_todos", [])
+    if todos:
+        lines.append(f"\nOpen TODOs at impacted files ({len(todos)}):")
+        for t in todos:
+            lines.append(
+                f"  [{t.get('priority', 'normal')}] {t.get('content', '')}  "
+                f"({t.get('file_path', '')}; todo {t.get('uuid', '')})"
             )
 
     total = (
@@ -563,6 +675,20 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
         return "\n".join(lines)
 
     lines.append(f"Test selector for {len(data['changed_files'])} changed file(s):")
+
+    # A selector built from the indexed files only says nothing about the others (#683).
+    missing = data.get("unindexed_paths") or []
+    if missing:
+        lines.append(
+            "\nINCOMPLETE: these changed files are not in the structure graph, so the tests "
+            "covering them are not in this list:"
+        )
+        lines.extend(f"  ? {p}" for p in missing)
+    if data.get("depth_truncated"):
+        lines.append(
+            f"\nDEPTH LIMIT: the import trace stopped at {data.get('max_depth')} hops and more "
+            "importers exist beyond it; tests for those files are missing from this list."
+        )
 
     if data["affected_source_files"]:
         lines.append(

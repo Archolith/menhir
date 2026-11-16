@@ -15,6 +15,11 @@ from uuid import UUID, uuid4, uuid5
 
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.secret_scrub import ensure_scrubbed, redact, resolve_policy
+from menhir.domain.structure_paths import (
+    is_absolute_spelling,
+    normalize_query_path,
+    normalize_query_paths,
+)
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE,
 )
@@ -28,6 +33,10 @@ from menhir.infrastructure.project_scanner import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Rows blast_radius returns before it reports truncation (#683).
+_FUNCTION_CALLER_CAP = 30
+_RELATED_MEMORY_CAP = 10
 
 
 def _normalize_structure_path(path: str) -> str:
@@ -687,6 +696,20 @@ class StructureGraphWriter:
             return str(rows[0]["fp"])
         return None
 
+    def _query_path(self, project: str, path: str, *, prefix: bool = False) -> str:
+        """Caller spelling -> stored `structure_path` spelling (#679). Reads root_path only
+        for an absolute spelling, so relative queries cost no extra round trip."""
+        root = self.get_project_root_path(project) if is_absolute_spelling(path) else None
+        return normalize_query_path(path, root or "", prefix=prefix)
+
+    def _query_paths(self, project: str, paths: list[str]) -> list[str]:
+        root = (
+            self.get_project_root_path(project)
+            if any(is_absolute_spelling(p) for p in paths)
+            else None
+        )
+        return normalize_query_paths(list(paths), root or "")[0]
+
     def get_project_root_path(self, project_name: str) -> str | None:
         """Read the directory a project was last scanned from, or None if unknown.
 
@@ -1216,6 +1239,8 @@ class StructureGraphWriter:
     def query_files(self, project: str, path_filter: str = "") -> list[dict[str, str]]:
         """List files in a project, optionally filtered by path prefix."""
         if path_filter:
+            path_filter = self._query_path(project, path_filter, prefix=True)
+        if path_filter:
             rows = self.neo4j.execute(
                 """
                 MATCH (n:Entity {structure_project: $p})
@@ -1366,6 +1391,7 @@ class StructureGraphWriter:
 
     def query_imports(self, project: str, file_path: str) -> dict[str, list[str]]:
         """Return what a file imports and what imports it."""
+        file_path = self._query_path(project, file_path)
         outgoing = self.neo4j.execute(
             """
             MATCH (a:Entity {structure_project: $p, structure_path: $f})-[:IMPORTS]->(b:Entity)
@@ -1387,6 +1413,8 @@ class StructureGraphWriter:
 
     def query_tests(self, project: str, file_path: str = "") -> list[dict[str, str]]:
         """Return test→source mappings, optionally filtered to a source file."""
+        if file_path:
+            file_path = self._query_path(project, file_path)
         if file_path:
             rows = self.neo4j.execute(
                 """
@@ -1475,6 +1503,10 @@ class StructureGraphWriter:
             "cross_project_refs": [...],
         }
         """
+        # #679: every sub-query below matches the stored spelling. Normalizing here, once,
+        # keeps changed_set, all_impacted, the caller query and the coverage check in step.
+        file_paths = self._query_paths(project, list(file_paths))
+
         # Transitive reverse-import traversal with depth tracking
         # depth=1 → direct importers, depth>1 → transitive
         rows = self.neo4j.execute(
@@ -1493,12 +1525,14 @@ class StructureGraphWriter:
         direct: set[str] = set()
         transitive: set[str] = set()
         changed_set = set(file_paths)
+        min_hop: dict[str, int] = {}
 
         for row in rows:
             imp = row.get("importer_path")
             if not imp or imp in changed_set:
                 continue
             dist = row.get("hop_distance", 1)
+            min_hop[imp] = min(dist, min_hop.get(imp, dist))
             if dist == 1:
                 direct.add(imp)
             else:
@@ -1506,6 +1540,28 @@ class StructureGraphWriter:
 
         # Don't double-count: if a file is both direct and transitive, keep it as direct
         transitive -= direct
+
+        # #683: say when max_depth cut the traversal. Only files first reached AT the limit can
+        # have importers beyond it; one single-hop look from them is enough.
+        frontier = sorted(p for p, hop in min_hop.items() if hop >= max_depth)
+        depth_truncated = False
+        if frontier:
+            beyond = self.neo4j.execute(
+                """
+                UNWIND $frontier AS fp
+                MATCH (f:Entity {structure_project: $p, structure_path: fp})
+                      <-[:IMPORTS]-(nxt:Entity {structure_project: $p})
+                WHERE NOT nxt.structure_path IN $seen
+                RETURN nxt.structure_path AS path
+                LIMIT 1
+                """,
+                {
+                    "p": project,
+                    "frontier": frontier,
+                    "seen": sorted(changed_set | direct | transitive),
+                },
+            )
+            depth_truncated = bool(beyond)
 
         # Find affected tests: tests that cover any changed/affected file
         all_impacted = list(changed_set | direct | transitive)
@@ -1538,9 +1594,12 @@ class StructureGraphWriter:
         ]
 
         # Related memories: semantic memories anchored to impacted files
+        # One past the cap so the caller can be told more exist (#683).
         related_memories = self.query_linked_memories(
-            project, all_impacted, limit=10, namespace=namespace
+            project, all_impacted, limit=_RELATED_MEMORY_CAP + 1, namespace=namespace
         )
+        related_memories_truncated = len(related_memories) > _RELATED_MEMORY_CAP
+        related_memories = related_memories[:_RELATED_MEMORY_CAP]
 
         # Open TODOs at any impacted location. Matched on the todo's own
         # normalized :TodoLocation (exact project + path) rather than the
@@ -1609,10 +1668,12 @@ class StructureGraphWriter:
                 callee_sym.name AS callee_name,
                 callee_sym.symbol_parent AS callee_class
             ORDER BY caller_file.structure_path, caller_sym.name
-            LIMIT 30
+            LIMIT $limit
             """,
-            {"p": project, "paths": file_paths},
+            {"p": project, "paths": file_paths, "limit": _FUNCTION_CALLER_CAP + 1},
         )
+        function_callers_truncated = len(fn_caller_rows) > _FUNCTION_CALLER_CAP
+        fn_caller_rows = fn_caller_rows[:_FUNCTION_CALLER_CAP]
         function_callers = [
             {
                 "caller": f"{r['caller_class']}.{r['caller_name']}"
@@ -1638,8 +1699,12 @@ class StructureGraphWriter:
             "affected_tests": affected_tests,
             "cross_project_refs": cross_refs,
             "related_memories": related_memories,
+            "related_memories_truncated": related_memories_truncated,
             "open_todos": open_todos,
             "function_callers": function_callers,
+            "function_callers_truncated": function_callers_truncated,
+            "max_depth": max_depth,
+            "depth_truncated": depth_truncated,
             "unindexed_paths": sorted(p for p in file_paths if p not in indexed),
             "coverage": self.get_project_coverage(project),
         }
@@ -1660,6 +1725,7 @@ class StructureGraphWriter:
 
         # Get the full blast radius first
         radius = self.query_blast_radius(project, file_paths, max_depth=max_depth)
+        file_paths = radius["changed"]  # the stored spellings it actually matched (#679)
 
         # Collect unique test files
         test_files = sorted({t["test"] for t in radius["affected_tests"]})
@@ -1681,6 +1747,8 @@ class StructureGraphWriter:
             # meaningful when the inputs were indexed and the project index is complete.
             "unindexed_paths": radius.get("unindexed_paths", []),
             "coverage": radius.get("coverage", {}),
+            "max_depth": max_depth,
+            "depth_truncated": radius.get("depth_truncated", False),
         }
 
     def resolve_structural_neighbors(self, project: str, file_path: str) -> list[str]:
@@ -1867,6 +1935,8 @@ class StructureGraphWriter:
 
     def query_symbols(self, project: str, path: str = "") -> dict[str, Any]:
         """Return symbols for a file (exact path), directory prefix (trailing /), or whole project."""
+        if path:
+            path = self._query_path(project, path, prefix=True)
         if not path:
             sym_rows = self.neo4j.execute(
                 """
@@ -1952,6 +2022,7 @@ class StructureGraphWriter:
         """Return full context for a single file: summary, symbols, imports, imported_by, tested_by."""
         if not path:
             raise ValueError("path is required for context query")
+        path = self._query_path(project, path)
 
         # CF-73: one round trip, not five. The five statements this replaces all anchored on
         # the same `(f:Entity {structure_project, structure_path})` pattern and were independent
