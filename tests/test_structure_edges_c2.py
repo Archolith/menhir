@@ -375,3 +375,112 @@ def test_a_capped_scan_still_prunes_between_scanned_files() -> None:
     StructureGraphWriter(neo4j=neo).write_project(scan, "s", "u")
 
     assert _derived_prunes(neo)
+
+
+# --- #681: runner follows the file's language, not just the nearest signal ------------------
+
+
+def test_a_ts_test_under_a_python_root_is_not_a_pytest_file(tmp_path: Path) -> None:
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "tests/test_a.py")
+    _write(tmp_path, "ui/widget.test.ts")
+
+    by_path = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}
+
+    assert by_path["tests/test_a.py"].test_runner == "pytest"
+    assert by_path["ui/widget.test.ts"].test_runner == "npm test --"
+    assert by_path["ui/widget.test.ts"].stack_root == "."
+
+
+def test_a_python_test_under_a_js_package_finds_the_python_root(tmp_path: Path) -> None:
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "tools/package.json", json.dumps({"devDependencies": {"jest": "29"}}))
+    _write(tmp_path, "tools/test_build.py")
+    _write(tmp_path, "tools/build.test.js")
+
+    by_path = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}
+
+    assert (by_path["tools/test_build.py"].stack_root, by_path["tools/test_build.py"].test_runner) == (
+        ".",
+        "pytest",
+    )
+    assert (by_path["tools/build.test.js"].stack_root, by_path["tools/build.test.js"].test_runner) == (
+        "tools",
+        "npx jest",
+    )
+
+
+def test_a_package_json_linked_out_of_the_project_is_not_read(tmp_path: Path) -> None:
+    import os
+
+    import pytest
+
+    outside = tmp_path / "outside"
+    _write(outside, "package.json", json.dumps({"devDependencies": {"vitest": "1"}}))
+    project = tmp_path / "proj"
+    _write(project, "src/a.test.ts")
+    try:
+        os.symlink(outside / "package.json", project / "package.json")
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"cannot create symlinks here: {error}")
+
+    by_path = {f.rel_path: f for f in ProjectScanner().scan(project).files}
+
+    assert by_path["src/a.test.ts"].test_runner == "npm test --"
+
+
+def test_a_sub_project_conftest_runs_from_its_own_root() -> None:
+    neo = _ScriptedNeo4j(
+        [
+            (
+                "structure_test_runner AS runner",
+                [
+                    {"path": "services/api/tests/conftest.py", "stack_root": "services/api", "runner": "pytest"},
+                    {"path": "services/api/tests/test_h.py", "stack_root": "services/api", "runner": "pytest"},
+                ],
+            )
+        ]
+    )
+    commands = StructureGraphWriter(neo4j=neo)._test_commands(
+        "mono", ["services/api/tests/", "services/api/tests/test_h.py"]
+    )
+
+    assert commands == ["cd services/api && pytest tests/ tests/test_h.py"]
+
+
+def test_no_selected_tests_suggests_the_changed_files_own_suite() -> None:
+    """A TS-only change with no tests: `npx vitest run` from its package, never `pytest`."""
+    neo = _ScriptedNeo4j(
+        [
+            ("IMPORTS*1..", []),
+            (
+                "structure_test_runner AS runner",
+                [{"path": "web/src/util.ts", "stack_root": "web", "runner": "npx vitest run"}],
+            ),
+        ]
+    )
+    result = StructureGraphWriter(neo4j=neo).query_affected_tests("mono", ["web/src/util.ts"])
+
+    assert result["test_files"] == []
+    assert result["test_command"] == (
+        "cd web && npx vitest run  # no specific tests found — run full suite"
+    )
+    assert "pytest" not in result["test_command"]
+
+
+def test_no_paths_lists_every_stack_roots_suite() -> None:
+    neo = _ScriptedNeo4j(
+        [
+            (
+                "RETURN DISTINCT t.structure_stack_root",
+                [
+                    {"stack_root": ".", "runner": "pytest"},
+                    {"stack_root": "web", "runner": "npm test --"},
+                    {"stack_root": "svc", "runner": "go test"},
+                ],
+            )
+        ]
+    )
+    result = StructureGraphWriter(neo4j=neo).query_affected_tests("mono", [])
+
+    assert result["test_commands"] == ["pytest", "cd svc && go test ./...", "cd web && npm test"]

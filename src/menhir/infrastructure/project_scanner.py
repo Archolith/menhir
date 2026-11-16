@@ -102,8 +102,8 @@ class FileEntry:
     description: str = ""
     symbols_truncated: bool = False
     file_mtime: float = 0.0     # mtime at scan time — used for incremental write diff
-    stack_root: str = ""        # nearest directory with a stack signal ("." = repo root) (#681)
-    test_runner: str = ""       # test files only: the command they run under (#681)
+    stack_root: str = ""        # nearest stack root of the file's language ("." = repo root) (#681)
+    test_runner: str = ""       # the test runner at that root (#681)
 
 
 @dataclass
@@ -861,8 +861,29 @@ def _parse_gradle_deps(root: Path) -> list[str]:
     return []
 
 
-#: Test runner per stack-signal file (#681). A runner that takes file arguments is followed
-#: by the selected files; the others run their stack root's suite (see structure_queries).
+#: Language family per stack-signal file, and per source extension (#681). A test runs under
+#: the nearest stack root of ITS OWN family: a `.test.ts` beside a root `pyproject.toml` is not
+#: a pytest file.
+_SIGNAL_FAMILY: dict[str, str] = {
+    "pyproject.toml": "py",
+    "setup.py": "py",
+    "requirements.txt": "py",
+    "package.json": "js",
+    "build.gradle": "jvm",
+    "build.gradle.kts": "jvm",
+    "pom.xml": "jvm",
+    "Cargo.toml": "rust",
+    "go.mod": "go",
+}
+_EXTENSION_FAMILY: dict[str, str] = {
+    ".py": "py",
+    ".ts": "js", ".tsx": "js", ".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
+    ".java": "jvm", ".kt": "jvm", ".kts": "jvm", ".groovy": "jvm", ".scala": "jvm",
+    ".rs": "rust",
+    ".go": "go",
+}
+#: Runner per stack-signal file. A runner that takes file arguments is followed by the
+#: selected files; the others run their stack root's suite (see structure_queries).
 _SIGNAL_TEST_RUNNERS: dict[str, str] = {
     "pyproject.toml": "pytest",
     "setup.py": "pytest",
@@ -872,6 +893,13 @@ _SIGNAL_TEST_RUNNERS: dict[str, str] = {
     "Cargo.toml": "cargo test",
     "go.mod": "go test",
     "pom.xml": "mvn test",
+}
+#: Runner when no stack root of the file's family exists: run from the repository root.
+_FAMILY_FALLBACK_RUNNERS: dict[str, str] = {
+    "py": "pytest",
+    "js": "npm test --",
+    "go": "go test",
+    "rust": "cargo test",
 }
 
 
@@ -884,35 +912,51 @@ class StackRoot:
     signal: str  # the signal filename that decided it
 
 
-def _detect_stack_roots(root: Path, rel_dirs: set[str] | list[str]) -> dict[str, StackRoot]:
-    """Stack per directory (#681): every scanned directory with a signal file is a stack root."""
-    roots: dict[str, StackRoot] = {}
+def _detect_stack_roots(root: Path, rel_dirs: set[str] | list[str]) -> dict[str, list[StackRoot]]:
+    """Stack per directory (#681): every scanned directory with signal files is a stack root.
+
+    A directory can hold several (a Python service with a `package.json` for its tooling); each
+    is kept, so a file finds the root of its own language.
+    """
+    roots: dict[str, list[StackRoot]] = {}
     for rel_dir in sorted({".", *rel_dirs}):
         base = root if rel_dir == "." else root / rel_dir
         for filename, stack in _STACK_SIGNALS:
             if (base / filename).is_file():
-                roots[rel_dir] = StackRoot(rel_dir, stack, filename)
-                break
+                found = roots.setdefault(rel_dir, [])
+                if all(_SIGNAL_FAMILY[r.signal] != _SIGNAL_FAMILY[filename] for r in found):
+                    found.append(StackRoot(rel_dir, stack, filename))
     return roots
 
 
-def _stack_root_for(rel_path: str, roots: dict[str, StackRoot]) -> StackRoot | None:
-    """The nearest stack root above *rel_path*, or None when no ancestor carries a signal."""
+def _file_family(rel_path: str) -> str | None:
+    return _EXTENSION_FAMILY.get(os.path.splitext(rel_path)[1].lower())
+
+
+def _stack_root_for(
+    rel_path: str, roots: dict[str, list[StackRoot]], family: str | None = None
+) -> StackRoot | None:
+    """The nearest stack root above *rel_path* (of *family*, when given), or None."""
     parts = rel_path.split("/")[:-1]
     while True:
         key = "/".join(parts) if parts else "."
-        found = roots.get(key)
-        if found is not None:
-            return found
+        for found in roots.get(key, ()):
+            if family is None or _SIGNAL_FAMILY[found.signal] == family:
+                return found
         if not parts:
             return None
         parts.pop()
 
 
 def _js_test_runner(package_json: Path) -> str:
+    """vitest or jest from the package's declared deps; `npm test` when it says neither.
+
+    Read through the scan reader so the containment check applies: a `package.json` that is a
+    link out of the project is not read, and the runner degrades rather than the scan failing.
+    """
     try:
-        data = json.loads(read_text_utf8(package_json))
-    except (OSError, ValueError):
+        data = json.loads(_read_text_for_scan(package_json))
+    except (OSError, ScanReadError, ValueError):
         return "npm test --"
     deps: dict[str, object] = {}
     for key in ("devDependencies", "dependencies"):
@@ -926,29 +970,30 @@ def _js_test_runner(package_json: Path) -> str:
     return "npm test --"
 
 
-def _test_runner_for(rel_path: str, stack_root: StackRoot | None, root: Path) -> str:
-    """The command a test file runs under, from its own stack root rather than the repo root."""
-    if stack_root is not None:
-        if stack_root.signal == "package.json":
-            base = root if stack_root.rel_dir == "." else root / stack_root.rel_dir
-            return _js_test_runner(base / "package.json")
-        runner = _SIGNAL_TEST_RUNNERS.get(stack_root.signal)
-        if runner:
-            return runner
-    if rel_path.endswith(".py"):
-        return "pytest"
-    if rel_path.endswith((".ts", ".tsx", ".js", ".jsx")):
-        return "npm test --"
-    return ""
+def _stamp_stacks(root: Path, files: list[FileEntry], roots: dict[str, list[StackRoot]]) -> None:
+    """Record, per file, the stack root of its own language and the test runner there.
 
-
-def _stamp_stacks(root: Path, files: list[FileEntry], roots: dict[str, StackRoot]) -> None:
-    """Record each file's stack root, and each test file's runner, on its FileEntry."""
+    Every file is stamped, not only tests: a change with no selected tests still needs its
+    stack's suite command.
+    """
+    js_runners: dict[str, str] = {}
     for f in files:
-        sr = _stack_root_for(f.rel_path, roots)
-        f.stack_root = sr.rel_dir if sr is not None else ""
-        if f.role == "test":
-            f.test_runner = _test_runner_for(f.rel_path, sr, root)
+        family = _file_family(f.rel_path)
+        sr = _stack_root_for(f.rel_path, roots, family) if family else None
+        if sr is None and family is None:
+            sr = _stack_root_for(f.rel_path, roots)
+        if sr is None:
+            f.stack_root = "." if family in _FAMILY_FALLBACK_RUNNERS else ""
+            f.test_runner = _FAMILY_FALLBACK_RUNNERS.get(family or "", "")
+            continue
+        f.stack_root = sr.rel_dir
+        if sr.signal == "package.json":
+            if sr.rel_dir not in js_runners:
+                base = root if sr.rel_dir == "." else root / sr.rel_dir
+                js_runners[sr.rel_dir] = _js_test_runner(base / "package.json")
+            f.test_runner = js_runners[sr.rel_dir]
+        else:
+            f.test_runner = _SIGNAL_TEST_RUNNERS.get(sr.signal, "")
 
 
 # ---------------------------------------------------------------------------
@@ -1040,8 +1085,8 @@ def _module_names(rel_path: str, py_roots: list[str]) -> list[str]:
 class _PyModuleIndex:
     """Dotted module name -> candidate files, plus a path set for relative resolution."""
 
-    def __init__(self, files: list[FileEntry], roots: dict[str, StackRoot]) -> None:
-        py_roots = sorted(r.rel_dir for r in roots.values() if r.stack == "python")
+    def __init__(self, files: list[FileEntry], roots: dict[str, list[StackRoot]]) -> None:
+        py_roots = sorted(r.rel_dir for rs in roots.values() for r in rs if r.stack == "python")
         self.paths = {f.rel_path for f in files if f.rel_path.endswith(".py")}
         self.modules: dict[str, list[str]] = {}
         for rel_path in sorted(self.paths):
@@ -1142,7 +1187,7 @@ def _resolve_python_import(
 
 
 def _analyze_python_imports(
-    root: Path, files: list[FileEntry], roots: dict[str, StackRoot] | None = None
+    root: Path, files: list[FileEntry], roots: dict[str, list[StackRoot]] | None = None
 ) -> tuple[list[ImportEdge], dict[str, dict[str, tuple[str, str]]]]:
     """IMPORTS edges and the CALLS name map from one `ast` read of every `.py` file.
 

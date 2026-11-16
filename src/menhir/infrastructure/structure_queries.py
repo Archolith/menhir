@@ -93,6 +93,20 @@ def _command_for(stack_root: str, runner: str, tests: list[str]) -> str:
     return f"cd {prefix.rstrip('/')} && {body}" if prefix else body
 
 
+def _suite_command(stack_root: str, runner: str) -> str:
+    """The whole suite at one stack root, for when no specific test was selected."""
+    if runner == "go test":
+        body = "go test ./..."
+    elif runner == "npm test --":
+        body = "npm test"
+    elif runner == "npx vitest run":
+        body = "npx vitest run"
+    else:
+        body = runner
+    prefix = "" if stack_root in ("", ".") else stack_root.rstrip("/")
+    return f"cd {prefix} && {body}" if prefix else body
+
+
 def _normalize_structure_path(path: str) -> str:
     """Stored `structure_path` spelling of a caller path, with no project root known.
 
@@ -1837,7 +1851,14 @@ class StructureGraphWriter:
         }
         """
         if not file_paths:
-            return {"changed_files": [], "test_files": [], "test_command": "pytest"}
+            # Nothing named: the whole project's suites, one per stack root the scan found.
+            suites = self._suite_commands(self._project_stamps(project))
+            return {
+                "changed_files": [],
+                "test_files": [],
+                "test_command": "\n".join(suites) if suites else "pytest",
+                "test_commands": suites,
+            }
 
         # Get the full blast radius first
         radius = self.query_blast_radius(project, file_paths, max_depth=max_depth)
@@ -1851,7 +1872,13 @@ class StructureGraphWriter:
         if test_commands:
             test_cmd = "\n".join(test_commands)
         else:
-            test_cmd = "pytest  # no specific tests found — run full suite"
+            # No tests selected: the suites of the stacks the changed files belong to.
+            stamps = self._stamps(project, file_paths)
+            suites = self._suite_commands(set(stamps.values()))
+            test_commands = []
+            test_cmd = "\n".join(
+                f"{cmd}  # no specific tests found — run full suite" for cmd in suites
+            ) or "pytest  # no specific tests found — run full suite"
 
         return {
             "changed_files": file_paths,
@@ -1869,11 +1896,10 @@ class StructureGraphWriter:
             "depth_truncated": radius.get("depth_truncated", False),
         }
 
-    def _test_commands(self, project: str, test_files: list[str]) -> list[str]:
-        """Commands that run *test_files*, grouped by the stack root and runner the scan stamped."""
-        if not test_files:
-            return []
-        lookup = [t.rstrip("/") for t in test_files]
+    def _stamps(self, project: str, paths: list[str]) -> dict[str, tuple[str, str]]:
+        """(stack root, runner) the scan stamped on each of *paths*; unstamped paths are absent."""
+        if not paths:
+            return {}
         rows = self.neo4j.execute(
             """
             UNWIND $paths AS tp
@@ -1882,14 +1908,44 @@ class StructureGraphWriter:
                    t.structure_stack_root AS stack_root,
                    t.structure_test_runner AS runner
             """,
-            {"p": project, "paths": lookup},
+            {"p": project, "paths": sorted(set(paths))},
         )
-        stamped = {str(r["path"]): r for r in rows if r.get("path")}
+        return {
+            str(r["path"]): (str(r.get("stack_root") or "."), str(r["runner"]))
+            for r in rows
+            if r.get("path") and r.get("runner")
+        }
+
+    def _project_stamps(self, project: str) -> set[tuple[str, str]]:
+        rows = self.neo4j.execute(
+            """
+            MATCH (t:Entity {structure_project: $p})
+            WHERE coalesce(t.structure_test_runner, '') <> ''
+            RETURN DISTINCT t.structure_stack_root AS stack_root,
+                   t.structure_test_runner AS runner
+            """,
+            {"p": project},
+        )
+        return {(str(r.get("stack_root") or "."), str(r["runner"])) for r in rows if r.get("runner")}
+
+    @staticmethod
+    def _suite_commands(pairs: set[tuple[str, str]]) -> list[str]:
+        return [_suite_command(root, runner) for root, runner in sorted(pairs)]
+
+    def _test_commands(self, project: str, test_files: list[str]) -> list[str]:
+        """Commands that run *test_files*, grouped by the stack root and runner the scan stamped.
+
+        A directory selection (from a `conftest.py`) carries no stamp of its own; it takes the
+        stamp of the conftest that selected it, so it runs from the same root as its siblings.
+        """
+        if not test_files:
+            return []
+        source = {t: (f"{t}conftest.py" if t != "./" else "conftest.py") if t.endswith("/") else t
+                  for t in test_files}
+        stamped = self._stamps(project, list(source.values()))
         groups: dict[tuple[str, str], list[str]] = {}
         for test in test_files:
-            row = stamped.get(test.rstrip("/")) or {}
-            runner = row.get("runner") or _runner_by_extension(test)
-            root = row.get("stack_root") or "."
+            root, runner = stamped.get(source[test]) or (".", _runner_by_extension(test))
             if not runner:
                 continue
             groups.setdefault((root, runner), []).append(test)
