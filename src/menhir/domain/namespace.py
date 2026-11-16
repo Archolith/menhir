@@ -256,10 +256,10 @@ def namespace_group_id_error(namespace: str | None) -> str | None:
     """
     if not namespace or namespace == DEFAULT_NAMESPACE:
         return None
-    if _GROUP_ID_SAFE_PATTERN.match(namespace):
+    if _GROUP_ID_SAFE_PATTERN.fullmatch(namespace):
         return None
     stripped = namespace.strip()
-    if stripped != namespace and (not stripped or _GROUP_ID_SAFE_PATTERN.match(stripped)):
+    if stripped != namespace and (not stripped or _GROUP_ID_SAFE_PATTERN.fullmatch(stripped)):
         return (
             f"namespace {namespace!r} has surrounding whitespace; namespaces are matched "
             f"exactly. Did you mean {stripped or DEFAULT_NAMESPACE!r}?"

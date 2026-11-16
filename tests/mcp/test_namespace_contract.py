@@ -102,3 +102,37 @@ async def test_an_unknown_namespace_without_similar_spellings_still_gets_a_note(
 @pytest.mark.asyncio
 async def test_an_older_server_without_the_probe_means_no_note_not_a_failure() -> None:
     assert await namespace_note(_backend(RuntimeError("404 unknown op")), "pfcc") is None
+
+
+@pytest.mark.asyncio
+async def test_the_note_names_the_namespace_the_server_applied() -> None:
+    """A pinned client asking about 'foo' is answered about its pin; the note must say so."""
+    note = await namespace_note(_backend({"namespace": "bar", "known": False, "similar": []}), "foo")
+    assert note is not None and "'bar'" in note and "'foo'" not in note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pin", "expected_ns", "expected_similar"),
+    [("", "PFCC", True), ("tenant-a", "tenant-a", False)],
+    ids=["unpinned", "pinned"],
+)
+async def test_get_namespace_status_forces_the_pin_and_hides_other_names(
+    pin, expected_ns, expected_similar
+) -> None:
+    """Removing `pin or` or `include_similar=not pin` would let a pinned client probe and list
+    other silos' names."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from menhir.core.backend_runtime import RuntimeProvider
+    from menhir.domain.session import new_session
+
+    adapter = MagicMock()
+    adapter.namespace_status = MagicMock(return_value={"known": False, "similar": []})
+    runtime = RuntimeProvider(SimpleNamespace(graph_adapter=adapter), new_session("u"))
+    with patch("menhir.core.backend_runtime_data_ops.pinned_namespace", return_value=pin):
+        await runtime.get_namespace_status("PFCC")
+    adapter.namespace_status.assert_called_once_with(
+        expected_ns, include_similar=expected_similar
+    )

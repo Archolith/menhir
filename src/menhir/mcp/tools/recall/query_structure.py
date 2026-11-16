@@ -770,7 +770,9 @@ def _format_symbols(data: dict, path: str, project: str, *, neg: str = "") -> st
 
 def _format_context(data: dict) -> str:
     if "error" in data:
-        raise McpToolRefusal(str(data["error"]))
+        # The one error context returns is "File not found in structure graph": a miss in the
+        # index, so it keeps the stale banner and path notes like the other not_indexed answers.
+        raise McpToolRefusal(str(data["error"]), code="not_indexed")
     lines = [f"Context for {data.get('path', '')}:"]
     summary = data.get("summary", "")
     if summary:

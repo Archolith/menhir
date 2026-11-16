@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -78,7 +79,12 @@ DEFAULT_MCP_TIMEOUT = int(os.getenv("MENHIR_MCP_TIMEOUT", "120"))
 PREVIEW_UNAUTHORIZED = '{"unauthorized": true}'
 
 #: exception type names that mean the graph store (Neo4j) is unreachable/degraded.
-_GRAPH_UNREACHABLE_ERRORS = frozenset({"ServiceUnavailable", "SessionExpired", "SessionError"})
+_GRAPH_UNREACHABLE_ERRORS = frozenset(
+    {"ServiceUnavailable", "SessionExpired", "SessionError", "DatabaseUnavailable", "TransientError"}
+)
+
+#: Backend HTTP statuses that mean "try again later", not "the request was wrong" (#669 review).
+_BACKEND_RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 
 
 def _graph_unreachable(exc: BaseException) -> bool:
@@ -88,14 +94,19 @@ def _graph_unreachable(exc: BaseException) -> bool:
 
 
 def _backend_unreachable(exc: BaseException) -> bool:
-    """A stdio client's HTTP call to the Menhir server failed in transport or with a 5xx."""
+    """A stdio client's HTTP call to the Menhir server failed in transport, or the server said
+    it is overloaded or unreachable behind a proxy. A plain 500 is a server bug, not an outage:
+    it stays ``internal`` so a client does not retry a deterministic failure."""
     try:
         import httpx
     except ImportError:  # pragma: no cover - httpx is a runtime dependency
         return False
     if isinstance(exc, httpx.TransportError):
         return True
-    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code in _BACKEND_RETRYABLE_STATUSES
+    )
 
 
 def _telemetry_store_busy(exc: BaseException) -> bool:
@@ -113,6 +124,8 @@ def failure_code(exc: BaseException | None) -> str:
         return "access_denied"
     if _graph_unreachable(exc) or _backend_unreachable(exc) or _telemetry_store_busy(exc):
         return "unavailable"
+    if isinstance(exc, json.JSONDecodeError):  # a malformed server response, not bad input
+        return "internal"
     if isinstance(exc, ValueError):
         return "invalid_argument"
     return "internal"

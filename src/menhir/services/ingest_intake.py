@@ -130,9 +130,10 @@ class IngestIntakeMixin:
                 status=IngestStatus.FAILED,
                 nodes_touched=0,
                 edges_touched=0,
+                # The write landed, so say which episode and that resending would duplicate it.
                 error=(
-                    "the episode was written but could not be queued for enrichment "
-                    f"({type(exc).__name__}); see the server log"
+                    f"episode {episode_uuid} was written but could not be queued for enrichment "
+                    f"({type(exc).__name__}); do not write it again, see the server log"
                 ),
             )
 

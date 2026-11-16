@@ -340,5 +340,5 @@ async def test_query_structure_affected_tests_partial_index() -> None:
 async def test_query_structure_context_error() -> None:
     tool = _structure_tool({"context": {"error": "File not found in structure graph: x.py"}})
     out = await tool.execute(query_type="context", project="p1", path="x.py")
-    error_of(out, code="invalid_argument")
-    assert text_of(out) == "File not found in structure graph: x.py"
+    error_of(out, code="not_indexed")
+    assert text_of(out).endswith("File not found in structure graph: x.py")

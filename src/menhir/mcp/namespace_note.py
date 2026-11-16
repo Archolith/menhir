@@ -26,8 +26,10 @@ async def namespace_note(backend: Any, namespace: str | None) -> str | None:
         return None
     if not isinstance(status, dict) or status.get("known") is not False:
         return None
+    # The server answers for the namespace it applied: a pinned client's pin, not what it asked.
+    shown = str(status.get("namespace") or ns)
     note = (
-        f"Namespace {ns!r} holds no records, so an empty result here is not evidence of no "
+        f"Namespace {shown!r} holds no records, so an empty result here is not evidence of no "
         "history. Namespaces are matched exactly."
     )
     similar = [str(s) for s in status.get("similar") or []]
