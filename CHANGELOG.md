@@ -1,4 +1,19 @@
-## 2026-11-15 - query_structure answers for the stored path and says what it cut (#679, #683)
+## 2026-11-16 - Tests that import changed code are selected; rescans drop stale edges (#681, #680)
+
+- Python imports are read with `ast`. Relative imports resolve, `from pkg import sub` links
+  `pkg/sub.py`, every name in `import a, b` is linked, and a file `ast` cannot parse falls back
+  to the old line match. Stacks are detected per directory, so a monorepo with no root
+  `pyproject.toml` gets import and call edges, and a sub-project's `src/` package resolves to
+  its own copy (#681).
+- `blast_radius` / `affected_tests` select any test that imports the changed code (directly
+  or transitively), not only one named after it; a `conftest.py` selects its directory. Test
+  links between duplicate basenames prefer the source the test imports, then the mirroring
+  directory. `affected_tests` emits one command per stack root and runner (`pytest`,
+  `npx vitest run`, `npx jest`, `go test`, `cargo test`, Gradle, Maven), run from that root;
+  `test_commands` lists them (#681).
+- A rescan deletes IMPORTS and TESTS edges between scanned files that the scan no longer
+  derives, keyed by project identity; edges into files a capped scan dropped are kept (#680).
+- Scanner schema 12: every stored project is rewritten once on its next scan.
 
 - New `domain/structure_paths.py` maps caller spellings (`./a.py`, `src\a.py`, absolute paths
   under the project's recorded root, Git Bash `/c/...`) to the stored repo-relative form. The

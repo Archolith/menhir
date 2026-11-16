@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+import json
 import logging
 import os
 import re
@@ -101,6 +102,8 @@ class FileEntry:
     description: str = ""
     symbols_truncated: bool = False
     file_mtime: float = 0.0     # mtime at scan time — used for incremental write diff
+    stack_root: str = ""        # nearest directory with a stack signal ("." = repo root) (#681)
+    test_runner: str = ""       # test files only: the command they run under (#681)
 
 
 @dataclass
@@ -249,7 +252,8 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 11  # v11: text literals elided from stored signature defaults
+SCANNER_SCHEMA_VERSION = 12  # v12: ast imports, per-directory stack, ranked test links (#681)
+# (v11: text literals elided from stored signature defaults)
 # (v9: the legacy `.agent/project-id` identity file is scan-invisible)
 
 # Beacon publication and evidence scratch files live at the repository root. They are
@@ -455,8 +459,10 @@ class ProjectScanner:
         # Build directory entries
         directories = [DirEntry(rel_path=d, purpose=_infer_dir_purpose(d)) for d in sorted(dir_set)]
 
-        # Detect stack
+        # Detect stack: the root's for the project summary, each directory's for its files (#681)
         stack = _detect_stack(root)
+        stack_roots = _detect_stack_roots(root, dir_set)
+        _stamp_stacks(root, file_entries, stack_roots)
 
         # Read description
         description = _read_project_description(root)
@@ -480,8 +486,8 @@ class ProjectScanner:
         )
 
         # Parse imports, test edges, endpoints, cross-project refs
-        result.imports = _parse_imports(root, file_entries, stack)
-        result.test_edges = _detect_test_edges(file_entries)
+        result.imports, import_name_map = _analyze_python_imports(root, file_entries, stack_roots)
+        result.test_edges = _detect_test_edges(file_entries, result.imports)
         result.endpoints = _detect_endpoints(root, file_entries, stack)
         result.cross_project_refs = _detect_cross_project_refs(root, file_entries, project_name)
 
@@ -496,7 +502,7 @@ class ProjectScanner:
             result.symbols.extend(syms)
 
         # Build function-level call graph from extracted symbols
-        if result.symbols and stack == "python":
+        if result.symbols:
             tl_lookup: dict[tuple[str, str], str] = {}
             method_lookup: dict[tuple[str, str, str], str] = {}
             for sym in result.symbols:
@@ -505,7 +511,6 @@ class ProjectScanner:
                     tl_lookup[(sym.file_path, sym.name)] = path
                 elif sym.kind == "method":
                     method_lookup[(sym.file_path, sym.parent, sym.name)] = path
-            import_name_map = _build_import_name_map(root, file_entries, stack)
             for fe in result.files:
                 if not fe.rel_path.endswith(".py"):
                     continue
@@ -856,34 +861,303 @@ def _parse_gradle_deps(root: Path) -> list[str]:
     return []
 
 
+#: Test runner per stack-signal file (#681). A runner that takes file arguments is followed
+#: by the selected files; the others run their stack root's suite (see structure_queries).
+_SIGNAL_TEST_RUNNERS: dict[str, str] = {
+    "pyproject.toml": "pytest",
+    "setup.py": "pytest",
+    "requirements.txt": "pytest",
+    "build.gradle": "./gradlew test",
+    "build.gradle.kts": "./gradlew test",
+    "Cargo.toml": "cargo test",
+    "go.mod": "go test",
+    "pom.xml": "mvn test",
+}
+
+
+@dataclass(frozen=True)
+class StackRoot:
+    """A directory carrying a stack signal: the nearest one above a file sets its stack."""
+
+    rel_dir: str  # "." for the repository root
+    stack: str
+    signal: str  # the signal filename that decided it
+
+
+def _detect_stack_roots(root: Path, rel_dirs: set[str] | list[str]) -> dict[str, StackRoot]:
+    """Stack per directory (#681): every scanned directory with a signal file is a stack root."""
+    roots: dict[str, StackRoot] = {}
+    for rel_dir in sorted({".", *rel_dirs}):
+        base = root if rel_dir == "." else root / rel_dir
+        for filename, stack in _STACK_SIGNALS:
+            if (base / filename).is_file():
+                roots[rel_dir] = StackRoot(rel_dir, stack, filename)
+                break
+    return roots
+
+
+def _stack_root_for(rel_path: str, roots: dict[str, StackRoot]) -> StackRoot | None:
+    """The nearest stack root above *rel_path*, or None when no ancestor carries a signal."""
+    parts = rel_path.split("/")[:-1]
+    while True:
+        key = "/".join(parts) if parts else "."
+        found = roots.get(key)
+        if found is not None:
+            return found
+        if not parts:
+            return None
+        parts.pop()
+
+
+def _js_test_runner(package_json: Path) -> str:
+    try:
+        data = json.loads(read_text_utf8(package_json))
+    except (OSError, ValueError):
+        return "npm test --"
+    deps: dict[str, object] = {}
+    for key in ("devDependencies", "dependencies"):
+        section = data.get(key) if isinstance(data, dict) else None
+        if isinstance(section, dict):
+            deps.update(section)
+    if "vitest" in deps:
+        return "npx vitest run"
+    if "jest" in deps:
+        return "npx jest"
+    return "npm test --"
+
+
+def _test_runner_for(rel_path: str, stack_root: StackRoot | None, root: Path) -> str:
+    """The command a test file runs under, from its own stack root rather than the repo root."""
+    if stack_root is not None:
+        if stack_root.signal == "package.json":
+            base = root if stack_root.rel_dir == "." else root / stack_root.rel_dir
+            return _js_test_runner(base / "package.json")
+        runner = _SIGNAL_TEST_RUNNERS.get(stack_root.signal)
+        if runner:
+            return runner
+    if rel_path.endswith(".py"):
+        return "pytest"
+    if rel_path.endswith((".ts", ".tsx", ".js", ".jsx")):
+        return "npm test --"
+    return ""
+
+
+def _stamp_stacks(root: Path, files: list[FileEntry], roots: dict[str, StackRoot]) -> None:
+    """Record each file's stack root, and each test file's runner, on its FileEntry."""
+    for f in files:
+        sr = _stack_root_for(f.rel_path, roots)
+        f.stack_root = sr.rel_dir if sr is not None else ""
+        if f.role == "test":
+            f.test_runner = _test_runner_for(f.rel_path, sr, root)
+
+
 # ---------------------------------------------------------------------------
 # Import parsing
 # ---------------------------------------------------------------------------
 
-def _parse_imports(root: Path, files: list[FileEntry], stack: str) -> list[ImportEdge]:
-    if stack != "python":
-        return []
+#: One import statement: (module, [(name, asname)], level). `import a.b as c` is ("a.b", [], 0).
+_PyImport = tuple[str, list[tuple[str, str]], int]
 
-    # Build module → rel_path lookup
-    module_map: dict[str, str] = {}
-    for f in files:
-        if f.rel_path.endswith(".py"):
-            # Convert path to module: src/menhir/services/foo.py → menhir.services.foo
-            mod = f.rel_path.replace("/", ".").replace("\\", ".")
-            if mod.endswith(".py"):
-                mod = mod[:-3]
-            # Strip leading src. if present
-            if mod.startswith("src."):
-                mod = mod[4:]
-            # Also register without __init__
-            if mod.endswith(".__init__"):
-                module_map[mod[:-9]] = f.rel_path
-            module_map[mod] = f.rel_path
+_FROM_RE = re.compile(r"^from\s+(\.*)([\w.]*)\s+import\s+(.+)$")
+_IMPORT_RE = re.compile(r"^import\s+(.+)$")
 
+
+def _python_imports(text: str) -> list[_PyImport]:
+    """Every import statement in *text*, read with `ast` (#681).
+
+    A file `ast` cannot parse (a syntax error, Python 2) falls back to the old line match, so a
+    broken file still contributes what it can rather than nothing.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return _python_imports_by_line(text)
+    found: list[_PyImport] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                found.append((alias.name, [], 0))
+        elif isinstance(node, ast.ImportFrom):
+            names = [(a.name, a.asname or a.name) for a in node.names]
+            found.append((node.module or "", names, node.level or 0))
+    return found
+
+
+def _python_imports_by_line(text: str) -> list[_PyImport]:
+    found: list[_PyImport] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = _FROM_RE.match(stripped)
+        if m:
+            names: list[tuple[str, str]] = []
+            for part in m.group(3).strip().rstrip("\\").strip("()").split(","):
+                part = part.strip()
+                original, _, local = part.partition(" as ")
+                original, local = original.strip(), (local.strip() or original.strip())
+                if original.isidentifier() and local.isidentifier():
+                    names.append((original, local))
+            found.append((m.group(2), names, len(m.group(1))))
+            continue
+        m = _IMPORT_RE.match(stripped)
+        if m:
+            for part in m.group(1).split(","):
+                mod = part.strip().split(" as ")[0].strip()
+                if re.fullmatch(r"[\w.]+", mod):
+                    found.append((mod, [], 0))
+    return found
+
+
+def _module_names(rel_path: str, py_roots: list[str]) -> list[str]:
+    """Dotted names a `.py` file can be imported as.
+
+    Relative to the repository root, to its `src/` (as before), and to every Python stack root
+    above it and that root's `src/` -- so `packages/x/src/pkg/mod.py` is also `pkg.mod`.
+    """
+    stem = rel_path[:-3]
+    bases = {""}
+    for py_root in py_roots:
+        prefix = "" if py_root == "." else py_root + "/"
+        if not stem.startswith(prefix):
+            continue
+        bases.add(prefix)
+        bases.add(prefix + "src/")
+    bases.add("src/")
+    names: list[str] = []
+    for base in sorted(bases):
+        if not stem.startswith(base):
+            continue
+        dotted = stem[len(base):].replace("/", ".")
+        if not dotted:
+            continue
+        if dotted.endswith(".__init__"):
+            names.append(dotted[: -len(".__init__")])
+        elif dotted == "__init__":
+            continue
+        names.append(dotted)
+    return names
+
+
+class _PyModuleIndex:
+    """Dotted module name -> candidate files, plus a path set for relative resolution."""
+
+    def __init__(self, files: list[FileEntry], roots: dict[str, StackRoot]) -> None:
+        py_roots = sorted(r.rel_dir for r in roots.values() if r.stack == "python")
+        self.paths = {f.rel_path for f in files if f.rel_path.endswith(".py")}
+        self.modules: dict[str, list[str]] = {}
+        for rel_path in sorted(self.paths):
+            for name in _module_names(rel_path, py_roots):
+                bucket = self.modules.setdefault(name, [])
+                if rel_path not in bucket:
+                    bucket.append(rel_path)
+
+    def exact(self, module: str, importer: str) -> str | None:
+        candidates = self.modules.get(module)
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        # A name defined in two sub-projects: the copy nearest the importer is the one it gets.
+        return max(candidates, key=lambda c: (_shared_dir_depth(c, importer), -len(c), c))
+
+    def absolute(self, module: str, importer: str) -> str | None:
+        """Exact match, else the longest importable prefix (an attribute of a package)."""
+        parts = module.split(".")
+        for i in range(len(parts), 0, -1):
+            hit = self.exact(".".join(parts[:i]), importer)
+            if hit:
+                return hit
+        return None
+
+    def relative_base(self, importer: str, level: int, module: str) -> str | None:
+        """Directory (no trailing slash, "" for root) a relative import's module names."""
+        parts = importer.split("/")[:-1]
+        up = level - 1
+        if up > len(parts):
+            return None
+        base = parts[: len(parts) - up] if up else parts
+        if module:
+            base = base + module.split(".")
+        return "/".join(base)
+
+    def file_at(self, dotted_dir: str) -> str | None:
+        """The module file for a slash path: `<p>.py`, else `<p>/__init__.py`."""
+        if not dotted_dir:
+            return "__init__.py" if "__init__.py" in self.paths else None
+        for candidate in (f"{dotted_dir}.py", f"{dotted_dir}/__init__.py"):
+            if candidate in self.paths:
+                return candidate
+        return None
+
+
+def _shared_dir_depth(a: str, b: str) -> int:
+    depth = 0
+    for x, y in zip(a.split("/")[:-1], b.split("/")[:-1], strict=False):
+        if x != y:
+            break
+        depth += 1
+    return depth
+
+
+def _resolve_python_import(
+    imp: _PyImport, importer: str, index: _PyModuleIndex
+) -> tuple[set[str], dict[str, tuple[str, str]]]:
+    """Files one import statement links to, and the local names it binds to a module's members.
+
+    `from pkg import sub` links to `pkg/sub.py` when `sub` is a module and to `pkg` otherwise;
+    a relative import resolves against the importing file's own package.
+    """
+    module, names, level = imp
+    targets: set[str] = set()
+    bound: dict[str, tuple[str, str]] = {}
+    if level:
+        base = index.relative_base(importer, level, module)
+        if base is None:
+            return targets, bound
+        owner = index.file_at(base)
+        for original, local in names:
+            sub = index.file_at(f"{base}/{original}" if base else original)
+            if sub and original != "*":
+                targets.add(sub)
+            elif owner:
+                targets.add(owner)
+                bound[local] = (owner, original)
+        if not names and owner:
+            targets.add(owner)
+    elif names:
+        owner = index.absolute(module, importer)
+        for original, local in names:
+            sub = index.exact(f"{module}.{original}", importer) if original != "*" else None
+            if sub:
+                targets.add(sub)
+            elif owner:
+                targets.add(owner)
+                bound[local] = (owner, original)
+    else:
+        target = index.absolute(module, importer)
+        if target:
+            targets.add(target)
+    targets.discard(importer)
+    bound = {k: v for k, v in bound.items() if v[0] != importer}
+    return targets, bound
+
+
+def _analyze_python_imports(
+    root: Path, files: list[FileEntry], roots: dict[str, StackRoot] | None = None
+) -> tuple[list[ImportEdge], dict[str, dict[str, tuple[str, str]]]]:
+    """IMPORTS edges and the CALLS name map from one `ast` read of every `.py` file.
+
+    Runs on every Python file whatever the root stack (#681): a monorepo with no root signal
+    still has Python in it.
+    """
+    if roots is None:
+        roots = _detect_stack_roots(root, {os.path.dirname(f.rel_path) or "." for f in files})
+    index = _PyModuleIndex(files, roots)
     edges: list[ImportEdge] = []
-    source_files = [f for f in files if f.rel_path.endswith(".py") and f.role != "config"]
-
-    for f in source_files:
+    seen: set[tuple[str, str]] = set()
+    name_maps: dict[str, dict[str, tuple[str, str]]] = {}
+    for f in files:
+        if not f.rel_path.endswith(".py") or f.role == "config":
+            continue
         full_path = root / f.rel_path
         if not full_path.is_file():
             continue
@@ -891,91 +1165,83 @@ def _parse_imports(root: Path, files: list[FileEntry], stack: str) -> list[Impor
             text = _read_text_for_scan(full_path)
         except OSError:
             continue
-
-        for line in text.splitlines():
-            line = line.strip()
-            # from X.Y import Z
-            m = re.match(r"^from\s+([\w.]+)\s+import\s+", line)
-            if m:
-                mod_name = m.group(1)
-                target = _resolve_module(mod_name, module_map)
-                if target and target != f.rel_path:
+        name_map: dict[str, tuple[str, str]] = {}
+        for imp in _python_imports(text):
+            targets, bound = _resolve_python_import(imp, f.rel_path, index)
+            for target in sorted(targets):
+                if (f.rel_path, target) not in seen:
+                    seen.add((f.rel_path, target))
                     edges.append(ImportEdge(source_path=f.rel_path, target_path=target))
-                continue
-            # import X.Y
-            m = re.match(r"^import\s+([\w.]+)", line)
-            if m:
-                mod_name = m.group(1)
-                target = _resolve_module(mod_name, module_map)
-                if target and target != f.rel_path:
-                    edges.append(ImportEdge(source_path=f.rel_path, target_path=target))
-
-    # Deduplicate
-    seen: set[tuple[str, str]] = set()
-    deduped: list[ImportEdge] = []
-    for e in edges:
-        key = (e.source_path, e.target_path)
-        if key not in seen:
-            seen.add(key)
-            deduped.append(e)
-    return deduped
+            name_map.update(bound)
+        if name_map:
+            name_maps[f.rel_path] = name_map
+    return edges, name_maps
 
 
-def _resolve_module(mod_name: str, module_map: dict[str, str]) -> str | None:
-    """Try to resolve a dotted module name to a project-relative file path."""
-    if mod_name in module_map:
-        return module_map[mod_name]
-    # Try progressively shorter prefixes
-    parts = mod_name.split(".")
-    for i in range(len(parts) - 1, 0, -1):
-        prefix = ".".join(parts[:i])
-        if prefix in module_map:
-            return module_map[prefix]
-    return None
+def _parse_imports(root: Path, files: list[FileEntry], stack: str = "") -> list[ImportEdge]:
+    """Python IMPORTS edges. *stack* is ignored: the stack is decided per directory (#681)."""
+    return _analyze_python_imports(root, files)[0]
 
 
 # ---------------------------------------------------------------------------
 # Test edge detection
 # ---------------------------------------------------------------------------
 
-def _detect_test_edges(files: list[FileEntry]) -> list[TestEdge]:
+def _detect_test_edges(
+    files: list[FileEntry], imports: list[ImportEdge] | None = None
+) -> list[TestEdge]:
+    """Link each test to the source its name points at.
+
+    Several files can share a basename (`utils.py`, `models.py`), so the candidate is ranked,
+    not taken first (#681): one the test imports, then the one sharing the most trailing
+    directory names with the test (`tests/cli/test_up.py` -> `src/pkg/cli/up.py`), then the
+    shortest path.
+    """
     test_files = [f for f in files if f.role == "test"]
     source_files = {f.rel_path: f for f in files if f.role not in ("test", "config")}
+    imported: dict[str, set[str]] = {}
+    for e in imports or []:
+        imported.setdefault(e.source_path, set()).add(e.target_path)
 
-    # Build basename → rel_path index for source files
     basename_index: dict[str, list[str]] = {}
     for rp in source_files:
-        bn = os.path.basename(rp)
-        basename_index.setdefault(bn, []).append(rp)
+        basename_index.setdefault(os.path.basename(rp), []).append(rp)
+
+    def best(test_path: str, candidates: list[str]) -> str:
+        test_dirs = [d for d in test_path.split("/")[:-1] if d not in ("tests", "test", "__tests__")]
+        used = imported.get(test_path, set())
+
+        def rank(c: str) -> tuple[int, int, int, str]:
+            src_dirs = c.split("/")[:-1]
+            shared = 0
+            for x, y in zip(reversed(test_dirs), reversed(src_dirs), strict=False):
+                if x != y:
+                    break
+                shared += 1
+            return (1 if c in used else 0, shared, -len(c), c)
+
+        return max(candidates, key=rank)
 
     edges: list[TestEdge] = []
     for tf in test_files:
         name = os.path.basename(tf.rel_path)
-        # test_foo.py → foo.py
+        targets: list[str] = []
         m = re.match(r"^test_(.+\.py)$", name)
         if m:
-            target_name = m.group(1)
+            targets = [m.group(1)]
+        else:
+            m = re.match(r"^(.+)_test\.py$", name)
+            if m:
+                targets = [m.group(1) + ".py"]
+            else:
+                m = re.match(r"^(.+)\.(test|spec)\.(ts|tsx|js|jsx)$", name)
+                if m:
+                    targets = [f"{m.group(1)}.{ext}" for ext in (m.group(3), "tsx", "ts", "js", "jsx")]
+        for target_name in targets:
             candidates = basename_index.get(target_name, [])
             if candidates:
-                edges.append(TestEdge(test_path=tf.rel_path, source_path=candidates[0]))
-                continue
-        # foo_test.py → foo.py
-        m = re.match(r"^(.+)_test\.py$", name)
-        if m:
-            target_name = m.group(1) + ".py"
-            candidates = basename_index.get(target_name, [])
-            if candidates:
-                edges.append(TestEdge(test_path=tf.rel_path, source_path=candidates[0]))
-                continue
-        # foo.test.ts → foo.ts (or .tsx)
-        m = re.match(r"^(.+)\.(test|spec)\.(ts|tsx|js|jsx)$", name)
-        if m:
-            for ext in (m.group(3), "tsx", "ts", "js", "jsx"):
-                target_name = f"{m.group(1)}.{ext}"
-                candidates = basename_index.get(target_name, [])
-                if candidates:
-                    edges.append(TestEdge(test_path=tf.rel_path, source_path=candidates[0]))
-                    break
+                edges.append(TestEdge(test_path=tf.rel_path, source_path=best(tf.rel_path, candidates)))
+                break
 
     return edges
 
@@ -1240,65 +1506,14 @@ def _sym_path(sym: SymbolEntry) -> str:
 def _build_import_name_map(
     root: Path,
     files: list[FileEntry],
-    stack: str,
+    stack: str = "",
 ) -> dict[str, dict[str, tuple[str, str]]]:
-    """Build per-file map of imported names to their source for cross-file call resolution.
+    """Per-file map of imported names to their source, for cross-file call resolution.
 
-    Returns {file_rel_path: {local_name: (target_rel_path, original_name)}}.
-    Only populated for Python projects.
+    Returns {file_rel_path: {local_name: (target_rel_path, original_name)}}. Shares the `ast`
+    import reader with IMPORTS edges; *stack* is ignored (#681).
     """
-    if stack != "python":
-        return {}
-
-    module_map: dict[str, str] = {}
-    for f in files:
-        if not f.rel_path.endswith(".py"):
-            continue
-        mod = f.rel_path.replace("/", ".").replace("\\", ".")
-        if mod.endswith(".py"):
-            mod = mod[:-3]
-        if mod.startswith("src."):
-            mod = mod[4:]
-        if mod.endswith(".__init__"):
-            module_map[mod[:-9]] = f.rel_path
-        module_map[mod] = f.rel_path
-
-    result: dict[str, dict[str, tuple[str, str]]] = {}
-    for f in files:
-        if not f.rel_path.endswith(".py"):
-            continue
-        full_path = root / f.rel_path
-        if not full_path.is_file():
-            continue
-        try:
-            text = _read_text_for_scan(full_path)
-        except OSError:
-            continue
-
-        name_map: dict[str, tuple[str, str]] = {}
-        for line in text.splitlines():
-            stripped = line.strip()
-            m = re.match(r"^from\s+([\w.]+)\s+import\s+(.+)$", stripped)
-            if not m:
-                continue
-            mod_name = m.group(1)
-            target = _resolve_module(mod_name, module_map)
-            if not target or target == f.rel_path:
-                continue
-            names_str = m.group(2).strip().rstrip("\\").strip("()")
-            for part in names_str.split(","):
-                part = part.strip()
-                if " as " in part:
-                    original, local = [p.strip() for p in part.split(" as ", 1)]
-                else:
-                    original = local = part
-                if original and local and original.isidentifier() and local.isidentifier():
-                    name_map[local] = (target, original)
-
-        if name_map:
-            result[f.rel_path] = name_map
-
-    return result
+    return _analyze_python_imports(root, files)[1]
 
 
 def _walk_no_inner_defs(stmts: list) -> list:

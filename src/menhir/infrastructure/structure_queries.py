@@ -7,6 +7,7 @@ Graphiti — so the project skeleton is always complete and reliable.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,59 @@ logger = logging.getLogger(__name__)
 #: Rows blast_radius returns before it reports truncation (#683).
 _FUNCTION_CALLER_CAP = 30
 _RELATED_MEMORY_CAP = 10
+
+
+_TEST_FILE_NAME = re.compile(
+    r"^(test_.+\.py|.+_test\.py|.+_test\.go|.+\.(test|spec)\.(ts|tsx|js|jsx))$"
+)
+#: Runners that take no file arguments: they run their stack root's suite (go: per package dir).
+_SUITE_RUNNERS = frozenset({"cargo test", "./gradlew test", "mvn test"})
+
+
+def _test_selection(test_path: str) -> str | None:
+    """What to run for a test-role file reached through imports (#681).
+
+    A test file runs itself; a `conftest.py` affects every test beneath it, so its directory
+    runs; any other helper under tests/ selects nothing itself -- the tests importing it are
+    reached by the same traversal.
+    """
+    name = test_path.rsplit("/", 1)[-1]
+    if _TEST_FILE_NAME.match(name):
+        return test_path
+    if name == "conftest.py":
+        parent = test_path.rsplit("/", 1)[0] if "/" in test_path else ""
+        return f"{parent}/" if parent else "./"
+    return None
+
+
+def _runner_by_extension(test_path: str) -> str:
+    """Fallback for graphs written before the scanner stamped runners."""
+    if test_path.endswith((".py", "/")):
+        return "pytest"
+    if test_path.endswith((".ts", ".tsx", ".js", ".jsx")):
+        return "npm test --"
+    if test_path.endswith(".go"):
+        return "go test"
+    return ""
+
+
+def _command_for(stack_root: str, runner: str, tests: list[str]) -> str:
+    """One runnable command: from the stack root, with paths relative to it."""
+    prefix = "" if stack_root in ("", ".") else stack_root.rstrip("/") + "/"
+
+    def rel(path: str) -> str:
+        if path == "./":
+            return "."
+        return path[len(prefix):] if prefix and path.startswith(prefix) else path
+
+    if runner in _SUITE_RUNNERS:
+        body = runner
+    elif runner == "go test":
+        dirs = sorted({"./" + (rel(t).rsplit("/", 1)[0] if "/" in rel(t) else ".") for t in tests})
+        body = "go test " + " ".join(d.replace("/./", "/").rstrip("/.") or "." for d in dirs)
+    else:
+        body = f"{runner} " + " ".join(rel(t) for t in sorted(tests))
+    return f"cd {prefix.rstrip('/')} && {body}" if prefix else body
 
 
 def _normalize_structure_path(path: str) -> str:
@@ -301,6 +355,8 @@ class StructureGraphWriter:
                 "name": f.rel_path.split("/")[-1],
                 "content": f.description or f.rel_path,
                 "file_mtime": f.file_mtime,
+                "structure_stack_root": getattr(f, "stack_root", "") or "",
+                "structure_test_runner": getattr(f, "test_runner", "") or "",
                 "session_id": session_id,
                 "user_id": user_id,
                 "now": now,
@@ -469,6 +525,18 @@ class StructureGraphWriter:
             for ie in scan.imports
         ]
         edge_count += self._write_edges_batch("IMPORTS", import_edges, scan.name)
+
+        # 9b. #680: replace, not accumulate. A file that drops an import, or a test whose name
+        #     now points at a better-ranked source, must lose the old edge.
+        scanned_paths = [f.rel_path for f in scan.files]
+        for rel_type, edges in (("TESTS", test_edges), ("IMPORTS", import_edges)):
+            stale = self._delete_stale_derived_edges(
+                scan.name, rel_type, scanned_paths, edges, project_id
+            )
+            if stale:
+                logger.info(
+                    "Pruned %d stale %s edges for project=%s", stale, rel_type, scan.name
+                )
 
         # 10. EXPOSES edges: project→endpoint
         exposes_edges = [
@@ -1055,6 +1123,48 @@ class StructureGraphWriter:
             deleted += int(rows[0].get("deleted", 0)) if rows else 0
         return deleted
 
+    def _delete_stale_derived_edges(
+        self,
+        project_name: str,
+        rel_type: str,
+        scanned_paths: list[str],
+        current: list[dict[str, str]],
+        project_id: str | None = None,
+    ) -> int:
+        """Delete `rel_type` edges between scanned files that this scan no longer derives (#680).
+
+        Only edges whose BOTH endpoints are in `scanned_paths` are candidates. The scan parsed
+        every such source and saw every such target, so absence from `current` is evidence the
+        edge is gone -- even on a capped scan, where an edge into a file the cap dropped stays
+        untouched. Relationships only; nodes are pruned elsewhere. One keep set per relationship
+        type: a test's TESTS edge must not keep a dropped IMPORTS edge to the same file alive.
+        """
+        if rel_type not in ("IMPORTS", "TESTS"):
+            raise ValueError(f"not a derived file edge: {rel_type}")
+        keep = sorted({(e["source_path"], e["target_path"]) for e in current})
+        keep_pairs = [list(pair) for pair in keep]
+        deleted = 0
+        for owner in self._owner_arms("a", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                UNWIND $scanned AS sp
+                MATCH (a:Entity {{structure_path: sp}})
+                WHERE {owner}
+                MATCH (a)-[r:{rel_type}]->(b:Entity)
+                WHERE b.structure_path IN $scanned
+                  AND NOT [a.structure_path, b.structure_path] IN $keep
+                DELETE r
+                RETURN count(*) AS deleted
+                """,
+                {
+                    **self._owner_params(project_name, project_id),
+                    "scanned": scanned_paths,
+                    "keep": keep_pairs,
+                },
+            )
+            deleted += int(rows[0].get("deleted", 0)) if rows else 0
+        return deleted
+
     def _delete_stale_contains_repo_edges(
         self, project_name: str, keep_rel_paths: list[str],
         project_id: str | None = None,
@@ -1505,7 +1615,10 @@ class StructureGraphWriter:
             WHERE ALL(n IN nodes(path) WHERE n.structure_project = $p)
               AND length(path) <= $depth
             RETURN DISTINCT importer.structure_path AS importer_path,
-                   length(path) AS hop_distance
+                   length(path) AS hop_distance,
+                   changed.structure_path AS changed_path,
+                   changed.structure_role AS changed_role,
+                   importer.structure_role AS importer_role
             """,
             {"p": project, "paths": file_paths, "depth": max_depth},
         )
@@ -1514,13 +1627,22 @@ class StructureGraphWriter:
         transitive: set[str] = set()
         changed_set = set(file_paths)
         min_hop: dict[str, int] = {}
+        # #681: a test that imports changed code is affected whatever its name says.
+        importing_tests: dict[str, tuple[int, str]] = {}
 
         for row in rows:
+            changed_path = row.get("changed_path")
+            if changed_path and row.get("changed_role") == "test":
+                importing_tests[changed_path] = (0, changed_path)
             imp = row.get("importer_path")
             if not imp or imp in changed_set:
                 continue
             dist = row.get("hop_distance", 1)
             min_hop[imp] = min(dist, min_hop.get(imp, dist))
+            if row.get("importer_role") == "test" and changed_path:
+                prior = importing_tests.get(imp)
+                if prior is None or (dist, changed_path) < prior:
+                    importing_tests[imp] = (dist, changed_path)
             if dist == 1:
                 direct.add(imp)
             else:
@@ -1563,10 +1685,16 @@ class StructureGraphWriter:
             {"p": project, "paths": all_impacted},
         )
         affected_tests = [
-            {"test": str(r["test_file"]), "covers": str(r["covers"])}
+            {"test": str(r["test_file"]), "covers": str(r["covers"]), "via": "name"}
             for r in test_rows
             if r.get("test_file")
         ]
+        named = {t["test"] for t in affected_tests}
+        for test_path, (_dist, covers) in sorted(importing_tests.items()):
+            target = _test_selection(test_path)
+            if target and target not in named:
+                named.add(target)
+                affected_tests.append({"test": target, "covers": covers, "via": "imports"})
 
         # Cross-project impact: check if any changed file is an endpoint or has CALLS edges
         xref_rows = self.neo4j.execute(
@@ -1718,9 +1846,10 @@ class StructureGraphWriter:
         # Collect unique test files
         test_files = sorted({t["test"] for t in radius["affected_tests"]})
 
-        # Build pytest command
-        if test_files:
-            test_cmd = "pytest " + " ".join(test_files)
+        # #681: one command per (stack root, runner), run from that root.
+        test_commands = self._test_commands(project, test_files)
+        if test_commands:
+            test_cmd = "\n".join(test_commands)
         else:
             test_cmd = "pytest  # no specific tests found — run full suite"
 
@@ -1731,6 +1860,7 @@ class StructureGraphWriter:
             ),
             "test_files": test_files,
             "test_command": test_cmd,
+            "test_commands": test_commands,
             # Carried through from the blast-radius traversal: an empty test set is only
             # meaningful when the inputs were indexed and the project index is complete.
             "unindexed_paths": radius.get("unindexed_paths", []),
@@ -1738,6 +1868,32 @@ class StructureGraphWriter:
             "max_depth": max_depth,
             "depth_truncated": radius.get("depth_truncated", False),
         }
+
+    def _test_commands(self, project: str, test_files: list[str]) -> list[str]:
+        """Commands that run *test_files*, grouped by the stack root and runner the scan stamped."""
+        if not test_files:
+            return []
+        lookup = [t.rstrip("/") for t in test_files]
+        rows = self.neo4j.execute(
+            """
+            UNWIND $paths AS tp
+            MATCH (t:Entity {structure_project: $p, structure_path: tp})
+            RETURN t.structure_path AS path,
+                   t.structure_stack_root AS stack_root,
+                   t.structure_test_runner AS runner
+            """,
+            {"p": project, "paths": lookup},
+        )
+        stamped = {str(r["path"]): r for r in rows if r.get("path")}
+        groups: dict[tuple[str, str], list[str]] = {}
+        for test in test_files:
+            row = stamped.get(test.rstrip("/")) or {}
+            runner = row.get("runner") or _runner_by_extension(test)
+            root = row.get("stack_root") or "."
+            if not runner:
+                continue
+            groups.setdefault((root, runner), []).append(test)
+        return [_command_for(root, runner, tests) for (root, runner), tests in sorted(groups.items())]
 
     def resolve_structural_neighbors(self, project: str, file_path: str) -> list[str]:
         """Return the file's UUID plus UUIDs of its imports, importers, and testers."""
@@ -2298,6 +2454,8 @@ class StructureGraphWriter:
                 n.structure_project_id = row.structure_project_id,
                 n.structure_path = row.structure_path,
                 n.file_mtime = coalesce(row.file_mtime, 0.0),
+                n.structure_stack_root = row.structure_stack_root,
+                n.structure_test_runner = row.structure_test_runner,
                 n.hot_count = 0,
                 n.session_id = row.session_id,
                 n.user_id = row.user_id,
@@ -2310,7 +2468,9 @@ class StructureGraphWriter:
                 n.last_accessed = row.now,
                 n.structure_role = row.structure_role,
                 n.name = row.name,
-                n.file_mtime = coalesce(row.file_mtime, n.file_mtime)
+                n.file_mtime = coalesce(row.file_mtime, n.file_mtime),
+                n.structure_stack_root = row.structure_stack_root,
+                n.structure_test_runner = row.structure_test_runner
             """,
             {"rows": rows, "sc": STRUCTURE_SOURCE_CONFIDENCE},
         )

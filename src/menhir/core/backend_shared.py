@@ -96,6 +96,14 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+def _known_fields(cls: type, item: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys *cls* does not declare, so a newer scanner's payload still loads here."""
+    from dataclasses import fields
+
+    names = {f.name for f in fields(cls)}
+    return {k: v for k, v in item.items() if k in names}
+
+
 def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
     coverage_fields = ("files_discovered", "files_eligible", "files_indexed")
     missing = [field for field in coverage_fields if field not in payload]
@@ -121,7 +129,7 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
         stack=str(payload.get("stack") or ""),
         description=str(payload.get("description") or ""),
         directories=[DirEntry(**item) for item in payload.get("directories", []) or []],
-        files=[FileEntry(**item) for item in payload.get("files", []) or []],
+        files=[FileEntry(**_known_fields(FileEntry, item)) for item in payload.get("files", []) or []],
         dependencies=[str(item) for item in payload.get("dependencies", []) or []],
         imports=[ImportEdge(**item) for item in payload.get("imports", []) or []],
         test_edges=[TestEdge(**item) for item in payload.get("test_edges", []) or []],
