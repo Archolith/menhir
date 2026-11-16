@@ -4,6 +4,27 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-15 - Hardening: loopback request checks, ingest path containment, structure signatures
+
+- `src/menhir/api/auth.py`, `api/server_support.py`: credential-free loopback grants also check the
+  request's browser origin; `MENHIR_CORS_ORIGINS` is honoured.
+- `src/menhir/core/ingest_guard.py`, `core/backend_runtime_data_ops.py`: host system directories are
+  refused for every tier; `ingest_document` refuses an existing path that is not a regular file.
+- `src/menhir/infrastructure/path_containment.py`, `project_scanner.py`, `artifact_corpus_scanner.py`:
+  project scans and the corpus audit read only regular files inside the scanned root; symlinks out
+  of it (and Windows junctions), FIFOs, devices and dangling symlinks are skipped, for every tier.
+  A file that cannot be examined still refuses the scan. `domain/project_id_file.py`: the legacy
+  identity file must be a regular file inside the project.
+- `src/menhir/core/backend_runtime_admin_ops.py`, `api/routes_support.py`: the corpus audit uses the
+  ingest path containment and is agent tier in the internal dispatch.
+- `src/menhir/infrastructure/project_scanner.py`, `infrastructure/structure_queries.py`: text literals
+  are elided from stored symbol signatures. The project node records `scanner_schema`; the first
+  ingest after an upgrade rewrites every file's symbols once, not only files whose mtime changed.
+- `docs/security-posture.md`: keyless loopback request checks and `MENHIR_CORS_ORIGINS`.
+- Tests: `test_loopback_cross_origin.py`, `test_ingest_guard_system_paths.py`,
+  `core/test_corpus_audit_path_containment.py`, `test_signature_literal_elision.py`,
+  `infrastructure/test_scanner_schema_rewrite_online.py`.
+
 ## 2026-11-09 - Vector index plan (#574)
 
 - `plans/menhir-574-vector-indexes-2026-11-09.md`: new plan for default vector indexes and
@@ -117,10 +138,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
 - `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER`, default on; `false` restores the old behaviour.
   Applies at ingest, so existing graphs change only for facts written after it is on.
 - `tests/test_edge_invalidation_statement_order.py`, `tests/test_edge_invalidation_statement_order_online.py`.
-
-## 2026-10-25 - Backfill `--require-complete` build gate
-
-- `scripts/backfill_episode_embeddings.py --require-complete`: after the run, count READY
-  episodes that still have no content embedding (the listing's own predicates, missing only) and
-  exit 3 if any remain. With `--dry-run` it only checks. For benchmark builds, where the
-  scheduler (and so the repair job) is off.

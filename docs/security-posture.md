@@ -231,6 +231,10 @@ configured OAuth-only remote deployment starts normally. `menhir diagnostics` mi
 as offline preflight checks (bind host, auth mode, no-auth remote guard, admin-key status,
 AS consent secret, AS rate-limit proxy awareness) and never prints secret values.
 
+On a keyless loopback server, a request without credentials must also name a loopback `Host`, and
+a browser request must come from a loopback origin or one listed in `MENHIR_CORS_ORIGINS`.
+Cross-site browser writes with no `Origin` header are refused as well.
+
 ## 8. Reverse-proxy posture
 
 Behind a same-host proxy the peer socket address is always the proxy (e.g. `127.0.0.1`),
@@ -337,7 +341,7 @@ after any auth change; it is the fast regression net for the shapes.
 | `MENHIR_CLIENT_TOKENS_ENABLED` | Enable the per-client token tier |
 | `MENHIR_OPERATOR_KEY` / `MENHIR_AGENT_KEY` / `MENHIR_READONLY_KEY` / `MENHIR_API_KEY` | Static bearer keys by tier |
 | `MENHIR_TRUSTED_PROXY` | Trust the last `X-Forwarded-For` hop for AS rate-limit keys |
-| `MENHIR_CORS_ORIGINS` | Explicit CORS allow-list (no wildcard default) |
+| `MENHIR_CORS_ORIGINS` | Explicit CORS allow-list (no wildcard default). On a keyless loopback server it is also the list of non-loopback browser origins allowed to call the API |
 | `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH` | Override the no-auth remote bind guard (unsafe) |
 | `MENHIR_OAUTH_AS_DIR` | Directory for the AS/client-token SQLite stores + signing key |
 
