@@ -1633,56 +1633,60 @@ class StructureGraphWriter:
         # keeps changed_set, all_impacted, the caller query and the coverage check in step.
         file_paths = self._query_paths(project, list(file_paths))
 
-        # Transitive reverse-import traversal with depth tracking
-        # depth=1 → direct importers, depth>1 → transitive
-        rows = self.neo4j.execute(
-            """
-            UNWIND $paths AS changed_path
-            MATCH (changed:Entity {structure_project: $p, structure_path: changed_path})
-            OPTIONAL MATCH path = (importer:Entity)-[:IMPORTS*1..]->(changed)
-            WHERE ALL(n IN nodes(path) WHERE n.structure_project = $p)
-              AND length(path) <= $depth
-            RETURN DISTINCT importer.structure_path AS importer_path,
-                   length(path) AS hop_distance,
-                   changed.structure_path AS changed_path,
-                   changed.structure_role AS changed_role,
-                   importer.structure_role AS importer_role,
-                   all(n IN nodes(path)[1..-1] WHERE n.structure_role = 'test') AS via_tests
-            """,
-            {"p": project, "paths": file_paths, "depth": max_depth},
-        )
-
-        direct: set[str] = set()
-        transitive: set[str] = set()
+        # Reverse-import BFS, one single-hop query per level. A variable-length path match
+        # enumerates every path, and the import graph has cycles (package `__init__` edges):
+        # one call ran 16+ minutes on menhir's own graph. Each node is expanded at most once.
         changed_set = set(file_paths)
         min_hop: dict[str, int] = {}
         # #681: a test that imports changed code is affected whatever its name says. Only a
         # test that imports it directly, or through test helpers alone, is selected: reaching
         # `tests/conftest.py` through five source hops would select the whole suite for over a
         # third of the files in a real project, which is "run everything" with extra steps.
+        # value: (hop, changed file it reaches through a chain of tests only)
         importing_tests: dict[str, tuple[int, str]] = {}
+        # layer: path -> changed file it was first reached from (smallest at that hop)
+        layer: dict[str, str] = {p: p for p in file_paths}
+        test_layer: dict[str, str] = dict(layer)  # nodes reached through tests only
+        visited = set(changed_set)
+        test_visited = set(changed_set)
+        for hop in range(1, max_depth + 1):
+            if not layer and not test_layer:
+                break
+            rows = self.neo4j.execute(
+                """
+                UNWIND $layer AS lp
+                MATCH (t:Entity {structure_project: $p, structure_path: lp})
+                OPTIONAL MATCH (t)<-[:IMPORTS]-(i:Entity {structure_project: $p})
+                RETURN lp AS target, t.structure_role AS target_role,
+                       i.structure_path AS importer_path, i.structure_role AS importer_role
+                """,
+                {"p": project, "layer": sorted(set(layer) | set(test_layer))},
+            )
+            next_layer: dict[str, str] = {}
+            next_test: dict[str, str] = {}
+            for row in rows:
+                target = row.get("target")
+                if hop == 1 and target in changed_set and row.get("target_role") == "test":
+                    importing_tests[target] = (0, target)
+                imp = row.get("importer_path")
+                if not imp or imp in changed_set:
+                    continue
+                if target in layer and imp not in visited:
+                    origin = layer[target]
+                    next_layer[imp] = min(origin, next_layer.get(imp, origin))
+                if target in test_layer and imp not in test_visited and row.get("importer_role") == "test":
+                    origin = test_layer[target]
+                    next_test[imp] = min(origin, next_test.get(imp, origin))
+            for imp in next_layer:
+                min_hop[imp] = hop
+            for imp, origin in next_test.items():
+                importing_tests.setdefault(imp, (hop, origin))
+            visited |= next_layer.keys()
+            test_visited |= next_test.keys()
+            layer, test_layer = next_layer, next_test
 
-        for row in rows:
-            changed_path = row.get("changed_path")
-            if changed_path and row.get("changed_role") == "test":
-                importing_tests[changed_path] = (0, changed_path)
-            imp = row.get("importer_path")
-            if not imp or imp in changed_set:
-                continue
-            dist = row.get("hop_distance", 1)
-            min_hop[imp] = min(dist, min_hop.get(imp, dist))
-            selectable = dist == 1 or row.get("via_tests") is True
-            if row.get("importer_role") == "test" and changed_path and selectable:
-                prior = importing_tests.get(imp)
-                if prior is None or (dist, changed_path) < prior:
-                    importing_tests[imp] = (dist, changed_path)
-            if dist == 1:
-                direct.add(imp)
-            else:
-                transitive.add(imp)
-
-        # Don't double-count: if a file is both direct and transitive, keep it as direct
-        transitive -= direct
+        direct = {p for p, hop in min_hop.items() if hop == 1}
+        transitive = set(min_hop) - direct
 
         # #683: say when max_depth cut the traversal. Only files first reached AT the limit can
         # have importers beyond it; one single-hop look from them is enough.

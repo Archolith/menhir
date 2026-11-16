@@ -189,13 +189,32 @@ class _ScriptedNeo4j:
         self.calls.append((query, params or {}))
         for marker, rows in self.script:
             if marker in query:
-                return rows
+                return rows(params or {}) if callable(rows) else rows
         return []
 
 
-def _blast_script(importer_rows, stamped):
+def _import_graph(edges: list[tuple[str, str]], roles: dict[str, str]):
+    """Answers the one-hop reverse-import query from (importer, imported) pairs."""
+
+    def hop(params: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = []
+        for target in params["layer"]:
+            importers = [i for i, t in edges if t == target] or [None]
+            rows += [
+                {
+                    "target": target, "target_role": roles.get(target, "file"),
+                    "importer_path": i, "importer_role": roles.get(i, "file") if i else None,
+                }
+                for i in importers
+            ]
+        return rows
+
+    return hop
+
+
+def _blast_script(edges, roles, stamped):
     return [
-        ("IMPORTS*1..", importer_rows),
+        ("UNWIND $layer", _import_graph(edges, roles)),
         ("structure_test_runner AS runner", stamped),
     ]
 
@@ -205,21 +224,10 @@ def test_a_test_that_imports_changed_code_is_selected_whatever_its_name() -> Non
     neo = _ScriptedNeo4j(
         _blast_script(
             [
-                {
-                    "importer_path": "tests/test_cli_up.py",
-                    "hop_distance": 1,
-                    "changed_path": "src/menhir/cli/up.py",
-                    "changed_role": "file",
-                    "importer_role": "test",
-                },
-                {
-                    "importer_path": "tests/helpers.py",
-                    "hop_distance": 1,
-                    "changed_path": "src/menhir/cli/up.py",
-                    "changed_role": "file",
-                    "importer_role": "test",
-                },
+                ("tests/test_cli_up.py", "src/menhir/cli/up.py"),
+                ("tests/helpers.py", "src/menhir/cli/up.py"),
             ],
+            {"tests/test_cli_up.py": "test", "tests/helpers.py": "test"},
             [{"path": "tests/test_cli_up.py", "stack_root": ".", "runner": "pytest"}],
         )
     )
@@ -453,7 +461,7 @@ def test_no_selected_tests_suggests_the_changed_files_own_suite() -> None:
     """A TS-only change with no tests: `npx vitest run` from its package, never `pytest`."""
     neo = _ScriptedNeo4j(
         [
-            ("IMPORTS*1..", []),
+            ("UNWIND $layer", _import_graph([], {})),
             (
                 "structure_test_runner AS runner",
                 [{"path": "web/src/util.ts", "stack_root": "web", "runner": "npx vitest run"}],
@@ -596,22 +604,21 @@ def test_only_direct_or_test_helper_importers_are_selected() -> None:
     neo = _ScriptedNeo4j(
         _blast_script(
             [
-                {  # imports the change directly
-                    "importer_path": "tests/test_direct.py", "hop_distance": 1,
-                    "changed_path": "src/a.py", "changed_role": "file",
-                    "importer_role": "test", "via_tests": True,
-                },
-                {  # through a test helper only
-                    "importer_path": "tests/test_via_helper.py", "hop_distance": 2,
-                    "changed_path": "src/a.py", "changed_role": "file",
-                    "importer_role": "test", "via_tests": True,
-                },
-                {  # through source files: transitively affected, not selected
-                    "importer_path": "tests/conftest.py", "hop_distance": 4,
-                    "changed_path": "src/a.py", "changed_role": "file",
-                    "importer_role": "test", "via_tests": False,
-                },
+                ("tests/test_direct.py", "src/a.py"),  # imports the change directly
+                ("tests/helpers.py", "src/a.py"),  # through a test helper only
+                ("tests/test_via_helper.py", "tests/helpers.py"),
+                # through source files: transitively affected, not selected
+                ("src/b.py", "src/a.py"),
+                ("src/c.py", "src/b.py"),
+                ("src/d.py", "src/c.py"),
+                ("tests/conftest.py", "src/d.py"),
+                # a cycle back into the change must not loop or re-select
+                ("src/a.py", "src/d.py"),
             ],
+            {
+                "tests/test_direct.py": "test", "tests/helpers.py": "test",
+                "tests/test_via_helper.py": "test", "tests/conftest.py": "test",
+            },
             [],
         )
     )
@@ -628,13 +635,8 @@ def test_a_changed_test_is_reported_as_changed_not_as_importing_itself() -> None
     """F14."""
     neo = _ScriptedNeo4j(
         _blast_script(
-            [
-                {
-                    "importer_path": None, "hop_distance": None,
-                    "changed_path": "tests/test_a.py", "changed_role": "test",
-                    "importer_role": None, "via_tests": None,
-                }
-            ],
+            [],
+            {"tests/test_a.py": "test"},
             [],
         )
     )

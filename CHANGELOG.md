@@ -18,6 +18,9 @@
   derives, keyed by project identity; edges into files a capped scan dropped, and from files it
   could not read, are kept (#680).
 - The per-function call cap counts distinct callees, not call sites.
+- `blast_radius` walks reverse imports one hop per query instead of matching variable-length
+  paths, which enumerated every path through import cycles: one call on menhir's own graph ran
+  16+ minutes; the slowest is now about half a second.
 - Scanner schema 12: every stored project is rewritten once on its next scan.
 
 ## 2026-11-15 - query_structure answers for the stored path and says what it cut (#679, #683)
