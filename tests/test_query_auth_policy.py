@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
+
 from menhir.mcp import contracts
 from menhir.mcp.contracts import BaseTextTool, _compute_query_auth_allowed_tools
 from menhir.mcp.service_access import (
@@ -100,8 +102,9 @@ def test_query_auth_blocks_non_allowed_write_tool_execution():
     finally:
         reset_request_session(session_token)
         reset_request_auth_mode(token)
-    assert "PermissionError" in output
-    assert "query-string auth cannot invoke" in output
+    error_of(output, code="access_denied")  # #669
+    assert "PermissionError" in text_of(output)
+    assert "query-string auth cannot invoke" in text_of(output)
 
 
 def test_header_auth_keeps_write_tool_available():
@@ -141,8 +144,9 @@ def test_query_auth_rate_limits_add_memory_by_client(monkeypatch):
         reset_request_session(session_token)
         reset_request_auth_mode(token)
         contracts._query_add_memory_events.clear()
-    assert "PermissionError" in blocked
-    assert "rate limit exceeded for `add_memory`" in blocked
+    error_of(blocked, code="access_denied")  # #669
+    assert "PermissionError" in text_of(blocked)
+    assert "rate limit exceeded for `add_memory`" in text_of(blocked)
 
 
 class _ReadonlyTierTool(BaseTextTool):
@@ -186,12 +190,14 @@ def test_readonly_tier_allows_readonly_tool():
 
 def test_readonly_tier_blocks_agent_tool():
     result = _run_with_tier(_AgentTierTool(), "readonly")
-    assert "cannot invoke" in result
+    error_of(result, code="access_denied")  # #669
+    assert "cannot invoke" in text_of(result)
 
 
 def test_readonly_tier_blocks_operator_tool():
     result = _run_with_tier(_OperatorTierTool(), "readonly")
-    assert "cannot invoke" in result
+    error_of(result, code="access_denied")  # #669
+    assert "cannot invoke" in text_of(result)
 
 
 def test_agent_tier_allows_readonly_tool():
@@ -204,7 +210,8 @@ def test_agent_tier_allows_agent_tool():
 
 def test_agent_tier_blocks_operator_tool():
     result = _run_with_tier(_OperatorTierTool(), "agent")
-    assert "cannot invoke" in result
+    error_of(result, code="access_denied")  # #669
+    assert "cannot invoke" in text_of(result)
 
 
 def test_operator_tier_allows_readonly_tool():
@@ -222,7 +229,9 @@ def test_operator_tier_allows_operator_tool():
 def test_no_tier_set_is_refused():
     """CF-34, DELIBERATE BEHAVIOUR CHANGE. This asserted the empty tier bypassed enforcement
     entirely -- the defect, asserted as the contract. It now refuses."""
-    assert "No request tier is bound" in _run_with_tier(_OperatorTierTool(), "")
+    result = _run_with_tier(_OperatorTierTool(), "")
+    error_of(result, code="access_denied")  # #669
+    assert "No request tier is bound" in text_of(result)
 
 
 def test_query_auth_add_memory_limit_is_per_client(monkeypatch):

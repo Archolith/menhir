@@ -258,6 +258,12 @@ def namespace_group_id_error(namespace: str | None) -> str | None:
         return None
     if _GROUP_ID_SAFE_PATTERN.match(namespace):
         return None
+    stripped = namespace.strip()
+    if stripped != namespace and (not stripped or _GROUP_ID_SAFE_PATTERN.match(stripped)):
+        return (
+            f"namespace {namespace!r} has surrounding whitespace; namespaces are matched "
+            f"exactly. Did you mean {stripped or DEFAULT_NAMESPACE!r}?"
+        )
     return (
         f"namespace {namespace!r} must contain only alphanumeric characters, dashes, "
         "or underscores (it becomes the graphiti group_id on write). Did you mean to "

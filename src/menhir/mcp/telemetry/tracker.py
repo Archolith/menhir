@@ -27,11 +27,17 @@ STAGE_COMPLETED = "completed"  # runner returned
 
 
 class McpToolRefusal(ValueError):
-    """A tool declining a request on purpose (for example, evidence it cannot vouch for).
+    """A tool declining a request on purpose: bad input, a missing or foreign object, a refused
+    state change.
 
-    The caller receives an MCP error result (``isError``) carrying this message, so a machine
-    client can tell a refusal from a result. Other tool failures keep the "Error: ..." text.
+    The caller receives an MCP error result (``isError``) carrying this message, ``code`` and
+    ``hint`` (#669). The message is shown as written, with no exception-type prefix.
     """
+
+    def __init__(self, message: str, *, code: str = "invalid_argument", hint: str | None = None):
+        super().__init__(message)
+        self.code = code
+        self.hint = hint
 
 
 class McpToolAccessDenied(PermissionError):
@@ -75,24 +81,69 @@ PREVIEW_UNAUTHORIZED = '{"unauthorized": true}'
 _GRAPH_UNREACHABLE_ERRORS = frozenset({"ServiceUnavailable", "SessionExpired", "SessionError"})
 
 
+def _graph_unreachable(exc: BaseException) -> bool:
+    # By type only (#669): a substring match on "neo4j" also caught validation errors that echo
+    # the caller's text.
+    return type(exc).__name__ in _GRAPH_UNREACHABLE_ERRORS
+
+
+def _backend_unreachable(exc: BaseException) -> bool:
+    """A stdio client's HTTP call to the Menhir server failed in transport or with a 5xx."""
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - httpx is a runtime dependency
+        return False
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+
+
+def _telemetry_store_busy(exc: BaseException) -> bool:
+    low = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in low or "busy" in low)
+
+
+def failure_code(exc: BaseException | None) -> str:
+    """The #669 error code for a failure; ``None`` means the call timed out."""
+    if exc is None:
+        return "timeout"
+    if isinstance(exc, McpToolRefusal):
+        return exc.code
+    if isinstance(exc, PermissionError):
+        return "access_denied"
+    if _graph_unreachable(exc) or _backend_unreachable(exc) or _telemetry_store_busy(exc):
+        return "unavailable"
+    if isinstance(exc, ValueError):
+        return "invalid_argument"
+    return "internal"
+
+
+#: Builds a tool's error result: (code, message, hint, is_refusal) -> result.
+ErrorResultBuilder = Callable[[str, str, "str | None", bool], Any]
+
+
 def _diagnose_failure(operation: str, exc: Exception) -> str:
     """Turn an INFRASTRUCTURE exception into an actionable, caller-facing message, so a degraded
     server explains WHAT is wrong instead of surfacing a bare exception. Non-infra errors keep the
     plain ``Type: message`` form (callers and existing tests rely on it), so this only enriches the
     two failure modes a caller cannot otherwise diagnose from the client side."""
     text = str(exc)
-    low = text.lower()
-    if isinstance(exc, sqlite3.OperationalError) and ("locked" in low or "busy" in low):
+    if _telemetry_store_busy(exc):
         return (
             f"{operation}: memory telemetry store is busy/locked (SQLite). The server is DEGRADED "
             "-- a duplicate 'menhir serve' process or an un-checkpointed database is likely "
             "contending for .agent/mcp_telemetry.db. The graph store itself may still be reachable; "
             f"retry shortly or check server health. (original: {type(exc).__name__}: {text})"
         )
-    if type(exc).__name__ in _GRAPH_UNREACHABLE_ERRORS or "neo4j" in low:
+    if _graph_unreachable(exc):
         return (
             f"{operation}: graph store (Neo4j) is unreachable or timed out. The server is DEGRADED; "
             f"check the remote graph endpoint. (original: {type(exc).__name__}: {text})"
+        )
+    if _backend_unreachable(exc):
+        return (
+            f"{operation}: the Menhir server is unreachable or returned a server error; check that "
+            f"it is running and healthy. (original: {type(exc).__name__}: {text})"
         )
     return f"{type(exc).__name__}: {text}"
 
@@ -104,11 +155,12 @@ def _telemetry_error(exc: Exception) -> str:
     enough information to aggregate failure classes. Arbitrary exception text can contain the
     request body and must not become another durable copy of user content.
     """
-    text = str(exc).lower()
-    if isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+    if _telemetry_store_busy(exc):
         return "SQLiteOperationalError: telemetry store busy/locked"
-    if type(exc).__name__ in _GRAPH_UNREACHABLE_ERRORS or "neo4j" in text:
+    if _graph_unreachable(exc):
         return f"{type(exc).__name__}: graph store unavailable"
+    if _backend_unreachable(exc):
+        return f"{type(exc).__name__}: backend unavailable"
     return type(exc).__name__
 
 
@@ -154,10 +206,13 @@ async def track_mcp_call(
     timeout: int = DEFAULT_MCP_TIMEOUT,  # noqa: ASYNC109 -- public tool contract
     error_mapper: Callable[[str], T] | None = None,
     effective_payload: Callable[[], Any | None] | None = None,
+    error_result: ErrorResultBuilder | None = None,
 ) -> T:
     """Measure and persist one MCP call around an async runner.
 
-    Returns an error string instead of raising so Claude always gets a response.
+    Returns an error instead of raising so Claude always gets a response. With ``error_result``
+    (tools, #669) every failure is built by it: one shape, flagged ``isError``. Without it
+    (resources) a failure is an ``error_mapper`` value or an ``Error: ...`` string.
     Applies an async timeout (default 120s) to prevent indefinite hangs.
 
     ``payload`` is used only for sizing and a privacy-minimized preview. Tool callers may provide
@@ -256,6 +311,8 @@ async def track_mcp_call(
             )
         except sqlite3.Error:
             logger.exception("Failed to record timeout telemetry")
+        if error_result is not None:
+            return cast(T, error_result("timeout", error_msg, None, False))
         if error_mapper is not None:
             return error_mapper(error_msg)
         return cast(T, f"Error: {error_msg}")
@@ -263,7 +320,10 @@ async def track_mcp_call(
         completed_at = _utc_now_iso()
         duration_ms = int((time.perf_counter() - started) * 1000)
         error_msg = _diagnose_failure(operation, exc)
-        logger.error("MCP %s/%s failed after %dms: %s", kind, operation, duration_ms, error_msg)
+        if isinstance(exc, McpToolRefusal):
+            logger.info("MCP %s/%s refused after %dms: %s", kind, operation, duration_ms, exc)
+        else:
+            logger.error("MCP %s/%s failed after %dms: %s", kind, operation, duration_ms, error_msg)
         namespace, node_uuid = _resolved_lineage()
         try:
             await asyncio.to_thread(store.record,
@@ -298,6 +358,13 @@ async def track_mcp_call(
                     _meta={"mcp/www_authenticate": exc.challenge},
                 ),
             )
+        if error_result is not None:
+            if isinstance(exc, McpToolRefusal):
+                return cast(T, error_result(exc.code, str(exc), exc.hint, True))
+            if isinstance(exc, McpToolAccessDenied):
+                # Keep the plain PermissionError wording clients and the deploy smoke probe know.
+                return cast(T, error_result("access_denied", f"PermissionError: {exc}", None, False))
+            return cast(T, error_result(failure_code(exc), error_msg, None, False))
         if isinstance(exc, McpToolRefusal):
             from mcp.types import CallToolResult, TextContent
 

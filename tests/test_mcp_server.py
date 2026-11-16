@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
+
 from tests._temp_cleanup import remove_test_dir
 from menhir.mcp import lifecycle as mcp_server_lifecycle
 from menhir.mcp import resources as mcp_resources
@@ -947,7 +949,8 @@ def test_watch_enrichment_returns_delta_history(stubbed_mcp_state):
 def test_watch_enrichment_rejects_bad_uuid(stubbed_mcp_state):
     result = asyncio.run(watch_enrichment("not-a-uuid", timeout_s=0.1, poll_interval_s=0.01))
 
-    assert result.startswith("Error: ValueError: Invalid episode UUID")
+    error_of(result, code="invalid_argument")
+    assert text_of(result).startswith("Error: ValueError: Invalid episode UUID")
 
 
 def test_get_enrichment_status_returns_episode_snapshot(stubbed_mcp_state):
@@ -965,7 +968,8 @@ def test_get_enrichment_status_returns_episode_snapshot(stubbed_mcp_state):
 def test_get_enrichment_status_rejects_bad_uuid(stubbed_mcp_state):
     result = asyncio.run(get_enrichment_status("not-a-uuid"))
 
-    assert result.startswith("Error: ValueError: Invalid episode UUID")
+    error_of(result, code="invalid_argument")
+    assert text_of(result).startswith("Error: ValueError: Invalid episode UUID")
 
 
 def test_force_scheduler_takeover_reports_owner_state(stubbed_mcp_state):
@@ -1303,7 +1307,8 @@ def test_add_memory_returns_error_when_backend_resolution_fails(monkeypatch):
 
     result = asyncio.run(add_memory("remember this", source="claude-code"))
 
-    assert result.startswith("Error: RuntimeError: MCP stdio now requires menhir_BACKEND_URL.")
+    error_of(result, code="internal")
+    assert text_of(result).startswith("Error: RuntimeError: MCP stdio now requires menhir_BACKEND_URL.")
 @pytest.mark.parametrize("state,note", [
     ({"status": "completed"}, "not an outstanding obligation"),
     ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),

@@ -49,6 +49,8 @@ async def add_memory(
 
 
 class AddMemoryTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot store memory"
     name = "add_memory"
     scope = ToolScope.NAMESPACED
     title = "Add Memory"
@@ -95,12 +97,6 @@ class AddMemoryTool(BaseTextTool):
         """
         backend = self.get_backend()
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope
-        from menhir.domain.namespace import namespace_group_id_error
-
-        namespace_error = namespace_group_id_error(namespace)
-        if namespace_error is not None:
-            return f"Cannot store memory: {namespace_error}"
-
         if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
             return f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}."
 

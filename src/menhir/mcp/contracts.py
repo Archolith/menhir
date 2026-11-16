@@ -27,7 +27,7 @@ from menhir.mcp.service_access import (
     require_trusted_client_identity,
 )
 from menhir.mcp.telemetry import track_mcp_call
-from menhir.mcp.telemetry.tracker import McpToolAccessDenied
+from menhir.mcp.telemetry.tracker import McpToolAccessDenied, McpToolRefusal
 from menhir.tiers import TIER_RANK, tier_allows
 
 if TYPE_CHECKING:
@@ -590,6 +590,12 @@ class BaseTool:
     response_kind = "text"
     required_tier: str = "agent"  # minimum tier required to invoke this tool
 
+    #: True when this tool's `namespace` names the graphiti group a write lands in. Such a
+    #: namespace must be a valid group_id, checked at call time (#671); a read only gets a note.
+    writes_namespace: bool = False
+    #: How a refused write names itself ("Cannot store memory: ...").
+    write_refusal_prefix: str = "Cannot store"
+
     #: How this tool relates to tenant data. See :class:`ToolScope`.
     #:
     #: Deliberately declared with NO default that grants reach. `None` means "nobody has
@@ -607,6 +613,31 @@ class BaseTool:
 
     def error_mapper(self, error_text: str) -> str | None:
         return None
+
+    def error_result(self, code: str, message: str, hint: str | None, refusal: bool) -> Any:
+        """This tool's failure, in the one shape every tool uses (#669).
+
+        ``isError`` is set and ``structuredContent`` carries ``{ok: false, tool, error: {code,
+        message, hint?}}``. The text is that envelope for a JSON tool; for a text tool it is the
+        message (``Error: `` first unless the tool refused on purpose), plus a hint line.
+        """
+        from mcp.types import CallToolResult, TextContent
+
+        error: dict[str, Any] = {"code": code, "message": message}
+        if hint:
+            error["hint"] = hint
+        envelope = {"ok": False, "tool": self.operation, "error": error}
+        if self.response_kind == "json":
+            text = render_json(envelope)
+        else:
+            text = message if refusal else f"Error: {message}"
+            if hint:
+                text = f"{text}\nHint: {hint}"
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structuredContent=envelope,
+            isError=True,
+        )
 
     def call_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         if kwargs:
@@ -748,6 +779,12 @@ class BaseTool:
             if self.required_tier == "operator":
                 _try_record_destructive_op_mcp(self.name, tier)
             call_kwargs = self._apply_pinned_namespace(kwargs)
+            if self.writes_namespace:
+                from menhir.domain.namespace import namespace_group_id_error
+
+                namespace_error = namespace_group_id_error(call_kwargs.get("namespace"))
+                if namespace_error is not None:
+                    raise McpToolRefusal(f"{self.write_refusal_prefix}: {namespace_error}")
             telemetry_effective_payload = self.call_payload(*args, **call_kwargs)
             return await self.endpoint(*args, **call_kwargs)
 
@@ -765,6 +802,7 @@ class BaseTool:
             timeout=call_timeout,
             error_mapper=error_mapper,
             effective_payload=lambda: telemetry_effective_payload,
+            error_result=self.error_result,
         )
         try:
             from menhir.core.backend_impl import drain_client_warnings

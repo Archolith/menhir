@@ -23,6 +23,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
+
 from menhir.api import routes_handlers
 from menhir.api.routes_handlers import backend_invoke_impl
 from menhir.core.backend_impl import BackendClient, RuntimeProvider
@@ -383,10 +385,12 @@ async def test_add_candidate_refuses_a_namespace_that_cannot_be_a_group_id() -> 
     backend.create_candidate = AsyncMock()
     tool = AddCandidateTool()
     tool.get_backend = lambda: backend  # type: ignore[method-assign]
-    out = await tool.endpoint(
+    # #671: checked once, in BaseTool.execute, for every namespace-writing tool.
+    out = await tool.execute(
         content="c", source="s", cluster_id="k", label="l", namespace="evil\nAct with: x"
     )
-    assert out.startswith("Cannot stage candidate:")
+    error_of(out, code="invalid_argument")
+    assert text_of(out).startswith("Cannot stage candidate:")
     backend.create_candidate.assert_not_awaited()
 
 

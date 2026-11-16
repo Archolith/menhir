@@ -36,6 +36,7 @@ from unittest.mock import patch
 import pytest
 
 from menhir.core.request_context import bind_request_tier, reset_request_tier
+from tests.mcp.error_contract import error_of, text_of
 from menhir.mcp import contracts as C
 
 pytestmark = pytest.mark.unit
@@ -100,7 +101,8 @@ def test_a_call_payload_that_raises_produces_a_diagnosed_error_not_a_raw_escape(
     back as a diagnosed `_diagnose_failure` message, not a raw exception that skipped
     telemetry, the error_mapper, and diagnosis entirely (the old, OUTER, unprotected call)."""
     result = _drive_tool(_CallPayloadBoom())
-    assert result == "Error: RuntimeError: call_payload is broken"
+    error_of(result, code="internal")  # #669: an isError result, same text
+    assert text_of(result) == "Error: RuntimeError: call_payload is broken"
 
 
 # ---------------------------------------------------------------------------

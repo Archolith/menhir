@@ -17,6 +17,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from tests.mcp.error_contract import error_of, text_of
 from mcp.types import CallToolResult
 
 from menhir.api import mcp_remote
@@ -117,7 +119,9 @@ def test_tier_refusal_is_still_plain_text(monkeypatch: pytest.MonkeyPatch) -> No
     # Only the tool-allowlist gate changed; other gate refusals keep their earlier form.
     monkeypatch.setattr(contracts, "get_request_tier", lambda: "readonly")
     out = asyncio.run(_Tool().execute())
-    assert isinstance(out, str) and "cannot invoke" in out
+    # #669: every failure is an isError result; the wording is unchanged.
+    error_of(out, code="access_denied")
+    assert "cannot invoke" in text_of(out)
 
 
 class _FakeTool:

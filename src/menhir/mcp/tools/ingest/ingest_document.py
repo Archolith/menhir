@@ -50,6 +50,8 @@ async def ingest_document(
 
 
 class IngestDocumentTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot ingest document"
     name = "ingest_document"
     # NAMESPACED, not OBJECT: the structure node this writes is deliberately shared (the
     # structure graph is an index of a codebase keyed by project, and `query_structure`

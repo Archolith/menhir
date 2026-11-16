@@ -61,6 +61,8 @@ async def add_memory_and_track(
 
 
 class AddMemoryAndTrackTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot store memory"
     name = "add_memory_and_track"
     scope = ToolScope.NAMESPACED
     title = "Add Memory And Track"

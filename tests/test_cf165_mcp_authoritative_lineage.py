@@ -11,6 +11,8 @@ import importlib
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
+
 from menhir.domain.namespace import DEFAULT_NAMESPACE
 from menhir.mcp.tools.ingest.add_memory import AddMemoryTool
 
@@ -112,7 +114,8 @@ async def test_denied_add_memory_does_not_treat_raw_namespace_as_ownership(monke
         namespace="caller-forged-owner",
     )
 
-    assert result.startswith("Error: PermissionError:")
+    error_of(result)
+    assert text_of(result).startswith("Error: PermissionError:")
     assert backend.calls == []
     assert len(store.rows) == 1
     row = store.rows[0]

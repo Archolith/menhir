@@ -52,6 +52,8 @@ async def ingest_project(
 
 
 class IngestProjectTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot ingest project"
     name = "ingest_project"
     # NAMESPACED: see `execute_project_ingest` -- the structure write is shared by design, the
     # queued episode is tenant memory and was landing in the default group regardless of the
