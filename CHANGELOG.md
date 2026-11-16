@@ -1,3 +1,17 @@
+## 2026-11-15 - First run: `menhir up` stops without a model; the quick start says what it costs (#685-#688)
+
+- `menhir up` exits 1 when the extraction or embedding row is a MISS instead of serving a server
+  that cannot enrich anything; `--allow-degraded` serves anyway. `--check` and the end of
+  `menhir setup` count those rows as blocking too (#688).
+- README quick start: adding the operator key for the smoke test now also adds an agent key and
+  warns that the keyless client gets 401 after the restart (#685). A new "What runs by default"
+  section names the ~92 MB rerank download and the default-on anchored-time, scalar and counting
+  LLM lanes, and Recall / Retrieval scoring describe the cross-encoder and its 7-result cap
+  (#686). The keyless `/mcp-http` tool list is `core`+`curate`, not every tool.
+- `.env.example` no longer says Tier 0 works as copied, drops the removed standalone explorer
+  host/port, and labels the always-on retrieval lanes correctly; the Docker test stack uses
+  `gpt-4o-mini` instead of `gpt-4.1-nano` (#687).
+
 ## 2026-11-14 - Hermes reads every namespace and writes only to its own
 
 - `integrations/hermes/menhir/`: the `namespace` setting is replaced by `write_namespace` (default

@@ -234,7 +234,10 @@ episode -> queue -> LLM extraction -> Neo4j merge -> metadata -> structural anch
 Graphiti supplies candidates using hybrid BM25 and vector search. Menhir reranks them
 with semantic similarity, graph adjacency, recency, prominence, and conflict signals.
 File-linked candidates can enter through structural context even when they were absent
-from the text search results.
+from the text search results. By default a local cross-encoder
+(`cross-encoder/ms-marco-MiniLM-L6-v2`) then reorders the top 50 candidates, and recall
+returns at most 7 results when it runs (`MENHIR_RECALL_RERANK_ENABLED`,
+`MENHIR_RECALL_RERANK_MAX_RESULTS`).
 
 The repository does not claim that this is universally better than vector-only search.
 Retrieval quality still depends on the stored evidence, provider, index coverage, and
@@ -387,9 +390,12 @@ menhir up --compose-neo4j --provider local     # writes the block, then edit .en
 `menhir up` creates `.env` (writing the provider block and, with `--compose-neo4j`, the Neo4j
 credentials), starts Neo4j with `docker compose` when asked, waits for Bolt, prints a tier
 report that names the `.env` key behind anything still missing, and then runs `menhir serve`.
-Run from a source checkout it uses that checkout; otherwise `MENHIR_STATE_DIR`. On the first run paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at
-your model server or a hosted gateway such as OpenRouter) when the report asks, and run it
-again. `menhir up --check` does everything except start Neo4j or the server. `menhir up` ends in
+Run from a source checkout it uses that checkout; otherwise `MENHIR_STATE_DIR`. If the
+extraction or embedding row is a MISS, `menhir up` stops instead of serving a server that cannot
+enrich anything: paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at your model server or a
+hosted gateway such as OpenRouter) and run it again. `--allow-degraded` serves anyway, with new
+memories queued until the model is reachable. `menhir up --check` does everything except start
+Neo4j or the server. `menhir up` ends in
 `menhir serve`, which runs in the foreground until interrupted -- background it yourself when
 scripting (`nohup menhir up --compose-neo4j > up.log 2>&1 &`).
 
@@ -397,6 +403,19 @@ Running `menhir` with no arguments prints the same report and the next command; 
 ends with it too. Once the server is up, connect a client and run the smoke test below. The
 individual steps `up` performs are listed at the end of this section for anyone who needs to
 run them by hand.
+
+### What runs by default
+
+- **Rerank model download.** The first time the server starts it downloads the recall
+  cross-encoder, about 92 MB, from Hugging Face, then reuses the cached copy. No memory or query
+  is sent. Set `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false` (or `MENHIR_RECALL_RERANK_ENABLED=false`)
+  to skip it; [`docs/your-data.md`](docs/your-data.md#things-that-leave-your-machine) has the
+  details.
+- **Extra LLM work on enrichment.** Besides entity extraction, three lanes ship on and make their
+  own model calls: anchored time (`MENHIR_ANCHORED_TIME_RESOLVER`), typed scalar state
+  (`MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED`) and counting
+  (`MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`). With a paid provider these add to the cost of each
+  memory. Set any of them to `false` to turn that lane off.
 
 ### Connect an MCP client
 
@@ -471,7 +490,7 @@ curl -fsS -X POST http://127.0.0.1:8100/mcp-http \
 ```
 
 Expect a JSON-RPC result listing the tools your key's tier can call (with no key configured,
-that is the operator tier and every tool), including `add_memory`,
+the same `core` and `curate` set the keyless stdio client gets), including `add_memory`,
 `recall_memories`, `query_structure`, and `build_context`. A `401` means a key is configured
 and the request needs `-H "Authorization: Bearer <key>"`; anything else means the server is not
 serving MCP yet -- check `/api/ready` first.
@@ -513,11 +532,19 @@ WorkArtifacts or the shared code-structure graph (see [`docs/your-data.md`](docs
 Namespace deletion requires the operator tier, and `menhir setup` does not write an operator key
 -- `.env` has no `MENHIR_OPERATOR_KEY` line at all, only a comment naming it. Add one, then restart
 `menhir up` so the server picks it up. `.env` is in your checkout if you have one, otherwise in
-`MENHIR_STATE_DIR` (default `~/.menhir`) -- the path `menhir setup` printed:
+`MENHIR_STATE_DIR` (default `~/.menhir`) -- the path `menhir setup` printed.
+
+**Adding any key ends keyless access.** After the restart the server refuses unauthenticated MCP
+requests, so a keyless stdio client you configured above starts getting `401`. Add a
+`MENHIR_AGENT_KEY` in the same step (skip that line if you already have one) and put its value
+in the client's `env` as shown in [Connect an MCP client](#connect-an-mcp-client), then restart
+the client:
 
 ```bash
 ENV_FILE=${MENHIR_STATE_DIR:-~/.menhir}/.env     # or ./.env in a source checkout
 echo "MENHIR_OPERATOR_KEY=$(openssl rand -hex 24)" >> "$ENV_FILE"
+grep -q '^MENHIR_AGENT_KEY=' "$ENV_FILE" || echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "$ENV_FILE"
+grep '^MENHIR_AGENT_KEY=' "$ENV_FILE"            # copy this value into the MCP client's env
 ```
 
 ```bash
@@ -815,6 +842,9 @@ score = similarity + alpha*adjacency + beta*recency + gamma*prominence + delta*c
 
 Presets named `knowledge`, `recent`, `connected`, `emotional`, and `conflict` adjust the
 weights for different recall tasks.
+
+When the cross-encoder rerank is on (the default), it reorders the top 50 blended candidates
+and the result is capped at 7 (see [Recall](#recall)).
 
 ## Tests
 

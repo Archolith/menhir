@@ -267,6 +267,62 @@ def test_up_loads_the_checkout_env_not_the_cwd_env(
     assert seen and all(u == "bolt://from-checkout:7687" for u in seen), seen
 
 
+@pytest.mark.parametrize(
+    "missing", [{"graphiti_llm_ready": False}, {"embedder_ready": False}], ids=["extraction", "embeddings"]
+)
+def test_up_refuses_to_serve_without_a_working_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_env, missing
+) -> None:
+    """#688: a missing provider key used to fall through to a foreground serve that could not
+    enrich anything. A MISS on extraction or embeddings must stop `up` before serve."""
+    repo = _checkout(tmp_path)
+    served: list[object] = []
+    monkeypatch.setattr("menhir.core.runtime_preflight.probe_neo4j", lambda *a: "ok")
+    monkeypatch.setattr("menhir.core.collect_runtime_capabilities", lambda settings: _caps(**missing))
+
+    import menhir.cli as cli_module
+
+    monkeypatch.setattr(cli_module, "serve", lambda **kw: served.append(kw))
+
+    result = CliRunner().invoke(app, ["up", "--repo", str(repo)])
+    assert result.exit_code == 1, result.output
+    assert served == []
+    assert "--allow-degraded" in result.output
+
+    check = CliRunner().invoke(app, ["up", "--check", "--repo", str(repo)])
+    assert check.exit_code == 1, check.output
+    assert "Next: fix the MISS lines above" in check.output
+
+
+def test_up_allow_degraded_serves_without_a_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_env
+) -> None:
+    repo = _checkout(tmp_path)
+    served: list[object] = []
+    monkeypatch.setattr("menhir.core.runtime_preflight.probe_neo4j", lambda *a: "ok")
+    monkeypatch.setattr(
+        "menhir.core.collect_runtime_capabilities",
+        lambda settings: _caps(graphiti_llm_ready=False, embedder_ready=False),
+    )
+
+    import menhir.cli as cli_module
+
+    monkeypatch.setattr(cli_module, "serve", lambda **kw: served.append(kw))
+
+    result = CliRunner().invoke(app, ["up", "--allow-degraded", "--repo", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert served == [{"host": None, "port": None}]
+
+
+def test_allow_degraded_does_not_bypass_neo4j() -> None:
+    from menhir.cli.up import cannot_enrich, cannot_start
+
+    caps = _caps(neo4j_ready=False)
+    assert cannot_start(caps) is True
+    assert cannot_enrich(_caps()) is False
+    assert cannot_enrich(_caps(embedder_ready=False)) is True
+
+
 def test_embeddings_row_says_when_the_model_was_not_listed() -> None:
     """The report must not print a bare [ok] next to a startup log saying the endpoint does
     not list that model. Run #6 hit exactly that and had to read the log to decide it was
