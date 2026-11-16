@@ -24,6 +24,7 @@ import pytest
 
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.ownership import foreign_object_refusal
+from tests.mcp.error_contract import error_of, text_of
 
 pytestmark = pytest.mark.unit
 
@@ -202,9 +203,10 @@ def test_close_todo_refuses_a_todo_in_another_silo() -> None:
     backend.get_todo = AsyncMock(side_effect=lambda uuid, **kw: None if kw.get("namespace") else {"uuid": uuid})
     backend.close_todo = AsyncMock(return_value=True)
 
-    result = asyncio.run(_stub(CloseTodoTool, backend).endpoint(uuid="t-1", namespace="tenant_a"))
+    result = asyncio.run(_stub(CloseTodoTool, backend).execute(uuid="t-1", namespace="tenant_a"))
 
-    assert "outside namespace tenant_a" in result
+    error_of(result, code="outside_namespace")
+    assert "outside namespace tenant_a" in text_of(result)
     backend.close_todo.assert_not_awaited()
 
 
@@ -263,13 +265,14 @@ def test_link_artifacts_checks_both_uuids_not_just_the_source() -> None:
     backend.link_artifacts = AsyncMock(return_value={"linked": True})
 
     result = asyncio.run(
-        _stub(LinkArtifactsTool, backend).endpoint(
+        _stub(LinkArtifactsTool, backend).execute(
             source_uuid="a-mine", target_uuid="a-theirs", relation="informs",
             namespace="tenant_a",
         )
     )
 
-    assert "a-theirs exists but is outside namespace tenant_a" in result
+    error_of(result, code="outside_namespace")
+    assert "a-theirs exists but is outside namespace tenant_a" in text_of(result)
     backend.link_artifacts.assert_not_awaited()
 
 

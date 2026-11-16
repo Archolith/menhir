@@ -324,7 +324,7 @@ async def test_e2e_08_isolation(
         # reporting an ordinary success is the failure: every later reader treats the
         # fragment as the whole change.
         refused_outright = (
-            "Failed to store memory." in oversized
+            "Failed to store memory" in oversized  # #669: now followed by the reason
             or "too large" in oversized.lower()
             or "Memory diff exceeds" in oversized
         )

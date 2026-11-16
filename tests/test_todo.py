@@ -14,6 +14,7 @@ from menhir.infrastructure.todo_repository import (
 )
 from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE
 from menhir.cli.output import format_hook_output
+from tests.mcp.error_contract import error_of, text_of
 
 
 # ---------------------------------------------------------------------------
@@ -567,9 +568,10 @@ def test_close_todo_tool_not_found_message() -> None:
     tool.get_backend = MagicMock(return_value=backend)
 
     import asyncio
-    result = asyncio.run(tool.endpoint(uuid="u1"))
+    result = asyncio.run(tool.execute(uuid="u1"))
 
-    assert "not found or already closed" in result
+    error_of(result, code="not_found")
+    assert "not found or already closed" in text_of(result)
 
 
 # ---------------------------------------------------------------------------
@@ -1097,9 +1099,10 @@ def test_get_todo_tool_not_found_message() -> None:
     tool.get_backend = MagicMock(return_value=backend)
 
     import asyncio
-    result = asyncio.run(tool.endpoint(uuid="missing"))
+    result = asyncio.run(tool.execute(uuid="missing"))
 
-    assert "TODO missing not found" in result
+    error_of(result, code="not_found")
+    assert "TODO missing not found" in text_of(result)
 
 
 @pytest.mark.unit

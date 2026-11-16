@@ -18,6 +18,7 @@ from menhir.infrastructure.telemetry.operator_warnings_store import (
 from menhir.infrastructure.telemetry.store import McpTelemetryStore
 from menhir.mcp import formatters
 from menhir.mcp.formatters import _queue_summary, session_start_warning_lines
+from tests.mcp.error_contract import error_of, text_of
 
 pytestmark = [pytest.mark.unit]
 
@@ -310,7 +311,9 @@ def test_tool_is_operator_tier_and_registered() -> None:
 def test_tool_rejects_unknown_kind_and_reports_nothing_active(store) -> None:
     backend = _Backend(store)
     tool = _tool(backend)
-    assert "unknown warning kind" in asyncio.run(tool.endpoint(kind="bogus"))
+    bogus = asyncio.run(tool.execute(kind="bogus"))
+    error_of(bogus, code="invalid_argument")
+    assert "unknown warning kind" in text_of(bogus)
     assert asyncio.run(tool.endpoint(kind="provider_auth")).startswith("nothing to acknowledge")
 
 

@@ -308,8 +308,9 @@ def _review_backend(
 async def test_review_refuses_a_candidate_in_another_silo_without_writing() -> None:
     backend = _review_backend(scoped=None, unscoped={"uuid": "c-b"})
     for decision in ("approve", "reject"):
-        out = await _review(backend).endpoint(uuid="c-b", decision=decision, namespace="tenant-a")
-        assert out.startswith("Refused:") and "tenant-a" in out
+        out = await _review(backend).execute(uuid="c-b", decision=decision, namespace="tenant-a")
+        error_of(out, code="outside_namespace")
+        assert text_of(out).startswith("Refused:") and "tenant-a" in text_of(out)
     backend.approve_candidate.assert_not_awaited()
     backend.reject_candidate.assert_not_awaited()
 
@@ -322,8 +323,9 @@ async def test_review_reports_a_missing_candidate_as_not_found() -> None:
     backend.approve_candidate = AsyncMock(return_value={"status": "not_found"})
     backend.reject_candidate = AsyncMock(return_value=False)
     for decision in ("approve", "reject"):
-        out = await _review(backend).endpoint(uuid="nope", decision=decision, namespace="tenant-a")
-        assert out.startswith("No candidate awaiting review"), out
+        out = await _review(backend).execute(uuid="nope", decision=decision, namespace="tenant-a")
+        error_of(out, code="not_found")
+        assert text_of(out).startswith("No candidate awaiting review"), out
 
 
 @pytest.mark.unit
@@ -409,8 +411,9 @@ async def test_review_scopes_the_write_itself() -> None:
 @pytest.mark.asyncio
 async def test_review_rejects_an_unknown_decision() -> None:
     backend = _review_backend(scoped=None, unscoped=None)
-    out = await _review(backend).endpoint(uuid="c-a", decision="promote")
-    assert out.startswith("Invalid decision")
+    out = await _review(backend).execute(uuid="c-a", decision="promote")
+    error_of(out, code="invalid_argument")
+    assert text_of(out).startswith("Invalid decision")
     backend.fetch_candidate.assert_not_awaited()
 
 
@@ -591,8 +594,9 @@ async def test_a_retry_after_a_committed_approval_says_already_approved(decision
     backend = _review_backend(scoped={"uuid": "c-a"}, unscoped={"uuid": "c-a"})
     backend.approve_candidate = AsyncMock(return_value={"status": "not_found", "uuid": "c-a"})
     backend.reject_candidate = AsyncMock(return_value=False)
-    out = await _review(backend).endpoint(uuid="c-a", decision=decision)
-    assert "already approved" in out
+    out = await _review(backend).execute(uuid="c-a", decision=decision)
+    error_of(out, code="not_found")
+    assert "already approved" in text_of(out)
 
 
 def _list_tool(rows: list[dict]) -> tuple[ListCandidatesTool, MagicMock]:

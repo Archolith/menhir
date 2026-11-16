@@ -501,11 +501,14 @@ class TestBackendRoundTrip:
         tool = DeleteNamespaceTool()
 
         with patch.object(DeleteNamespaceTool, "get_backend", return_value=bc):
-            rendered = await tool.endpoint("scratch", max_nodes=1, force=False, dry_run=False)
+            result = await tool.execute(namespace="scratch", max_nodes=1, force=False, dry_run=False)
 
-        payload = json.loads(rendered)
-        assert payload["namespace"] == "scratch"
-        assert "force=true" in payload["error"] and "dry_run=true" in payload["error"]
+        from tests.mcp.error_contract import error_of, text_of
+
+        error_of(result, code="refused")
+        rendered = text_of(result)
+        assert "scratch" in rendered
+        assert "force=true" in rendered and "dry_run=true" in rendered
         assert "500" not in rendered and "HTTPStatusError" not in rendered
 
     @pytest.mark.unit
@@ -522,8 +525,13 @@ class TestBackendRoundTrip:
         )
 
         with patch.object(FlagMemoryTool, "get_backend", return_value=bc):
-            rendered = await FlagMemoryTool().endpoint("node-uuid-1")
+            result = await FlagMemoryTool().execute(node_uuid="node-uuid-1")
 
+        # #669: the refusal is an isError result; its text keeps the "Cannot flag: ..." wording.
+        from tests.mcp.error_contract import error_of, text_of
+
+        error_of(result, code="invalid_argument")
+        rendered = text_of(result)
         assert rendered.startswith("Cannot flag: Cannot flag structural graph node (role=file)")
         assert "HTTPStatusError" not in rendered
 

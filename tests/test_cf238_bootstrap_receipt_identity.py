@@ -291,6 +291,7 @@ def _mcp_backend():
 async def _run_mcp_handshake(*, record_ns: str, check_ns: str) -> dict[str, object]:
     import json
 
+    from menhir.mcp.telemetry.tracker import McpToolRefusal
     from menhir.mcp.tools.recall.read_flagged_memories import ReadFlaggedMemoriesTool
     from menhir.mcp.tools.recall.recall_context_memories import RecallContextMemoriesTool
 
@@ -302,7 +303,10 @@ async def _run_mcp_handshake(*, record_ns: str, check_ns: str) -> dict[str, obje
         type(check), "get_backend", return_value=backend
     ):
         await record.endpoint(reader_id="mcp-reader", namespace=record_ns)
-        raw = await check.endpoint(reader_id="mcp-reader", namespace=check_ns)
+        try:
+            raw = await check.endpoint(reader_id="mcp-reader", namespace=check_ns)
+        except McpToolRefusal as refusal:  # #669: a refusal is raised, not returned
+            return {"ok": False, "error": {"code": refusal.code, "message": str(refusal)}}
     return json.loads(raw)
 
 
@@ -328,15 +332,15 @@ async def test_mcp_a_receipt_from_another_tenant_does_not_open_the_gate() -> Non
 @pytest.mark.asyncio
 async def test_mcp_context_without_any_receipt_is_refused() -> None:
     """POSITIVE CONTROL: no receipt at all is still a refusal."""
-    import json
-
+    from menhir.mcp.telemetry.tracker import McpToolRefusal
     from menhir.mcp.tools.recall.recall_context_memories import RecallContextMemoriesTool
 
     check = RecallContextMemoriesTool()
     with patch.object(type(check), "get_backend", return_value=_mcp_backend()):
-        payload = json.loads(await check.endpoint(reader_id="fresh-mcp-reader", namespace="tenant-a"))
+        with pytest.raises(McpToolRefusal) as refusal:
+            await check.endpoint(reader_id="fresh-mcp-reader", namespace="tenant-a")
 
-    assert payload.get("ok") is False
+    assert refusal.value.code == "bootstrap_required"
 
 
 @pytest.mark.asyncio

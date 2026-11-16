@@ -10,6 +10,7 @@ import pytest
 from menhir.api.routes_support import _BACKEND_METHODS, _required_tier_for_operation
 from menhir.domain.work_artifact import ArtifactStatus, ArtifactType
 from menhir.mcp.tools import ALL_TOOLS
+from tests.mcp.error_contract import text_of
 
 _ARTIFACT_OPS = {
     "get_artifact",
@@ -106,7 +107,7 @@ def test_get_artifact_reports_missing_rather_than_empty() -> None:
 
     tool, _ = _tool(GetArtifactTool, get_artifact=None)
 
-    assert "not found" in _run(tool.endpoint(artifact_uuid="nope"))
+    assert "not found" in text_of(_run(tool.execute(artifact_uuid="nope")))
 
 
 @pytest.mark.unit
@@ -183,7 +184,7 @@ def test_link_refusal_explains_the_type_rule() -> None:
         link_artifacts={"linked": False, "reason": "illegal_source_type"},
     )
 
-    out = _run(tool.endpoint(source_uuid="a1", target_uuid="a2", relation="reviews"))
+    out = text_of(_run(tool.execute(source_uuid="a1", target_uuid="a2", relation="reviews")))
 
     assert "cannot be the source" in out
 
@@ -198,7 +199,7 @@ def test_link_points_supersedes_at_the_lifecycle_command() -> None:
         link_artifacts={"linked": False, "reason": "unsupported_relation"},
     )
 
-    out = _run(tool.endpoint(source_uuid="a1", target_uuid="a2", relation="supersedes"))
+    out = text_of(_run(tool.execute(source_uuid="a1", target_uuid="a2", relation="supersedes")))
 
     assert "supersede_artifact" in out
 
@@ -218,7 +219,7 @@ def test_transition_refusal_names_what_is_legal() -> None:
         },
     )
 
-    out = _run(tool.endpoint(artifact_uuid="a1", to_status=ArtifactStatus.IMPLEMENTED))
+    out = text_of(_run(tool.execute(artifact_uuid="a1", to_status=ArtifactStatus.IMPLEMENTED)))
 
     assert "not legal for a plan" in out
     assert "REVIEWED" in out
@@ -232,7 +233,7 @@ def test_transition_tool_routes_supersession_to_dedicated_action() -> None:
         TransitionArtifactTool,
         transition_artifact_status={"applied": False, "reason": "supersession_requires_replacement"},
     )
-    out = _run(tool.endpoint(artifact_uuid="a1", to_status=ArtifactStatus.SUPERSEDED))
+    out = text_of(_run(tool.execute(artifact_uuid="a1", to_status=ArtifactStatus.SUPERSEDED)))
     assert "supersede_artifact(new_uuid, old_uuid)" in out
 
 
@@ -244,7 +245,7 @@ def test_transition_tool_reports_stale_conflict() -> None:
         TransitionArtifactTool,
         transition_artifact_status={"applied": False, "reason": "stale_transition"},
     )
-    out = _run(tool.endpoint(artifact_uuid="a1", to_status=ArtifactStatus.REVIEWED))
+    out = text_of(_run(tool.execute(artifact_uuid="a1", to_status=ArtifactStatus.REVIEWED)))
     assert "changed during this transition" in out
 
 

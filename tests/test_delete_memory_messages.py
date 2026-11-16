@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from menhir.mcp.tools.ingest.delete_memory import DeleteMemoryTool
+from tests.mcp.error_contract import text_of
 
 pytestmark = [pytest.mark.unit]
 
@@ -34,7 +35,7 @@ class _Backend:
 def _run(monkeypatch, outcome: dict) -> str:
     backend = _Backend(outcome)
     monkeypatch.setattr(DeleteMemoryTool, "get_backend", lambda self: backend)
-    text = asyncio.run(DeleteMemoryTool().endpoint(NODE))
+    text = text_of(asyncio.run(DeleteMemoryTool().execute(node_uuid=NODE)))
     assert backend.erased == [NODE]
     return text
 

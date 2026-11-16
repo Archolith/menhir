@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from menhir.mcp.feedback import SCORE_SCALE, is_valid_score, score_value
+from tests.mcp.error_contract import error_of, text_of
 
 
 class TestScoreScale:
@@ -115,9 +116,9 @@ class TestRateRecallTool:
     async def test_invalid_score_returns_error(self):
         from menhir.mcp.tools.ops.rate_recall import RateRecallTool
 
-        out = await RateRecallTool().endpoint(score="amazing")
-        assert '"ok":false' in out
-        assert "Invalid score" in out
+        out = await RateRecallTool().execute(score="amazing")
+        error_of(out, code="invalid_argument", tool="rate_recall")
+        assert "Invalid score" in text_of(out)
 
     @pytest.mark.asyncio
     async def test_valid_score_records_feedback(self):
@@ -144,6 +145,6 @@ class TestRateRecallTool:
         fake_store.record_recall_feedback.return_value = None
         with patch.object(mod, "get_request_session", return_value=MagicMock(session_id="", client_id="")), \
              patch("menhir.mcp.telemetry.telemetry_store", fake_store):
-            out = await mod.RateRecallTool().endpoint(score="useful")
-        assert '"ok":false' in out
-        assert "no unrated recall" in out
+            out = await mod.RateRecallTool().execute(score="useful")
+        error_of(out, code="not_found", tool="rate_recall")
+        assert "no unrated recall" in text_of(out)

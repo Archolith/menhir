@@ -782,9 +782,10 @@ def test_recall_context_requires_flagged_bootstrap(stubbed_mcp_state):
         )
     )
 
-    assert "Context bootstrap required." in result
-    assert "read_flagged_memories(reader_id='bot-a', workspace='')" in result
-    assert "current_flagged_version=1:stubflagged" in result
+    error_of(result, code="bootstrap_required")
+    assert "Context bootstrap required." in text_of(result)
+    assert "read_flagged_memories(reader_id='bot-a', workspace='')" in text_of(result)
+    assert "current_flagged_version=1:stubflagged" in text_of(result)
 
 
 def test_read_flagged_then_recall_context_flow(stubbed_mcp_state):
@@ -910,8 +911,9 @@ def test_recall_context_requires_rebootstrap_when_flagged_version_changes(stubbe
         )
     )
 
-    assert "Context bootstrap required." in context_result
-    assert "current_flagged_version=2:changed" in context_result
+    error_of(context_result, code="bootstrap_required")
+    assert "Context bootstrap required." in text_of(context_result)
+    assert "current_flagged_version=2:changed" in text_of(context_result)
 
 
 def test_add_memory_and_track_returns_status_history(stubbed_mcp_state):
@@ -950,7 +952,7 @@ def test_watch_enrichment_rejects_bad_uuid(stubbed_mcp_state):
     result = asyncio.run(watch_enrichment("not-a-uuid", timeout_s=0.1, poll_interval_s=0.01))
 
     error_of(result, code="invalid_argument")
-    assert text_of(result).startswith("Error: ValueError: Invalid episode UUID")
+    assert text_of(result).startswith("Invalid episode UUID")
 
 
 def test_get_enrichment_status_returns_episode_snapshot(stubbed_mcp_state):
@@ -969,7 +971,7 @@ def test_get_enrichment_status_rejects_bad_uuid(stubbed_mcp_state):
     result = asyncio.run(get_enrichment_status("not-a-uuid"))
 
     error_of(result, code="invalid_argument")
-    assert text_of(result).startswith("Error: ValueError: Invalid episode UUID")
+    assert text_of(result).startswith("Invalid episode UUID")
 
 
 def test_force_scheduler_takeover_reports_owner_state(stubbed_mcp_state):
@@ -1154,11 +1156,10 @@ def test_list_conflicts_returns_grouped_summary(stubbed_mcp_state):
 
 
 def test_list_conflicts_rejects_invalid_status(stubbed_mcp_state):
-    payload = _parse_json_text(asyncio.run(list_conflicts(status="bad", limit=10)))
+    result = asyncio.run(list_conflicts(status="bad", limit=10))
 
-    assert payload["ok"] is False
-    assert payload["tool"] == "list_conflicts"
-    assert payload["error"]["message"] == "Invalid status. Use: unresolved, resolved, auto-resolved, all."
+    error = error_of(result, code="invalid_argument", tool="list_conflicts")
+    assert error["message"] == "Invalid status. Use: unresolved, resolved, auto-resolved, all."
 
 
 def test_list_conflicts_truncates_long_member_summaries(stubbed_mcp_state):
@@ -1213,17 +1214,16 @@ def test_resolve_conflict_apply_calls_adapter(stubbed_mcp_state):
 
 
 def test_resolve_conflict_rejects_invalid_membership(stubbed_mcp_state):
-    payload = _parse_json_text(asyncio.run(
+    result = asyncio.run(
         resolve_conflict(
             group_id="group-1",
             action="replace",
             keep_uuid="not-a-member",
         )
-    ))
+    )
 
-    assert payload["ok"] is False
-    assert payload["tool"] == "resolve_conflict"
-    assert "is not a member of group_id=group-1" in payload["error"]["message"]
+    error = error_of(result, code="invalid_argument", tool="resolve_conflict")
+    assert "is not a member of group_id=group-1" in error["message"]
 
 
 def test_resolve_conflict_keep_one_without_remove_uuid_reports_confirmation(stubbed_mcp_state):

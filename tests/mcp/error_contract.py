@@ -36,8 +36,11 @@ def error_of(result: Any, *, code: str | None = None, tool: str | None = None) -
     if tool is not None:
         assert envelope["tool"] == tool, envelope
     text = text_of(result)
-    if text.lstrip().startswith("{"):
-        assert json.loads(text) == envelope
-    else:
-        assert error["message"] in text
+    try:
+        as_json = json.loads(text)
+    except ValueError:
+        as_json = None
+    # A JSON tool's text is the envelope; a text tool's text carries the message (which may
+    # itself be JSON, e.g. ingest_document's needs_decision payload).
+    assert as_json == envelope or error["message"] in text, (text, envelope)
     return error

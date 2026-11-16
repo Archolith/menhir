@@ -269,10 +269,11 @@ async def test_mcp_whitespace_query_returns_error_json(
     backend.recall_history = _raise  # type: ignore[method-assign]
     tool = RecallHistoryTool()
     monkeypatch.setattr(tool, "get_backend", lambda: backend)
-    payload = json.loads(await tool.endpoint("   "))
-    assert payload["ok"] is False
-    assert payload["tool"] == "recall_history"
-    assert "non-empty" in payload["error"]["message"]
+    from tests.mcp.error_contract import error_of
+
+    error = error_of(await tool.execute(query="   "), code="invalid_argument", tool="recall_history")
+    # #669: the backend's real message is reported, not a hard-coded one.
+    assert "query must not be empty" in error["message"]
 
 
 def test_registered_in_recall_tools() -> None:

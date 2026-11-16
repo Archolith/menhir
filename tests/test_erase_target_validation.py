@@ -126,6 +126,10 @@ def test_delete_memory_tool_refuses_invalid_target_without_saying_erased():
 
     tool = DeleteMemoryTool()
     tool.get_backend = lambda: _Backend()  # type: ignore[method-assign]
-    message = asyncio.run(tool.endpoint(node_uuid="e"))
+    from tests.mcp.error_contract import error_of, text_of
+
+    result = asyncio.run(tool.execute(node_uuid="e"))
+    error_of(result, code="invalid_argument")
+    message = text_of(result)
     assert message.startswith("Refused")
     assert "Erased" not in message

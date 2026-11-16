@@ -292,6 +292,16 @@ def _run(tool, **kwargs) -> str:
     return asyncio.run(tool.endpoint(**kwargs))
 
 
+def _refusal(tool, code: str, **kwargs) -> str:
+    """The message of the McpToolRefusal the tool raises (#669)."""
+    from menhir.mcp.telemetry.tracker import McpToolRefusal
+
+    with pytest.raises(McpToolRefusal) as caught:
+        asyncio.run(tool.endpoint(**kwargs))
+    assert caught.value.code == code
+    return str(caught.value)
+
+
 def _blast(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "changed": [STORED], "directly_affected": [], "transitively_affected": [],
@@ -321,7 +331,7 @@ def test_tool_echoes_the_rewritten_spelling_and_sends_the_stored_one() -> None:
 )
 def test_unknown_exact_path_is_not_indexed_not_none_found(query_type: str, answer: Any, what: str) -> None:
     tool, _ = _tool({query_type: answer, "context": {"error": "File not found in structure graph: ghost.py"}})
-    out = _run(tool, query_type=query_type, project="p1", path="ghost.py")
+    out = _refusal(tool, "not_indexed", query_type=query_type, project="p1", path="ghost.py")
 
     assert f"Cannot answer {what} for p1: not indexed" in out
     assert "fully indexed" not in out
@@ -379,7 +389,7 @@ def test_depth_limit_never_pairs_with_a_full_index_claim() -> None:
 
 def test_absolute_path_outside_root_gets_a_note() -> None:
     tool, _ = _tool({"blast_radius": _blast(unindexed_paths=["D:/Other/a.py"])})
-    out = _run(tool, query_type="blast_radius", project="p1", path="D:\\Other\\a.py")
+    out = _refusal(tool, "not_indexed", query_type="blast_radius", project="p1", path="D:\\Other\\a.py")
     assert "absolute path outside this project's recorded root" in out
     assert "not indexed" in out
 
@@ -390,7 +400,7 @@ def test_affected_tests_says_how_many_inputs_are_unindexed() -> None:
         "test_command": "pytest", "unindexed_paths": ["ghost.py"], "coverage": {"known": True},
     }
     tool, _ = _tool({"affected_tests": data})
-    out = _run(tool, query_type="affected_tests", project="p1", path=f"{STORED},ghost.py")
+    out = _refusal(tool, "not_indexed", query_type="affected_tests", project="p1", path=f"{STORED},ghost.py")
     assert "1 of the 2 changed files are not in the structure graph" in out
 
 

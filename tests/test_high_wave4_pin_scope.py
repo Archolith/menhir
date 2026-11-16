@@ -351,7 +351,10 @@ async def test_et002_pinned_caller_refused_on_a_foreign_node(
             return True
 
     tool.get_backend = lambda: _Backend()  # type: ignore[method-assign]
-    result = await tool.endpoint(namespace="tenant-a", **kwargs)
+    result = await tool.execute(namespace="tenant-a", **kwargs)
 
-    assert "Refused" in result
+    from tests.mcp.error_contract import error_of, text_of
+
+    error_of(result, code="outside_namespace")
+    assert "Refused" in text_of(result)
     assert mutated == []
