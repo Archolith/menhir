@@ -10,6 +10,7 @@ Pure module: no network, no I/O, and secret values are never logged.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from detect_secrets.core.scan import scan_line
@@ -47,6 +48,11 @@ _CONFIG: dict[str, list[object]] = {
     "filters_used": [],
 }
 
+# detect-secrets' GitHubTokenDetector knows only the ghp_/gho_/ghu_/ghs_/ghr_ formats; fine-grained
+# personal access tokens (github_pat_<22>_<59>) need their own pattern.
+_GITHUB_TOKEN_KIND = "GitHub Token"
+_GITHUB_PAT = re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}")
+
 
 @dataclass(frozen=True)
 class SecretHit:
@@ -60,15 +66,16 @@ def detect_secrets(text: str) -> list[SecretHit]:
     seen: set[tuple[str, str]] = set()
     with transient_settings(_CONFIG):
         for line in text.splitlines():
-            for found in scan_line(line):
-                value = found.secret_value
+            found_pairs = [(found.type, found.secret_value) for found in scan_line(line)]
+            found_pairs += [(_GITHUB_TOKEN_KIND, m.group(0)) for m in _GITHUB_PAT.finditer(line)]
+            for kind, value in found_pairs:
                 if not value:
                     continue
-                key = (found.type, value)
+                key = (kind, value)
                 if key in seen:
                     continue
                 seen.add(key)
-                hits.append(SecretHit(kind=found.type, value=value))
+                hits.append(SecretHit(kind=kind, value=value))
     return hits
 
 
