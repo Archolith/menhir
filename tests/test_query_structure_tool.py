@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
+
 
 def _make_tool(backend: MagicMock):
     from menhir.mcp.tools.recall.query_structure import QueryStructureTool
@@ -27,9 +29,11 @@ def test_query_structure_reports_unknown_project_before_empty_results() -> None:
     )
     tool = _make_tool(backend)
 
-    result = asyncio.run(
-        tool.endpoint(query_type="files", project="cth.context-engine", path="src/")
+    raw = asyncio.run(
+        tool.execute(query_type="files", project="cth.context-engine", path="src/")
     )
+    error_of(raw, code="not_found")  # #669
+    result = text_of(raw)
 
     assert "Project 'cth.context-engine' is not ingested" in result
     assert "ingest_project" in result
@@ -127,6 +131,11 @@ def _run(backend, **kwargs):
     return asyncio.run(_make_tool(backend).endpoint(**kwargs))
 
 
+def _run_text(backend, **kwargs):
+    """Through execute, so a #669 refusal arrives as the isError text a client reads."""
+    return text_of(asyncio.run(_make_tool(backend).execute(**kwargs)))
+
+
 def _backend(projects_result, other_result):
     backend = MagicMock()
 
@@ -170,8 +179,10 @@ def test_fully_indexed_project_may_assert_absence() -> None:
 
 def test_unindexed_path_refuses_instead_of_reporting_zero() -> None:
     data = _blast(unindexed_paths=["ghost.py"])
-    out = _run(_backend(_projects(), data),
-               query_type="blast_radius", project="p1", path="ghost.py")
+    raw = asyncio.run(_make_tool(_backend(_projects(), data)).execute(
+        query_type="blast_radius", project="p1", path="ghost.py"))
+    error_of(raw, code="not_indexed")  # #669
+    out = text_of(raw)
 
     assert "not indexed" in out.lower()
     assert "Total impact" not in out, "must not emit a zero-impact answer"
@@ -227,6 +238,6 @@ def test_no_affected_tests_explains_coverage(project_meta: dict, expected: str) 
                      "files_indexed": project_meta.get("files_indexed"),
                      "files_eligible": project_meta.get("files_eligible")},
     }
-    out = _run(_backend(_projects(**project_meta), data),
-               query_type="affected_tests", project="p1", path="a.py")
+    out = _run_text(_backend(_projects(**project_meta), data),
+                    query_type="affected_tests", project="p1", path="a.py")
     assert expected in out.lower()

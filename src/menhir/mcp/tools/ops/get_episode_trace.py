@@ -6,6 +6,7 @@ from menhir.domain.utils import decode_json_value
 from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.mcp.formatters import _coerce_iso, _require_episode_uuid
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope, _tier_allows
 from menhir.mcp.service_access import get_request_tier
@@ -63,7 +64,10 @@ class GetEpisodeTraceTool(BaseJsonTool):
         self, episode_uuid: str, limit: int = 20, namespace: str = ""
     ) -> str:
         backend = self.get_backend()
-        normalized_uuid = _require_episode_uuid(episode_uuid)
+        try:
+            normalized_uuid = _require_episode_uuid(episode_uuid)
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
         # pinned client that learned one through any global read could previously inspect,
         # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
@@ -78,7 +82,7 @@ class GetEpisodeTraceTool(BaseJsonTool):
             label="episode",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         row = await backend.fetch_episode_processing(normalized_uuid)
         row = effective_processing_row(row)
         task_events = await backend.fetch_episode_task_events(

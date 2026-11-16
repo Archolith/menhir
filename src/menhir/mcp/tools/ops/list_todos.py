@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from menhir.infrastructure.todo_repository import TODO_STALE_AFTER_DAYS
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+
+#: The statuses todo_repository filters on; a test pins the two sets equal.
+TODO_STATUSES = ("open", "closed")
+TODO_LIST_MAX = 200
 
 
 async def list_todos(status: str = "open", limit: int = 25, namespace: str = "") -> str:
@@ -34,13 +39,20 @@ class ListTodosTool(BaseTextTool):
     open_world_hint = False
 
     async def endpoint(self, status: str = "open", limit: int = 25, namespace: str = "") -> str:
+        # #670: the repository read an unknown status as "open" and clamped limit silently.
+        if status not in TODO_STATUSES:
+            raise McpToolRefusal(
+                f"Invalid status {status!r}. Use one of: {', '.join(TODO_STATUSES)}."
+            )
+        applied = max(1, min(int(limit), TODO_LIST_MAX))
         backend = self.get_backend()
         rows = await backend.list_todos(
-            status=status, limit=min(limit, 200), namespace=namespace or None
+            status=status, limit=applied, namespace=namespace or None
         )
 
         scope = f" in {namespace}+default" if namespace else ""
-        lines = [f"{status} ({len(rows)}){scope}"]
+        clamp = f" (limit {applied} applied; allowed 1..{TODO_LIST_MAX})" if applied != limit else ""
+        lines = [f"{status} ({len(rows)}){scope}{clamp}"]
         if not rows:
             lines.append("(none)")
             return "\n".join(lines)

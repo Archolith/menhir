@@ -105,9 +105,12 @@ def test_promote_memory_tool_not_found_message() -> None:
     tool = PromoteMemoryTool()
     tool.get_backend = MagicMock(return_value=backend)
 
-    result = asyncio.run(tool.endpoint(node_uuid="missing"))
+    from tests.mcp.error_contract import error_of, text_of
 
-    assert "No PERSISTENT memory found" in result
+    result = asyncio.run(tool.execute(node_uuid="missing"))
+
+    error_of(result, code="not_found")
+    assert "No PERSISTENT memory found" in text_of(result)
 
 
 @pytest.mark.unit

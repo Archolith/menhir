@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -68,10 +69,13 @@ class PromoteMemoryTool(BaseTextTool):
             node_uuid, namespace=ns
         ) is None:
             if await backend.fetch_memory_by_uuid(node_uuid) is not None:
-                return (
-                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
+                raise McpToolRefusal(
+                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}.",
+                    code="outside_namespace",
                 )
         promoted = await backend.promote_memory(node_uuid)
         if promoted:
             return f"Promoted memory {node_uuid} to PROMOTED (verified ground truth)."
-        return f"No PERSISTENT memory found with uuid={node_uuid}."
+        raise McpToolRefusal(
+            f"No PERSISTENT memory found with uuid={node_uuid}.", code="not_found"
+        )

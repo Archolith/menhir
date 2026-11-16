@@ -13,6 +13,8 @@ from menhir.mcp.formatters import (
     _queue_summary,
 )
 from menhir.mcp.service_access import get_mcp_session
+from menhir.mcp.telemetry.tracker import McpToolRefusal
+from menhir.mcp.tools.ingest.add_memory import failed_write_reason
 from menhir.mcp.tools.base import BaseTextTool
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,8 @@ async def add_memory_and_track(
 
 
 class AddMemoryAndTrackTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot store memory"
     name = "add_memory_and_track"
     scope = ToolScope.NAMESPACED
     title = "Add Memory And Track"
@@ -119,7 +123,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
             Episode status summary plus observed state transitions.
         """
         if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
-            return f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}."
+            raise McpToolRefusal(f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}.")
         backend = self.get_backend()
         session = get_mcp_session()
         role_kwargs = {"role": role} if role is not None else {}
@@ -137,7 +141,9 @@ class AddMemoryAndTrackTool(BaseTextTool):
             **role_kwargs,
         )
         if str(queued.get("status") or "") == "failed":
-            return "Failed to queue memory."
+            raise McpToolRefusal(
+                f"Failed to queue memory: {failed_write_reason(queued)}", code="write_failed"
+            )
         episode_uuid = str(queued.get("episode_id") or "")
         try:
             row, history, timed_out = await _collect_episode_status(

@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 
 from menhir.mcp import formatters
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 track = importlib.import_module("menhir.mcp.tools.ingest.add_memory_and_track")
 context_tool = importlib.import_module("menhir.mcp.tools.recall.build_context")
@@ -202,9 +203,25 @@ async def test_post_acceptance_tracking_failure_preserves_receipt_and_redacts_er
 @pytest.mark.asyncio
 async def test_queue_failure_does_not_claim_acceptance_or_start_tracking(tracked_backend) -> None:
     tracked_backend.queue_episode.return_value = {"status": "failed"}
-    output = await track.AddMemoryAndTrackTool().endpoint("Durable fact", timeout_s=0)
-    assert output == "Failed to queue memory."
+    # #669: the failure is a write_failed error with a reason, not a bare string.
+    with pytest.raises(McpToolRefusal) as raised:
+        await track.AddMemoryAndTrackTool().endpoint("Durable fact", timeout_s=0)
+    assert raised.value.code == "write_failed"
+    assert str(raised.value) == (
+        "Failed to queue memory: reason unavailable (see the server log)"
+    )
     tracked_backend.fetch_episode_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queue_failure_carries_the_server_reason(tracked_backend) -> None:
+    tracked_backend.queue_episode.return_value = {
+        "status": "failed",
+        "error": "enrichment is disabled (MENHIR_ENRICHMENT=off)",
+    }
+    with pytest.raises(McpToolRefusal, match="enrichment is disabled") as raised:
+        await track.AddMemoryAndTrackTool().endpoint("Durable fact", timeout_s=0)
+    assert "accepted" not in str(raised.value)
 
 
 @pytest.mark.asyncio

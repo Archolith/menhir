@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from menhir.mcp.contracts import ToolScope
+from menhir.domain.namespace import DEFAULT_NAMESPACE
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 
 KINDS = ("memory", "turn_evidence", "typed_assertion")
 
 
 async def list_namespace_memories(
-    namespace: str = "default",
+    namespace: str = "",
     kind: str = "memory",
     limit: int = 50,
     after_id: str = "",
@@ -22,8 +24,9 @@ async def list_namespace_memories(
     Todos or WorkArtifacts.
 
     Args:
-        namespace: The silo to list ('default' covers every stored spelling of it). A pinned
-            client has this forced.
+        namespace: The silo to list; empty (the default, as on every other tool) or 'default'
+            means the default silo, covering every stored spelling of it. A pinned client has
+            this forced.
         kind: 'memory' (default), 'turn_evidence' or 'typed_assertion'.
         limit: Page size, 1-100 (default 50).
         after_id: The previous page's next_after_id, to continue.
@@ -54,18 +57,17 @@ class ListNamespaceMemoriesTool(BaseJsonTool):
 
     async def endpoint(
         self,
-        namespace: str = "default",
+        namespace: str = "",
         kind: str = "memory",
         limit: int = 50,
         after_id: str = "",
         source: str = "",
     ) -> str:
         if kind not in KINDS:
-            return self.render_json(
-                {"error": f"unknown kind {kind!r}; expected one of {list(KINDS)}"}
-            )
+            raise McpToolRefusal(f"unknown kind {kind!r}; expected one of {list(KINDS)}")
         result = await self.get_backend().list_namespace_records(
-            namespace,
+            # #671: "" is the default spelling on every other tool; the backend wants a name.
+            namespace or DEFAULT_NAMESPACE,
             kind=kind,
             limit=limit,
             after_id=after_id.strip() or None,

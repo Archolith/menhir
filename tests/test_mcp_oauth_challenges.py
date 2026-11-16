@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult
 
 from menhir.config.oauth import OAuthConfig
+from tests.mcp.error_contract import error_of, text_of
 from menhir.core.request_context import (
     bind_request_auth_mode,
     bind_request_tier,
@@ -202,7 +203,8 @@ async def test_domain_permission_error_is_not_an_oauth_challenge(monkeypatch):
         scopes=frozenset({"menhir:write"}),
     )
 
-    assert isinstance(result, str)
-    assert result.startswith("Error:")
-    assert "mcp/www_authenticate" not in result
+    # #669: a domain refusal is an isError result, but still not an OAuth challenge.
+    error_of(result, code="access_denied")
+    assert text_of(result).startswith("Error:")
+    assert not (result.meta or {}).get("mcp/www_authenticate")
     assert store.rows[0]["stage"] != STAGE_DENIED

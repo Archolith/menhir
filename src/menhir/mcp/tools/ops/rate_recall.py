@@ -6,6 +6,7 @@ from typing import Literal
 
 from menhir.mcp.feedback import SCORE_SCALE, is_valid_score, score_value
 from menhir.mcp.service_access import get_request_session
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
@@ -85,17 +86,8 @@ class RateRecallTool(BaseJsonTool):
     ) -> str:
         label = (score or "").strip().lower()
         if not is_valid_score(label):
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {
-                        "message": (
-                            f"Invalid score '{score}'. Use one of: "
-                            f"{', '.join(SCORE_SCALE)}."
-                        )
-                    },
-                }
+            raise McpToolRefusal(
+                f"Invalid score '{score}'. Use one of: {', '.join(SCORE_SCALE)}."
             )
 
         session = get_request_session()
@@ -120,9 +112,7 @@ class RateRecallTool(BaseJsonTool):
                 if recall_id
                 else "no unrated recall found for this session"
             )
-            return self.render_json(
-                {"ok": False, "tool": self.operation, "error": {"message": hint}}
-            )
+            raise McpToolRefusal(hint, code="not_found")
 
         return self.render_json(
             {

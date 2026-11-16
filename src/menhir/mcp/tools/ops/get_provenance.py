@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
@@ -71,20 +72,10 @@ class GetProvenanceTool(BaseJsonTool):
             label="node",
         )
         if refusal:
-            return self.render_json(
-                {"ok": False, "tool": self.operation, "node_uuid": node_uuid,
-                 "error": {"message": refusal}}
-            )
+            raise McpToolRefusal(refusal, code="outside_namespace")
         row = await backend.fetch_node_receipts(node_uuid)
         if row is None:
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "node_uuid": node_uuid,
-                    "error": {"message": f"No node found with uuid={node_uuid}."},
-                }
-            )
+            raise McpToolRefusal(f"No node found with uuid={node_uuid}.", code="not_found")
 
         try:
             cap = max(0, min(int(content_chars), _MAX_CONTENT_CHARS))

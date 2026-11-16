@@ -119,7 +119,7 @@ class IngestIntakeMixin:
                 # delayed by it.
                 if evidence_projection_uuid:
                     await self._enqueue_pending_episode(evidence_projection_uuid)
-        except Exception:  # catch-all: episode queue must not crash the caller
+        except Exception as exc:  # catch-all: episode queue must not crash the caller
             logger.exception(
                 "Episode queue failed for session_id=%s source=%s",
                 session.session_id,
@@ -130,6 +130,11 @@ class IngestIntakeMixin:
                 status=IngestStatus.FAILED,
                 nodes_touched=0,
                 edges_touched=0,
+                # The write landed, so say which episode and that resending would duplicate it.
+                error=(
+                    f"episode {episode_uuid} was written but could not be queued for enrichment "
+                    f"({type(exc).__name__}); do not write it again, see the server log"
+                ),
             )
 
         return IngestResult(
@@ -450,7 +455,7 @@ class IngestIntakeMixin:
                 )
         except IdempotencyKeyConflict:
             raise
-        except Exception:  # catch-all: episode queue must not crash the caller
+        except Exception as exc:  # catch-all: episode queue must not crash the caller
             logger.exception(
                 "Episode queue failed for session_id=%s source=%s",
                 session.session_id,
@@ -461,6 +466,7 @@ class IngestIntakeMixin:
                 status=IngestStatus.FAILED,
                 nodes_touched=0,
                 edges_touched=0,
+                error=f"the episode could not be recorded ({type(exc).__name__}); see the server log",
             )
 
         return episode_uuid, evidence_projection_uuid
@@ -545,6 +551,7 @@ class IngestIntakeMixin:
                 status=IngestStatus.FAILED,
                 nodes_touched=0,
                 edges_touched=0,
+                error=f"enrichment is disabled ({self._enrichment_disabled_reason or 'enrichment_disabled'})",
             )
 
         try:
@@ -576,6 +583,7 @@ class IngestIntakeMixin:
                     status=IngestStatus.FAILED,
                     nodes_touched=0,
                     edges_touched=0,
+                    error="the queued episode was not found while waiting for enrichment",
                 )
 
             # Same fix as wait_for_episode_processing above: ProcessingState is a
@@ -602,6 +610,7 @@ class IngestIntakeMixin:
                     status=IngestStatus.FAILED,
                     nodes_touched=0,
                     edges_touched=0,
+                    error="enrichment failed; get_enrichment_status shows why",
                 )
             else:
                 # Still PENDING/ENRICHING after timeout — return QUEUED (honest)
@@ -612,7 +621,7 @@ class IngestIntakeMixin:
                     edges_touched=0,
                 )
 
-        except Exception:  # catch-all: episode ingest must not crash the caller
+        except Exception as exc:  # catch-all: episode ingest must not crash the caller
             logger.exception(
                 "Episode ingest failed for session_id=%s source=%s",
                 session.session_id,
@@ -623,6 +632,7 @@ class IngestIntakeMixin:
                 status=IngestStatus.FAILED,
                 nodes_touched=0,
                 edges_touched=0,
+                error=f"the episode could not be ingested ({type(exc).__name__}); see the server log",
             )
 
     def flag_memory(self, node_id: str) -> bool:

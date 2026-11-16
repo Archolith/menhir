@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _queue_summary
 from menhir.mcp.service_access import get_mcp_session
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 from menhir.domain.turn_role import TURN_ROLES
+
+
+def failed_write_reason(result: dict) -> str:
+    """Why queue_episode returned FAILED (#669); an older server sends no reason."""
+    return str(result.get("error") or "").strip() or "reason unavailable (see the server log)"
 
 
 async def add_memory(
@@ -49,6 +55,8 @@ async def add_memory(
 
 
 class AddMemoryTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot store memory"
     name = "add_memory"
     scope = ToolScope.NAMESPACED
     title = "Add Memory"
@@ -95,17 +103,11 @@ class AddMemoryTool(BaseTextTool):
         """
         backend = self.get_backend()
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope
-        from menhir.domain.namespace import namespace_group_id_error
-
-        namespace_error = namespace_group_id_error(namespace)
-        if namespace_error is not None:
-            return f"Cannot store memory: {namespace_error}"
-
         if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
-            return f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}."
+            raise McpToolRefusal(f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}.")
 
         if (user_statement or "").strip() and turn_evidence_uuid:
-            return (
+            raise McpToolRefusal(
                 "Cannot store memory: user_statement and turn_evidence_uuid are mutually "
                 "exclusive. Pass the user's verbatim words via user_statement, or the UUID "
                 "of an existing :TurnEvidence node via turn_evidence_uuid -- not both."
@@ -113,7 +115,14 @@ class AddMemoryTool(BaseTextTool):
 
         normalized_bootstrap_scope = normalize_bootstrap_scope(bootstrap_scope)
         if normalized_bootstrap_scope is not None and not flagged:
-            return "Cannot store memory: bootstrap_scope requires flagged=true."
+            raise McpToolRefusal("Cannot store memory: bootstrap_scope requires flagged=true.")
+
+        # #670: TEMPORAL without valid_at used to queue an ordinary memory with nothing said.
+        if type.upper() == "TEMPORAL" and not valid_at:
+            raise McpToolRefusal(
+                "Cannot store memory: type=TEMPORAL requires valid_at (YYYY-MM-DD).",
+                hint="Pass valid_at for a time-bound reminder, or omit type for an ordinary memory.",
+            )
 
         # TEMPORAL direct-write path — bypasses Graphiti enrichment queue
         if type.upper() == "TEMPORAL" and valid_at:
@@ -157,7 +166,9 @@ class AddMemoryTool(BaseTextTool):
             **scope_kwargs,
         )
         if str(result.get("status") or "") == "failed":
-            return "Failed to store memory."
+            raise McpToolRefusal(
+                f"Failed to store memory: {failed_write_reason(result)}", code="write_failed"
+            )
         flag_note = ", flagged=true" if flagged else ""
         if normalized_bootstrap_scope is not None:
             flag_note += f", bootstrap_scope={normalized_bootstrap_scope}"

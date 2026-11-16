@@ -1282,6 +1282,10 @@ class MemoryGraphAdapter:
             namespace, kind=kind, limit=limit, after_id=after_id, source=source
         )
 
+    def namespace_status(self, namespace: str, *, include_similar: bool) -> dict[str, Any]:
+        """Whether a namespace holds any record, and stored spellings it may mean (#671)."""
+        return self._memory_queries.namespace_status(namespace, include_similar=include_similar)
+
     def fetch_memories_by_scope(
         self, scope: str, limit: int = 10, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:

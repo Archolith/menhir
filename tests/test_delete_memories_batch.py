@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from tests.mcp.error_contract import error_of, text_of
 from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
 from menhir.mcp.tools.ingest import delete_memories as batch_module
 from menhir.mcp.tools.ingest.delete_memories import MAX_IDS, DeleteMemoriesTool
@@ -59,11 +60,17 @@ def _call(monkeypatch, backend: _Backend, **kwargs: Any) -> dict:
     return json.loads(asyncio.run(DeleteMemoriesTool().endpoint(**kwargs)))
 
 
+def _refused(monkeypatch, backend: _Backend, **kwargs: Any) -> dict:
+    monkeypatch.setattr(DeleteMemoriesTool, "get_backend", lambda self: backend)
+    result = asyncio.run(DeleteMemoriesTool().execute(**kwargs))
+    return error_of(result, code="invalid_argument", tool="delete_memories")
+
+
 def test_over_the_cap_is_refused_with_nothing_run(monkeypatch) -> None:
     """Fails if a 101-id call erases anything or is silently truncated to 100."""
     backend = _Backend()
-    result = _call(monkeypatch, backend, node_uuids=_ids(MAX_IDS + 1), dry_run=False)
-    assert "exceeds the limit of 100" in result["error"]
+    result = _refused(monkeypatch, backend, node_uuids=_ids(MAX_IDS + 1), dry_run=False)
+    assert "exceeds the limit of 100" in result["message"]
     assert backend.erased == []
 
 
@@ -77,14 +84,14 @@ def test_exactly_the_cap_runs(monkeypatch) -> None:
 def test_one_invalid_id_refuses_the_whole_call(monkeypatch) -> None:
     """Fails if the valid ids run when another id in the same call is a short/partial id."""
     backend = _Backend()
-    result = _call(monkeypatch, backend, node_uuids=[*_ids(2), "e"], dry_run=False)
-    assert result["invalid"] == ["'e'"]
+    result = _refused(monkeypatch, backend, node_uuids=[*_ids(2), "e"], dry_run=False)
+    assert "'e'" in result["message"]
     assert backend.erased == []
 
 
 def test_empty_list_is_refused(monkeypatch) -> None:
     backend = _Backend()
-    assert "no ids" in _call(monkeypatch, backend, node_uuids=[], dry_run=False)["error"]
+    assert "no ids" in _refused(monkeypatch, backend, node_uuids=[], dry_run=False)["message"]
 
 
 def test_default_is_a_preview_that_erases_nothing(monkeypatch) -> None:
@@ -225,5 +232,6 @@ def test_listing_clamps_the_page_and_forces_the_pin(monkeypatch) -> None:
 
 
 def test_listing_tool_rejects_an_unknown_kind() -> None:
-    result = json.loads(asyncio.run(ListNamespaceMemoriesTool().endpoint(kind="entity")))
-    assert "unknown kind" in result["error"]
+    result = asyncio.run(ListNamespaceMemoriesTool().execute(kind="entity"))
+    error_of(result, code="invalid_argument")
+    assert "unknown kind" in text_of(result)

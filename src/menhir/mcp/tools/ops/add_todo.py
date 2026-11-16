@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+
+#: The priorities todo_repository stores; a test pins the two sets equal.
+TODO_PRIORITIES = ("low", "normal", "high")
 
 
 async def add_todo(
@@ -64,6 +68,12 @@ class AddTodoTool(BaseTextTool):
         due_date: str | None = None,
         namespace: str = "",
     ) -> str:
+        # #670: the repository stored an unknown priority as "normal" without saying so.
+        if priority not in TODO_PRIORITIES:
+            raise McpToolRefusal(
+                f"Cannot add todo: invalid priority {priority!r}. "
+                f"Use one of: {', '.join(TODO_PRIORITIES)}."
+            )
         backend = self.get_backend()
         todo = await backend.create_todo(
             content=text,

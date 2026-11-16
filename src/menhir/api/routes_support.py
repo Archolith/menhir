@@ -784,6 +784,7 @@ _BACKEND_METHODS = {
     "erase_memory",
     "delete_namespace",
     "list_namespace_records",
+    "get_namespace_status",
     "enqueue_pending_episode",
     "recall",
     "recall_history",

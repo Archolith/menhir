@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
 from menhir.domain.namespace import (
+    DEFAULT_NAMESPACE,
     normalize_namespace,
     namespace_spellings,
     namespace_to_group_ids,
@@ -519,6 +520,41 @@ class MemoryQueryRepository:
         return [
             {**row, "kind": kind} for row in self.neo4j.execute(query, params=params)
         ]
+
+    #: Labels that hold a namespace's data, each with an index on `namespace` (schema.py).
+    _NAMESPACE_LABELS = ("Episodic", "Entity", "Todo", "WorkArtifact", "TurnEvidence")
+
+    def namespace_status(self, namespace: str, *, include_similar: bool) -> dict[str, Any]:
+        """Whether any record carries exactly *namespace*, and stored spellings it may mean (#671).
+
+        Exact match on purpose: reads match the namespace verbatim, so `PFCC` or `pfcc ` finds
+        nothing when the data is under `pfcc`. ``similar`` lists the stored namespaces equal to it
+        after stripping and case-folding; it is for unpinned callers only.
+        """
+        if namespace in ("", DEFAULT_NAMESPACE):
+            return {"namespace": namespace, "known": True, "similar": []}
+        # The same silo predicate reads use (CF-127), so "known" means "a read would find it".
+        scope = tenant_scope_cypher("n")
+        known = any(
+            self.neo4j.execute(
+                f"MATCH (n:{label}) WHERE {scope} RETURN 1 AS hit LIMIT 1",
+                params=tenant_scope_params(namespace),
+            )
+            for label in self._NAMESPACE_LABELS
+        )
+        similar: list[str] = []
+        if not known and include_similar:
+            key = namespace.strip().casefold()
+            values: set[str] = {DEFAULT_NAMESPACE}
+            for label in self._NAMESPACE_LABELS:
+                rows = self.neo4j.execute(
+                    f"MATCH (n:{label}) WITH coalesce(n.namespace, n.group_id) AS v "
+                    "WHERE v IS NOT NULL RETURN DISTINCT v LIMIT 1000",
+                    params={},
+                )
+                values.update(str(r["v"]) for r in rows if r.get("v") is not None)
+            similar = sorted(v for v in values if v != namespace and v.strip().casefold() == key)
+        return {"namespace": namespace, "known": known, "similar": similar}
 
     def fetch_memories_by_scope(
         self, scope: str, limit: int = 10, *, namespace: str | None = None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.service_access import get_request_session
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 
 _KINDS = ("provider_auth", "provider_billing", "failed_episodes")
@@ -42,7 +43,9 @@ class AcknowledgeWarningTool(BaseTextTool):
         kind = (kind or "").strip()
         subject = (subject or "").strip()
         if kind not in _KINDS:
-            return f"error: unknown warning kind {kind!r}; expected one of: {', '.join(_KINDS)}"
+            raise McpToolRefusal(
+                f"unknown warning kind {kind!r}; expected one of: {', '.join(_KINDS)}"
+            )
         session = get_request_session()
         actor = ""
         if session is not None:
@@ -62,5 +65,8 @@ class AcknowledgeWarningTool(BaseTextTool):
         if already:
             lines.append(f"already acknowledged {kind}: {', '.join(already)}")
         if not lines:
-            lines.append(f"nothing acknowledged: {kind} changed while acknowledging; retry")
+            raise McpToolRefusal(
+                f"nothing acknowledged: {kind} changed while acknowledging; retry",
+                code="conflict",
+            )
         return "\n".join(lines)

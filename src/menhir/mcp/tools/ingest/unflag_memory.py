@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -54,13 +55,14 @@ class UnflagMemoryTool(BaseTextTool):
             node_uuid, namespace=ns
         ) is None:
             if await backend.fetch_memory_by_uuid(node_uuid) is not None:
-                return (
-                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
+                raise McpToolRefusal(
+                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}.",
+                    code="outside_namespace",
                 )
         try:
             unflagged = await backend.unflag_memory(node_uuid)
         except ValueError as exc:
-            return f"Cannot unflag: {exc}"
+            raise McpToolRefusal(f"Cannot unflag: {exc}") from exc
         if unflagged:
             return f"Removed retention flag from memory {node_uuid}."
-        return f"No memory found with uuid={node_uuid}."
+        raise McpToolRefusal(f"No memory found with uuid={node_uuid}.", code="not_found")

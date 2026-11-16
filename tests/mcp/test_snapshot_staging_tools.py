@@ -21,6 +21,7 @@ from menhir.config.snapshot_mode import (
     resolve_snapshot_receive_mode,
 )
 from menhir.mcp.contracts import assert_tool_scopes_declared, validate_tool_metadata
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools import ALL_TOOLS, registered_tools
 from menhir.mcp.tools.ingest.snapshot_staging import (
     SNAPSHOT_RECEIVE_MODE_ENV,
@@ -129,10 +130,11 @@ async def test_an_endpoint_refuses_at_call_time_even_holding_an_instance(
     """Registration is a process-start fact; this is a runtime one. Both must refuse."""
     monkeypatch.delenv(SNAPSHOT_RECEIVE_MODE_ENV, raising=False)
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(McpToolRefusal) as excinfo:
         await BeginProjectSnapshotTool().endpoint(project_key="p", declared_bytes=16)
 
     assert "disabled" in str(excinfo.value)
+    assert excinfo.value.code == "disabled"
 
 
 # --- posture ------------------------------------------------------------------------------------
@@ -248,10 +250,10 @@ async def test_begin_chunk_status_abort_round_trip(staging_on: None, session) ->
 async def test_a_refusal_comes_back_as_a_stable_code_not_an_exception(
     staging_on: None, session
 ) -> None:
-    result = json.loads(await GetProjectSnapshotStatusTool().endpoint(upload_id="deadbeef" * 4))
+    with pytest.raises(McpToolRefusal) as excinfo:
+        await GetProjectSnapshotStatusTool().endpoint(upload_id="deadbeef" * 4)
 
-    assert result["ok"] is False
-    assert result["error"]["code"] == "snapshot.upload.not_found"
+    assert excinfo.value.code == "snapshot.upload.not_found"
 
 
 async def test_one_principal_cannot_read_anothers_upload(
@@ -276,12 +278,10 @@ async def test_one_principal_cannot_read_anothers_upload(
     monkeypatch.setattr(
         "menhir.mcp.tools.ingest.snapshot_staging.get_mcp_session", lambda: _Mallory()
     )
-    result = json.loads(
+    with pytest.raises(McpToolRefusal) as excinfo:
         await GetProjectSnapshotStatusTool().endpoint(upload_id=begun["upload_id"])
-    )
 
-    assert result["ok"] is False
-    assert result["error"]["code"] == "snapshot.upload.not_found"
+    assert excinfo.value.code == "snapshot.upload.not_found"
 
 
 def test_telemetry_keeps_the_upload_id_and_still_masks_the_content() -> None:

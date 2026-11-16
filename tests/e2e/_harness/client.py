@@ -101,6 +101,10 @@ _BACKEND_FAULT_MARKERS = (
 )
 
 
+#: #669 error codes that mean a fault rather than a refusal.
+_FAULT_CODES = frozenset({"internal", "unavailable", "timeout"})
+
+
 def assert_no_backend_fault(result: Any, *, tool: str) -> None:
     """Fail the lane when a tool response carries a backend fault rather than an answer.
 
@@ -121,6 +125,15 @@ def assert_no_backend_fault(result: Any, *, tool: str) -> None:
 
     content = getattr(result, "content", None) or []
     text = "\n".join(getattr(item, "text", "") or "" for item in content)
+    # #669: a tool error carries a code. A refusal (invalid_argument, not_found, refused, ...)
+    # is a designed answer; these codes mean the call itself broke.
+    structured = getattr(result, "structuredContent", None)
+    error = structured.get("error") if isinstance(structured, dict) else None
+    if getattr(result, "isError", False) and isinstance(error, dict):
+        if error.get("code") in _FAULT_CODES:
+            raise AssertionError(
+                f"backend fault from tool {tool!r} ({error.get('code')}):\n{text[:800]}"
+            )
     for marker in _BACKEND_FAULT_MARKERS:
         if marker in text:
             raise AssertionError(

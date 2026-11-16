@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -50,10 +51,10 @@ class ArtifactRelationshipsTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         data = await backend.get_artifact_relationships(artifact_uuid)
         if not data:
-            return f"Artifact {artifact_uuid} not found"
+            raise McpToolRefusal(f"Artifact {artifact_uuid} not found", code="not_found")
 
         lines: list[str] = []
         for row in data.get("outgoing") or []:

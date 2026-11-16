@@ -8,6 +8,7 @@ from typing import Mapping
 from menhir.domain.models import ProcessingState
 from menhir.domain.verbatim_skip_status import PROJECTION_LOST_SUBSTAGE, effective_processing_row
 from menhir.mcp.formatters import _coerce_iso, _resolve_queue_state_filter, _stale_reason_for_row
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -74,7 +75,10 @@ class ListEnrichmentQueueTool(BaseTextTool):
         self, state: str = "active", limit: int = 25, namespace: str = ""
     ) -> str:
         backend = self.get_backend()
-        state_label, state_filter = _resolve_queue_state_filter(state)
+        try:
+            state_label, state_filter = _resolve_queue_state_filter(state)
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         scope = {"namespace": namespace} if namespace else {}
         rows = await backend.list_episode_processing(
             states=state_filter,

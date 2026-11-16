@@ -62,6 +62,8 @@ async def add_candidate(
 
 
 class AddCandidateTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot stage candidate"
     name = "add_candidate"
     scope = ToolScope.NAMESPACED
     description = "Stage a low-trust memory/friction candidate for human review (not recalled until approved)."
@@ -109,14 +111,6 @@ class AddCandidateTool(BaseTextTool):
             Confirmation with the candidate uuid, cluster_id, and review status.
         """
         backend = self.get_backend()
-        from menhir.domain.namespace import namespace_group_id_error
-
-        # As in add_memory: the namespace becomes the group_id, and an approved candidate is
-        # an ordinary memory (#431).
-        namespace_error = namespace_group_id_error(namespace)
-        if namespace_error is not None:
-            return f"Cannot stage candidate: {namespace_error}"
-
         # CF-33 step 4 resolved this as a MISDECLARATION, not a missing guard: `cluster_id`
         # is an emitter-side grouping label on a NEW write, not the address of an existing
         # object, so OBJECT never described this tool. It stages tenant memory -- an approved

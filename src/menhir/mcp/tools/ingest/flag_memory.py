@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -61,8 +62,9 @@ class FlagMemoryTool(BaseTextTool):
             node_uuid, namespace=ns
         ) is None:
             if await backend.fetch_memory_by_uuid(node_uuid) is not None:
-                return (
-                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
+                raise McpToolRefusal(
+                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}.",
+                    code="outside_namespace",
                 )
         try:
             scope_arg = bootstrap_scope if bootstrap_scope.strip() else None
@@ -70,7 +72,7 @@ class FlagMemoryTool(BaseTextTool):
                 node_uuid, bootstrap_scope=scope_arg
             )
         except ValueError as exc:
-            return f"Cannot flag: {exc}"
+            raise McpToolRefusal(f"Cannot flag: {exc}") from exc
         if flagged:
             row = await backend.fetch_memory_by_uuid(node_uuid)
             effective_scope = (row or {}).get("bootstrap_scope")
@@ -78,4 +80,4 @@ class FlagMemoryTool(BaseTextTool):
                 f"Flagged memory {node_uuid} for permanent retention; "
                 f"bootstrap_scope={effective_scope or 'none'}."
             )
-        return f"No memory found with uuid={node_uuid}."
+        raise McpToolRefusal(f"No memory found with uuid={node_uuid}.", code="not_found")

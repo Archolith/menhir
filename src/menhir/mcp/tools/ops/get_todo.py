@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -36,7 +37,7 @@ class GetTodoTool(BaseTextTool):
         row = await backend.get_todo(uuid, namespace=namespace or None)
         if not row:
             scope = f" in namespace {namespace}" if namespace else ""
-            return f"TODO {uuid} not found{scope}"
+            raise McpToolRefusal(f"TODO {uuid} not found{scope}", code="not_found")
 
         tag = (row.get("priority") or "normal").upper()
         lines = [f"[{tag}] uuid={row.get('uuid', uuid)}  status={row.get('status', '?')}"]

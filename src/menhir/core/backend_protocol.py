@@ -251,6 +251,10 @@ class MemoryBackend(Protocol):
         """One page of a silo's erasable records of one kind, keyed by the id an erase takes."""
         ...
 
+    async def get_namespace_status(self, namespace: str) -> dict[str, Any]:
+        """``{namespace, known, similar}``: whether any record carries exactly this namespace."""
+        ...
+
     async def fetch_recent_memories(
         self, limit: int = 20, namespace: str | None = None
     ) -> list[dict[str, Any]]:

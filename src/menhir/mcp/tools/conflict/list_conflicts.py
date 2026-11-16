@@ -10,6 +10,7 @@ from menhir.mcp.formatters import (
 )
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 async def list_conflicts(
@@ -125,11 +126,7 @@ class ListConflictsTool(BaseJsonTool):
                     "groups": groups,
                 }
             )
+        except McpToolRefusal:
+            raise
         except ValueError as exc:
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {"message": str(exc)},
-                }
-            )
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc

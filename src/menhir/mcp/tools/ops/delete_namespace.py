@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
@@ -67,5 +68,5 @@ class DeleteNamespaceTool(BaseJsonTool):
                 namespace, max_nodes=max_nodes, force=force, dry_run=dry_run
             )
         except ValueError as exc:
-            return self.render_json({"error": str(exc), "namespace": namespace})
+            raise McpToolRefusal(f"{exc} (namespace: {namespace})", code="refused") from exc
         return self.render_json(result)

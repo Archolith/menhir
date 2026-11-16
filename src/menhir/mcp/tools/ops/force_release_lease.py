@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _require_episode_uuid
 from menhir.mcp.telemetry import record_lifecycle_event
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
@@ -36,7 +37,10 @@ class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
         self, episode_uuid: str, requeue: bool = True, namespace: str = ""
     ) -> str:
         backend = self.get_backend()
-        normalized_uuid = _require_episode_uuid(episode_uuid)
+        try:
+            normalized_uuid = _require_episode_uuid(episode_uuid)
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
         # pinned client that learned one through any global read could previously inspect,
         # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
@@ -51,16 +55,17 @@ class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
             label="episode",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
 
         released = await backend.force_release_episode_lease(
             normalized_uuid,
             max_attempts=await backend.get_max_enrichment_attempts(),
         )
         if not released:
-            return (
+            raise McpToolRefusal(
                 f"episode_uuid: {normalized_uuid}\n"
-                "result: NOT_FOUND — no ENRICHING episode with that UUID"
+                "result: NOT_FOUND — no ENRICHING episode with that UUID",
+                code="not_found",
             )
         record_lifecycle_event(
             component="operator",

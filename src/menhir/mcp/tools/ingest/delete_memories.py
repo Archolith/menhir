@@ -7,6 +7,7 @@ from collections import Counter
 from typing import Any
 
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.tools.ingest.delete_memory import OUTSIDE_NAMESPACE, describe_erase
 
@@ -42,10 +43,6 @@ async def delete_memories(
     )
 
 
-def _refusal(message: str, **extra: Any) -> dict[str, Any]:
-    return {"error": message, "erased": 0, **extra}
-
-
 class DeleteMemoriesTool(BaseJsonTool):
     name = "delete_memories"
     scope = ToolScope.NAMESPACED
@@ -66,18 +63,18 @@ class DeleteMemoriesTool(BaseJsonTool):
 
         raw = list(node_uuids or [])
         if not raw:
-            return self.render_json(_refusal("no ids given; nothing was erased"))
+            raise McpToolRefusal("no ids given; nothing was erased")
         if len(raw) > MAX_IDS:
-            return self.render_json(_refusal(
+            raise McpToolRefusal(
                 f"{len(raw)} ids exceeds the limit of {MAX_IDS} per call; nothing was erased",
-                limit=MAX_IDS,
-            ))
+                hint=f"Send at most {MAX_IDS} ids per call.",
+            )
         invalid = [repr(v) for v in raw if normalize_erase_target(v) is None]
         if invalid:
-            return self.render_json(_refusal(
-                "invalid ids (expected the full 36-character uuid form); nothing was erased",
-                invalid=invalid,
-            ))
+            raise McpToolRefusal(
+                "invalid ids (expected the full 36-character uuid form); nothing was erased: "
+                + ", ".join(invalid)
+            )
         targets: list[str] = []
         for value in raw:
             target = normalize_erase_target(value)

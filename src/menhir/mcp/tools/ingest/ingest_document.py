@@ -8,6 +8,7 @@ import os
 
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.contracts import ToolScope
 
 
@@ -50,6 +51,8 @@ async def ingest_document(
 
 
 class IngestDocumentTool(BaseTextTool):
+    writes_namespace = True
+    write_refusal_prefix = "Cannot ingest document"
     name = "ingest_document"
     # NAMESPACED, not OBJECT: the structure node this writes is deliberately shared (the
     # structure graph is an index of a codebase keyed by project, and `query_structure`
@@ -80,7 +83,7 @@ class IngestDocumentTool(BaseTextTool):
         adopt_project_id: str | None = None,
     ) -> str:
         if not await asyncio.to_thread(os.path.isfile, path):
-            return f"Error: not a file: {path}"
+            raise McpToolRefusal(f"not a file: {path}")
 
         backend = self.get_backend()
         session = get_mcp_session()
@@ -96,7 +99,7 @@ class IngestDocumentTool(BaseTextTool):
         )
 
         if result.get("status") == "needs_decision":
-            return json.dumps(result, sort_keys=True)
+            raise McpToolRefusal(json.dumps(result, sort_keys=True), code="needs_decision")
 
         structure_project = result.get("structure_project", "")
         structure_path = result.get("structure_path", "")

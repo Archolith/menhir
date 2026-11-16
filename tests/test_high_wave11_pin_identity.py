@@ -287,9 +287,12 @@ async def test_cf83_minting_an_undeclared_client_is_refused(monkeypatch) -> None
         lambda *a, **k: frozenset({"tiny-agent"}),
     )
 
-    result = _json.loads(await mod.MintClientTool().endpoint(client_name="helper"))
-    assert "refusing to mint undeclared client" in result["error"]
-    assert "token" not in result
+    from tests.mcp.error_contract import error_of, text_of
+
+    result = await mod.MintClientTool().execute(client_name="helper")
+    error_of(result, code="refused")
+    assert "refusing to mint undeclared client" in text_of(result)
+    assert "token" not in text_of(result)
 
 
 @pytest.mark.asyncio

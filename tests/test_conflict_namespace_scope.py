@@ -28,6 +28,8 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
+
 from menhir.mcp.contracts import ToolScope
 
 CONFLICT_TOOLS = (
@@ -191,15 +193,15 @@ def test_resolve_rejects_a_uuid_hidden_by_namespace_before_mutation() -> None:
     backend.resolve_conflict_group = AsyncMock()
     tool = _stub_tool(ResolveConflictTool, backend)
 
-    raw = asyncio.run(tool.endpoint(
-        group_id="grp-mixed",
-        action="replace",
-        keep_uuid="tenant-a-1",
-        remove_uuid="tenant-b-1",
-        namespace="tenant_a",
-    ))
+    with pytest.raises(McpToolRefusal, match="is not a member"):
+        asyncio.run(tool.endpoint(
+            group_id="grp-mixed",
+            action="replace",
+            keep_uuid="tenant-a-1",
+            remove_uuid="tenant-b-1",
+            namespace="tenant_a",
+        ))
 
-    assert "is not a member" in json.loads(raw)["error"]["message"]
     backend.resolve_conflict_group.assert_not_awaited()
 
 

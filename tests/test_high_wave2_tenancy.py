@@ -195,9 +195,12 @@ async def test_cf64_pinned_caller_cannot_erase_another_silos_node() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(DeleteMemoryTool(), backend)
 
-    result = await tool.endpoint(_UUID_1, namespace="tenant-a")
+    result = await tool.execute(node_uuid=_UUID_1, namespace="tenant-a")
 
-    assert "Refused" in result
+    from tests.mcp.error_contract import error_of, text_of
+
+    error_of(result, code="outside_namespace")
+    assert "Refused" in text_of(result)
     assert backend.erased == []
 
 
@@ -247,9 +250,12 @@ async def test_cf64_pinned_caller_cannot_flag_another_silos_node() -> None:
     backend = _Backend(node_namespace="tenant-b")
     tool = _tool_with_backend(FlagMemoryTool(), backend)
 
-    result = await tool.endpoint("uuid-1", namespace="tenant-a")
+    result = await tool.execute(node_uuid="uuid-1", namespace="tenant-a")
 
-    assert "Refused" in result
+    from tests.mcp.error_contract import error_of, text_of
+
+    error_of(result, code="outside_namespace")
+    assert "Refused" in text_of(result)
     assert backend.flagged == []
 
 

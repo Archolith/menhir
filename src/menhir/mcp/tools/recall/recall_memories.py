@@ -9,7 +9,10 @@ from types import SimpleNamespace
 from menhir.mcp.formatters import _compact_scored_item
 from menhir.mcp.service_access import get_request_session
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.domain.recall import InvalidQueryPresetError
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.namespace_note import namespace_note
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 def _resolve_compact(explicit: bool | None) -> bool:
@@ -154,6 +157,9 @@ class RecallMemoriesTool(BaseJsonTool):
         stale-anchor warnings and response notes. Empty results do not establish
         that no relevant memory exists.
         """
+        if int(limit) < 1:
+            # #670: limit=0 used to return an empty list with nothing said.
+            raise McpToolRefusal(f"Invalid limit {limit!r}: limit must be at least 1.")
         backend = self.get_backend()
         compact = _resolve_compact(compact)
         count_reduced = False
@@ -182,18 +188,8 @@ class RecallMemoriesTool(BaseJsonTool):
                 trace=trace,
                 source_memory_limit=backend_limit,
             )
-        except ValueError:
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {
-                        "message": (
-                            f"Invalid preset '{preset}'. Use: knowledge, recent, emotional, connected, conflict."
-                        )
-                    },
-                }
-            )
+        except InvalidQueryPresetError as exc:
+            raise McpToolRefusal(str(exc)) from exc
         now = datetime.now(timezone.utc)
         retrieved_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         elapsed_since_last_access: str | None = None
@@ -283,6 +279,11 @@ class RecallMemoriesTool(BaseJsonTool):
             payload["trace"] = result.get("trace")
         if elapsed_since_last_access is not None:
             payload["elapsed_since_last_access"] = elapsed_since_last_access
+        if not payload["items"] and not payload.get("source_memories"):
+            # #671: an empty result under a namespace that holds nothing is not "no history".
+            ns_note = await namespace_note(backend, namespace)
+            if ns_note:
+                payload["namespace_note"] = ns_note
         return self.render_recall_json(
             payload, log_context={"namespace": namespace or None, "limit": limit}
         )

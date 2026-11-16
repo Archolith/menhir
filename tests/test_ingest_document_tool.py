@@ -37,9 +37,12 @@ def test_rejects_nonexistent_file() -> None:
     from menhir.mcp.tools.ingest.ingest_document import IngestDocumentTool
 
     tool = IngestDocumentTool()
-    result = asyncio.run(tool.endpoint(path="/nonexistent/file.md"))
+    from tests.mcp.error_contract import error_of, text_of
 
-    assert result.startswith("Error: not a file:")
+    result = asyncio.run(tool.execute(path="/nonexistent/file.md"))
+
+    error_of(result, code="invalid_argument")
+    assert text_of(result).startswith("not a file:")
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +148,14 @@ def test_needs_decision_is_rendered_without_episode_queue_eligibility(tmp_path) 
 
     tool = _make_tool(backend)
     with patch("menhir.mcp.tools.ingest.ingest_document.get_mcp_session", return_value=_mock_session()):
-        result = asyncio.run(tool.endpoint(path=str(doc), project="proj"))
+        outcome = asyncio.run(tool.execute(path=str(doc), project="proj"))
 
+    from tests.mcp.error_contract import text_of
+
+    # error_of() would parse this JSON message as the envelope, so check the envelope directly.
+    assert outcome.isError is True
+    assert outcome.structuredContent["error"]["code"] == "needs_decision"
+    result = text_of(outcome)
     assert '"status": "needs_decision"' in result
     assert '"decision_type": "project_identity"' in result
     assert '"project_id": "existing-id"' in result

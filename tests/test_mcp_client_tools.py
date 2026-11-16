@@ -8,6 +8,8 @@ import os
 
 import pytest
 
+from tests.mcp.error_contract import error_of
+
 
 @pytest.fixture(autouse=True)
 def reset_store_singleton() -> None:
@@ -69,9 +71,8 @@ def test_mint_invalid_tier(enabled_env: None) -> None:
     from menhir.mcp.tools.ops.mint_client import MintClientTool
 
     tool = MintClientTool()
-    result = asyncio.run(tool.endpoint(client_name="gamma", tier="root"))
-    payload = json.loads(result)
-    assert "error" in payload
+    result = asyncio.run(tool.execute(client_name="gamma", tier="root"))
+    error_of(result, code="invalid_argument")
 
 
 @pytest.mark.unit
@@ -112,9 +113,8 @@ def test_disabled_returns_error() -> None:
     from menhir.mcp.tools.ops.mint_client import MintClientTool
 
     tool = MintClientTool()
-    result = asyncio.run(tool.endpoint(client_name="epsilon", tier="readonly"))
-    payload = json.loads(result)
-    assert "error" in payload
+    result = asyncio.run(tool.execute(client_name="epsilon", tier="readonly"))
+    error_of(result, code="disabled")
 
 
 @pytest.mark.unit
@@ -147,6 +147,5 @@ def test_list_clients_disabled_returns_error() -> None:
 
     from menhir.mcp.tools.ops.list_clients import ListClientsTool
 
-    result = asyncio.run(ListClientsTool().endpoint())
-    payload = json.loads(result)
-    assert "error" in payload
+    result = asyncio.run(ListClientsTool().execute())
+    error_of(result, code="disabled")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -88,7 +89,7 @@ class RelocateArtifactSourceTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         result = await backend.relocate_artifact_source(
             artifact_uuid=artifact_uuid,
             old_path=old_path,
@@ -122,4 +123,7 @@ class RelocateArtifactSourceTool(BaseTextTool):
             "stale_old_locator": "The source has moved since you read it.",
             "stale_expected_integrity": "The file changed since the integrity you supplied.",
         }
-        return f"Refused ({reason}): {explanations.get(reason, 'no change was made.')}"
+        raise McpToolRefusal(
+            f"Refused ({reason}): {explanations.get(reason, 'no change was made.')}",
+            code="refused",
+        )

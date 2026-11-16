@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -56,10 +57,11 @@ class CloseMemoryTool(BaseTextTool):
             uuid, namespace=ns
         ) is None:
             if await backend.fetch_memory_by_uuid(uuid) is not None:
-                return (
-                    f"Refused: memory {uuid} exists but is outside namespace {ns}."
+                raise McpToolRefusal(
+                    f"Refused: memory {uuid} exists but is outside namespace {ns}.",
+                    code="outside_namespace",
                 )
         ok = await backend.complete_temporal(uuid)
         if ok:
             return f"Completed memory {uuid}."
-        return f"Memory {uuid} not found or already completed."
+        raise McpToolRefusal(f"Memory {uuid} not found or already completed.", code="not_found")

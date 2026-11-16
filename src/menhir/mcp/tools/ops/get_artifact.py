@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -39,7 +40,7 @@ class GetArtifactTool(BaseTextTool):
         row = await backend.get_artifact(artifact_uuid, namespace=namespace or None)
         if not row:
             scope = f" in namespace {namespace}" if namespace else ""
-            return f"Artifact {artifact_uuid} not found{scope}"
+            raise McpToolRefusal(f"Artifact {artifact_uuid} not found{scope}", code="not_found")
 
         lines = [
             f"[{(row.get('artifact_type') or '?').upper()}] {row.get('title') or '(untitled)'}",

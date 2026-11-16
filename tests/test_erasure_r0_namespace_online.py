@@ -21,6 +21,8 @@ from typing import Any
 
 import httpx
 import pytest
+
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from fastapi import FastAPI
 
 from menhir.core.request_context import bind_request_session, reset_request_session
@@ -259,7 +261,10 @@ def test_mcp_delete_memory_pinned_to_a_cannot_erase_b_turn(rig: _Rig, monkeypatc
 
     async def call() -> str:
         with _PinnedCaller(monkeypatch, rig.ns_a):
-            return await tool.endpoint(rig.turn_b, namespace=rig.ns_a)
+            with pytest.raises(McpToolRefusal) as refused:  # #669: a refusal raises
+                await tool.endpoint(rig.turn_b, namespace=rig.ns_a)
+        assert refused.value.code == "outside_namespace"
+        return str(refused.value)
 
     result = asyncio.run(call())
 

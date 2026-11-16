@@ -985,10 +985,14 @@ async def test_mcp_timeline_value_error_returns_error_json(
     backend.recall_timeline = _raise  # type: ignore[method-assign]
     tool = RecallTimelineTool()
     monkeypatch.setattr(tool, "get_backend", lambda: backend)
-    payload = json.loads(await tool.endpoint(at="2026-01-01", around="ep-1"))
-    assert payload["ok"] is False
-    assert payload["tool"] == "recall_timeline"
-    assert "exactly one" in payload["error"]["message"]
+    from tests.mcp.error_contract import error_of
+
+    error = error_of(
+        await tool.execute(at="2026-01-01", around="ep-1"),
+        code="invalid_argument",
+        tool="recall_timeline",
+    )
+    assert "exactly one" in error["message"]
 
 
 def test_registered_in_recall_tools() -> None:
