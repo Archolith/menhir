@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -30,13 +31,16 @@ class MintClientTool(BaseTextTool):
 
         store = get_client_token_store()
         if store is None:
-            return json.dumps({"error": "per-client token tier is not enabled (set MENHIR_CLIENT_TOKENS_ENABLED=1)"})
+            raise McpToolRefusal(
+                "per-client token tier is not enabled (set MENHIR_CLIENT_TOKENS_ENABLED=1)",
+                code="disabled",
+            )
 
         if tier not in {"operator", "agent", "readonly"}:
-            return json.dumps({"error": "tier must be operator, agent, or readonly"})
+            raise McpToolRefusal("tier must be operator, agent, or readonly")
 
         if not client_name.strip():
-            return json.dumps({"error": "client_name is required"})
+            raise McpToolRefusal("client_name is required")
 
         # CF-83: a namespace pin is server config keyed on client_name, so minting a name that
         # is not configured produces a credential no pin covers -- and a pinned operator could
@@ -64,15 +68,14 @@ class MintClientTool(BaseTextTool):
             client_restrictions_configured()
             and requested.lower() not in declared_client_names()
         ):
-            return json.dumps({
-                "error": (
-                    f"refusing to mint undeclared client {requested!r}: this deployment "
-                    "configures per-client restrictions, so a minted identity must be declared "
-                    "server-side first. Add it to MENHIR_CLIENT_NAMESPACES (pinned), "
-                    "MENHIR_CLIENT_TOOLS (tool-restricted), or MENHIR_KNOWN_CLIENTS "
-                    "(recognized, unrestricted), then mint."
-                )
-            })
+            raise McpToolRefusal(
+                f"refusing to mint undeclared client {requested!r}: this deployment "
+                "configures per-client restrictions, so a minted identity must be declared "
+                "server-side first. Add it to MENHIR_CLIENT_NAMESPACES (pinned), "
+                "MENHIR_CLIENT_TOOLS (tool-restricted), or MENHIR_KNOWN_CLIENTS "
+                "(recognized, unrestricted), then mint.",
+                code="refused",
+            )
 
         raw, record = store.mint(requested, tier)
         return json.dumps({

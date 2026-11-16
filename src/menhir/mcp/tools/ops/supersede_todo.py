@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -59,14 +60,15 @@ class SupersedeTodoTool(BaseTextTool):
                 label="todo",
             )
             if refusal:
-                return refusal
+                raise McpToolRefusal(refusal, code="outside_namespace")
 
         result = await backend.supersede_todo(old_uuid, new_uuid)
         if result.get("applied"):
             return f"TODO {old_uuid} is now closed, superseded by {new_uuid}"
-        return (
+        raise McpToolRefusal(
             f"Refused: {old_uuid} was not superseded ({result.get('reason', 'unknown')}). "
             "The old todo must be open and have no successor already, the new todo must "
             "exist and be open, they must not be the same todo, and the new todo must be "
-            "in the old one's namespace or the shared default bucket."
+            "in the old one's namespace or the shared default bucket.",
+            code="refused",
         )

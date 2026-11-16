@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -30,7 +31,10 @@ class RevokeClientTool(BaseTextTool):
 
         store = get_client_token_store()
         if store is None:
-            return json.dumps({"error": "per-client token tier is not enabled (set MENHIR_CLIENT_TOKENS_ENABLED=1)"})
+            raise McpToolRefusal(
+                "per-client token tier is not enabled (set MENHIR_CLIENT_TOKENS_ENABLED=1)",
+                code="disabled",
+            )
 
         revoked = store.revoke(client_id)
         return json.dumps({"client_id": client_id, "revoked": revoked})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -57,7 +58,7 @@ class SupersedeArtifactTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         refusal = await foreign_object_refusal(
             uuid=old_uuid,
             namespace=namespace,
@@ -67,13 +68,14 @@ class SupersedeArtifactTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         result = await backend.supersede_artifact(new_uuid, old_uuid)
 
         if result.get("applied"):
             return f"{old_uuid} is now SUPERSEDED by {new_uuid}"
-        return (
+        raise McpToolRefusal(
             f"Refused: {old_uuid} was not superseded. Supersession is same-type only, the "
             "artifacts must share a namespace, and an already-superseded or deferred artifact "
-            "is not re-superseded so the recorded replacement stays the one that applied."
+            "is not re-superseded so the recorded replacement stays the one that applied.",
+            code="refused",
         )

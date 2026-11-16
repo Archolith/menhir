@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -65,14 +66,21 @@ class TransitionArtifactTool(BaseTextTool):
 
         reason = result.get("reason") or "unknown"
         if reason == "artifact_not_found":
-            return f"Artifact {artifact_uuid} not found"
+            raise McpToolRefusal(f"Artifact {artifact_uuid} not found", code="not_found")
         if reason == "supersession_requires_replacement":
-            return "Refused: SUPERSEDED requires a replacement. Use supersede_artifact(new_uuid, old_uuid)."
+            raise McpToolRefusal(
+                "Refused: SUPERSEDED requires a replacement. Use supersede_artifact(new_uuid, old_uuid).",
+                code="refused",
+            )
         if reason == "stale_transition":
-            return f"Refused: {artifact_uuid} changed during this transition. Read it again before retrying."
+            raise McpToolRefusal(
+                f"Refused: {artifact_uuid} changed during this transition. Read it again before retrying.",
+                code="conflict",
+            )
         valid = result.get("valid_transitions")
         suffix = f" Legal from here: {', '.join(sorted(valid))}" if valid else ""
-        return (
+        raise McpToolRefusal(
             f"Refused: {result.get('from_status', '?')} -> {to_status} is not legal for a "
-            f"{result.get('artifact_type', '?')}.{suffix}"
+            f"{result.get('artifact_type', '?')}.{suffix}",
+            code="refused",
         )

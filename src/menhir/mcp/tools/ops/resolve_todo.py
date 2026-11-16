@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -51,7 +52,7 @@ class ResolveTodoTool(BaseTextTool):
             label="todo",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         refusal = await foreign_object_refusal(
             uuid=memory_uuid,
             namespace=namespace,
@@ -59,13 +60,14 @@ class ResolveTodoTool(BaseTextTool):
             label="memory",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
 
         result = await backend.resolve_todo(todo_uuid, memory_uuid)
         if result.get("applied"):
             return f"TODO {todo_uuid} closed, resolved by memory {memory_uuid}"
-        return (
+        raise McpToolRefusal(
             f"Refused: {todo_uuid} was not resolved. The todo must be open, and the memory "
             "must be a durable non-structural memory in the todo's namespace or the shared "
-            "default bucket."
+            "default bucket.",
+            code="refused",
         )

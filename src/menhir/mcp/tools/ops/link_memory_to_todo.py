@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.domain.todo_location import TODO_LINK_RELATIONS
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -54,10 +55,11 @@ class LinkMemoryToTodoTool(BaseTextTool):
         self, memory_uuid: str, todo_uuid: str, relation: str, namespace: str = ""
     ) -> str:
         if relation not in _RELATIONS:
-            return (
+            raise McpToolRefusal(
                 f"Refused: unsupported relation {relation!r}. Use one of "
                 f"{', '.join(_RELATIONS)}. Lifecycle relations are not reachable here -- "
-                "use resolve_todo or reopen_todo, which move status and edge together."
+                "use resolve_todo or reopen_todo, which move status and edge together.",
+                code="invalid_argument",
             )
 
         backend = self.get_backend()
@@ -68,7 +70,7 @@ class LinkMemoryToTodoTool(BaseTextTool):
             label="todo",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         refusal = await foreign_object_refusal(
             uuid=memory_uuid,
             namespace=namespace,
@@ -76,13 +78,14 @@ class LinkMemoryToTodoTool(BaseTextTool):
             label="memory",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
 
         result = await backend.link_memory_to_todo(memory_uuid, todo_uuid, relation)
         if result.get("linked"):
             return f"Memory {memory_uuid} now {relation} TODO {todo_uuid}"
-        return (
+        raise McpToolRefusal(
             f"Refused: no link written ({result.get('reason', 'unknown')}). The memory must "
             "be a durable non-structural memory, and the todo must be in the memory's "
-            "namespace or the shared default bucket."
+            "namespace or the shared default bucket.",
+            code="refused",
         )

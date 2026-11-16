@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -65,7 +66,7 @@ class LinkArtifactsTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         refusal = await foreign_object_refusal(
             uuid=target_uuid,
             namespace=namespace,
@@ -75,7 +76,7 @@ class LinkArtifactsTool(BaseTextTool):
             label="artifact",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         result = await backend.link_artifacts(source_uuid, target_uuid, relation)
 
         if result.get("linked"):
@@ -86,8 +87,9 @@ class LinkArtifactsTool(BaseTextTool):
         # an edge, and must go through supersede_artifact so the old artifact's
         # status moves with it.
         if relation == "supersedes":
-            return (
+            raise McpToolRefusal(
                 "Refused: supersedes is not a declarable relation. Use supersede_artifact, "
-                "which writes the edge and moves the superseded artifact's status together."
+                "which writes the edge and moves the superseded artifact's status together.",
+                code="refused",
             )
-        return f"Refused: {self._REASONS.get(reason, reason)}"
+        raise McpToolRefusal(f"Refused: {self._REASONS.get(reason, reason)}", code="refused")

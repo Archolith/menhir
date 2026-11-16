@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -44,8 +45,8 @@ class CloseTodoTool(BaseTextTool):
             label="todo",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         closed = await backend.close_todo(uuid)
         if closed:
             return f"Closed TODO {uuid}"
-        return f"TODO {uuid} not found or already closed"
+        raise McpToolRefusal(f"TODO {uuid} not found or already closed", code="not_found")

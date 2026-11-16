@@ -6,6 +6,7 @@ from typing import Any
 
 from menhir.mcp.formatters import _collect_episode_status, _format_episode_status, _require_episode_uuid
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -77,7 +78,10 @@ class ForceReenrichTool(BaseTextTool):
         namespace: str = "",
     ) -> str:
         backend = self.get_backend()
-        normalized_uuid = _require_episode_uuid(episode_uuid)
+        try:
+            normalized_uuid = _require_episode_uuid(episode_uuid)
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
         # pinned client that learned one through any global read could previously inspect,
         # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
@@ -92,11 +96,14 @@ class ForceReenrichTool(BaseTextTool):
             label="episode",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
 
         reset_ok = await backend.force_reset_failed_episode(normalized_uuid)
         if not reset_ok:
-            return f"episode_uuid: {normalized_uuid}\nresult: NOT_FOUND — no FAILED/PENDING episode with that UUID"
+            raise McpToolRefusal(
+                f"episode_uuid: {normalized_uuid}\nresult: NOT_FOUND — no FAILED/PENDING episode with that UUID",
+                code="not_found",
+            )
 
         queued = await backend.enqueue_pending_episode(normalized_uuid)
 

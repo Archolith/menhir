@@ -6,6 +6,7 @@ from typing import Any
 
 from menhir.mcp.formatters import _collect_episode_status, _format_episode_watch, _require_episode_uuid
 from menhir.mcp.ownership import foreign_object_refusal
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -68,7 +69,10 @@ class WatchEnrichmentTool(BaseTextTool):
         namespace: str = "",
     ) -> str:
         backend = self.get_backend()
-        normalized_uuid = _require_episode_uuid(episode_uuid)
+        try:
+            normalized_uuid = _require_episode_uuid(episode_uuid)
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
         # pinned client that learned one through any global read could previously inspect,
         # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
@@ -83,7 +87,7 @@ class WatchEnrichmentTool(BaseTextTool):
             label="episode",
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
         row, history, timed_out = await _collect_episode_status(
             backend,
             normalized_uuid,

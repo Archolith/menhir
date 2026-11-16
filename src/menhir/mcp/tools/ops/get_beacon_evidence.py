@@ -69,18 +69,21 @@ class GetBeaconEvidenceTool(BaseTextTool):
         if repository:
             found = await backend.query_structure(repository, "beacon_projects_for_repository")
             if isinstance(found, dict) and "error" in found:
-                raise McpToolRefusal(str(found["error"]))
+                raise McpToolRefusal(str(found["error"]), code="refused")
             projects = list((found or {}).get("projects") or [])
             if not projects:
-                raise McpToolRefusal(f"no indexed project recorded repository {repository}")
+                raise McpToolRefusal(
+                    f"no indexed project recorded repository {repository}", code="not_found"
+                )
             if len(projects) > 1:
                 raise McpToolRefusal(
                     f"{len(projects)} indexed projects recorded repository {repository}; "
-                    f"name one with project_id: {_describe(projects)}"
+                    f"name one with project_id: {_describe(projects)}",
+                    code="invalid_argument",
                 )
             project_id = projects[0]["project_id"]
         result = await backend.query_structure(project_id, "beacon_evidence")
         if isinstance(result, dict) and "error" in result:
             # An MCP error result, so Beacon can tell a refusal from evidence.
-            raise McpToolRefusal(str(result["error"]))
+            raise McpToolRefusal(str(result["error"]), code="refused")
         return json.dumps(result, sort_keys=True, ensure_ascii=True)
