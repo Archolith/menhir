@@ -41,7 +41,11 @@ ROOT = "C:\\Repo"
         # Outside the root: left absolute, so it reports as not indexed rather than matching.
         ("D:\\Other\\src\\a.py", ROOT, "D:/Other/src/a.py"),
         ("C:\\Repository\\src\\a.py", ROOT, "C:/Repository/src/a.py"),
-        ("/srv/repo/src/a.py", "", "/srv/repo/src/a.py"),
+        # A plain leading slash outside any known root reads as repo-relative (#679 decision,
+        # pinned by test_normalize_structure_path_matches_stored_spelling).
+        ("/src/a.py", "", STORED),
+        ("/src/a.py", "/srv/repo", STORED),
+        ("/c/Repo/src/a.py", "", "/c/Repo/src/a.py"),
         # A one-letter top directory is a real directory, not a drive (#682's mangling).
         ("a/foo.py", "", "a/foo.py"),
     ],
@@ -147,6 +151,25 @@ def test_blast_radius_reports_an_absolute_path_outside_the_root_as_unindexed() -
     neo4j = _RecordingNeo4j()
     result = StructureGraphWriter(neo4j=neo4j).query_blast_radius("proj", ["D:\\Other\\src\\a.py"])
     assert result["unindexed_paths"] == ["D:/Other/src/a.py"]
+
+
+@pytest.mark.parametrize("spelling", ["C:\\Elsewhere\\src\\a.py", "/d/Other/src/a.py"])
+def test_coverage_check_uses_the_traversal_spelling(spelling: str) -> None:
+    """Counterexample: the traversal and the coverage check must not normalize differently.
+    A drive path outside the root stays absolute for the traversal, so the coverage check must
+    not reduce it to `src/a.py`, find it, and call the input indexed -- that reproduces the
+    "none found (project fully indexed)" all-clear."""
+    neo4j = _RecordingNeo4j()
+    result = StructureGraphWriter(neo4j=neo4j).query_blast_radius("proj", [spelling])
+    assert result["unindexed_paths"] == [normalize_query_path(spelling, ROOT)]
+    assert STORED not in neo4j.path_params()
+
+
+def test_leading_slash_is_read_as_repo_relative_everywhere() -> None:
+    neo4j = _RecordingNeo4j()
+    result = StructureGraphWriter(neo4j=neo4j).query_blast_radius("proj", ["/src/a.py"])
+    assert result["changed"] == [STORED] and result["unindexed_paths"] == []
+    assert set(neo4j.path_params()) == {STORED}
 
 
 def test_relative_paths_cost_no_root_lookup() -> None:
@@ -326,6 +349,28 @@ def test_blast_radius_renders_caps_and_open_todos() -> None:
     assert "Function-level callers (1) [first results only; more exist]" in out
     assert "Related memories (1) [most recent only; more exist" in out
     assert "Open TODOs at impacted files (1)" in out and "fix a" in out
+
+
+def test_depth_limit_never_pairs_with_a_full_index_claim() -> None:
+    tool, _ = _tool({"blast_radius": _blast(depth_truncated=True, max_depth=5)})
+    blast = _run(tool, query_type="blast_radius", project="p1", path=STORED)
+    assert "fully indexed" not in blast and "DEPTH LIMIT" in blast
+
+    data = {
+        "changed_files": [STORED], "affected_source_files": [], "test_files": [],
+        "test_command": "pytest", "unindexed_paths": [], "coverage": {"known": True},
+        "depth_truncated": True, "max_depth": 5,
+    }
+    tool, _ = _tool({"affected_tests": data})
+    affected = _run(tool, query_type="affected_tests", project="p1", path=STORED)
+    assert "fully indexed" not in affected and "5 import hops" in affected
+
+
+def test_absolute_path_outside_root_gets_a_note() -> None:
+    tool, _ = _tool({"blast_radius": _blast(unindexed_paths=["D:/Other/a.py"])})
+    out = _run(tool, query_type="blast_radius", project="p1", path="D:\\Other\\a.py")
+    assert "absolute path outside this project's recorded root" in out
+    assert "not indexed" in out
 
 
 def test_affected_tests_names_unindexed_inputs_even_when_some_tests_were_found() -> None:

@@ -40,16 +40,13 @@ _RELATED_MEMORY_CAP = 10
 
 
 def _normalize_structure_path(path: str) -> str:
-    """Normalize a caller-supplied path to the stored `structure_path` spelling.
+    """Stored `structure_path` spelling of a caller path, with no project root known.
 
-    Stored paths are forward-slashed and repo-relative with no leading `./`. Callers pass
-    paths through verbatim, so without this a Windows-style or dot-prefixed path silently
-    fails to match an indexed file.
+    Kept as the one entry point older code and tests use; it is `normalize_query_path`, so there
+    is a single normalizer and the coverage check cannot drift from the traversal (#679).
     """
-    p = str(path).strip().replace("\\", "/")
-    while p.startswith("./"):
-        p = p[2:]
-    return p.lstrip("/").rstrip("/")
+    return normalize_query_path(path)
+
 
 
 def _scrub_signature(signature: str) -> str:
@@ -652,33 +649,24 @@ class StructureGraphWriter:
         }
 
     def which_paths_indexed(self, project: str, file_paths: list[str]) -> set[str]:
-        """Subset of *file_paths* that exist as indexed entities for *project*.
+        """Subset of *file_paths* that exist as indexed entities for *project*, matched EXACTLY.
 
-        Matching is on the caller's ORIGINAL string, but each path is also probed in its
-        normalized form. `structure_path` is stored forward-slashed and repo-relative, while
-        callers pass paths through verbatim -- a Windows `src\\a.py` or a `./src/a.py` would
-        otherwise miss and be reported as un-indexed, producing a false refusal for a file
-        that is present.
+        Callers pass the spellings their traversal used (normalized by
+        `domain.structure_paths`). Normalizing again here, differently, is what let
+        `/src/a.py` count as indexed while the traversal matched nothing (#679).
         """
         if not file_paths:
             return set()
-        variants: dict[str, str] = {}
-        for original in file_paths:
-            variants.setdefault(_normalize_structure_path(original), original)
         rows = self.neo4j.execute(
             """
             UNWIND $paths AS p
             MATCH (n:Entity {structure_project: $proj, structure_path: p})
             RETURN DISTINCT n.structure_path AS path
             """,
-            {"proj": project, "paths": list(variants)},
+            {"proj": project, "paths": list(dict.fromkeys(file_paths))},
         )
-        # Map hits back to the caller's spelling so the caller can compare against its input.
-        return {
-            variants[str(r["path"])]
-            for r in rows
-            if str(r.get("path") or "") in variants
-        }
+        wanted = set(file_paths)
+        return {str(r["path"]) for r in rows if str(r.get("path") or "") in wanted}
 
     def get_scan_fingerprint(
         self, project_name: str, *, project_id: str | None = None

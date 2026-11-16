@@ -436,11 +436,16 @@ def _normalize_for_query(query_type: str, path: str, root: str) -> tuple[str, di
         return path, {}
     if query_type in _MULTI_PATH_QUERY_TYPES:
         paths, rewrites = normalize_query_paths(path.split(","), root)
+        # An absolute path that could not be mapped is unchanged, but still worth a note.
+        for original in (p.strip() for p in path.split(",")):
+            if original and is_absolute_spelling(normalize_query_path(original, root)):
+                rewrites.setdefault(original, normalize_query_path(original, root))
         return ",".join(paths), rewrites
     if query_type in _NORMALIZED_QUERY_TYPES:
         original = path.strip()
         new = normalize_query_path(original, root, prefix=query_type in _PREFIX_QUERY_TYPES)
-        return new, ({original: new} if new != original else {})
+        changed = new != original or is_absolute_spelling(new)
+        return new, ({original: new} if changed else {})
     return path, {}
 
 
@@ -594,6 +599,10 @@ def _format_blast_radius(data: dict, project: str) -> str:
         lines.append(f"\nAffected tests ({len(data['affected_tests'])}):")
         for t in data["affected_tests"]:
             lines.append(f"  {t['test']} (covers {t['covers']})")
+    elif data.get("depth_truncated"):
+        lines.append(
+            "\nAffected tests: none found within the depth limit -- not evidence of absence."
+        )
     else:
         lines.append(
             "\nAffected tests: none found" + _negative_qualifier(data.get("coverage"))
@@ -660,6 +669,11 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
             lines.append(
                 "\nAn empty test set here reflects a missing index, not untested code. "
                 "Re-scan with ingest_project(path=..., force=True), then retry."
+            )
+        elif data.get("depth_truncated"):
+            lines.append(
+                f"No tests found within {data.get('max_depth')} import hops, and more importers "
+                "exist beyond that limit -- not evidence that the change is untested."
             )
         elif partial:
             cov = data.get("coverage") or {}

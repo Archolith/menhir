@@ -46,17 +46,20 @@ def normalize_query_path(path: str, root_path: str = "", *, prefix: bool = False
     ``prefix=True`` keeps a trailing slash: for `files` and `symbols` a trailing `/` means
     "directory", and dropping it would turn `src/` into a match for `src_old/`.
 
-    An absolute path is made repo-relative only when it lies under *root_path* (compared
-    separator-insensitively, and case-insensitively for Windows drives). An absolute path
-    outside the root comes back forward-slashed but still absolute, so it reports as not indexed
-    instead of silently matching a different file.
+    An absolute path under *root_path* is made repo-relative (compared separator-insensitively,
+    and case-insensitively for Windows drives). Outside the root, a Windows-drive spelling
+    (`C:/...`, `/c/...`, `/mnt/c/...`) comes back forward-slashed but still absolute, so it
+    reports as not indexed instead of matching a different file. A plain leading `/` is read as
+    repo-relative (`/src/a.py` -> `src/a.py`), as it always was; callers echo the rewrite.
     """
     raw = str(path).strip().replace("\\", "/")
     trailing = prefix and raw.endswith("/")
     if is_absolute_spelling(raw):
         rel = _strip_root(raw, root_path)
         if rel is None:
-            return raw
+            if _drive_form(raw) is not None:
+                return raw
+            rel = _relative(raw)
     else:
         rel = _relative(raw)
     rel = rel.rstrip("/")
