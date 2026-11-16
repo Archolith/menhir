@@ -8,6 +8,7 @@ from itertools import combinations
 from menhir.mcp.formatters import _coerce_conflict_members, _count_unresolved_members
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +76,12 @@ class ResolveConflictTool(BaseJsonTool):
             backend = self.get_backend()
             normalized_group = (group_id or "").strip()
             if not normalized_group:
-                return self.render_json(
-                    {"ok": False, "tool": self.operation, "error": {"message": "Invalid group_id: value is required."}}
-                )
+                raise McpToolRefusal("Invalid group_id: value is required.")
 
             normalized_action = (action or "").strip().lower()
             allowed_actions = {"keep_both", "replace", "discard_new"}
             if normalized_action not in allowed_actions:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {"message": "Invalid action. Use: keep_both, replace, discard_new."},
-                    }
-                )
+                raise McpToolRefusal("Invalid action. Use: keep_both, replace, discard_new.")
 
             keep = (keep_uuid or "").strip() or None
             remove = (remove_uuid or "").strip() or None
@@ -103,20 +96,14 @@ class ResolveConflictTool(BaseJsonTool):
             )
             group_row = next((row for row in rows if str(row.get("group_id") or "") == normalized_group), None)
             if group_row is None:
-                return f"Conflict group not found: {normalized_group}"
+                raise McpToolRefusal(f"Conflict group not found: {normalized_group}", code="not_found")
 
             members = _coerce_conflict_members(group_row)
             member_uuids = {str(member.get("uuid") or "") for member in members if member.get("uuid")}
 
             if normalized_action == "keep_both":
                 if keep is not None or remove is not None:
-                    return self.render_json(
-                        {
-                            "ok": False,
-                            "tool": self.operation,
-                            "error": {"message": "action=keep_both must not include keep_uuid/remove_uuid."},
-                        }
-                    )
+                    raise McpToolRefusal("action=keep_both must not include keep_uuid/remove_uuid.")
                 if dry_run:
                     return self.render_json(
                         {
@@ -169,37 +156,13 @@ class ResolveConflictTool(BaseJsonTool):
                 )
 
             if keep is None:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {"message": f"action={normalized_action} requires keep_uuid."},
-                    }
-                )
+                raise McpToolRefusal(f"action={normalized_action} requires keep_uuid.")
             if keep not in member_uuids:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {"message": f"keep_uuid {keep} is not a member of group_id={normalized_group}."},
-                    }
-                )
+                raise McpToolRefusal(f"keep_uuid {keep} is not a member of group_id={normalized_group}.")
             if remove is not None and remove not in member_uuids:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {"message": f"remove_uuid {remove} is not a member of group_id={normalized_group}."},
-                    }
-                )
+                raise McpToolRefusal(f"remove_uuid {remove} is not a member of group_id={normalized_group}.")
             if remove is not None and remove == keep:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {"message": "remove_uuid cannot equal keep_uuid."},
-                    }
-                )
+                raise McpToolRefusal("remove_uuid cannot equal keep_uuid.")
 
             would_remove = [remove] if remove else sorted(uuid for uuid in member_uuids if uuid != keep)
             if dry_run:
@@ -262,14 +225,10 @@ class ResolveConflictTool(BaseJsonTool):
                     f"Removed {len(result.get('removed_uuids') or [])} node(s) as non-keep members of group."
                 )
             return self.render_json(payload)
+        except McpToolRefusal:
+            raise
         except ValueError as exc:
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {"message": str(exc)},
-                }
-            )
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
 
 
 async def _record_suppression(

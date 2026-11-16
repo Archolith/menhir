@@ -11,6 +11,7 @@ from menhir.domain.structure_paths import (
 )
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 # Read-time existence check on a project's root_path — the structural-graph analogue of
 # stale_labeling.py's file-anchor advisory. The structural graph reflects the last
@@ -79,6 +80,7 @@ async def query_structure(
             - "affected_tests" — minimal test set for changed files (path = comma-separated file paths)
             - "symbols" — list functions/classes/methods (path = exact file, dir prefix with /, or empty for all)
             - "context" — full picture of one file: summary + symbols + imports + tests (requires path)
+            - "documents" — documents ingested for the project (path = optional path filter)
         project: Project name (e.g. "menhir"). Required for all query types except "projects".
         path: File path filter. Used by "files" (prefix filter), "imports" (exact file), "tests" (source file),
             "blast_radius" and "affected_tests" (comma-separated list of changed file paths),
@@ -115,7 +117,8 @@ class QueryStructureTool(BaseTextTool):
         namespace: str = "",
     ) -> str:
         """query_type: projects, overview, files, imports, tests, endpoints,
-        dependencies, cross_refs, blast_radius, affected_tests, symbols, context.
+        dependencies, cross_refs, blast_radius, affected_tests, symbols, context,
+        documents.
         project is required except for projects. Check projects before trusting
         project-scoped results.
 
@@ -201,12 +204,12 @@ class QueryStructureTool(BaseTextTool):
             return "\n".join(lines)
 
         if not project:
-            return "Error: project name is required for this query type."
+            raise McpToolRefusal("project name is required for this query type.")
 
         projects = await backend.query_structure("", "projects")
         known_projects = {str(p.get("name", "")) for p in projects}
         if project not in known_projects:
-            return _format_unknown_project(project, projects)
+            raise McpToolRefusal(_format_unknown_project(project, projects), code="not_found")
 
         # Coverage for THIS project, derived from the listing already fetched above rather
         # than a second round trip. Every completeness-sensitive answer below is qualified
@@ -238,8 +241,15 @@ class QueryStructureTool(BaseTextTool):
             text = await self._dispatch(
                 query_type, project, path, backend, namespace, neg=neg
             )
+        except McpToolRefusal as refusal:
+            if refusal.code == "not_indexed" and (stale_banner or notes):
+                # The stale banner and path-rewrite notes explain a miss; keep them with it.
+                raise McpToolRefusal(
+                    stale_banner + notes + str(refusal), code=refusal.code, hint=refusal.hint
+                ) from refusal
+            raise
         except ValueError as e:
-            return f"Error: {e}"
+            raise McpToolRefusal(str(e), code="invalid_argument") from e
         return stale_banner + notes + text
 
     async def _dispatch(
@@ -290,13 +300,13 @@ class QueryStructureTool(BaseTextTool):
 
             if query_type == "imports":
                 if not path:
-                    return "Error: path is required for imports query (the file to inspect)."
+                    raise McpToolRefusal("path is required for imports query (the file to inspect).")
                 result = await backend.query_structure(
                     project, "imports", {"file_path": path}
                 )
                 if not result["imports"] and not result["imported_by"]:
                     if await _path_indexed(backend, project, path) is False:
-                        return _not_indexed(project, path, "imports")
+                        raise McpToolRefusal(_not_indexed(project, path, "imports"), code="not_indexed")
                 lines = [f"Import graph for {path}:"]
                 if result["imports"]:
                     lines.append(f"  Imports ({len(result['imports'])}):")
@@ -316,7 +326,7 @@ class QueryStructureTool(BaseTextTool):
                 kwargs = {"file_path": path} if path else {}
                 tests = await backend.query_structure(project, "tests", kwargs)
                 if not tests and path and await _path_indexed(backend, project, path) is False:
-                    return _not_indexed(project, path, "test mappings")
+                    raise McpToolRefusal(_not_indexed(project, path, "test mappings"), code="not_indexed")
                 if not tests:
                     return (
                         f"No test mappings found{neg}"
@@ -360,7 +370,7 @@ class QueryStructureTool(BaseTextTool):
 
             if query_type == "blast_radius":
                 if not path:
-                    return "Error: path is required for blast_radius query (comma-separated file paths)."
+                    raise McpToolRefusal("path is required for blast_radius query (comma-separated file paths).")
                 file_paths = [p.strip() for p in path.split(",") if p.strip()]
                 # namespace scopes only the open-TODO section of the result, which
                 # reads :Todo through :TodoLocation. Omitted keeps the historical
@@ -374,7 +384,7 @@ class QueryStructureTool(BaseTextTool):
 
             if query_type == "affected_tests":
                 if not path:
-                    return "Error: path is required for affected_tests query (comma-separated file paths)."
+                    raise McpToolRefusal("path is required for affected_tests query (comma-separated file paths).")
                 file_paths = [p.strip() for p in path.split(",") if p.strip()]
                 result = await backend.query_structure(
                     project, "affected_tests", {"file_paths": file_paths}
@@ -389,14 +399,12 @@ class QueryStructureTool(BaseTextTool):
                     if path.endswith("/"):
                         return _empty_prefix(f"No indexed symbols in {project} under '{path}'", neg)
                     if await _path_indexed(backend, project, path) is False:
-                        return _not_indexed(project, path, "symbols")
+                        raise McpToolRefusal(_not_indexed(project, path, "symbols"), code="not_indexed")
                 return _format_symbols(result, path, project, neg=neg)
 
             if query_type == "context":
                 if not path:
-                    return (
-                        "Error: path is required for context query (exact file path)."
-                    )
+                    raise McpToolRefusal("path is required for context query (exact file path).")
                 result = await backend.query_structure(
                     project, "context", {"path": path}
                 )
@@ -418,7 +426,7 @@ class QueryStructureTool(BaseTextTool):
                     lines.append(f"  {d['path']}{tag}")
                 return "\n".join(lines)
 
-            return (
+            raise McpToolRefusal(
                 f"Unknown query_type: {query_type}. Use one of: projects, overview, files, imports, "
                 f"tests, endpoints, dependencies, cross_refs, blast_radius, affected_tests, "
                 f"symbols, context, documents."
@@ -569,7 +577,7 @@ def _unindexed_refusal(data: dict, project: str, what: str) -> str | None:
 def _format_blast_radius(data: dict, project: str) -> str:
     refusal = _unindexed_refusal(data, project, "blast radius")
     if refusal:
-        return refusal
+        raise McpToolRefusal(refusal, code="not_indexed")
 
     lines = [f"Blast radius for {project}:"]
     caveat = _coverage_caveat(data)
@@ -660,11 +668,13 @@ def _format_blast_radius(data: dict, project: str) -> str:
 
 def _format_affected_tests(data: dict, *, neg: str = "") -> str:
     lines = []
+    cannot_determine = False
 
     if not data["test_files"]:
         missing = data.get("unindexed_paths") or []
         partial = (data.get("coverage") or {}).get("partial_index")
         if missing:
+            cannot_determine = True
             which = (
                 "the changed files are"
                 if len(missing) >= len(data.get("changed_files") or missing)
@@ -684,6 +694,7 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
                 "exist beyond that limit -- not evidence that the change is untested."
             )
         elif partial:
+            cannot_determine = True
             cov = data.get("coverage") or {}
             lines.append(
                 "Cannot determine the affected tests: this project is only partially "
@@ -695,6 +706,8 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
         lines.append("Recommendation: run full test suite.")
         lines.append("")
         lines.extend(f"  {c}" for c in str(data["test_command"]).splitlines())
+        if cannot_determine:
+            raise McpToolRefusal("\n".join(lines), code="not_indexed")
         return "\n".join(lines)
 
     lines.append(f"Test selector for {len(data['changed_files'])} changed file(s):")
@@ -757,7 +770,7 @@ def _format_symbols(data: dict, path: str, project: str, *, neg: str = "") -> st
 
 def _format_context(data: dict) -> str:
     if "error" in data:
-        return f"Error: {data['error']}"
+        raise McpToolRefusal(str(data["error"]))
     lines = [f"Context for {data.get('path', '')}:"]
     summary = data.get("summary", "")
     if summary:

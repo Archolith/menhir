@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.domain.recall import InvalidQueryPresetError
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import (
@@ -12,6 +13,8 @@ from menhir.mcp.formatters import (
 from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.namespace_note import namespace_note
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 async def recall_context_memories(
@@ -97,20 +100,13 @@ class RecallContextMemoriesTool(BaseJsonTool):
             workspace=ws,
             namespace=ns,
         ):
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {
-                        "message": (
-                            "Context bootstrap required. "
-                            "Call read_flagged_memories("
-                            f"reader_id='{normalized_reader_id}', "
-                            f"workspace='{ws or ''}') first. "
-                            f"(current_flagged_version={flagged_version})"
-                        )
-                    },
-                }
+            raise McpToolRefusal(
+                "Context bootstrap required. "
+                "Call read_flagged_memories("
+                f"reader_id='{normalized_reader_id}', "
+                f"workspace='{ws or ''}') first. "
+                f"(current_flagged_version={flagged_version})",
+                code="bootstrap_required",
             )
         relevant: dict[str, object] = {}
         query_text = (query or "").strip()
@@ -126,18 +122,8 @@ class RecallContextMemoriesTool(BaseJsonTool):
                     **({"include_warden_status": True} if include_warden_status else {}),
                     namespace=namespace or None,
                 )
-            except ValueError:
-                return self.render_json(
-                    {
-                        "ok": False,
-                        "tool": self.operation,
-                        "error": {
-                            "message": (
-                                f"Invalid preset '{preset}'. Use: knowledge, recent, emotional, connected, conflict."
-                            )
-                        },
-                    }
-                )
+            except InvalidQueryPresetError as exc:
+                raise McpToolRefusal(str(exc)) from exc
             for scored in relevant.get("results", []):
                 raw_row = await backend.fetch_memory_by_uuid(
                     str(scored.get("uuid") or ""), namespace=namespace or None
@@ -188,6 +174,10 @@ class RecallContextMemoriesTool(BaseJsonTool):
             pass  # non-critical; don't block bootstrap
 
         operator_warnings = await session_start_warning_lines(backend)
+        ns_note = None
+        if not relevant_rows and not non_flagged_recent:
+            # #671: an empty result under a namespace that holds nothing is not "no history".
+            ns_note = await namespace_note(backend, namespace)
         return self.render_recall_json(
             {
                 "reader_id": normalized_reader_id,
@@ -206,6 +196,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 "recent": [_compact_memory_item(row, tag="recent") for row in non_flagged_recent],
                 "stale_todo_warning": stale_warning or None,
                 **({"operator_warnings": operator_warnings} if operator_warnings else {}),
+                **({"namespace_note": ns_note} if ns_note else {}),
             },
             log_context={"namespace": namespace or None, "limit": limit},
         )

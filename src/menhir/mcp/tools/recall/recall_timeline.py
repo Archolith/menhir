@@ -6,6 +6,8 @@ from typing import Any
 
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.namespace_note import namespace_note
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 async def recall_timeline(
@@ -125,14 +127,10 @@ class RecallTimelineTool(BaseJsonTool):
                 history_offset=history_offset,
                 history_limit=history_limit,
             )
+        except McpToolRefusal:
+            raise
         except ValueError as exc:
-            return self.render_json(
-                {
-                    "ok": False,
-                    "tool": self.operation,
-                    "error": {"message": str(exc)},
-                }
-            )
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         payload: dict[str, Any] = {
             "thread": result.get("thread"),
             "count": len(result.get("entries", []) or []),
@@ -199,4 +197,9 @@ class RecallTimelineTool(BaseJsonTool):
             ]
         if result.get("note"):
             payload["note"] = result.get("note")
+        if not payload["entries"] and not payload.get("histories"):
+            # #671: an empty result under a namespace that holds nothing is not "no history".
+            ns_note = await namespace_note(backend, namespace)
+            if ns_note:
+                payload["namespace_note"] = ns_note
         return self.render_recall_json(payload)

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from menhir.domain.recall import InvalidQueryPresetError, format_query_preset_values
+from menhir.domain.recall import InvalidQueryPresetError
 from menhir.mcp.service_access import get_mcp_session, get_request_session
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 def _build_temporal_header() -> str | None:
@@ -105,10 +106,8 @@ class BuildContextTool(BaseTextTool):
                 **({"include_warden_status": True} if include_warden_status else {}),
                 namespace=namespace or None,
             )
-        except InvalidQueryPresetError:
-            return (
-                f"Invalid preset '{preset}'. Use: {format_query_preset_values()}."
-            )
+        except InvalidQueryPresetError as exc:
+            raise McpToolRefusal(str(exc)) from exc
 
         # Temporal header — client-id-specific last_accessed lookup
         temporal_header = _build_temporal_header()
