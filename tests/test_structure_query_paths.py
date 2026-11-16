@@ -373,6 +373,16 @@ def test_absolute_path_outside_root_gets_a_note() -> None:
     assert "not indexed" in out
 
 
+def test_affected_tests_says_how_many_inputs_are_unindexed() -> None:
+    data = {
+        "changed_files": [STORED, "ghost.py"], "affected_source_files": [], "test_files": [],
+        "test_command": "pytest", "unindexed_paths": ["ghost.py"], "coverage": {"known": True},
+    }
+    tool, _ = _tool({"affected_tests": data})
+    out = _run(tool, query_type="affected_tests", project="p1", path=f"{STORED},ghost.py")
+    assert "1 of the 2 changed files are not in the structure graph" in out
+
+
 def test_affected_tests_names_unindexed_inputs_even_when_some_tests_were_found() -> None:
     data = {
         "changed_files": [STORED, "ghost.py"], "affected_source_files": [],

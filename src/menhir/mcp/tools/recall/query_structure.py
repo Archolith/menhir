@@ -661,9 +661,13 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
         missing = data.get("unindexed_paths") or []
         partial = (data.get("coverage") or {}).get("partial_index")
         if missing:
+            which = (
+                "the changed files are"
+                if len(missing) >= len(data.get("changed_files") or missing)
+                else f"{len(missing)} of the {len(data['changed_files'])} changed files are"
+            )
             lines.append(
-                "Cannot determine the affected tests: the changed files are not in the "
-                "structure graph."
+                f"Cannot determine the affected tests: {which} not in the structure graph."
             )
             lines.extend(f"  ? {p}" for p in missing)
             lines.append(
