@@ -27,6 +27,9 @@ class IngestResult:
     edges_touched: int
     idempotent_replay: bool = False
     processing_state: str | None = None
+    #: Why a FAILED result failed, for the caller (#669). A short class of cause plus the
+    #: exception type, never the exception text: that can echo the memory's content.
+    error: str | None = None
 
 
 class IdempotencyKeyConflict(ValueError):

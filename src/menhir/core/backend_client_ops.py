@@ -284,6 +284,9 @@ class BackendClientOpsMixin:
             },
         )
 
+    async def get_namespace_status(self, namespace: str) -> dict[str, Any]:
+        return await self._request("get_namespace_status", {"namespace": namespace})
+
     async def fetch_node_receipts(self, node_uuid: str) -> dict[str, Any] | None:
         return await self._request("fetch_node_receipts", {"node_uuid": node_uuid})
 

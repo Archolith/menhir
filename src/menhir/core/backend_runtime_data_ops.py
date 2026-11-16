@@ -582,6 +582,18 @@ class RuntimeProviderDataOpsMixin:
             "next_after_id": items[-1]["id"] if len(items) == safe_limit else None,
         }
 
+    async def get_namespace_status(self, namespace: str) -> dict[str, Any]:
+        """Whether *namespace* holds any record; unpinned callers also get similar spellings (#671).
+
+        A pinned caller asks only about its own silo, and never learns other namespaces' names.
+        """
+        pin = pinned_namespace()
+        return await self._off_loop(
+            self.built.graph_adapter.namespace_status,
+            pin or (namespace or ""),
+            include_similar=not pin,
+        )
+
     async def fetch_node_receipts(self, node_uuid: str) -> dict[str, Any] | None:
         return _to_jsonable(
             await self._off_loop(
