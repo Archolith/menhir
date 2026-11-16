@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -158,6 +159,27 @@ def describe_erase(node_uuid: str, outcome: dict[str, Any]) -> str:
     )
 
 
+def erase_failure_code(outcome: dict[str, Any]) -> str | None:
+    """The error code for an erase outcome that is a refusal or a failure, None for a success.
+
+    ``erased``, ``graph_already_absent`` and ``nothing_to_erase`` are successes. Used at the
+    delete_memory call site; describe_erase itself stays a pure describer (delete_memories
+    reports these per id).
+    """
+    reason = outcome.get("reason")
+    if reason in ("erased", "graph_already_absent", "nothing_to_erase"):
+        return None
+    if reason == "invalid_target":
+        return "invalid_argument"
+    if reason == OUTSIDE_NAMESPACE:
+        return "outside_namespace"
+    if reason == "erased_incomplete" and "foreign_target" in (
+        outcome.get("incomplete_reasons") or []
+    ):
+        return "outside_namespace"
+    return "write_failed"
+
+
 class DeleteMemoryTool(BaseTextTool):
     name = "delete_memory"
     scope = ToolScope.NAMESPACED
@@ -183,7 +205,9 @@ class DeleteMemoryTool(BaseTextTool):
 
         target = normalize_erase_target(node_uuid)
         if target is None:
-            return describe_erase(node_uuid, {"reason": INVALID_TARGET})
+            raise McpToolRefusal(
+                describe_erase(node_uuid, {"reason": INVALID_TARGET}), code="invalid_argument"
+            )
         backend = self.get_backend()
         # Ownership guard. Without the `namespace` parameter above, the pin cannot reach
         # this tool at all: _apply_pinned_namespace injects only into endpoints whose
@@ -198,6 +222,13 @@ class DeleteMemoryTool(BaseTextTool):
         ns = namespace.strip() or None
         if ns is not None and await backend.fetch_memory_by_uuid(target, namespace=ns) is None:
             if await backend.fetch_memory_by_uuid(target) is not None:
-                return describe_erase(target, {"reason": OUTSIDE_NAMESPACE, "namespace": ns})
-        outcome = await backend.erase_memory(target, namespace=ns)
-        return describe_erase(target, dict(outcome or {}))
+                raise McpToolRefusal(
+                    describe_erase(target, {"reason": OUTSIDE_NAMESPACE, "namespace": ns}),
+                    code="outside_namespace",
+                )
+        outcome = dict(await backend.erase_memory(target, namespace=ns) or {})
+        message = describe_erase(target, outcome)
+        code = erase_failure_code(outcome)
+        if code is not None:
+            raise McpToolRefusal(message, code=code)
+        return message

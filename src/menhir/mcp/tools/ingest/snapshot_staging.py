@@ -43,6 +43,7 @@ from menhir.config.snapshot_mode import (
 )
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.service_access import get_mcp_session
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.snapshot.receive import ReceiveError, StagingReceiver, UploadRecord
 
@@ -132,12 +133,10 @@ class _StagingTool(BaseJsonTool):
 
     def _guard(self) -> None:
         if not staging_enabled():
-            raise RuntimeError(_DISABLED_MESSAGE)
+            raise McpToolRefusal(_DISABLED_MESSAGE, code="disabled")
 
-    def _refuse(self, exc: ReceiveError) -> str:
-        return self.render_json(
-            {"ok": False, "tool": self.operation, "error": {"code": exc.code, "message": str(exc)}}
-        )
+    def _refuse(self, exc: ReceiveError) -> McpToolRefusal:
+        return McpToolRefusal(str(exc), code=exc.code)
 
 
 class BeginProjectSnapshotTool(_StagingTool):
@@ -180,7 +179,7 @@ class BeginProjectSnapshotTool(_StagingTool):
                 chunk_bytes=int(chunk_bytes) if chunk_bytes else None,
             )
         except ReceiveError as exc:
-            return self._refuse(exc)
+            raise self._refuse(exc) from exc
         return self.render_json(_record_json(record))
 
 
@@ -241,7 +240,7 @@ class PutProjectSnapshotChunkTool(_StagingTool):
                 digest=digest,
             )
         except ReceiveError as exc:
-            return self._refuse(exc)
+            raise self._refuse(exc) from exc
         return self.render_json(_record_json(record))
 
 
@@ -261,7 +260,7 @@ class GetProjectSnapshotStatusTool(_StagingTool):
         try:
             record = _receiver().status(upload_id=upload_id, principal=_principal())
         except ReceiveError as exc:
-            return self._refuse(exc)
+            raise self._refuse(exc) from exc
         return self.render_json(_record_json(record))
 
 
@@ -281,7 +280,7 @@ class AbortProjectSnapshotTool(_StagingTool):
         try:
             record = _receiver().abort(upload_id=upload_id, principal=_principal())
         except ReceiveError as exc:
-            return self._refuse(exc)
+            raise self._refuse(exc) from exc
         return self.render_json(_record_json(record))
 
 

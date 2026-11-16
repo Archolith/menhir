@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.contracts import ToolScope
 from menhir.services.project_ingest import (
     ProjectEpisodeStatus,
@@ -134,9 +135,9 @@ def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
             "  Retry with identity_action='adopt' and adopt_project_id=<id> to continue an "
             "existing project, or identity_action='new' to mint a fresh identity."
         )
-        return chr(10).join(lines)
+        raise McpToolRefusal(chr(10).join(lines), code="needs_decision")
     if outcome.error:
-        return f"Error: {outcome.error}"
+        raise McpToolRefusal(outcome.error)
     identity = f" (project_id={outcome.project_id})" if outcome.project_id else ""
     if outcome.skipped:
         return (

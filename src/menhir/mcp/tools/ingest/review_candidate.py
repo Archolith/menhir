@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from menhir.core.tenancy import foreign_object_refusal
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 
 _DECISIONS = ("approve", "reject")
@@ -54,10 +55,10 @@ class ReviewCandidateTool(BaseTextTool):
         """
         choice = (decision or "").strip().lower()
         if choice not in _DECISIONS:
-            return f"Invalid decision {decision!r}: use 'approve' or 'reject'."
+            raise McpToolRefusal(f"Invalid decision {decision!r}: use 'approve' or 'reject'.")
         uuid = (uuid or "").strip()
         if not uuid:
-            return "A candidate uuid is required."
+            raise McpToolRefusal("A candidate uuid is required.")
         backend = self.get_backend()
         ns = (namespace or "").strip() or None
         scope: dict[str, Any] = {"namespace": ns} if ns else {}
@@ -68,16 +69,16 @@ class ReviewCandidateTool(BaseTextTool):
             uuid=uuid, namespace=ns or "", lookup=backend.fetch_candidate, label="candidate"
         )
         if refusal:
-            return refusal
+            raise McpToolRefusal(refusal, code="outside_namespace")
 
         if choice == "reject":
             if await backend.reject_candidate(uuid, **scope):
                 return f"Rejected candidate {uuid}; it was deleted."
-            return await self._not_found(backend, uuid, scope)
+            await self._not_found(backend, uuid, scope)
 
         result = await backend.approve_candidate(uuid, **scope)
         if not isinstance(result, dict) or result.get("status") != "approved":
-            return await self._not_found(backend, uuid, scope)
+            await self._not_found(backend, uuid, scope)
         # The contradiction check can merge the new memory into a near-duplicate, which deletes
         # it; say so rather than report a memory that no longer exists.
         if await backend.fetch_memory_by_uuid(uuid, **scope) is None:
@@ -100,12 +101,13 @@ class ReviewCandidateTool(BaseTextTool):
         return "\n".join(lines)
 
     @staticmethod
-    async def _not_found(backend: Any, uuid: str, scope: dict[str, Any]) -> str:
+    async def _not_found(backend: Any, uuid: str, scope: dict[str, Any]) -> NoReturn:
         # A retry after a timed-out approval lands here; an existing memory with this uuid means
         # the earlier approval committed.
         if await backend.fetch_memory_by_uuid(uuid, **scope) is not None:
-            return (
+            raise McpToolRefusal(
                 f"Candidate {uuid} is no longer awaiting review: a memory with this uuid exists, "
-                "so it was already approved."
+                "so it was already approved.",
+                code="not_found",
             )
-        return f"No candidate awaiting review with uuid={uuid}."
+        raise McpToolRefusal(f"No candidate awaiting review with uuid={uuid}.", code="not_found")
