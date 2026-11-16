@@ -185,11 +185,28 @@ def render_report(lines: list[TierLine], startup_mode: str) -> str:
     return f"{body}\n{tail}"
 
 
+def cannot_start(capabilities: object) -> bool:
+    """Neo4j unreachable or the interpreter guard failed: no server at all."""
+
+    return not getattr(capabilities, "neo4j_ready", False) or not getattr(capabilities, "venv_ready", True)
+
+
+def cannot_enrich(capabilities: object) -> bool:
+    """The chosen provider's extraction or embedding row is a MISS.
+
+    The server would start, but new memories would never be enriched (or recall would have no
+    embedder), so `menhir up` stops instead of serving unless --allow-degraded is passed.
+    """
+
+    return not getattr(capabilities, "graphiti_llm_ready", False) or not getattr(capabilities, "embedder_ready", False)
+
+
 def report_readiness(checkout: Path) -> tuple[object, bool]:
     """Load the checkout's .env, run preflight, print the tier report.
 
-    Returns ``(capabilities, blocking)`` where ``blocking`` means the server cannot start
-    (Neo4j unreachable or the interpreter guard failed). Shared by ``menhir up`` and the end of
+    Returns ``(capabilities, blocking)`` where ``blocking`` means `menhir up` would refuse to
+    serve: Neo4j unreachable, the interpreter guard failed, or the extraction or embedding
+    provider is not ready. Shared by ``menhir up`` and the end of
     ``menhir setup`` so a newcomer sees the same picture -- and the same next command -- from
     either entry point.
     """
@@ -207,7 +224,7 @@ def report_readiness(checkout: Path) -> tuple[object, bool]:
     settings = MemorySettings.from_env()
     capabilities = collect_runtime_capabilities(settings)
     typer.echo(render_report(tier_report(capabilities, settings), capabilities.startup_mode))
-    blocking = not capabilities.neo4j_ready or not capabilities.venv_ready
+    blocking = cannot_start(capabilities) or cannot_enrich(capabilities)
     return capabilities, blocking
 
 
@@ -225,6 +242,13 @@ def up(
     wait_timeout: Annotated[float, typer.Option("--wait-timeout", help="Seconds to wait for Neo4j to answer.")] = DEFAULT_WAIT_TIMEOUT_S,
     host: Annotated[str | None, typer.Option(help="Bind address passed to serve.")] = None,
     port: Annotated[int | None, typer.Option(help="Bind port passed to serve.")] = None,
+    allow_degraded: Annotated[
+        bool,
+        typer.Option(
+            "--allow-degraded",
+            help="Serve even when the extraction or embedding provider is a MISS (writes queue, nothing is enriched).",
+        ),
+    ] = False,
 ) -> None:
     """Bring Menhir up: env, Neo4j, preflight report, serve.
 
@@ -294,12 +318,19 @@ def up(
         # 4. preflight + tier report
         capabilities = collect_runtime_capabilities(settings)
         typer.echo(render_report(tier_report(capabilities, settings), capabilities.startup_mode))
-        blocking = not capabilities.neo4j_ready or not capabilities.venv_ready
+        degraded = cannot_enrich(capabilities) and not allow_degraded
+        blocking = cannot_start(capabilities) or degraded
         if check:
             typer.echo(next_step_hint(blocking))
             raise typer.Exit(1 if blocking else 0)
         if blocking:
-            typer.echo("menhir up: fix the MISS lines above and re-run.", err=True)
+            message = "menhir up: fix the MISS lines above and re-run."
+            if degraded and not cannot_start(capabilities):
+                message += (
+                    " The server would start without a working extraction or embedding model;"
+                    " pass --allow-degraded to serve anyway."
+                )
+            typer.echo(message, err=True)
             raise typer.Exit(1)
 
         # 5. serve (foreground)
@@ -322,6 +353,8 @@ __all__ = [
     "DEFAULT_WAIT_TIMEOUT_S",
     "TierLine",
     "UpError",
+    "cannot_enrich",
+    "cannot_start",
     "compose_neo4j_up",
     "neo4j_is_loopback",
     "next_step_hint",
