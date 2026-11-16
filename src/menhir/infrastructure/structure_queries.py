@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,8 +44,13 @@ _RELATED_MEMORY_CAP = 10
 _TEST_FILE_NAME = re.compile(
     r"^(test_.+\.py|.+_test\.py|.+_test\.go|.+\.(test|spec)\.(ts|tsx|js|jsx))$"
 )
-#: Runners that take no file arguments: they run their stack root's suite (go: per package dir).
-_SUITE_RUNNERS = frozenset({"cargo test", "./gradlew test", "mvn test"})
+#: Runners that take no file arguments: they run their stack root's suite.
+_SUITE_RUNNERS = frozenset({"cargo test", "mvn test"})
+
+
+def _is_suite_runner(runner: str) -> bool:
+    # Gradle task paths (`./gradlew :app:test`) select a sub-project, not files.
+    return runner in _SUITE_RUNNERS or runner.startswith(("./gradlew", "gradle "))
 
 
 def _test_selection(test_path: str) -> str | None:
@@ -67,15 +73,17 @@ def _runner_by_extension(test_path: str) -> str:
     """Fallback for graphs written before the scanner stamped runners."""
     if test_path.endswith((".py", "/")):
         return "pytest"
-    if test_path.endswith((".ts", ".tsx", ".js", ".jsx")):
-        return "npm test --"
-    if test_path.endswith(".go"):
-        return "go test"
     return ""
 
 
+def _cd(stack_root: str, body: str) -> str:
+    if stack_root in ("", "."):
+        return body
+    return f"cd {shlex.quote(stack_root.rstrip('/'))} && {body}"
+
+
 def _command_for(stack_root: str, runner: str, tests: list[str]) -> str:
-    """One runnable command: from the stack root, with paths relative to it."""
+    """One runnable command: from the stack root, with (shell-quoted) paths relative to it."""
     prefix = "" if stack_root in ("", ".") else stack_root.rstrip("/") + "/"
 
     def rel(path: str) -> str:
@@ -83,14 +91,17 @@ def _command_for(stack_root: str, runner: str, tests: list[str]) -> str:
             return "."
         return path[len(prefix):] if prefix and path.startswith(prefix) else path
 
-    if runner in _SUITE_RUNNERS:
+    if _is_suite_runner(runner):
         body = runner
     elif runner == "go test":
-        dirs = sorted({"./" + (rel(t).rsplit("/", 1)[0] if "/" in rel(t) else ".") for t in tests})
-        body = "go test " + " ".join(d.replace("/./", "/").rstrip("/.") or "." for d in dirs)
+        # Go selects packages (directories), never files.
+        dirs = sorted(
+            {"./" + rel(t).rsplit("/", 1)[0] if "/" in rel(t) else "." for t in tests}
+        )
+        body = "go test " + " ".join(shlex.quote(d) for d in dirs)
     else:
-        body = f"{runner} " + " ".join(rel(t) for t in sorted(tests))
-    return f"cd {prefix.rstrip('/')} && {body}" if prefix else body
+        body = f"{runner} " + " ".join(shlex.quote(rel(t)) for t in sorted(tests))
+    return _cd(stack_root, body)
 
 
 def _suite_command(stack_root: str, runner: str) -> str:
@@ -99,12 +110,9 @@ def _suite_command(stack_root: str, runner: str) -> str:
         body = "go test ./..."
     elif runner == "npm test --":
         body = "npm test"
-    elif runner == "npx vitest run":
-        body = "npx vitest run"
     else:
         body = runner
-    prefix = "" if stack_root in ("", ".") else stack_root.rstrip("/")
-    return f"cd {prefix} && {body}" if prefix else body
+    return _cd(stack_root, body)
 
 
 def _normalize_structure_path(path: str) -> str:
@@ -543,9 +551,11 @@ class StructureGraphWriter:
         # 9b. #680: replace, not accumulate. A file that drops an import, or a test whose name
         #     now points at a better-ranked source, must lose the old edge.
         scanned_paths = [f.rel_path for f in scan.files]
+        unread = set(getattr(scan, "import_sources_unread", None) or [])
+        sources = [p for p in scanned_paths if p not in unread]
         for rel_type, edges in (("TESTS", test_edges), ("IMPORTS", import_edges)):
             stale = self._delete_stale_derived_edges(
-                scan.name, rel_type, scanned_paths, edges, project_id
+                scan.name, rel_type, scanned_paths, edges, project_id, sources=sources
             )
             if stale:
                 logger.info(
@@ -1144,13 +1154,16 @@ class StructureGraphWriter:
         scanned_paths: list[str],
         current: list[dict[str, str]],
         project_id: str | None = None,
+        *,
+        sources: list[str] | None = None,
     ) -> int:
         """Delete `rel_type` edges between scanned files that this scan no longer derives (#680).
 
-        Only edges whose BOTH endpoints are in `scanned_paths` are candidates. The scan parsed
-        every such source and saw every such target, so absence from `current` is evidence the
-        edge is gone -- even on a capped scan, where an edge into a file the cap dropped stays
-        untouched. Relationships only; nodes are pruned elsewhere. One keep set per relationship
+        Only edges from a file in `sources` (default: every scanned file) into a file in
+        `scanned_paths` are candidates. The scan read every such source and saw every such
+        target, so absence from `current` is evidence the edge is gone -- even on a capped scan,
+        where an edge into a file the cap dropped stays untouched. A file the scan listed but
+        could not read is left out of `sources`, so its stored edges survive. Relationships only; nodes are pruned elsewhere. One keep set per relationship
         type: a test's TESTS edge must not keep a dropped IMPORTS edge to the same file alive.
         """
         if rel_type not in ("IMPORTS", "TESTS"):
@@ -1161,7 +1174,7 @@ class StructureGraphWriter:
         for owner in self._owner_arms("a", project_id):
             rows = self.neo4j.execute(
                 f"""
-                UNWIND $scanned AS sp
+                UNWIND $sources AS sp
                 MATCH (a:Entity {{structure_path: sp}})
                 WHERE {owner}
                 MATCH (a)-[r:{rel_type}]->(b:Entity)
@@ -1172,6 +1185,7 @@ class StructureGraphWriter:
                 """,
                 {
                     **self._owner_params(project_name, project_id),
+                    "sources": scanned_paths if sources is None else sources,
                     "scanned": scanned_paths,
                     "keep": keep_pairs,
                 },
@@ -1632,7 +1646,8 @@ class StructureGraphWriter:
                    length(path) AS hop_distance,
                    changed.structure_path AS changed_path,
                    changed.structure_role AS changed_role,
-                   importer.structure_role AS importer_role
+                   importer.structure_role AS importer_role,
+                   all(n IN nodes(path)[1..-1] WHERE n.structure_role = 'test') AS via_tests
             """,
             {"p": project, "paths": file_paths, "depth": max_depth},
         )
@@ -1641,7 +1656,10 @@ class StructureGraphWriter:
         transitive: set[str] = set()
         changed_set = set(file_paths)
         min_hop: dict[str, int] = {}
-        # #681: a test that imports changed code is affected whatever its name says.
+        # #681: a test that imports changed code is affected whatever its name says. Only a
+        # test that imports it directly, or through test helpers alone, is selected: reaching
+        # `tests/conftest.py` through five source hops would select the whole suite for over a
+        # third of the files in a real project, which is "run everything" with extra steps.
         importing_tests: dict[str, tuple[int, str]] = {}
 
         for row in rows:
@@ -1653,7 +1671,8 @@ class StructureGraphWriter:
                 continue
             dist = row.get("hop_distance", 1)
             min_hop[imp] = min(dist, min_hop.get(imp, dist))
-            if row.get("importer_role") == "test" and changed_path:
+            selectable = dist == 1 or row.get("via_tests") is True
+            if row.get("importer_role") == "test" and changed_path and selectable:
                 prior = importing_tests.get(imp)
                 if prior is None or (dist, changed_path) < prior:
                     importing_tests[imp] = (dist, changed_path)
@@ -1704,11 +1723,12 @@ class StructureGraphWriter:
             if r.get("test_file")
         ]
         named = {t["test"] for t in affected_tests}
-        for test_path, (_dist, covers) in sorted(importing_tests.items()):
+        for test_path, (dist, covers) in sorted(importing_tests.items()):
             target = _test_selection(test_path)
             if target and target not in named:
                 named.add(target)
-                affected_tests.append({"test": target, "covers": covers, "via": "imports"})
+                via = "changed" if dist == 0 else "imports"
+                affected_tests.append({"test": target, "covers": covers, "via": via})
 
         # Cross-project impact: check if any changed file is an endpoint or has CALLS edges
         xref_rows = self.neo4j.execute(

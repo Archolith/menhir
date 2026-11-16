@@ -598,8 +598,11 @@ def _format_blast_radius(data: dict, project: str) -> str:
     if data["affected_tests"]:
         lines.append(f"\nAffected tests ({len(data['affected_tests'])}):")
         for t in data["affected_tests"]:
-            how = "imports" if t.get("via") == "imports" else "covers"
-            lines.append(f"  {t['test']} ({how} {t['covers']})")
+            if t.get("via") == "changed":
+                lines.append(f"  {t['test']} (changed)")
+            else:
+                how = "imports" if t.get("via") == "imports" else "covers"
+                lines.append(f"  {t['test']} ({how} {t['covers']})")
     elif data.get("depth_truncated"):
         lines.append(
             "\nAffected tests: none found within the depth limit -- not evidence of absence."
@@ -690,7 +693,8 @@ def _format_affected_tests(data: dict, *, neg: str = "") -> str:
         else:
             lines.append(f"No specific tests found for the changed files.{neg}")
         lines.append("Recommendation: run full test suite.")
-        lines.append(f"\n  {data['test_command']}")
+        lines.append("")
+        lines.extend(f"  {c}" for c in str(data["test_command"]).splitlines())
         return "\n".join(lines)
 
     lines.append(f"Test selector for {len(data['changed_files'])} changed file(s):")

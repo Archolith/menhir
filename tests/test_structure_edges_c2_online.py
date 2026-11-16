@@ -175,3 +175,42 @@ def test_a_capped_scan_keeps_edges_into_files_the_cap_dropped(
     edges = _edges(repo, name, "IMPORTS")
     assert ("app.py", "tests/helper.py") in edges  # not evidence of removal
     assert ("app.py", "db.py") not in edges  # both ends scanned: really removed
+
+
+def test_legacy_rows_without_an_identity_stamp_are_pruned(repo, name, tmp_path) -> None:
+    """The second owner arm: rows written before CF-257 carry no structure_project_id."""
+    _base(tmp_path)
+    _write(repo, tmp_path, name)
+    repo.execute(
+        "MATCH (n:Entity {structure_project: $p}) REMOVE n.structure_project_id", {"p": name}
+    )
+
+    _write_file(tmp_path, "app.py", "import db\n")
+    _write(repo, tmp_path, name)
+
+    assert ("app.py", "cache.py") not in _edges(repo, name, "IMPORTS")
+    assert ("app.py", "db.py") in _edges(repo, name, "IMPORTS")
+
+
+def test_blast_radius_selects_direct_and_helper_importers_only(repo, name, tmp_path) -> None:
+    """The `via_tests` path predicate, executed: helper chains count, source chains do not."""
+    _write_file(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write_file(tmp_path, "core.py")
+    _write_file(tmp_path, "service.py", "import core\n")
+    _write_file(tmp_path, "tests/__init__.py")
+    _write_file(tmp_path, "tests/helpers.py", "import core\n")
+    _write_file(tmp_path, "tests/test_core.py", "import core\n")
+    _write_file(tmp_path, "tests/test_helper_user.py", "from tests import helpers\n")
+    _write_file(tmp_path, "tests/test_end_to_end_flow.py", "import service\n")
+    _write(repo, tmp_path, name)
+
+    writer = StructureGraphWriter(repo)
+    radius = writer.query_blast_radius(name, ["core.py"])
+    result = writer.query_affected_tests(name, ["core.py"])
+
+    assert sorted(t["test"] for t in radius["affected_tests"]) == [
+        "tests/test_core.py",
+        "tests/test_helper_user.py",
+    ]
+    assert "tests/test_end_to_end_flow.py" in radius["transitively_affected"]
+    assert result["test_command"] == "pytest tests/test_core.py tests/test_helper_user.py"

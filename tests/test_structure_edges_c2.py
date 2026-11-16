@@ -68,7 +68,8 @@ def test_from_package_import_submodule_links_the_submodule(tmp_path: Path) -> No
     edges = _edges(ProjectScanner().scan(tmp_path))
 
     assert ("src/app.py", "src/pkg/sub.py") in edges
-    assert ("src/app.py", "src/pkg/__init__.py") not in edges
+    # Importing a submodule runs the package __init__ first, so both are dependencies.
+    assert ("src/app.py", "src/pkg/__init__.py") in edges
     # A name that is not a module still links to the package that defines it.
     assert ("src/other.py", "src/pkg/__init__.py") in edges
 
@@ -388,8 +389,8 @@ def test_a_ts_test_under_a_python_root_is_not_a_pytest_file(tmp_path: Path) -> N
     by_path = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}
 
     assert by_path["tests/test_a.py"].test_runner == "pytest"
-    assert by_path["ui/widget.test.ts"].test_runner == "npm test --"
-    assert by_path["ui/widget.test.ts"].stack_root == "."
+    # No package.json anywhere: no JS command at all, rather than `npm test` that cannot run.
+    assert by_path["ui/widget.test.ts"].test_runner == ""
 
 
 def test_a_python_test_under_a_js_package_finds_the_python_root(tmp_path: Path) -> None:
@@ -484,3 +485,224 @@ def test_no_paths_lists_every_stack_roots_suite() -> None:
     result = StructureGraphWriter(neo4j=neo).query_affected_tests("mono", [])
 
     assert result["test_commands"] == ["pytest", "cd svc && go test ./...", "cd web && npm test"]
+
+
+# --- review findings on PR #695 -------------------------------------------------------------
+
+
+def test_a_module_named_setup_inside_a_package_is_not_a_project_root(tmp_path: Path) -> None:
+    """F1: `src/app/cli/setup.py` is the setup command, not a manifest."""
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "src/app/__init__.py")
+    _write(tmp_path, "src/app/cli/__init__.py")
+    _write(tmp_path, "src/app/cli/setup.py")
+    _write(tmp_path, "src/app/cli/logging.py", "def getLogger():\n    pass\n")
+    _write(tmp_path, "src/app/core.py", "import logging\n\ndef f():\n    logging.getLogger()\n")
+    _write(
+        tmp_path, "src/app/cli/tool.py", "from logging import getLogger\n\ndef g():\n    getLogger()\n"
+    )
+
+    result = ProjectScanner().scan(tmp_path)
+    by_path = {f.rel_path: f for f in result.files}
+
+    assert by_path["src/app/cli/setup.py"].stack_root == "."
+    assert not {e for e in _edges(result) if e[1] == "src/app/cli/logging.py"}
+    assert not [c for c in result.call_edges if "cli/logging.py" in c.callee_path]
+
+
+def test_a_sub_project_name_is_invisible_outside_it(tmp_path: Path) -> None:
+    """F1: `services/a/src/logging.py` is `logging` only to importers inside services/a."""
+    _write(tmp_path, "services/a/pyproject.toml", "[project]\nname='a'\n")
+    _write(tmp_path, "services/a/src/logging.py")
+    _write(tmp_path, "services/a/src/app.py", "import logging\n")
+    _write(tmp_path, "tools/run.py", "import logging\n")
+
+    edges = _edges(ProjectScanner().scan(tmp_path))
+
+    assert ("services/a/src/app.py", "services/a/src/logging.py") in edges
+    assert not {e for e in edges if e[0] == "tools/run.py"}
+
+
+def test_fallback_reads_a_parenthesised_import_spread_over_lines(tmp_path: Path) -> None:
+    """F4: before, only the first physical line was read and a.py / b.py were lost."""
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "pkg/__init__.py")
+    _write(tmp_path, "pkg/a.py")
+    _write(tmp_path, "pkg/b.py")
+    _write(tmp_path, "pkg/main_mod.py", "from . import (\n    a,\n    b,\n)\nprint 'py2'\n")
+
+    edges = _edges(ProjectScanner().scan(tmp_path))
+
+    assert {("pkg/main_mod.py", "pkg/a.py"), ("pkg/main_mod.py", "pkg/b.py")} <= edges
+
+
+def test_relative_import_past_the_top_level_package_resolves_nothing(tmp_path: Path) -> None:
+    """F12: Python refuses `from .. import x` in a top-level package; so does the scanner."""
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "x.py")
+    _write(tmp_path, "pkg/__init__.py")
+    _write(tmp_path, "pkg/a.py", "from .. import x\n")
+
+    assert not {e for e in _edges(ProjectScanner().scan(tmp_path)) if e[0] == "pkg/a.py"}
+
+
+def test_conftest_and_go_tests_are_tests_wherever_they_sit(tmp_path: Path) -> None:
+    """F11 / F18: a root conftest.py was role `file`, so its `./` selection was unreachable."""
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(tmp_path, "conftest.py")
+    _write(tmp_path, "svc/go.mod", "module svc\n")
+    _write(tmp_path, "svc/pkg/a_test.go")
+
+    by_path = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}
+    go_test = by_path["svc/pkg/a_test.go"]
+
+    assert by_path["conftest.py"].role == "test"
+    assert go_test.role == "test"
+    assert (go_test.stack_root, go_test.test_runner) == ("svc", "go test")
+
+
+def test_a_gradle_sub_project_runs_through_the_root_wrapper(tmp_path: Path) -> None:
+    """F8: `gradlew` lives at the build root, so `cd app && ./gradlew test` cannot run."""
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    _write(tmp_path, "settings.gradle", "include 'app'\n")
+    _write(tmp_path, "app/build.gradle")
+    _write(tmp_path, "app/src/test/java/ATest.java")
+
+    by_path = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}
+    test = by_path["app/src/test/java/ATest.java"]
+
+    assert (test.stack_root, test.test_runner) == (".", "./gradlew :app:test")
+    assert _command_for(test.stack_root, test.test_runner, [test.rel_path]) == "./gradlew :app:test"
+
+
+def test_a_gradle_project_without_a_wrapper_uses_plain_gradle(tmp_path: Path) -> None:
+    _write(tmp_path, "svc/build.gradle")
+    _write(tmp_path, "svc/src/test/java/ATest.java")
+
+    test = {f.rel_path: f for f in ProjectScanner().scan(tmp_path).files}["svc/src/test/java/ATest.java"]
+
+    assert (test.stack_root, test.test_runner) == ("svc", "gradle test")
+
+
+def test_commands_quote_paths_with_spaces() -> None:
+    """F9."""
+    assert _command_for("my svc", "pytest", ["my svc/tests/test x.py"]) == (
+        "cd 'my svc' && pytest 'tests/test x.py'"
+    )
+
+
+def test_only_direct_or_test_helper_importers_are_selected() -> None:
+    """F2: a test reaching the change only through other source files is not selected."""
+    neo = _ScriptedNeo4j(
+        _blast_script(
+            [
+                {  # imports the change directly
+                    "importer_path": "tests/test_direct.py", "hop_distance": 1,
+                    "changed_path": "src/a.py", "changed_role": "file",
+                    "importer_role": "test", "via_tests": True,
+                },
+                {  # through a test helper only
+                    "importer_path": "tests/test_via_helper.py", "hop_distance": 2,
+                    "changed_path": "src/a.py", "changed_role": "file",
+                    "importer_role": "test", "via_tests": True,
+                },
+                {  # through source files: transitively affected, not selected
+                    "importer_path": "tests/conftest.py", "hop_distance": 4,
+                    "changed_path": "src/a.py", "changed_role": "file",
+                    "importer_role": "test", "via_tests": False,
+                },
+            ],
+            [],
+        )
+    )
+    radius = StructureGraphWriter(neo4j=neo).query_blast_radius("p", ["src/a.py"])
+
+    assert sorted(t["test"] for t in radius["affected_tests"]) == [
+        "tests/test_direct.py",
+        "tests/test_via_helper.py",
+    ]
+    assert "tests/conftest.py" in radius["transitively_affected"]
+
+
+def test_a_changed_test_is_reported_as_changed_not_as_importing_itself() -> None:
+    """F14."""
+    neo = _ScriptedNeo4j(
+        _blast_script(
+            [
+                {
+                    "importer_path": None, "hop_distance": None,
+                    "changed_path": "tests/test_a.py", "changed_role": "test",
+                    "importer_role": None, "via_tests": None,
+                }
+            ],
+            [],
+        )
+    )
+    radius = StructureGraphWriter(neo4j=neo).query_blast_radius("p", ["tests/test_a.py"])
+
+    assert radius["affected_tests"] == [
+        {"test": "tests/test_a.py", "covers": "tests/test_a.py", "via": "changed"}
+    ]
+
+
+def test_every_suite_line_is_shown_when_no_tests_were_selected() -> None:
+    """F10: the formatter indented only the first of several suite commands."""
+    from menhir.mcp.tools.recall.query_structure import _format_affected_tests
+
+    out = _format_affected_tests(
+        {
+            "changed_files": ["a.py"],
+            "affected_source_files": [],
+            "test_files": [],
+            "test_command": "pytest  # x\ncd web && npm test  # x",
+            "test_commands": [],
+            "unindexed_paths": [],
+            "coverage": {"known": True},
+        }
+    )
+
+    assert "\n  pytest  # x" in out
+    assert "\n  cd web && npm test  # x" in out
+
+
+def test_an_unread_file_is_not_a_prune_source() -> None:
+    """F13: a .py file that vanished mid-scan keeps its stored edges."""
+    neo = _Recording()
+    scan = _scan()
+    scan.import_sources_unread = ["a.py"]
+    StructureGraphWriter(neo4j=neo).write_project(scan, "s", "u")
+
+    prunes = _derived_prunes(neo)
+    assert prunes
+    for _q, params in prunes:
+        assert "a.py" not in params["sources"]
+        assert "a.py" in params["scanned"]  # still a valid target
+
+
+def test_a_file_that_vanishes_during_the_import_pass_is_recorded_unread(tmp_path: Path) -> None:
+    from menhir.infrastructure.project_scanner import _analyze_python_imports
+
+    _write(tmp_path, "a.py", "import b\n")
+    _write(tmp_path, "b.py")
+    files = [FileEntry("a.py"), FileEntry("b.py"), FileEntry("gone.py")]
+    unread: list[str] = []
+
+    edges, _ = _analyze_python_imports(tmp_path, files, unread=unread)
+
+    assert unread == ["gone.py"]
+    assert ("a.py", "b.py") in {(e.source_path, e.target_path) for e in edges}
+
+
+def test_the_call_cap_counts_distinct_callees_not_call_sites(tmp_path: Path) -> None:
+    """F15: 60 calls to one helper used to exhaust the 50-call budget before `other` was seen."""
+    body = "\n".join(["    helper()"] * 60 + ["    other()"])
+    _write(tmp_path, "pyproject.toml", "[project]\nname='p'\n")
+    _write(
+        tmp_path,
+        "m.py",
+        "def helper():\n    pass\n\ndef other():\n    pass\n\ndef f():\n" + body + "\n",
+    )
+
+    calls = {(c.caller_path, c.callee_path) for c in ProjectScanner().scan(tmp_path).call_edges}
+
+    assert ("m.py::f", "m.py::other") in calls

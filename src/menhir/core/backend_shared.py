@@ -170,4 +170,7 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
             str(item) for item in payload.get("truncated_symbol_files", []) or []
         ],
         call_edges=[CallEdge(**item) for item in payload.get("call_edges", []) or []],
+        import_sources_unread=[
+            str(item) for item in payload.get("import_sources_unread", []) or []
+        ],
     )

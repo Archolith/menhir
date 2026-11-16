@@ -190,6 +190,9 @@ class ProjectScanResult:
     symbols: list[SymbolEntry] = field(default_factory=list)
     truncated_symbol_files: list[str] = field(default_factory=list)
     call_edges: list[CallEdge] = field(default_factory=list)
+    # .py files listed in `files` whose imports this scan could not read (vanished mid-scan,
+    # refused as an out-of-root link). Their stored edges are not evidence-free to prune (#680).
+    import_sources_unread: list[str] = field(default_factory=list)
     # Coverage accounting. Three counts, not one ratio: `files_indexed / files_discovered`
     # would mark every project permanently partial once documentation is intentionally
     # excluded. Truncation is `files_indexed < files_eligible`.
@@ -486,7 +489,9 @@ class ProjectScanner:
         )
 
         # Parse imports, test edges, endpoints, cross-project refs
-        result.imports, import_name_map = _analyze_python_imports(root, file_entries, stack_roots)
+        result.imports, import_name_map = _analyze_python_imports(
+            root, file_entries, stack_roots, result.import_sources_unread
+        )
         result.test_edges = _detect_test_edges(file_entries, result.imports)
         result.endpoints = _detect_endpoints(root, file_entries, stack)
         result.cross_project_refs = _detect_cross_project_refs(root, file_entries, project_name)
@@ -628,6 +633,9 @@ def _classify_file_role(rel_path: str) -> str:
     if any(p in ("tests", "test", "__tests__") for p in parts):
         return "test"
     if re.match(r"^test_.*\.py$", name) or re.match(r".*_test\.py$", name):
+        return "test"
+    # pytest fixtures apply wherever the file sits; Go tests live beside their package.
+    if name == "conftest.py" or re.match(r".*_test\.go$", name):
         return "test"
     if re.match(r".*\.test\.(ts|tsx|js|jsx)$", name):
         return "test"
@@ -895,12 +903,15 @@ _SIGNAL_TEST_RUNNERS: dict[str, str] = {
     "pom.xml": "mvn test",
 }
 #: Runner when no stack root of the file's family exists: run from the repository root.
+#: Only pytest runs without a manifest; `npm test` / `go test` / `cargo test` need theirs, so a
+#: stray `.js` file in a repo with no `package.json` gets no command rather than a wrong one.
 _FAMILY_FALLBACK_RUNNERS: dict[str, str] = {
     "py": "pytest",
-    "js": "npm test --",
-    "go": "go test",
-    "rust": "cargo test",
 }
+
+
+#: Signals that name a project only outside a Python package (see `_detect_stack_roots`).
+_WEAK_PACKAGE_SIGNALS = frozenset({"setup.py", "requirements.txt"})
 
 
 @dataclass(frozen=True)
@@ -921,7 +932,12 @@ def _detect_stack_roots(root: Path, rel_dirs: set[str] | list[str]) -> dict[str,
     roots: dict[str, list[StackRoot]] = {}
     for rel_dir in sorted({".", *rel_dirs}):
         base = root if rel_dir == "." else root / rel_dir
+        in_package = rel_dir != "." and (base / "__init__.py").is_file()
         for filename, stack in _STACK_SIGNALS:
+            # Inside a Python package, `setup.py` / `requirements.txt` are modules or data
+            # (`menhir/cli/setup.py` is the setup COMMAND), not a project manifest.
+            if in_package and filename in _WEAK_PACKAGE_SIGNALS:
+                continue
             if (base / filename).is_file():
                 found = roots.setdefault(rel_dir, [])
                 if all(_SIGNAL_FAMILY[r.signal] != _SIGNAL_FAMILY[filename] for r in found):
@@ -992,8 +1008,26 @@ def _stamp_stacks(root: Path, files: list[FileEntry], roots: dict[str, list[Stac
                 base = root if sr.rel_dir == "." else root / sr.rel_dir
                 js_runners[sr.rel_dir] = _js_test_runner(base / "package.json")
             f.test_runner = js_runners[sr.rel_dir]
+        elif sr.signal in ("build.gradle", "build.gradle.kts"):
+            f.stack_root, f.test_runner = _gradle_command(root, sr.rel_dir)
         else:
             f.test_runner = _SIGNAL_TEST_RUNNERS.get(sr.signal, "")
+
+
+def _gradle_command(root: Path, rel_dir: str) -> tuple[str, str]:
+    """(directory to run from, task) for a Gradle (sub-)project.
+
+    The wrapper lives at the build root, not in each sub-project: run `./gradlew :a:b:test`
+    from the nearest ancestor holding `gradlew`, or plain `gradle test` where there is none.
+    """
+    parts = [] if rel_dir == "." else rel_dir.split("/")
+    for i in range(len(parts), -1, -1):
+        base = root.joinpath(*parts[:i]) if i else root
+        if (base / "gradlew").is_file():
+            wrapper_dir = "/".join(parts[:i]) or "."
+            sub = parts[i:]
+            return wrapper_dir, ("./gradlew " + (":" + ":".join(sub) + ":test" if sub else "test"))
+    return rel_dir, "gradle test"
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1063,10 @@ def _python_imports(text: str) -> list[_PyImport]:
 
 
 def _python_imports_by_line(text: str) -> list[_PyImport]:
+    # One logical line per statement: a parenthesised `from . import (a, b)` spread over lines,
+    # and backslash-continued lines, would otherwise show only their first physical line.
+    text = text.replace("\\\n", " ")
+    text = re.sub(r"\(([^()]*)\)", lambda m: "(" + m.group(1).replace("\n", " ") + ")", text)
     found: list[_PyImport] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -1052,33 +1090,35 @@ def _python_imports_by_line(text: str) -> list[_PyImport]:
     return found
 
 
-def _module_names(rel_path: str, py_roots: list[str]) -> list[str]:
-    """Dotted names a `.py` file can be imported as.
+def _module_names(rel_path: str, py_roots: list[str]) -> list[tuple[str, str]]:
+    """(dotted name, scope) pairs a `.py` file can be imported as.
 
-    Relative to the repository root, to its `src/` (as before), and to every Python stack root
-    above it and that root's `src/` -- so `packages/x/src/pkg/mod.py` is also `pkg.mod`.
+    Relative to the repository root and to its `src/` (scope "", visible everywhere, as
+    before), and to every Python stack root above it and that root's `src/` -- so
+    `packages/x/src/pkg/mod.py` is also `pkg.mod`. A name earned from a sub-project root is
+    scoped to importers inside that root: from anywhere else, `import logging` is the stdlib,
+    not `packages/x/src/logging.py`.
     """
     stem = rel_path[:-3]
-    bases = {""}
+    bases: dict[str, str] = {"": "", "src/": ""}
     for py_root in py_roots:
-        prefix = "" if py_root == "." else py_root + "/"
+        if py_root == ".":
+            continue
+        prefix = py_root + "/"
         if not stem.startswith(prefix):
             continue
-        bases.add(prefix)
-        bases.add(prefix + "src/")
-    bases.add("src/")
-    names: list[str] = []
-    for base in sorted(bases):
+        bases.setdefault(prefix, py_root)
+        bases.setdefault(prefix + "src/", py_root)
+    names: list[tuple[str, str]] = []
+    for base, scope in sorted(bases.items()):
         if not stem.startswith(base):
             continue
         dotted = stem[len(base):].replace("/", ".")
-        if not dotted:
+        if not dotted or dotted == "__init__":
             continue
         if dotted.endswith(".__init__"):
-            names.append(dotted[: -len(".__init__")])
-        elif dotted == "__init__":
-            continue
-        names.append(dotted)
+            names.append((dotted[: -len(".__init__")], scope))
+        names.append((dotted, scope))
     return names
 
 
@@ -1088,15 +1128,21 @@ class _PyModuleIndex:
     def __init__(self, files: list[FileEntry], roots: dict[str, list[StackRoot]]) -> None:
         py_roots = sorted(r.rel_dir for rs in roots.values() for r in rs if r.stack == "python")
         self.paths = {f.rel_path for f in files if f.rel_path.endswith(".py")}
-        self.modules: dict[str, list[str]] = {}
+        self.modules: dict[str, list[tuple[str, str]]] = {}
         for rel_path in sorted(self.paths):
-            for name in _module_names(rel_path, py_roots):
+            for name, scope in _module_names(rel_path, py_roots):
                 bucket = self.modules.setdefault(name, [])
-                if rel_path not in bucket:
-                    bucket.append(rel_path)
+                if (rel_path, scope) not in bucket:
+                    bucket.append((rel_path, scope))
 
     def exact(self, module: str, importer: str) -> str | None:
-        candidates = self.modules.get(module)
+        candidates = sorted(
+            {
+                path
+                for path, scope in self.modules.get(module, ())
+                if not scope or importer.startswith(scope + "/")
+            }
+        )
         if not candidates:
             return None
         if len(candidates) == 1:
@@ -1117,7 +1163,7 @@ class _PyModuleIndex:
         """Directory (no trailing slash, "" for root) a relative import's module names."""
         parts = importer.split("/")[:-1]
         up = level - 1
-        if up > len(parts):
+        if up >= len(parts):  # past the top-level package: Python refuses this import too
             return None
         base = parts[: len(parts) - up] if up else parts
         if module:
@@ -1163,6 +1209,10 @@ def _resolve_python_import(
             sub = index.file_at(f"{base}/{original}" if base else original)
             if sub and original != "*":
                 targets.add(sub)
+                # `from .sub import mod` runs sub/__init__.py first; `from . import mod` is
+                # inside a package that is already initialised, so it adds nothing.
+                if module and owner and owner.endswith("__init__.py"):
+                    targets.add(owner)
             elif owner:
                 targets.add(owner)
                 bound[local] = (owner, original)
@@ -1170,10 +1220,14 @@ def _resolve_python_import(
             targets.add(owner)
     elif names:
         owner = index.absolute(module, importer)
+        package_init = index.exact(module, importer)
         for original, local in names:
             sub = index.exact(f"{module}.{original}", importer) if original != "*" else None
             if sub:
                 targets.add(sub)
+                # Importing a submodule executes its package's __init__.py first.
+                if package_init and package_init.endswith("__init__.py"):
+                    targets.add(package_init)
             elif owner:
                 targets.add(owner)
                 bound[local] = (owner, original)
@@ -1187,7 +1241,10 @@ def _resolve_python_import(
 
 
 def _analyze_python_imports(
-    root: Path, files: list[FileEntry], roots: dict[str, list[StackRoot]] | None = None
+    root: Path,
+    files: list[FileEntry],
+    roots: dict[str, list[StackRoot]] | None = None,
+    unread: list[str] | None = None,
 ) -> tuple[list[ImportEdge], dict[str, dict[str, tuple[str, str]]]]:
     """IMPORTS edges and the CALLS name map from one `ast` read of every `.py` file.
 
@@ -1204,11 +1261,15 @@ def _analyze_python_imports(
         if not f.rel_path.endswith(".py") or f.role == "config":
             continue
         full_path = root / f.rel_path
-        if not full_path.is_file():
-            continue
         try:
+            if not full_path.is_file():
+                raise FileNotFoundError(full_path)
             text = _read_text_for_scan(full_path)
         except OSError:
+            # An editor's atomic save can make the file vanish for an instant. Absence of its
+            # edges then says nothing; record it so the writer leaves its stored edges alone.
+            if unread is not None:
+                unread.append(f.rel_path)
             continue
         name_map: dict[str, tuple[str, str]] = {}
         for imp in _python_imports(text):
@@ -1626,9 +1687,10 @@ def _extract_call_edges(
         return method_lookup.get((rel_path, class_name, method_name))
 
     def walk_body(body: list, caller_sym_path: str, class_ctx: str | None) -> None:
-        count = 0
+        # The cap bounds distinct callees, not call sites: 131 calls to one helper are one edge.
+        callees: set[str] = set()
         for node in _walk_no_inner_defs(body):
-            if count >= _MAX_CALLS_PER_SYMBOL:
+            if len(callees) >= _MAX_CALLS_PER_SYMBOL:
                 break
             if not isinstance(node, ast.Call):
                 continue
@@ -1645,7 +1707,7 @@ def _extract_call_edges(
                 callee = resolve_self(func.attr, class_ctx)
             if callee:
                 add_edge(caller_sym_path, callee)
-                count += 1
+                callees.add(callee)
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
