@@ -416,6 +416,12 @@ run them by hand.
   (`MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED`) and counting
   (`MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`). With a paid provider these add to the cost of each
   memory. Set any of them to `false` to turn that lane off.
+- **Conflict review.** An hourly scheduler job sends up to 20 newly detected contradictions to
+  the LLM for confirmation. It has no separate switch.
+- **Source-memory embeddings.** Each memory gets one extra embedding call at ingest, and each
+  recall one query-embedding call, for the raw source-memory section. This lane is always on.
+- **OpenAI key check.** With the `openai` provider, preflight calls the free `GET /v1/models` to
+  verify the key.
 
 ### Connect an MCP client
 
