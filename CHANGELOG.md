@@ -1,3 +1,20 @@
+## 2026-11-15 - query_structure answers for the stored path and says what it cut (#679, #683)
+
+- New `domain/structure_paths.py` maps caller spellings (`./a.py`, `src\a.py`, absolute paths
+  under the project's recorded root, Git Bash `/c/...`) to the stored repo-relative form. The
+  MCP tool and every `StructureGraphWriter` query (`blast_radius`, `affected_tests`, `imports`,
+  `tests`, `symbols`, `files`, `context`) use it; the tool echoes each rewritten spelling. An
+  absolute path outside the root is reported as not indexed. Before, `src\a.py` passed the
+  coverage check but missed the traversal and printed "Affected tests: none found (project
+  fully indexed)" (#679).
+- `imports`, `tests` and `symbols` for an unknown file now answer "not indexed" (probed with the
+  existing `context` query, so older backends need nothing new); an empty `files`/`symbols`
+  prefix no longer claims "(project fully indexed)". `affected_tests` lists unindexed inputs
+  even when other inputs found tests (#683).
+- `blast_radius` reports when the 5-hop import limit cut the trace, when function callers
+  (30) or related memories (10) were capped, and renders the open TODOs it already computed
+  (#683). MCP clients see the new output text after they reconnect.
+
 ## 2026-11-15 - First run: `menhir up` stops without a model; the quick start says what it costs (#685-#688)
 
 - `menhir up` exits 1 when the extraction or embedding row is a MISS instead of serving a server
