@@ -1,3 +1,27 @@
+## 2026-11-16 - One MCP error shape; no silent coercion; namespace checks and notes (#669, #670, #671)
+
+- Every tool failure is a `CallToolResult` with `isError: true` and `structuredContent`
+  `{"ok": false, "tool", "error": {"code", "message", "hint"?}}`. JSON tools put that envelope in
+  the text; text tools put the message (refusals unprefixed, faults as `Error: ...`). Codes:
+  `invalid_argument`, `not_found`, `outside_namespace`, `refused`, `conflict`, `not_indexed`,
+  `disabled`, `write_failed`, `needs_decision`, `bootstrap_required`, `access_denied`,
+  `unavailable`, `timeout`, `internal`. Tools raise `McpToolRefusal(message, code=, hint=)`
+  instead of returning error strings or hand-built envelopes. Resources keep their shape (#669).
+- A failed write says why: `Failed to store memory: <reason>` / `Failed to queue memory:
+  <reason>` (`write_failed`). `IngestResult.error` carries the reason from every FAILED path.
+- `add_todo` rejects an unknown priority and `list_todos` an unknown status, naming the valid set,
+  instead of storing "normal" / listing "open". `list_todos` notes a clamped limit and
+  `recall_history` echoes `limit_applied`. `recall_memories(limit<1)` is an error.
+  `add_memory(type="TEMPORAL")` without `valid_at` is an error, not an ordinary memory.
+  `query_structure` documents `documents` (#670).
+- Every write that creates a graph group (`add_memory`, `add_memory_and_track`, `add_candidate`,
+  `ingest_document`, `ingest_project`) checks the namespace at call time, after the client pin;
+  surrounding whitespace is named. Empty `recall_memories`, `recall_context_memories`,
+  `recall_history` and `recall_timeline` results under a namespace that holds no records carry
+  a `namespace_note`, with the stored spelling a case or whitespace variant meant (never other
+  namespaces for a pinned client). New backend op `get_namespace_status`.
+  `list_namespace_memories` defaults to `""` like every other tool (#671).
+
 ## 2026-11-16 - Tests that import changed code are selected; rescans drop stale edges (#681, #680)
 
 - Python imports are read with `ast`. Relative imports resolve; `from pkg import sub` links
