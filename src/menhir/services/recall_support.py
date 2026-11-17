@@ -149,14 +149,14 @@ class RecallSupportMixin:
         Returns semantic entity UUIDs that are ANCHORED_TO structural entities
         in the file's neighborhood (the file itself + its imports/importers/tests).
         """
-        from menhir.infrastructure.structural_anchoring import normalize_to_repo_relative
+        from menhir.infrastructure.structural_anchoring import resolve_file_reference
 
-        # Get known roots for path normalization
         projects = await asyncio.to_thread(self.graph_adapter.list_structure_projects)
-        known_roots = [p.get("root_path", "") for p in projects if p.get("root_path")]
-        normalized = normalize_to_repo_relative(file_path, known_roots)
+        reference = resolve_file_reference(file_path, projects, project)
+        if reference is None:
+            return []
+        project, normalized = reference
 
-        # Resolve project if not provided
         if not project:
             project_names = [p["name"] for p in projects if p.get("name")]
             if not project_names:

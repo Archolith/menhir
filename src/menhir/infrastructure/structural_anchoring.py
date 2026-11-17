@@ -9,24 +9,34 @@ from __future__ import annotations
 
 import logging
 import re
+from itertools import islice, product
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.structure_paths import (
+    is_absolute_spelling,
+    normalize_query_path,
+    path_relative_to_root,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 
 logger = logging.getLogger(__name__)
+
+MAX_ANCHOR_EDGES_PER_EPISODE = 256
 
 # ---------------------------------------------------------------------------
 # Path extraction
 # ---------------------------------------------------------------------------
 
+_FILE_EXTENSIONS = r"py|tsx?|jsx?|java|kt|go|rs|yaml|toml|json|sql|sh"
 FILE_PATH_PATTERN = re.compile(
-    r'(?:[\w.-]+/)+[\w.-]+\.(?:py|ts|tsx|js|jsx|java|kt|go|rs|yaml|toml|json|sql|sh)',
-    re.MULTILINE,
+    rf"""(?P<quote>[`"'])(?P<quoted>(?:[A-Za-z]:)?[/\\][^`"'\r\n]+?\.(?:{_FILE_EXTENSIONS}))(?P=quote)"""
+    rf"|(?P<unquoted>(?:(?:[A-Za-z]:)?[/\\]{{1,2}}(?:[\w.-]+[/\\])*|(?:[\w.-]+[/\\])+)"
+    rf"[\w.-]+\.(?:{_FILE_EXTENSIONS})\b)"
 )
 
 BARE_FILENAME_PATTERN = re.compile(
-    r'\b([\w.-]+\.(?:py|ts|tsx|js|jsx|java|kt|go|rs|yaml|toml|json|sql|sh))\b',
+    rf"\b([\w.-]+\.(?:{_FILE_EXTENSIONS}))\b",
 )
 
 
@@ -40,11 +50,13 @@ def extract_file_paths(text: str) -> list[str]:
     if not text:
         return []
 
-    full_paths = list(dict.fromkeys(FILE_PATH_PATTERN.findall(text)))
-    bare_names = list(dict.fromkeys(BARE_FILENAME_PATTERN.findall(text)))
+    full_paths = list(dict.fromkeys(
+        match["quoted"] or match["unquoted"] for match in FILE_PATH_PATTERN.finditer(text)
+    ))
+    bare_names = list(dict.fromkeys(BARE_FILENAME_PATTERN.findall(FILE_PATH_PATTERN.sub(" ", text))))
 
     # Deduplicate: exclude bare names that are tails of full paths
-    full_tails = {p.rsplit("/", 1)[-1] for p in full_paths}
+    full_tails = {p.replace("\\", "/").rsplit("/", 1)[-1] for p in full_paths}
     unique_bare = [b for b in bare_names if b not in full_tails]
 
     return full_paths + unique_bare
@@ -54,53 +66,42 @@ def extract_file_paths(text: str) -> list[str]:
 # Path normalization
 # ---------------------------------------------------------------------------
 
-def normalize_to_repo_relative(
+def resolve_file_reference(
     path: str,
-    known_roots: list[str] | None = None,
-) -> str:
-    """Convert any file reference to repo-relative forward-slash form.
+    projects: list[dict[str, str]],
+    project: str | None = None,
+) -> tuple[str | None, str] | None:
+    """Resolve an absolute reference to its deepest indexed root and project."""
+    if project and sum(entry.get("name") == project for entry in projects) > 1:
+        return None
+    if not is_absolute_spelling(path):
+        relative = normalize_query_path(path)
+        if "/" not in relative and path.strip().replace("\\", "/").startswith("./"):
+            relative = f"./{relative}"
+        return project, relative
 
-    Handles:
-    - Absolute Windows paths: ``C:\\Users\\...\\src\\foo.py`` -> ``src/foo.py``
-    - Absolute Unix paths: ``/mnt/c/Users/.../src/foo.py`` -> ``src/foo.py``
-    - Git Bash paths: ``/c/Users/.../src/foo.py`` -> ``src/foo.py``
-    - Already-relative paths: ``src/foo.py`` -> ``src/foo.py`` (passthrough)
-    - Backslash paths: ``src\\foo.py`` -> ``src/foo.py``
+    matches = []
+    for entry in projects:
+        name = entry.get("name")
+        root = entry.get("root_path")
+        if name and root and (project is None or name == project):
+            relative = path_relative_to_root(path, root)
+            if relative:
+                matches.append((name, relative))
+    if not matches:
+        return None
 
-    ``known_roots``: project root_path values. Strips the longest matching prefix.
-    """
-    # Normalize separators
-    normalized = path.replace("\\", "/")
-
-    if known_roots:
-        # Sort by length descending so longest prefix wins
-        sorted_roots = sorted(
-            (r.replace("\\", "/").rstrip("/") for r in known_roots),
-            key=len,
-            reverse=True,
-        )
-        lower_normalized = normalized.lower()
-        for root in sorted_roots:
-            lower_root = root.lower()
-            if lower_normalized.startswith(lower_root + "/"):
-                normalized = normalized[len(root) + 1:]
-                break
-            if lower_normalized == lower_root:
-                return "."
-
-    # Strip leading slash if still absolute
-    normalized = normalized.lstrip("/")
-
-    # Handle Windows drive letters: C:/Users/... -> strip drive
-    if len(normalized) >= 2 and normalized[1] == ":":
-        normalized = normalized[2:].lstrip("/")
-
-    # Handle Git Bash /c/Users style (single letter directory at root)
-    parts = normalized.split("/")
-    if len(parts) >= 2 and len(parts[0]) == 1 and parts[0].isalpha():
-        normalized = "/".join(parts[1:])
-
-    return normalized
+    # Roots matching the same absolute path are nested or identical. The deepest
+    # one removes the longest prefix, including across equivalent drive spellings.
+    shortest = min(len(relative) for _, relative in matches)
+    best = {(name, relative) for name, relative in matches if len(relative) == shortest}
+    if len(best) != 1:
+        return None
+    name, relative = best.pop()
+    if sum(entry.get("name") == name for entry in projects) != 1:
+        return None
+    # Preserve a root-level path's explicit directory so it cannot match a basename in a subfolder.
+    return name, relative if "/" in relative else f"./{relative}"
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +109,17 @@ def normalize_to_repo_relative(
 # ---------------------------------------------------------------------------
 
 _DIFF_SEPARATOR = "\n\n--- git diff ---\n"
+
+
+def extract_diff_file_paths(diff: str) -> list[str]:
+    """Strip Git's a/ and b/ prefixes only in diff file headers."""
+    paths = []
+    for line in diff.splitlines():
+        references = extract_file_paths(line)
+        if line.startswith(("diff --git ", "--- ", "+++ ")):
+            references = [p[2:] if p.startswith(("a/", "b/")) else p for p in references]
+        paths.extend(references)
+    return list(dict.fromkeys(paths))
 
 
 def split_narrative_and_diff(episode_body: str) -> tuple[str, str]:
@@ -128,33 +140,39 @@ def split_narrative_and_diff(episode_body: str) -> tuple[str, str]:
 def resolve_structural_entities(
     neo4j: Neo4jRepository,
     candidate_paths: list[str],
-    project_filter: str | None = None,
+    project_filter: str | list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Resolve file paths to structural Entity nodes.
-
-    Returns ``[{uuid, project, path}]`` for each matched structural entity.
-    """
-    if not candidate_paths:
+    """Resolve each file reference only when it identifies one indexed entity."""
+    if not candidate_paths or project_filter == []:
         return []
 
-    project_clause = "AND n.structure_project = $project" if project_filter else ""
+    projects = [project_filter] if isinstance(project_filter, str) else project_filter
+    project_clause = "AND n.structure_project IN $projects" if projects is not None else ""
     rows = neo4j.execute(
         f"""
-        UNWIND $paths AS candidate
-        MATCH (n:Entity)
-        WHERE n.structure_role IN ['file', 'entrypoint', 'config', 'test']
-          AND (n.structure_path = candidate
-               OR (NOT candidate CONTAINS '/'
-                   AND (n.structure_path ENDS WITH '/' + candidate
-                        OR n.structure_path = candidate)))
-          {project_clause}
+        UNWIND $paths AS reference
+        WITH reference, CASE WHEN reference STARTS WITH './' THEN substring(reference, 2)
+                             ELSE reference END AS candidate
+        CALL (reference, candidate) {{
+            MATCH (n:Entity)
+            WHERE n.structure_role IN ['file', 'File', 'entrypoint', 'config', 'test']
+              AND n.uuid IS NOT NULL
+              AND (n.structure_path = candidate
+                   OR (NOT reference CONTAINS '/' AND n.structure_path ENDS WITH '/' + candidate))
+              {project_clause}
+            WITH n LIMIT 2
+            RETURN collect(n) AS matches
+        }}
+        WITH matches WHERE size(matches) = 1
+        WITH matches[0] AS n
         RETURN DISTINCT n.uuid AS uuid,
                n.structure_project AS project,
                n.structure_path AS path
+        ORDER BY project, path, uuid
         """,
         params={
-            "paths": candidate_paths,
-            **({"project": project_filter} if project_filter else {}),
+            "paths": list(dict.fromkeys(candidate_paths)),
+            **({"projects": projects} if projects is not None else {}),
         },
     )
     return [
@@ -175,14 +193,19 @@ def create_anchor_edges(
     *,
     anchor_source: str = "narrative_path",
     weight: float = 1.0,
+    max_edges: int = MAX_ANCHOR_EDGES_PER_EPISODE,
 ) -> int:
     """Create ANCHORED_TO edges from semantic entities to structural entities.
 
-    Returns count of edges created.
+    Returns the number of pairs processed, including pre-existing edges.
     """
-    if not semantic_uuids or not structural_uuids:
+    if not semantic_uuids or not structural_uuids or max_edges <= 0:
         return 0
 
+    semantic = list(dict.fromkeys(semantic_uuids))
+    structural = list(dict.fromkeys(structural_uuids))
+    if len(semantic) * len(structural) > max_edges:
+        logger.info("Structural anchor pairs capped at %d for %s", max_edges, anchor_source)
     pairs = [
         {
             "sem": sem_uuid,
@@ -191,8 +214,7 @@ def create_anchor_edges(
             "anchor_source": anchor_source,
             "weight": weight,
         }
-        for sem_uuid in semantic_uuids
-        for struct_uuid in structural_uuids
+        for struct_uuid, sem_uuid in islice(product(structural, semantic), max_edges)
     ]
 
     rows = neo4j.execute(

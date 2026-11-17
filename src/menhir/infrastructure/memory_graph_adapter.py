@@ -2135,6 +2135,7 @@ class MemoryGraphAdapter:
         anchor_source: str = "narrative_path",
         weight: float = 1.0,
         project_filter: str | None = None,
+        max_edges: int,
     ) -> int:
         """Resolve file paths and create ANCHORED_TO edges from semantic entities."""
         from menhir.infrastructure.structural_anchoring import (
@@ -2154,6 +2155,7 @@ class MemoryGraphAdapter:
             structural_uuids,
             anchor_source=anchor_source,
             weight=weight,
+            max_edges=max_edges,
         )
 
     def find_cross_linked_semantic_entities(

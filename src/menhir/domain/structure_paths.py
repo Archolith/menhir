@@ -55,7 +55,7 @@ def normalize_query_path(path: str, root_path: str = "", *, prefix: bool = False
     raw = str(path).strip().replace("\\", "/")
     trailing = prefix and raw.endswith("/")
     if is_absolute_spelling(raw):
-        rel = _strip_root(raw, root_path)
+        rel = path_relative_to_root(raw, root_path)
         if rel is None:
             if _drive_form(raw) is not None:
                 return raw
@@ -66,7 +66,9 @@ def normalize_query_path(path: str, root_path: str = "", *, prefix: bool = False
     return rel + "/" if trailing and rel else rel
 
 
-def _strip_root(path: str, root_path: str) -> str | None:
+def path_relative_to_root(path: str, root_path: str) -> str | None:
+    """Return a path under this indexed root, or None for an unrelated path."""
+    path = path.strip().replace("\\", "/")
     root = str(root_path or "").strip().replace("\\", "/").rstrip("/")
     if not root:
         return None
