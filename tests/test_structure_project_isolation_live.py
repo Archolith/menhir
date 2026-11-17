@@ -30,9 +30,15 @@ Run with:  pytest --run-online -m online tests/test_structure_project_isolation_
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.structure_queries import StructureGraphWriter
+from menhir.services.enrichment_steps import _anchor_to_structural_entities
+from menhir.services.recall_service import RecallService
 
 pytestmark = [pytest.mark.online]
 
@@ -161,6 +167,48 @@ def test_bulk_structural_neighbors_is_scoped_too(two_projects) -> None:
     assert matched_project == "proj-A"
     assert all(str(u).startswith("A-") for u in uuids), f"bulk leaked foreign uuids: {uuids}"
     assert "A-app" in uuids and "A-util" in uuids, "the caller's own neighbours went missing"
+
+
+def test_file_anchors_and_recall_require_an_unambiguous_match(two_projects) -> None:
+    repo = two_projects.neo4j
+    repo.execute(
+        """
+        MATCH (p:Entity {structure_project: 'proj-A', structure_role: 'project'})
+        SET p.root_path = 'C:/work/repo-a'
+        CREATE (:Entity {structure_project: 'proj-A', structure_role: 'file',
+                         structure_path: 'other/app.py', uuid: 'A-other-app'})
+        CREATE (:Entity {structure_project: 'proj-A', structure_role: 'file',
+                         structure_path: 'app.py', uuid: 'A-root-app'})
+        CREATE (:Entity {uuid: 'memory'})
+        """
+    )
+    adapter = MemoryGraphAdapter(repo)
+    ctx = SimpleNamespace(episode_uuid="episode", graph_adapter=adapter)
+    recall = RecallService(graphiti_client=None, graph_adapter=adapter, scoring_service=None)
+
+    for reference in ("app.py", "src/app.py"):
+        assert _anchor_to_structural_entities(ctx, ["memory"], reference)["narrative"] == 0
+
+    rooted_path = r"C:\work\repo-a\src\app.py"
+    assert _anchor_to_structural_entities(ctx, ["memory"], rooted_path)["narrative"] == 1
+    assert _anchor_to_structural_entities(ctx, ["memory"], r"C:\work\repo-a\app.py")["narrative"] == 1
+    assert _anchor_to_structural_entities(ctx, ["memory"], "util.py")["narrative"] == 1
+    rows = repo.execute(
+        """
+        MATCH (:Entity {uuid: 'memory'})-[:ANCHORED_TO]->(f:Entity)
+        RETURN f.uuid AS id ORDER BY id
+        """
+    )
+    assert [row["id"] for row in rows] == ["A-app", "A-root-app", "A-util"]
+
+    for projects in (["proj-A", "proj-B"], ["proj-B", "proj-A"]):
+        assert two_projects.resolve_structural_neighbors_bulk(projects, "src/app.py") is None
+    assert asyncio.run(recall._resolve_file_context("src/app.py")) == []
+    assert asyncio.run(recall._resolve_file_context("app.py", "proj-A")) == []
+    assert asyncio.run(recall._resolve_file_context("./app.py", "proj-A")) == ["memory"]
+    assert asyncio.run(recall._resolve_file_context("src/app.py", "proj-A")) == ["memory"]
+    assert asyncio.run(recall._resolve_file_context("src/app.py", "proj-B")) == []
+    assert asyncio.run(recall._resolve_file_context(rooted_path)) == ["memory"]
 
 
 # ---------------------------------------------------------------------------

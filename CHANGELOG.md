@@ -1,3 +1,8 @@
+## 2026-11-17 - Resolve file-linked memory without guessing a project (#682)
+
+- Skip ambiguous file references when writing links or adding file-linked recall candidates.
+  Use indexed roots for absolute paths and cap new link pairs per enrichment pass.
+
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 
 - A saved memory keeps its episode ID and reports pending queue recovery. A companion evidence

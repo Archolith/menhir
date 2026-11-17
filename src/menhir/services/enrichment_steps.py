@@ -931,9 +931,12 @@ def _anchor_to_structural_entities(
     file entities referenced in the episode body. Narrative-mentioned files
     get weight 1.0; diff-only files get weight 0.3.
     """
+    from menhir.domain.structure_paths import is_absolute_spelling
     from menhir.infrastructure.structural_anchoring import (
+        MAX_ANCHOR_EDGES_PER_EPISODE,
+        extract_diff_file_paths,
         extract_file_paths,
-        normalize_to_repo_relative,
+        resolve_file_reference,
         split_narrative_and_diff,
     )
 
@@ -946,24 +949,38 @@ def _anchor_to_structural_entities(
         narrative, diff = split_narrative_and_diff(episode_body)
 
         narrative_paths = extract_file_paths(narrative)
-        diff_paths = extract_file_paths(diff)
-        # Remove paths already in narrative (avoid double-linking)
-        narrative_set = set(narrative_paths)
-        diff_only_paths = [p for p in diff_paths if p not in narrative_set]
+        diff_paths = extract_diff_file_paths(diff)
+        projects = (
+            ctx.graph_adapter.list_structure_projects()
+            if any(is_absolute_spelling(path) for path in narrative_paths + diff_paths)
+            else []
+        )
+        remaining = MAX_ANCHOR_EDGES_PER_EPISODE
+        seen: set[tuple[str | None, str]] = set()
+        for source, paths, weight in (("narrative", narrative_paths, 1.0), ("diff", diff_paths, 0.3)):
+            by_project: dict[str | None, list[str]] = {}
+            for path in paths:
+                reference = resolve_file_reference(path, projects)
+                if reference is None or reference in seen:
+                    continue
+                seen.add(reference)
+                project, relative = reference
+                by_project.setdefault(project, []).append(relative)
 
-        if narrative_paths:
-            normalized = [normalize_to_repo_relative(p) for p in narrative_paths]
-            counts["narrative"] = ctx.graph_adapter.anchor_semantic_to_structural(
-                extracted_node_uuids, normalized,
-                anchor_source="narrative_path", weight=1.0,
-            )
-
-        if diff_only_paths:
-            normalized = [normalize_to_repo_relative(p) for p in diff_only_paths]
-            counts["diff"] = ctx.graph_adapter.anchor_semantic_to_structural(
-                extracted_node_uuids, normalized,
-                anchor_source="diff_path", weight=0.3,
-            )
+            for project, relative_paths in by_project.items():
+                if remaining <= 0:
+                    logger.info("Structural anchor budget exhausted for episode=%s", ctx.episode_uuid)
+                    break
+                linked = ctx.graph_adapter.anchor_semantic_to_structural(
+                    extracted_node_uuids,
+                    relative_paths,
+                    anchor_source=f"{source}_path",
+                    weight=weight,
+                    project_filter=project,
+                    max_edges=remaining,
+                )
+                remaining -= linked
+                counts[source] += linked
 
         total = counts["narrative"] + counts["diff"]
         if total > 0:
