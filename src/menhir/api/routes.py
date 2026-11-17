@@ -580,15 +580,18 @@ async def ingest_memory(
     except IdempotencyKeyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     status = str(result.get("status") or "")
-    error: str | None = None
+    error = result.get("error") if status == "failed" else None
+    warning = result.get("warning")
     retry: str | None = None
     timed_out = False
     entities_linked: int | None = None
-    if wait:
+    if wait and status != "failed":
         row = await runtime_ctx.built.ingest_service.wait_for_episode_processing(
             str(result.get("episode_id") or ""), timeout_s=60.0
         )
         status, error, retry, timed_out = _terminal_status_from_row(row, fallback=status)
+        if status not in {"queued", "pending"}:
+            warning = None
         if status == "ready":
             entities_linked = await _count_linked_entities(runtime_ctx, row, str(result.get("episode_id") or ""))
     return MemoryResponse(
@@ -598,6 +601,7 @@ async def ingest_memory(
         flagged=body.flagged,
         bootstrap_scope=body.bootstrap_scope,
         error=error,
+        warning=warning,
         retry=retry,
         timed_out=timed_out,
         entities_linked=entities_linked,

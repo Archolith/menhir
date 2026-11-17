@@ -10,6 +10,7 @@ import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -163,6 +164,71 @@ async def test_queue_episode_for_enrichment_returns_queued(
     assert result.edges_touched == 0
     assert result.episode_id in adapter.pending_episode_rows
     assert adapter.pending_episode_rows[result.episode_id]["processing_state"] == "PENDING"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["worker", "queue_put"])
+async def test_saved_episode_survives_scheduling_failure(
+    stub_memory_graph_adapter,
+    stub_graphiti_client,
+    stub_llm_adapter,
+    monkeypatch,
+    failure_point,
+) -> None:
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    worker = AsyncMock()
+    monkeypatch.setattr(service, "_ensure_enrichment_worker", worker)
+    queue = service._queue()
+    if failure_point == "worker":
+        worker.side_effect = RuntimeError("worker unavailable")
+    else:
+        put = queue.put
+        monkeypatch.setattr(queue, "put", AsyncMock(side_effect=RuntimeError("queue unavailable")))
+
+    result = await service.queue_episode_for_enrichment("saved memory", new_session("user"), "unit-test")
+
+    assert result.status is IngestStatus.QUEUED
+    assert result.error is None
+    assert result.processing_state == "PENDING"
+    assert result.warning and "pending queue recovery" in result.warning
+    assert result.episode_id in adapter.pending_episode_rows
+    assert result.episode_id not in service._queued_episode_ids
+
+    if failure_point == "worker":
+        worker.side_effect = None
+    else:
+        monkeypatch.setattr(queue, "put", put)
+    assert await service.resume_pending_episodes() == 1
+    assert queue.get_nowait() == result.episode_id
+    assert queue.empty()
+    assert set(adapter.pending_episode_rows) == {result.episode_id}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_companion_scheduling_failure_preserves_main_receipt(monkeypatch, caplog) -> None:
+    from menhir.services.ingest_intake import IngestIntakeMixin
+
+    intake = IngestIntakeMixin()
+    monkeypatch.setattr(intake, "_enrichment_enabled", True, raising=False)
+    monkeypatch.setattr(intake, "_record_episode_for_enrichment", lambda *args: ("memory-id", "evidence-id"))
+    monkeypatch.setattr(intake, "_ensure_enrichment_worker", AsyncMock(), raising=False)
+    enqueue = AsyncMock(side_effect=[None, RuntimeError("queue unavailable")])
+    monkeypatch.setattr(intake, "_enqueue_pending_episode", enqueue, raising=False)
+
+    result = await intake.queue_episode_for_enrichment("saved memory", new_session("user"), "unit-test")
+
+    assert result.episode_id == "memory-id"
+    assert result.status is IngestStatus.QUEUED
+    assert result.warning is None
+    assert [call.args[0] for call in enqueue.await_args_list] == ["memory-id", "evidence-id"]
+    assert "Could not schedule evidence projection evidence-id for saved episode memory-id" in caplog.text
 
 
 @pytest.mark.unit

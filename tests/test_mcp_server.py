@@ -771,6 +771,32 @@ def test_add_memory_queues_episode_for_background_enrichment(stubbed_mcp_state):
     ]
 
 
+@pytest.mark.parametrize("track", [False, True])
+def test_memory_tools_return_saved_id_when_scheduling_is_deferred(stubbed_mcp_state, monkeypatch, track):
+    built, _, _ = stubbed_mcp_state
+
+    async def deferred(*args, **kwargs):
+        return {
+            "episode_id": "saved-id",
+            "status": "queued",
+            "nodes_touched": 1,
+            "warning": "Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        }
+
+    monkeypatch.setattr(built.ingest_service, "queue_episode_for_enrichment", deferred)
+
+    if track:
+        result = asyncio.run(add_memory_and_track(
+            "remember this", source="claude-code", timeout_s=0.01, poll_interval_s=0.01,
+        ))
+        assert "episode_id: saved-id" in result
+    else:
+        result = asyncio.run(add_memory("remember this", source="claude-code"))
+        assert "episode_id=saved-id, state=PENDING" in result
+
+    assert result.startswith("Memory saved. Enrichment is pending queue recovery. Do not resubmit.")
+
+
 def test_recall_context_requires_flagged_bootstrap(stubbed_mcp_state):
     result = asyncio.run(
         recall_context_memories(

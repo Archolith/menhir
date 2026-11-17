@@ -357,6 +357,36 @@ class TestContext:
 
 
 class TestIngest:
+    def test_ingest_returns_saved_id_when_scheduling_is_deferred(self, client, fake_backend):
+        fake_backend.queue_episode.return_value = {
+            "episode_id": "ep-123",
+            "status": "queued",
+            "processing_state": "PENDING",
+            "warning": "Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        }
+
+        response = client.post("/api/memory", json={"episode": "saved memory"})
+
+        assert response.status_code == 200
+        assert response.json()["episode_id"] == "ep-123"
+        assert response.json()["status"] == "queued"
+        assert "pending queue recovery" in response.json()["warning"]
+
+    def test_ingest_wait_preserves_storage_failure(self, client, fake_backend):
+        fake_backend.queue_episode.return_value = {
+            "episode_id": "",
+            "status": "failed",
+            "error": "storage unavailable",
+        }
+
+        response = client.post("/api/memory?wait=true", json={"episode": "unsaved memory"})
+
+        assert response.status_code == 200
+        assert response.json()["episode_id"] == ""
+        assert response.json()["status"] == "failed"
+        assert response.json()["error"] == "storage unavailable"
+        assert response.json()["warning"] is None
+
     def test_ingest_memory_uses_caller_session_defaults(self, client, fake_backend):
         resp = client.post("/api/memory", json={"episode": "user said hello"})
         assert resp.status_code == 200
