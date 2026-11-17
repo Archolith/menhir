@@ -1,7 +1,3 @@
-## 2026-11-17 - Supported deployment scope (#689)
-
-- Clarify who can share an instance and when a client pin requires a dedicated credential.
-
 ## 2026-11-16 - One MCP error shape; no silent coercion; namespace checks and notes (#669, #670, #671)
 
 - Every tool failure is a `CallToolResult` with `isError: true` and `structuredContent`
