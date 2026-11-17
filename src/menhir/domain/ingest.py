@@ -30,6 +30,8 @@ class IngestResult:
     #: Why a FAILED result failed, for the caller (#669). A short class of cause plus the
     #: exception type, never the exception text: that can echo the memory's content.
     error: str | None = None
+    #: Caller guidance when the write was accepted but immediate scheduling was unavailable.
+    warning: str | None = None
 
 
 class IdempotencyKeyConflict(ValueError):

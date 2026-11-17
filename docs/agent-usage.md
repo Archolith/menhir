@@ -48,6 +48,7 @@ applies. Cut entries end in "…" and carry `truncated: true`. Pass `compact=fal
 - For a recall-critical semantic write in the local-stdio MVP, choose `add_memory_and_track` as the
   original write. Plain `add_memory` is fire-and-forget and provides no immediate-recall guarantee.
 - `add_memory` returning `PENDING` means the write was accepted, not that it will certainly finish.
+  If the receipt says enrichment is pending queue recovery, the memory is already saved.
   Keep the returned episode ID. Never call `add_memory_and_track` afterward to wait on that write:
   it takes new text, not an existing episode ID, and would queue another write.
 - Use `TEMPORAL` with `valid_at` for time-bound reminders. Use workspace/namespace fields explicitly; a

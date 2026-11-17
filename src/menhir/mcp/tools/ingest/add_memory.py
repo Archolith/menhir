@@ -172,8 +172,9 @@ class AddMemoryTool(BaseTextTool):
         flag_note = ", flagged=true" if flagged else ""
         if normalized_bootstrap_scope is not None:
             flag_note += f", bootstrap_scope={normalized_bootstrap_scope}"
+        receipt = result.get("warning") or "Queued."
         return (
-            f"Queued. episode_id={result.get('episode_id')}, "
+            f"{receipt} episode_id={result.get('episode_id')}, "
             f"state=PENDING, nodes={int(result.get('nodes_touched') or 0)}, edges={int(result.get('edges_touched') or 0)}, "
             f"{await _queue_summary(backend)}{flag_note}"
         )

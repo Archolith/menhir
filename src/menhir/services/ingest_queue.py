@@ -210,9 +210,13 @@ class IngestQueueMixin:
     async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
         if episode_uuid in self._queued_episode_ids:
             return
-        self._queued_episode_ids.add(episode_uuid)
         queue = self._queue()
-        await queue.put(episode_uuid)
+        self._queued_episode_ids.add(episode_uuid)
+        try:
+            await queue.put(episode_uuid)
+        except BaseException:
+            self._queued_episode_ids.discard(episode_uuid)
+            raise
         record_lifecycle_event(
             component="ingest_queue",
             event="episode_enqueued",

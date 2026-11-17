@@ -491,6 +491,8 @@ class MemoryResponse(BaseModel):
     #: Set when ``status`` is ``failed``: the error text and whether Menhir will retry it on its
     #: own (``retryable``), park it for an operator (``manual_review``), or never (``terminal``).
     error: str | None = None
+    #: Guidance for a saved memory awaiting queue recovery.
+    warning: str | None = None
     retry: str | None = None
     #: Set when ``wait`` elapsed before a terminal state.
     timed_out: bool = False

@@ -145,6 +145,8 @@ class AddMemoryAndTrackTool(BaseTextTool):
                 f"Failed to queue memory: {failed_write_reason(queued)}", code="write_failed"
             )
         episode_uuid = str(queued.get("episode_id") or "")
+        warning = queued.get("warning")
+        receipt_note = f"{warning}\n" if warning else ""
         try:
             row, history, timed_out = await _collect_episode_status(
                 backend,
@@ -165,7 +167,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
             logger.warning("Enrichment tracking unavailable after accepted write (%s)", type(exc).__name__)
             guidance = _episode_status_guidance(state="UNKNOWN", timed_out=False)
             return (
-                f"episode_id: {episode_uuid}\n"
+                f"{receipt_note}episode_id: {episode_uuid}\n"
                 "write_status: accepted\n"
                 "status: UNKNOWN\n"
                 "tracking_status: UNAVAILABLE\n"
@@ -176,4 +178,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
         except Exception as exc:  # noqa: BLE001 - optional diagnostics cannot hide the receipt
             logger.warning("Queue diagnostics unavailable after accepted write (%s)", type(exc).__name__)
             queue_summary = "queue_status: UNAVAILABLE (accepted write; queue diagnostics unavailable)"
-        return f"queued_summary: {queue_summary}\n{episode_status}"
+        # Terminal status takes precedence over the original scheduling warning.
+        if row and row.get("processing_state") in {"ENRICHING", "READY", "FAILED", "SKIPPED"}:
+            receipt_note = ""
+        return f"{receipt_note}queued_summary: {queue_summary}\n{episode_status}"

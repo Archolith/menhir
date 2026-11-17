@@ -1,3 +1,8 @@
+## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
+
+- A saved memory keeps its episode ID and reports pending queue recovery. A companion evidence
+  scheduling failure is logged separately from the memory's receipt.
+
 ## 2026-11-16 - One MCP error shape; no silent coercion; namespace checks and notes (#669, #670, #671)
 
 - Every tool failure is a `CallToolResult` with `isError: true` and `structuredContent`

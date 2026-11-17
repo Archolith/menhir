@@ -109,33 +109,30 @@ class IngestIntakeMixin:
         if isinstance(outcome, IngestResult):
             return outcome
         episode_uuid, evidence_projection_uuid = outcome
-        try:
-            if self._enrichment_enabled:
+        if self._enrichment_enabled:
+            try:
                 await self._ensure_enrichment_worker()
                 await self._enqueue_pending_episode(episode_uuid)
-                # The projection is a real PENDING episode and enriches through the same worker;
-                # without this it would sit queued forever and produce none of the entities it
-                # exists to produce. Enqueued AFTER the memory so the curated write is never
-                # delayed by it.
-                if evidence_projection_uuid:
+            except Exception:
+                logger.exception("Could not schedule saved episode %s for enrichment", episode_uuid)
+                return IngestResult(
+                    episode_id=episode_uuid,
+                    status=IngestStatus.QUEUED,
+                    nodes_touched=1,
+                    edges_touched=0,
+                    processing_state="PENDING",
+                    warning="Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+                )
+            # The companion is also PENDING and can be recovered independently of the memory.
+            if evidence_projection_uuid:
+                try:
                     await self._enqueue_pending_episode(evidence_projection_uuid)
-        except Exception as exc:  # catch-all: episode queue must not crash the caller
-            logger.exception(
-                "Episode queue failed for session_id=%s source=%s",
-                session.session_id,
-                source,
-            )
-            return IngestResult(
-                episode_id="",
-                status=IngestStatus.FAILED,
-                nodes_touched=0,
-                edges_touched=0,
-                # The write landed, so say which episode and that resending would duplicate it.
-                error=(
-                    f"episode {episode_uuid} was written but could not be queued for enrichment "
-                    f"({type(exc).__name__}); do not write it again, see the server log"
-                ),
-            )
+                except Exception:
+                    logger.exception(
+                        "Could not schedule evidence projection %s for saved episode %s",
+                        evidence_projection_uuid,
+                        episode_uuid,
+                    )
 
         return IngestResult(
             episode_id=episode_uuid,
@@ -619,6 +616,7 @@ class IngestIntakeMixin:
                     status=IngestStatus.QUEUED,
                     nodes_touched=0,
                     edges_touched=0,
+                    warning=queue_result.warning if processing_state == ProcessingState.PENDING else None,
                 )
 
         except Exception as exc:  # catch-all: episode ingest must not crash the caller
