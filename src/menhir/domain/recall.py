@@ -11,6 +11,8 @@ import menhir.domain.retrieval_trace_models as retrieval_trace_models
 from menhir.domain.retrieval_tuning import CandidateSource, RetrievalScoreKind
 from menhir.domain.truth.labels import WardenLabel
 
+MAX_EXPLICIT_RECALL_RESULTS = 50
+
 
 class InvalidQueryPresetError(ValueError):
     """Raised when a caller supplies an unsupported recall preset."""

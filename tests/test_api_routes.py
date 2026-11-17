@@ -182,6 +182,22 @@ class TestHealth:
 
 
 class TestRecall:
+    @pytest.mark.parametrize("payload", [{}, {"limit": 10}, {"limit": 20}])
+    def test_recall_keeps_explicit_limit_and_returns_cap_note(self, client, fake_backend, payload):
+        if not payload:
+            fake_backend.recall.return_value["note"] = "Reranking capped the default result limit at 7."
+        response = client.post("/api/recall", json={"query": "test query", **payload})
+
+        assert response.status_code == 200
+        kwargs = fake_backend.recall.await_args.kwargs
+        assert kwargs["limit"] == payload.get("limit", 10)
+        if payload:
+            assert kwargs["limit_is_explicit"] is True
+            assert "note" not in response.json()
+        else:
+            assert "limit_is_explicit" not in kwargs
+            assert response.json()["note"] == fake_backend.recall.return_value["note"]
+
     def test_recall_basic(self, client, fake_backend):
         resp = client.post("/api/recall", json={"query": "test query"})
         assert resp.status_code == 200
@@ -311,7 +327,7 @@ class TestRecall:
         resp = client.post("/api/recall", json={"query": "test", "preset": "recent", "limit": 5})
         assert resp.status_code == 200
         fake_backend.recall.assert_awaited_once_with(
-            "test", preset="recent", limit=5, include_session=True,
+            "test", preset="recent", limit=5, limit_is_explicit=True, include_session=True,
             include_superseded=False, include_invalidated=False, namespace=None,
         )
 

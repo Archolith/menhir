@@ -107,6 +107,7 @@ class BackendClientOpsMixin:
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         include_invalidated: bool = False,
@@ -133,6 +134,8 @@ class BackendClientOpsMixin:
             "namespace": namespace,
             "trace": trace,
         }
+        if limit_is_explicit:
+            params["limit_is_explicit"] = True
         if include_warden_status:
             params["include_warden_status"] = True
         if source_memory_limit is not None:

@@ -1,3 +1,8 @@
+## 2026-11-17 - Explicit recall limits can bypass the default rerank cap (#661)
+
+- MCP and REST honor a supplied recall limit up to 50. Omitted limits keep their existing
+  defaults, with a note when reranking cuts the result list to its configured cap.
+
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 
 - A saved memory keeps its episode ID and reports pending queue recovery. A companion evidence

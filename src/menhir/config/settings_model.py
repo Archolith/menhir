@@ -438,7 +438,7 @@ class MemorySettings:
     recall_rerank_cache_dir: str = ""
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200
-    recall_rerank_max_results: int = 7  # 1..200; results returned when rerank ran
+    recall_rerank_max_results: int = 7  # 1..200; cap when rerank ran and no caller limit was specified
     recall_rerank_threads: int = 0  # 0..256; 0 = auto (capped at the cgroup CPU quota)
 
     # HTTP server

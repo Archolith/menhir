@@ -12,7 +12,7 @@ from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
-from menhir.domain.recall import VerifierEvidence, normalize_source_memory_sources
+from menhir.domain.recall import MAX_EXPLICIT_RECALL_RESULTS, VerifierEvidence, normalize_source_memory_sources
 from menhir.tiers import TIER_RANK
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
@@ -190,7 +190,7 @@ def _resolve_namespace(request: Request, body_namespace: str | None) -> str | No
 class RecallRequest(BaseModel):
     query: str
     preset: str = "knowledge"
-    limit: int = Field(default=10, ge=1, le=50)
+    limit: int = Field(default=10, ge=1, le=MAX_EXPLICIT_RECALL_RESULTS)
     namespace: str | None = None
     # Whether to include SESSION-scoped (not-yet-promoted-to-PERSISTENT) memories.
     # True, matching every MCP recall tool. It was False here for historical reasons, which
@@ -330,6 +330,7 @@ class RecallResponse(BaseModel):
     preset: str
     results: list[RecallMemory]
     candidates_evaluated: int
+    note: str | None = None
     warden_status: dict[str, object] | None = None
     warden_notice: str | None = None
     trace: dict[str, object] | None = None
