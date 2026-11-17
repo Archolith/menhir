@@ -207,7 +207,10 @@ after it republishes even though the scan fingerprint is unchanged.
   `provider_auth_failure` when it rejected the credentials. Neither changes `status` or the 200/503
   code: the server still answers recall from keyword search, and a restart does not fix billing. The
   billing breaker probes the provider again every 5 minutes and closes once a call succeeds, so adding
-  credit needs no restart.
+  credit needs no restart. The block reads the flags and breakers of the process that answers the
+  request. `menhir serve` runs one worker, and that worker also runs the ingest queue and the
+  maintenance scheduler, so the block reflects ingest and recall. A deployment that splits HTTP from
+  ingest across processes would see only the HTTP process's state there.
 - After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
   `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
   the server serves the instructions and tools this package expects. The script sends the token only over
