@@ -16,6 +16,18 @@ about a week. There is no bounty.
 Fixes land on `main` and ship in the next release; the latest 0.3.x release is the supported
 version. There are no backported security releases.
 
+## Supported deployments
+
+Menhir supports one owner and that owner's agents and bots. Use separate instances for
+separate owners or trust domains. Multi-user organization deployments are tracked in
+[#637](https://github.com/Archolith/menhir/issues/637) and
+[#127](https://github.com/Archolith/menhir/issues/127).
+
+Namespaces organize memory within the owner's instance. To restrict an agent to its
+pinned namespace, give it a dedicated per-client token or OAuth credential bound to its
+client identity. Keyless loopback and local stdio are trusted local modes. A client name
+supplied by the caller, including under a shared key, does not establish an access boundary.
+
 ## Scope
 
 Menhir stores memory content in Neo4j and holds credentials for an LLM provider, so the
