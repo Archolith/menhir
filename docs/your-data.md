@@ -132,8 +132,9 @@ erasure journal and the erased-id suppression record.
 - SESSION scope is a relevance scope, not access control. Recall ranks the caller's own session's
   SESSION memories and leaves out other sessions', but the context loaders, recall history and
   timeline, and the `memory://` resources return SESSION memories from any session in the
-  namespace. To keep one client's memories from another, put them in separate namespaces
-  (`MENHIR_CLIENT_NAMESPACES`).
+namespace. Use `MENHIR_CLIENT_NAMESPACES` to organize each client's memory. To restrict a
+  client's access to its pinned namespace, follow the credential guidance in the
+  [supported deployment policy](../SECURITY.md#supported-deployments).
 - Hosted backups live in the private deploy repo and are outside this page. Retention of the
   encrypted backup archives is unknown from this repository.
 

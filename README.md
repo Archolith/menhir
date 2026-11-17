@@ -739,8 +739,12 @@ These are known gaps in 0.3.12, each with a planned fix:
 
 ## Security and privacy
 
-Menhir is a single-operator service, not a multi-tenant boundary. Run a separate instance
-for each operator or trust domain. The full threat model and known limitations are in
+### Supported deployments
+
+Menhir supports one owner and that owner's agents and bots. Use a separate instance for
+each owner or trust domain. Namespaces organize memory within an instance. See the
+[security policy](SECURITY.md#supported-deployments) for when a client pin can restrict
+access. The full threat model and known limitations are in
 [`docs/security-posture.md`](docs/security-posture.md). The full inventory of stored data and
 its retention is in [`docs/your-data.md`](docs/your-data.md).
 
