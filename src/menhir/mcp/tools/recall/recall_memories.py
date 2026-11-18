@@ -61,7 +61,7 @@ def _bound_source_memories(entries: list) -> tuple[list, bool]:
 async def recall_memories(
     query: str,
     preset: str = "knowledge",
-    limit: int = 5,
+    limit: int | None = None,
     file_context: str = "",
     file_context_project: str = "",
     namespace: str = "",
@@ -76,7 +76,7 @@ async def recall_memories(
     Args:
         query: What to search for. Natural language works best.
         preset: Ranking strategy — "knowledge" (default), "recent", "connected". Also accepts "emotional" and "conflict" (partial — weight balance only, no domain signals yet).
-        limit: Max results to return (default: 5).
+        limit: Max results to return (default 5). An explicit limit overrides the default rerank cap, up to 50 results.
         file_context: Optional file path — boosts memories linked to this file and its structural neighbors. Accepts absolute or relative paths.
         file_context_project: Optional project name for file_context disambiguation. Auto-detected if omitted.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
@@ -119,7 +119,7 @@ class RecallMemoriesTool(BaseJsonTool):
         self,
         query: str,
         preset: str = "knowledge",
-        limit: int = 5,
+        limit: int | None = None,
         file_context: str = "",
         file_context_project: str = "",
         namespace: str = "",
@@ -130,7 +130,8 @@ class RecallMemoriesTool(BaseJsonTool):
         include_warden_status: bool = False,
     ) -> str:
         """Name the component and decision in query. Start with one focused query;
-        rephrase if needed. limit defaults to 5. preset defaults to knowledge;
+        rephrase if needed. limit defaults to 5. An explicit limit overrides the
+        default rerank cap, up to 50 results. preset defaults to knowledge;
         recent and connected change ranking. emotional and conflict are also
         accepted ranking presets, not dedicated search modes.
 
@@ -157,7 +158,7 @@ class RecallMemoriesTool(BaseJsonTool):
         stale-anchor warnings and response notes. Empty results do not establish
         that no relevant memory exists.
         """
-        if int(limit) < 1:
+        if limit is not None and limit < 1:
             # #670: limit=0 used to return an empty list with nothing said.
             raise McpToolRefusal(f"Invalid limit {limit!r}: limit must be at least 1.")
         backend = self.get_backend()
@@ -177,7 +178,8 @@ class RecallMemoriesTool(BaseJsonTool):
             result = await backend.recall(
                 query,
                 preset=preset,
-                limit=limit,
+                limit=5 if limit is None else limit,
+                **({"limit_is_explicit": True} if limit is not None else {}),
                 include_session=True,
                 wait_for_pending=True,
                 file_context=file_context or None,

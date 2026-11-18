@@ -32,6 +32,7 @@ from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mo
 from menhir.domain.recall_provenance import derive_recall_provenance
 from menhir.domain.scalar_view_freshness import ObservationTime, newer_unfolded_evidence
 from menhir.domain.recall import (
+    MAX_EXPLICIT_RECALL_RESULTS,
     CandidateData,
     QueryPreset,
     RecallHistoryResult,
@@ -485,6 +486,7 @@ async def _run_recall(
     *,
     preset: QueryPreset = QueryPreset.KNOWLEDGE,
     limit: int = 10,
+    limit_is_explicit: bool = False,
     candidate_k: int = 50,
     context_node_ids: list[str] | None = None,
     include_session: bool = False,
@@ -511,6 +513,10 @@ async def _run_recall(
     _t_total = perf_counter()
     _t_phases: dict[str, int] = {}
     tuning = tuning or RetrievalTuningConfig()
+    limit_note = None
+    if limit_is_explicit and limit > MAX_EXPLICIT_RECALL_RESULTS:
+        limit_note = f"Requested {limit} results. Recall allows up to {MAX_EXPLICIT_RECALL_RESULTS}."
+        limit = MAX_EXPLICIT_RECALL_RESULTS
     configured_guards = tuple(name for name, enabled in (
         ("scope", tuning.enable_warden_gate), ("oracle_admission", tuning.enable_warden_gate),
         ("contradiction", tuning.enable_contradiction_interrupt),
@@ -1738,13 +1744,9 @@ async def _run_recall(
     source_memories, source_memory_note, source_memory_ms = await source_memory_task
     if source_memory_ms:
         _t_phases["source_memories"] = source_memory_ms
-    # Read after every lane ran, so a refusal during this recall is reflected; rides on
-    # source_memory_note so all three return paths carry it.
+    # Read after every lane ran so refusals during this recall are reflected.
     breaker_note = embed_breaker_note(service.graphiti_client)
-    if breaker_note:
-        source_memory_note = (
-            f"{breaker_note} | {source_memory_note}" if source_memory_note else breaker_note
-        )
+    shared_note = " | ".join(n for n in (limit_note, breaker_note, source_memory_note) if n) or None
 
     if not candidates:
         if visible_pending_rows:
@@ -1753,11 +1755,11 @@ async def _run_recall(
                 if search_error
                 else None
             )
-            if source_memory_note:
+            if shared_note:
                 pending_note = (
-                    f"{pending_note} | {source_memory_note}"
+                    f"{pending_note} | {shared_note}"
                     if pending_note
-                    else source_memory_note
+                    else shared_note
                 )
             pending_results = service._pending_fallback_results(
                 visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
@@ -1781,11 +1783,11 @@ async def _run_recall(
             if search_error
             else None
         )
-        if source_memory_note:
+        if shared_note:
             empty_note = (
-                f"{empty_note} | {source_memory_note}"
+                f"{empty_note} | {shared_note}"
                 if empty_note
-                else source_memory_note
+                else shared_note
             )
         return RecallResult(
             warden_status=warden_status if include_warden_status else None,
@@ -1872,13 +1874,14 @@ async def _run_recall(
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
-    # A reranked list skips the floor and fills the limit; rerank_max_results caps it (offline
-    # sweep: top 7 keeps the rerank's top-5 recall at about production's context size).
-    result_limit = min(limit, tuning.rerank_max_results) if rerank is not None else limit
+    # Retain the default context budget for reranked calls with no explicit result limit.
+    result_limit = min(limit, tuning.rerank_max_results) if rerank is not None and not limit_is_explicit else limit
     pending_fallback = service._pending_fallback_results(
-        visible_pending_rows, preset, result_limit, include_session=include_session,
+        visible_pending_rows, preset, min(limit, result_limit + 1), include_session=include_session,
         session_id=session_id,
     )
+    capped = result_limit < limit and len(pending_fallback) + len(scored) > result_limit
+    pending_fallback = pending_fallback[:result_limit]
     top_results = pending_fallback + scored[:max(0, result_limit - len(pending_fallback))]
     warden_status.unchecked_pending = len(pending_fallback)
 
@@ -1892,13 +1895,16 @@ async def _run_recall(
         note = f"{note} | {frontier_note}" if note else frontier_note
     if rerank_note:
         note = f"{note} | {rerank_note}" if note else rerank_note
+    if capped:
+        cap_note = f"Reranking capped the default result limit at {result_limit}. Pass limit explicitly to request more."
+        note = f"{note} | {cap_note}" if note else cap_note
     if search_error:
         warning = "Recall search backend failed; fallback results may be incomplete."
         note = f"{note} | {warning}" if note else warning
     if facet_active_warning:
         note = f"{note} | {facet_active_warning}" if note else facet_active_warning
-    if source_memory_note:
-        note = f"{note} | {source_memory_note}" if note else source_memory_note
+    if shared_note:
+        note = f"{note} | {shared_note}" if note else shared_note
 
     # --- Temporal facts enrichment (POST-RANK) ---
     _t = perf_counter()

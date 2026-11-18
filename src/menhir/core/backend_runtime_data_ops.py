@@ -346,6 +346,7 @@ class RuntimeProviderDataOpsMixin:
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         wait_for_pending: bool = False,
@@ -370,6 +371,8 @@ class RuntimeProviderDataOpsMixin:
         # Only thread the frontier params when there is config to pass, so the call shape
         # is unchanged (and older recall stubs keep working) when no portion is enabled.
         frontier_kwargs: dict[str, Any] = {}
+        if limit_is_explicit:
+            frontier_kwargs["limit_is_explicit"] = True
         if tuning is not None:
             frontier_kwargs["tuning"] = tuning
         if trace:
