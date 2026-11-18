@@ -148,6 +148,7 @@ class MemoryBackend(Protocol):
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         wait_for_pending: bool = False,

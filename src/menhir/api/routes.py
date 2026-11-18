@@ -174,6 +174,8 @@ def _log_api_recall_query(body: Any, result: dict[str, Any], resolved_namespace:
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
     recall_kwargs: dict[str, object] = {}
+    if "limit" in body.model_fields_set:
+        recall_kwargs["limit_is_explicit"] = True
     if body.include_warden_status:
         recall_kwargs["include_warden_status"] = True
     if body.trace:
@@ -247,6 +249,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             for m in result.get("results", []) or []
         ],
         candidates_evaluated=int(result.get("candidates_evaluated") or 0),
+        note=result.get("note"),
         warden_status=result.get("warden_status") if body.include_warden_status else None,
         warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),

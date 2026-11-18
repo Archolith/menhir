@@ -10,6 +10,14 @@
   pins (often a mistyped key) or the count could not be taken (null, never zero).
 - Connected MCP clients see the new `flag_memory` argument only after they reconnect.
 
+## 2026-11-17 - Explicit recall limits can bypass the default rerank cap (#661)
+
+- MCP and REST honor a supplied recall limit up to 50. Omitted limits keep their existing
+  defaults, with a note when reranking cuts the result list to its configured cap.
+- `recall_context_memories` treats a supplied `limit` the same way and returns the note as
+  `relevant_note`. A client newer than its server retries a rejected explicit limit once
+  without the flag and says the server may have capped the results.
+
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 
 - A saved memory keeps its episode ID and reports pending queue recovery. A companion evidence

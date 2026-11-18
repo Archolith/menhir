@@ -376,6 +376,7 @@ class StubRecallService:
         query,
         preset,
         limit,
+        limit_is_explicit=False,
         include_session=False,
         session_id=None,
         wait_for_pending=False,
