@@ -388,7 +388,7 @@ async def bootstrap_flagged(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, object]:
     """Read scoped pins and issue a reader-local bootstrap receipt."""
-    from menhir.mcp.formatters import _normalize_reader_id, _project_skipped_memory_rows
+    from menhir.mcp.formatters import _flagged_pin_counts, _normalize_reader_id, _project_skipped_memory_rows
     from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 
     backend = _get_backend(request)
@@ -422,7 +422,7 @@ async def bootstrap_flagged(
         "bootstrap_selection": selection_key,
         "bootstrap_ready": True,
         "flagged_version": version,
-        "flagged_count": len(rows),
+        **_flagged_pin_counts(version, selection_key, len(rows)),
         "items": rows,
     }
 

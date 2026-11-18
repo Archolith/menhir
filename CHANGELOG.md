@@ -1,3 +1,8 @@
+## 2026-11-17 - Report truncated startup pins (#674)
+
+- Bootstrap reads report the matching pin total and whether any pins were omitted. MCP
+  returns up to 1,000 characters of original pin text and marks shortened items.
+
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 
 - A saved memory keeps its episode ID and reports pending queue recovery. A companion evidence

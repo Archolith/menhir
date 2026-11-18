@@ -255,6 +255,21 @@ class TestRecall:
 
         assert response.status_code == 409
 
+    def test_bootstrap_flagged_reports_workspace_total(self, client, fake_backend):
+        fake_backend.fetch_flagged_memories.return_value = [
+            {"uuid": f"pin-{idx}", "content": "A pinned rule"} for idx in range(10)
+        ]
+        fake_backend.fetch_flagged_memory_bootstrap_version.return_value = "workspace:team:tools:12:digest"
+
+        response = client.get("/api/bootstrap/flagged", params={"workspace": "team:tools", "limit": 10})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["flagged_count"] == 10
+        assert payload["flagged_total"] == 12
+        assert payload["truncated"] is True
+        assert payload["items"][0]["content"] == "A pinned rule"
+
     def test_bootstrap_flagged_receipt_unlocks_scoped_context(self, client):
         flagged = client.get(
             "/api/bootstrap/flagged",

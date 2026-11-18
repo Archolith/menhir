@@ -5,7 +5,8 @@ from __future__ import annotations
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import (
-    _compact_memory_item,
+    _flagged_pin_counts,
+    _flagged_pin_item,
     _normalize_reader_id,
     session_start_warning_lines,
 )
@@ -62,8 +63,13 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
         Bots should call this first before requesting broader context.
 
         Args:
+            limit: Max pins to return (default 10, max 50). flagged_total counts
+                matching pins and truncated reports whether any were omitted.
             namespace: Restrict the read to a single namespace. A pinned client
                 has it forced.
+
+        Pin text is returned up to 1,000 characters. summary_truncated marks
+        any shortened text.
         """
         backend = self.get_backend()
         normalized_reader_id = _normalize_reader_id(reader_id)
@@ -91,8 +97,8 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
                 "bootstrap_selection": selection_key,
                 "bootstrap_ready": True,
                 "flagged_version": flagged_version,
-                "flagged_count": len(rows),
-                "items": [_compact_memory_item(row, tag="flagged") for row in rows],
+                **_flagged_pin_counts(flagged_version, selection_key, len(rows)),
+                "items": [_flagged_pin_item(row) for row in rows],
                 **({"operator_warnings": operator_warnings} if operator_warnings else {}),
             }
         )

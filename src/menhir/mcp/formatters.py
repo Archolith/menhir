@@ -230,6 +230,42 @@ def _compact_memory_item(row: dict[str, object], *, tag: str) -> dict[str, objec
     return item
 
 
+_FLAGGED_PIN_TEXT_LIMIT = 1_000
+
+
+def _flagged_pin_item(row: dict[str, object]) -> dict[str, object]:
+    """Keep the original pin wording within a bounded startup payload."""
+    item = _compact_memory_item(row, tag="flagged")
+    text = row.get("content")
+    if not isinstance(text, str) or not text.strip():
+        text = row.get("summary")
+    if isinstance(text, str) and text.strip():
+        clipped = len(text) > _FLAGGED_PIN_TEXT_LIMIT
+        item["summary"] = f"{text[:_FLAGGED_PIN_TEXT_LIMIT - 1]}…" if clipped else text
+        if clipped:
+            item["summary_truncated"] = True
+    return item
+
+
+def _flagged_pin_counts(version: str, selection: str, returned_count: int) -> dict[str, object]:
+    """Reuse the scoped count in the receipt fingerprint without another graph read."""
+    # A workspace key itself can contain colons.
+    version_fields = version.rsplit(":", 2)
+    total = None
+    if len(version_fields) == 3 and version_fields[0] == selection:
+        count = version_fields[1]
+        if count.isdecimal():
+            total = int(count)
+    if total is not None and total < returned_count:
+        # The set can change between fetching the rows and computing the receipt.
+        total = None
+    return {
+        "flagged_count": returned_count,
+        "flagged_total": total,
+        "truncated": total > returned_count if total is not None else None,
+    }
+
+
 def _bd(breakdown: object | None, key: str) -> float:
     """Extract a breakdown value that may be a dict (from JSON round-trip) or a dataclass."""
     if breakdown is None:
