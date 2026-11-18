@@ -86,10 +86,14 @@ class FlagMemoryTool(BaseTextTool):
             scope_arg = bootstrap_scope if bootstrap_scope.strip() else None
             # Checked before the write so a bad rank refuses with nothing changed.
             priority_arg = normalize_pin_priority(pin_priority)
-            flag_kwargs: dict[str, object] = {"bootstrap_scope": scope_arg}
-            if priority_arg is not None:
-                flag_kwargs["pin_priority"] = priority_arg
-            flagged = await backend.flag_memory(node_uuid, **flag_kwargs)
+            # Explicit keywords, not **kwargs: the namespace-argument census
+            # (test_namespace_argument_discipline) must see this call site.
+            if priority_arg is None:
+                flagged = await backend.flag_memory(node_uuid, bootstrap_scope=scope_arg)
+            else:
+                flagged = await backend.flag_memory(
+                    node_uuid, bootstrap_scope=scope_arg, pin_priority=priority_arg
+                )
         except ValueError as exc:
             raise McpToolRefusal(f"Cannot flag: {exc}") from exc
         if flagged:
