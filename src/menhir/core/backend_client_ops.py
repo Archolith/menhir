@@ -52,14 +52,16 @@ class BackendClientOpsMixin:
         return await self._request("queue_episode", params)
 
     async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
-        return bool(
-            await self._request(
-                "flag_memory",
-                {"node_uuid": node_uuid, "bootstrap_scope": bootstrap_scope},
-            )
-        )
+        payload: dict[str, Any] = {"node_uuid": node_uuid, "bootstrap_scope": bootstrap_scope}
+        # Sent only when set, so an unprioritized flag still works against an older server.
+        if pin_priority is not None:
+            payload["pin_priority"] = pin_priority
+        return bool(await self._request("flag_memory", payload))
 
     async def unflag_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("unflag_memory", {"node_uuid": node_uuid}))
@@ -321,6 +323,18 @@ class BackendClientOpsMixin:
                 {"workspace": workspace, "namespace": namespace},
             )
         )
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        counts = await self._request(
+            "fetch_flagged_pin_counts",
+            {"workspace": workspace, "namespace": namespace},
+        )
+        return {str(scope): int(pins) for scope, pins in dict(counts or {}).items()}
 
     async def fetch_memories_by_scope(
         self, scope: str, limit: int = 20, *, namespace: str | None = None

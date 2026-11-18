@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from menhir.domain.bootstrap_scope import normalize_pin_priority
 from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
 
 async def flag_memory(
-    node_uuid: str, bootstrap_scope: str = "", namespace: str = ""
+    node_uuid: str,
+    bootstrap_scope: str = "",
+    namespace: str = "",
+    pin_priority: int | None = None,
 ) -> str:
     """Flag a memory node for permanent retention. Flagged nodes survive lifecycle decay.
 
@@ -16,13 +20,18 @@ async def flag_memory(
         node_uuid: The UUID of the memory node to flag. Get this from recall_memories results.
         bootstrap_scope: Optional startup pin: general, workspace:<key>, or none.
         namespace: Restrict the operation to a single silo. A pinned client has this forced.
+        pin_priority: Optional startup pin rank, 0-100 (default 0). Higher pins are read
+            first when there are more pins than the read limit. Omit to keep the current rank.
 
     Returns:
         Confirmation or failure message.
     """
 
     return await FlagMemoryTool().execute(
-        node_uuid=node_uuid, bootstrap_scope=bootstrap_scope, namespace=namespace
+        node_uuid=node_uuid,
+        bootstrap_scope=bootstrap_scope,
+        namespace=namespace,
+        pin_priority=pin_priority,
     )
 
 
@@ -37,13 +46,20 @@ class FlagMemoryTool(BaseTextTool):
     open_world_hint = False
 
     async def endpoint(
-        self, node_uuid: str, bootstrap_scope: str = "", namespace: str = ""
+        self,
+        node_uuid: str,
+        bootstrap_scope: str = "",
+        namespace: str = "",
+        pin_priority: int | None = None,
     ) -> str:
         """Flag a memory node for permanent retention. Flagged nodes survive lifecycle decay.
 
         Args:
             node_uuid: The UUID of the memory node to flag. Get this from recall_memories results.
+            bootstrap_scope: Optional startup pin: general, workspace:<key>, or none.
             namespace: Restrict the operation to a single silo. A pinned client has this forced.
+            pin_priority: Optional startup pin rank, 0-100 (default 0). Higher pins are read
+                first when there are more pins than the read limit. Omit to keep the current rank.
 
         Returns:
             Confirmation or failure message.
@@ -68,16 +84,22 @@ class FlagMemoryTool(BaseTextTool):
                 )
         try:
             scope_arg = bootstrap_scope if bootstrap_scope.strip() else None
-            flagged = await backend.flag_memory(
-                node_uuid, bootstrap_scope=scope_arg
-            )
+            # Checked before the write so a bad rank refuses with nothing changed.
+            priority_arg = normalize_pin_priority(pin_priority)
+            flag_kwargs: dict[str, object] = {"bootstrap_scope": scope_arg}
+            if priority_arg is not None:
+                flag_kwargs["pin_priority"] = priority_arg
+            flagged = await backend.flag_memory(node_uuid, **flag_kwargs)
         except ValueError as exc:
             raise McpToolRefusal(f"Cannot flag: {exc}") from exc
         if flagged:
             row = await backend.fetch_memory_by_uuid(node_uuid)
             effective_scope = (row or {}).get("bootstrap_scope")
+            priority_note = (
+                f"; pin_priority={priority_arg}" if priority_arg is not None else ""
+            )
             return (
                 f"Flagged memory {node_uuid} for permanent retention; "
-                f"bootstrap_scope={effective_scope or 'none'}."
+                f"bootstrap_scope={effective_scope or 'none'}{priority_note}."
             )
         raise McpToolRefusal(f"No memory found with uuid={node_uuid}.", code="not_found")

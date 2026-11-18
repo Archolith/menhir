@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
+from menhir.domain.bootstrap_scope import WORKSPACE_BOOTSTRAP_PREFIX
 from menhir.domain.models import ProcessingState
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
@@ -244,7 +245,44 @@ def _flagged_pin_item(row: dict[str, object]) -> dict[str, object]:
         item["summary"] = f"{text[:_FLAGGED_PIN_TEXT_LIMIT - 1]}…" if clipped else text
         if clipped:
             item["summary_truncated"] = True
+    # `scope`/`type` describe the node's lifecycle (usually SESSION/EPISODIC for a pin);
+    # these say which startup scope pinned it and how it ranks there.
+    item["pin_scope"] = row.get("bootstrap_scope")
+    item["pin_priority"] = int(row.get("pin_priority") or 0)
     return item
+
+
+async def _workspace_pin_fields(
+    backend: Any,
+    selection: str,
+    *,
+    workspace: str | None,
+    namespace: str | None,
+) -> dict[str, object]:
+    """Report a workspace's own pin count, so a mistyped key is not silently general-only."""
+    if not selection.startswith(WORKSPACE_BOOTSTRAP_PREFIX):
+        return {}
+    try:
+        counts = await backend.fetch_flagged_pin_counts(
+            workspace=workspace, namespace=namespace
+        )
+        count: int | None = int(dict(counts).get(selection, 0))
+    except Exception:
+        # Advisory only: the pins and receipt above are already complete. An older server
+        # lacks this operation; that is "unknown", never "zero".
+        logger.warning("could not count workspace pins for %s", selection, exc_info=True)
+        count = None
+    fields: dict[str, object] = {"workspace_pin_count": count}
+    if count == 0:
+        fields["workspace_notice"] = (
+            f"No pins are scoped to {selection}; only general pins were returned. "
+            "Check the workspace key."
+        )
+    elif count is None:
+        fields["workspace_notice"] = (
+            f"Could not count pins scoped to {selection}; the returned pins are unaffected."
+        )
+    return fields
 
 
 def _flagged_pin_counts(version: str, selection: str, returned_count: int) -> dict[str, object]:

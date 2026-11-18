@@ -16,7 +16,11 @@ from datetime import timezone
 from typing import Any
 from uuid import uuid4
 
-from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
+from menhir.domain.bootstrap_scope import (
+    bootstrap_selection,
+    normalize_bootstrap_scope,
+    normalize_pin_priority,
+)
 from menhir.domain.namespace import (
     DEFAULT_NAMESPACE,
     normalize_namespace,
@@ -248,6 +252,29 @@ def _iso_utc_or_none(value: Any) -> str | None:
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
+def _flagged_pin_filter(
+    workspace: str | None, namespace: str | None
+) -> tuple[list[str], dict[str, Any]]:
+    """WHERE clauses and params selecting a bootstrap read's startup pins.
+
+    Shared by the pin list, the receipt version and the per-scope counts so the
+    reported totals always describe the same set as the returned pins.
+    """
+
+    _selection_key, allowed_scopes = bootstrap_selection(workspace)
+    where = ["(n:Entity OR n:Episodic)",
+             "coalesce(n.user_flagged, false) = true",
+             "n.bootstrap_scope IN $allowed_scopes",
+             non_structural_memory_cypher("n"),
+             default_recall_visibility_cypher("n")]
+    params: dict[str, Any] = {"allowed_scopes": allowed_scopes}
+    group_ids = namespace_to_group_ids(namespace)
+    if group_ids is not None:
+        where.append("n.group_id IN $group_ids")
+        params["group_ids"] = group_ids
+    return where, params
+
+
 class MemoryQueryRepository:
     """Encapsulates memory read/query operations and simple mutations (flag, delete)."""
 
@@ -393,29 +420,46 @@ class MemoryQueryRepository:
         """
 
         safe_limit = max(1, min(limit, 50))
-        _selection_key, allowed_scopes = bootstrap_selection(workspace)
-        where = ["(n:Entity OR n:Episodic)",
-                 "coalesce(n.user_flagged, false) = true",
-                 "n.bootstrap_scope IN $allowed_scopes",
-                 non_structural_memory_cypher("n"),
-                 default_recall_visibility_cypher("n")]
-        params: dict[str, Any] = {
-            "limit": safe_limit,
-            "allowed_scopes": allowed_scopes,
-        }
-        group_ids = namespace_to_group_ids(namespace)
-        if group_ids is not None:
-            where.append("n.group_id IN $group_ids")
-            params["group_ids"] = group_ids
+        where, params = _flagged_pin_filter(workspace, namespace)
+        params["limit"] = safe_limit
         query = (Cypher()
             .match("(n)")
             .where(*where)
             .with_clause(f"n, {memory_recency_cypher()} AS recency")
-            .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
+            .return_fields(MEMORY_RETURN_FIELDS, "n.pin_priority AS pin_priority")
+            # #674: explicit priority first, then the workspace's own pins ahead of
+            # general ones, then recency, so a limit drops the least important pins.
+            .order_by(
+                "coalesce(n.pin_priority, 0) DESC, "
+                "CASE WHEN n.bootstrap_scope STARTS WITH 'workspace:' THEN 0 ELSE 1 END, "
+                "recency IS NOT NULL DESC, recency DESC, n.uuid"
+            )
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
+
+    def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        """Count the startup pins a bootstrap read selects, keyed by bootstrap scope."""
+
+        where, params = _flagged_pin_filter(workspace, namespace)
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n)
+            WHERE {" AND ".join(where)}
+            RETURN n.bootstrap_scope AS bootstrap_scope, count(n) AS pins
+            """,
+            params=params,
+        )
+        return {
+            str(row["bootstrap_scope"]): int(row.get("pins") or 0)
+            for row in rows
+            if row.get("bootstrap_scope")
+        }
 
     def fetch_flagged_memory_bootstrap_version(
         self,
@@ -429,17 +473,8 @@ class MemoryQueryRepository:
         semantic flagged memories change.
         """
 
-        selection_key, allowed_scopes = bootstrap_selection(workspace)
-        where = ["(n:Entity OR n:Episodic)",
-                 "coalesce(n.user_flagged, false) = true",
-                 "n.bootstrap_scope IN $allowed_scopes",
-                 non_structural_memory_cypher("n"),
-                 default_recall_visibility_cypher("n")]
-        params: dict[str, Any] = {"allowed_scopes": allowed_scopes}
-        group_ids = namespace_to_group_ids(namespace)
-        if group_ids is not None:
-            where.append("n.group_id IN $group_ids")
-            params["group_ids"] = group_ids
+        selection_key, _allowed_scopes = bootstrap_selection(workspace)
+        where, params = _flagged_pin_filter(workspace, namespace)
         rows = self.neo4j.execute(
             f"""
             MATCH (n)
@@ -1341,7 +1376,8 @@ class MemoryQueryRepository:
             WHERE coalesce(n.user_flagged, false) = true
               AND NOT ({non_structural_memory_cypher("n")})
             SET n.user_flagged = false,
-                n.bootstrap_scope = null
+                n.bootstrap_scope = null,
+                n.pin_priority = null
             RETURN count(n) AS unflagged
             """
         )
@@ -1350,14 +1386,19 @@ class MemoryQueryRepository:
     # --- Flag & delete ------------------------------------------------------
 
     def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
         """Persist the explicit v1 retention override on a node.
 
         Rejects structural graph nodes (project-scan entities) because they
-        are not semantic memories and waste bootstrap tokens.
+        are not semantic memories and waste bootstrap tokens. ``pin_priority``
+        (0-100) orders startup pins; ``None`` keeps the stored value.
         """
 
+        normalized_priority = normalize_pin_priority(pin_priority)
         # Check if the target is a structural entity before flagging.
         struct_check = self.neo4j.execute(
             f"""
@@ -1387,12 +1428,16 @@ class MemoryQueryRepository:
         params: dict[str, Any] = {"node_uuid": node_uuid}
         if bootstrap_scope is not None:
             params["bootstrap_scope"] = normalized_scope
+        priority_set = ""
+        if normalized_priority is not None:
+            priority_set = ",\n                n.pin_priority = $pin_priority"
+            params["pin_priority"] = normalized_priority
         rows = self.neo4j.execute(
             f"""
             MATCH (n)
             WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
             SET n.user_flagged = true,
-                {scope_set}
+                {scope_set}{priority_set}
             RETURN count(n) AS nodes_updated
             """,
             params=params,
@@ -1411,7 +1456,8 @@ class MemoryQueryRepository:
             MATCH (n)
             WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
             SET n.user_flagged = false,
-                n.bootstrap_scope = null
+                n.bootstrap_scope = null,
+                n.pin_priority = null
             RETURN count(n) AS nodes_updated
             """,
             params={"node_uuid": node_uuid},

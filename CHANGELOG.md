@@ -2,6 +2,13 @@
 
 - Bootstrap reads report the matching pin total and whether any pins were omitted. MCP
   returns up to 1,000 characters of original pin text and marks shortened items.
+- `flag_memory` takes an optional `pin_priority` (0-100, MCP and REST). Startup pins are ordered
+  by priority, then the workspace's own pins before general ones, then recency. Unflagging
+  clears the priority. Unset pins rank 0, so existing order is unchanged until one is set.
+- Each MCP pin carries `pin_scope` and `pin_priority`; `scope` and `type` keep their meaning.
+- A workspace read reports `workspace_pin_count`, and `workspace_notice` when the key has no
+  pins (often a mistyped key) or the count could not be taken (null, never zero).
+- Connected MCP clients see the new `flag_memory` argument only after they reconnect.
 
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 
