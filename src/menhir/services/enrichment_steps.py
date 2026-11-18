@@ -931,7 +931,6 @@ def _anchor_to_structural_entities(
     file entities referenced in the episode body. Narrative-mentioned files
     get weight 1.0; diff-only files get weight 0.3.
     """
-    from menhir.domain.structure_paths import is_absolute_spelling
     from menhir.infrastructure.structural_anchoring import (
         MAX_ANCHOR_EDGES_PER_EPISODE,
         extract_diff_file_paths,
@@ -948,39 +947,50 @@ def _anchor_to_structural_entities(
     try:
         narrative, diff = split_narrative_and_diff(episode_body)
 
-        narrative_paths = extract_file_paths(narrative)
-        diff_paths = extract_diff_file_paths(diff)
-        projects = (
-            ctx.graph_adapter.list_structure_projects()
-            if any(is_absolute_spelling(path) for path in narrative_paths + diff_paths)
-            else []
+        sources = (
+            ("narrative", extract_file_paths(narrative), 1.0),
+            ("diff", extract_diff_file_paths(diff), 0.3),
         )
-        remaining = MAX_ANCHOR_EDGES_PER_EPISODE
-        seen: set[tuple[str | None, str]] = set()
-        for source, paths, weight in (("narrative", narrative_paths, 1.0), ("diff", diff_paths, 0.3)):
-            by_project: dict[str | None, list[str]] = {}
-            for path in paths:
-                reference = resolve_file_reference(path, projects)
-                if reference is None or reference in seen:
-                    continue
-                seen.add(reference)
-                project, relative = reference
-                by_project.setdefault(project, []).append(relative)
+        if not any(paths for _, paths, _ in sources):
+            return counts
+        projects = ctx.graph_adapter.list_structure_projects()
+        # Only live projects: entities left behind by a deleted project must not make a file ambiguous.
+        live = sorted({str(entry["name"]) for entry in projects if entry.get("name")})
+        resolved = [
+            (source, weight, [ref for ref in (resolve_file_reference(p, projects) for p in paths) if ref])
+            for source, paths, weight in sources
+        ]
+        # Episodes carry no project, so absolute paths under an indexed root are the only evidence
+        # of one; relative and bare references in the same episode are resolved within those projects.
+        mentioned = sorted({project for _, _, refs in resolved for project, _ in refs if project})
+        default_scope = tuple(mentioned or live)
 
-            for project, relative_paths in by_project.items():
+        remaining = MAX_ANCHOR_EDGES_PER_EPISODE
+        seen: set[tuple[tuple[str, ...], str]] = set()
+        for source, weight, refs in resolved:
+            by_scope: dict[tuple[str, ...], list[str]] = {}
+            for project, relative in refs:
+                scope = (project,) if project else default_scope
+                if not scope or (scope, relative) in seen:
+                    continue
+                seen.add((scope, relative))
+                by_scope.setdefault(scope, []).append(relative)
+
+            for scope, relative_paths in by_scope.items():
                 if remaining <= 0:
-                    logger.info("Structural anchor budget exhausted for episode=%s", ctx.episode_uuid)
                     break
                 linked = ctx.graph_adapter.anchor_semantic_to_structural(
                     extracted_node_uuids,
                     relative_paths,
                     anchor_source=f"{source}_path",
                     weight=weight,
-                    project_filter=project,
+                    project_filter=list(scope),
                     max_edges=remaining,
                 )
                 remaining -= linked
                 counts[source] += linked
+        if remaining <= 0:
+            logger.info("Structural anchor budget exhausted for episode=%s", ctx.episode_uuid)
 
         total = counts["narrative"] + counts["diff"]
         if total > 0:

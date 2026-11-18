@@ -179,6 +179,9 @@ def test_file_anchors_and_recall_require_an_unambiguous_match(two_projects) -> N
                          structure_path: 'other/app.py', uuid: 'A-other-app'})
         CREATE (:Entity {structure_project: 'proj-A', structure_role: 'file',
                          structure_path: 'app.py', uuid: 'A-root-app'})
+        // Left behind by a deleted project (no project node): must not make util.py ambiguous.
+        CREATE (:Entity {structure_project: 'proj-gone', structure_role: 'file',
+                         structure_path: 'src/util.py', uuid: 'gone-util'})
         CREATE (:Entity {uuid: 'memory'})
         """
     )
@@ -207,6 +210,7 @@ def test_file_anchors_and_recall_require_an_unambiguous_match(two_projects) -> N
     assert asyncio.run(recall._resolve_file_context("app.py", "proj-A")) == []
     assert asyncio.run(recall._resolve_file_context("./app.py", "proj-A")) == ["memory"]
     assert asyncio.run(recall._resolve_file_context("src/app.py", "proj-A")) == ["memory"]
+    assert asyncio.run(recall._resolve_file_context("/src/app.py", "proj-A")) == ["memory"]
     assert asyncio.run(recall._resolve_file_context("src/app.py", "proj-B")) == []
     assert asyncio.run(recall._resolve_file_context(rooted_path)) == ["memory"]
 

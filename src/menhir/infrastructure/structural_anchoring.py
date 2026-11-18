@@ -29,14 +29,17 @@ MAX_ANCHOR_EDGES_PER_EPISODE = 256
 # ---------------------------------------------------------------------------
 
 _FILE_EXTENSIONS = r"py|tsx?|jsx?|java|kt|go|rs|yaml|toml|json|sql|sh"
+# Unquoted matches may start only where a path-like run starts. Otherwise every position inside
+# a long run is a fresh start and the scan is quadratic (48K chars took ~68s).
+_RUN_START = r"(?<![\w.\-/\\])"
 FILE_PATH_PATTERN = re.compile(
     rf"""(?P<quote>[`"'])(?P<quoted>(?:[A-Za-z]:)?[/\\][^`"'\r\n]+?\.(?:{_FILE_EXTENSIONS}))(?P=quote)"""
-    rf"|(?P<unquoted>(?:(?:[A-Za-z]:)?[/\\]{{1,2}}(?:[\w.-]+[/\\])*|(?:[\w.-]+[/\\])+)"
+    rf"|{_RUN_START}(?P<unquoted>(?:(?:[A-Za-z]:)?[/\\]{{1,2}}(?:[\w.-]+[/\\])*|(?:[\w.-]+[/\\])+)"
     rf"[\w.-]+\.(?:{_FILE_EXTENSIONS})\b)"
 )
 
 BARE_FILENAME_PATTERN = re.compile(
-    rf"\b([\w.-]+\.(?:{_FILE_EXTENSIONS}))\b",
+    rf"{_RUN_START}([\w.-]+\.(?:{_FILE_EXTENSIONS}))\b",
 )
 
 
@@ -89,7 +92,14 @@ def resolve_file_reference(
             if relative:
                 matches.append((name, relative))
     if not matches:
-        return None
+        # A plain leading "/" is repo-relative, as in normalize_query_path. A drive spelling,
+        # or a path under some indexed root that the project filter excluded, is not.
+        relative = normalize_query_path(path)
+        if not relative or is_absolute_spelling(relative) or any(
+            path_relative_to_root(path, entry.get("root_path") or "") for entry in projects
+        ):
+            return None
+        return project, relative if "/" in relative else f"./{relative}"
 
     # Roots matching the same absolute path are nested or identical. The deepest
     # one removes the longest prefix, including across equivalent drive spellings.

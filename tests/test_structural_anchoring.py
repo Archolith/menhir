@@ -39,9 +39,17 @@ class TestResolveFileReference:
     def test_relative_path_keeps_single_letter_directory(self, reference):
         assert resolve_file_reference(reference, []) == (None, "a/foo.py")
 
-    def test_absolute_path_outside_index_abstains(self):
+    @pytest.mark.parametrize("reference", ["C:/work/other/src/foo.py", "/c/work/other/src/foo.py"])
+    def test_absolute_path_outside_index_abstains(self, reference):
+        projects = [{"name": "proj", "root_path": "C:/work/proj"}]
+        assert resolve_file_reference(reference, projects) is None
+
+    def test_plain_leading_slash_is_repo_relative(self):
+        # Same reading as normalize_query_path, which query_structure uses for this spelling.
         projects = [{"name": "proj", "root_path": "/work/proj"}]
-        assert resolve_file_reference("/work/other/src/foo.py", projects) is None
+        assert resolve_file_reference("/src/foo.py", projects, "proj") == ("proj", "src/foo.py")
+        assert resolve_file_reference("/src/foo.py", projects) == (None, "src/foo.py")
+        assert resolve_file_reference("/foo.py", projects, "proj") == ("proj", "./foo.py")
 
     def test_absolute_path_cannot_select_a_different_project(self):
         projects = [{"name": "proj", "root_path": "/work/proj"}]
@@ -87,6 +95,23 @@ class TestExtractFilePaths:
     def test_diff_prefix_does_not_remove_real_single_letter_directory(self):
         diff = "diff --git a/a/foo.py b/a/foo.py\n--- a/a/foo.py\n+++ b/a/foo.py"
         assert extract_diff_file_paths(diff) == ["a/foo.py"]
+
+    @pytest.mark.parametrize(
+        "text",
+        ["ab/" * 16000, "ab\\" * 16000, "a." * 16000, "x" * 48000],
+        ids=["slashes", "backslashes", "dots", "word"],
+    )
+    def test_long_path_like_run_is_scanned_in_linear_time(self, text):
+        import time
+
+        started = time.perf_counter()
+        extract_file_paths(text)
+        extract_diff_file_paths(text)
+        # Was ~68s per call at this length; linear scanning takes milliseconds.
+        assert time.perf_counter() - started < 2.0
+
+    def test_path_is_not_extracted_from_the_middle_of_a_run(self):
+        assert extract_file_paths("see pkg/src/foo.py and lib.util.py") == ["pkg/src/foo.py", "lib.util.py"]
 
     def test_bare_filename_extracted(self):
         text = "Check ingest_service.py for details."
@@ -329,6 +354,9 @@ class TestEnrichmentAnchoring:
                 self.calls.append((sem_uuids, paths, kwargs))
                 return len(sem_uuids) * len(paths)
 
+            def list_structure_projects(self):
+                return [{"name": "proj", "root_path": "/work/proj"}]
+
             def update_episode_processing(self, *args, **kwargs):
                 pass
 
@@ -363,6 +391,45 @@ class TestEnrichmentAnchoring:
         assert adapter.calls[0][1] == ["src/foo.py"]
         assert adapter.calls[1][1] == ["src/bar.py"]
         assert adapter.calls[0][2]["max_edges"] - adapter.calls[1][2]["max_edges"] == 1
+
+    @staticmethod
+    def _anchor(body, projects):
+        from menhir.services.enrichment_steps import _anchor_to_structural_entities
+
+        calls = []
+
+        def anchor(sem_uuids, paths, **kwargs):
+            calls.append((paths, kwargs["project_filter"], kwargs["anchor_source"]))
+            return len(paths)
+
+        adapter = SimpleNamespace(
+            anchor_semantic_to_structural=anchor, list_structure_projects=lambda: projects,
+        )
+        _anchor_to_structural_entities(
+            SimpleNamespace(episode_uuid="ep", graph_adapter=adapter), ["node-1"], body,
+        )
+        return calls
+
+    _PROJECTS = [
+        {"name": "menhir", "root_path": "C:/w/menhir"},
+        {"name": "other", "root_path": "C:/w/other"},
+    ]
+
+    def test_relative_reference_uses_the_project_an_absolute_path_names(self):
+        calls = self._anchor("Edited C:/w/menhir/src/a.py and src/b.py", self._PROJECTS)
+        assert calls == [(["src/a.py", "src/b.py"], ["menhir"], "narrative_path")]
+
+    def test_relative_reference_without_project_evidence_uses_live_projects(self):
+        # Never unfiltered: entities of a deleted project must not make a live file ambiguous.
+        calls = self._anchor("Edited src/b.py", self._PROJECTS)
+        assert calls == [(["src/b.py"], ["menhir", "other"], "narrative_path")]
+
+    def test_no_indexed_project_writes_nothing(self):
+        assert self._anchor("Edited src/b.py", []) == []
+
+    def test_absolute_and_relative_spelling_of_one_file_anchor_once(self):
+        body = "Edited C:/w/menhir/src/a.py\n\n--- git diff ---\ndiff --git a/src/a.py b/src/a.py"
+        assert self._anchor(body, self._PROJECTS) == [(["src/a.py"], ["menhir"], "narrative_path")]
 
     def test_anchoring_no_nodes_skips(self):
         """When no extracted nodes, anchoring does nothing."""

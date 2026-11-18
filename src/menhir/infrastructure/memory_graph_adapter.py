@@ -2134,7 +2134,7 @@ class MemoryGraphAdapter:
         *,
         anchor_source: str = "narrative_path",
         weight: float = 1.0,
-        project_filter: str | None = None,
+        project_filter: str | list[str] | None = None,
         max_edges: int,
     ) -> int:
         """Resolve file paths and create ANCHORED_TO edges from semantic entities."""
