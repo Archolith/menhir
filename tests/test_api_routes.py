@@ -271,6 +271,42 @@ class TestRecall:
 
         assert response.status_code == 409
 
+    def test_bootstrap_flagged_reports_workspace_total(self, client, fake_backend):
+        fake_backend.fetch_flagged_memories.return_value = [
+            {"uuid": f"pin-{idx}", "content": "A pinned rule"} for idx in range(10)
+        ]
+        fake_backend.fetch_flagged_memory_bootstrap_version.return_value = "workspace:team:tools:12:digest"
+
+        response = client.get("/api/bootstrap/flagged", params={"workspace": "team:tools", "limit": 10})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["flagged_count"] == 10
+        assert payload["flagged_total"] == 12
+        assert payload["truncated"] is True
+        assert payload["items"][0]["content"] == "A pinned rule"
+
+    def test_bootstrap_flagged_reports_a_workspace_with_no_pins(self, client, fake_backend):
+        fake_backend.fetch_flagged_pin_counts = AsyncMock(return_value={"general": 3})
+
+        response = client.get("/api/bootstrap/flagged", params={"workspace": "tpyo"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["workspace_pin_count"] == 0
+        assert "workspace:tpyo" in payload["workspace_notice"]
+
+    def test_flag_forwards_pin_priority_and_rejects_out_of_range(self, client, fake_backend):
+        resp = client.post("/api/memory/some-uuid/flag", params={"pin_priority": 7})
+        assert resp.status_code == 200
+        assert resp.json()["pin_priority"] == 7
+        fake_backend.flag_memory.assert_awaited_with("some-uuid", pin_priority=7)
+
+        fake_backend.flag_memory.reset_mock()
+        resp = client.post("/api/memory/some-uuid/flag", params={"pin_priority": 101})
+        assert resp.status_code == 422
+        fake_backend.flag_memory.assert_not_awaited()
+
     def test_bootstrap_flagged_receipt_unlocks_scoped_context(self, client):
         flagged = client.get(
             "/api/bootstrap/flagged",

@@ -391,7 +391,12 @@ async def bootstrap_flagged(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, object]:
     """Read scoped pins and issue a reader-local bootstrap receipt."""
-    from menhir.mcp.formatters import _normalize_reader_id, _project_skipped_memory_rows
+    from menhir.mcp.formatters import (
+        _flagged_pin_counts,
+        _normalize_reader_id,
+        _project_skipped_memory_rows,
+        _workspace_pin_fields,
+    )
     from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 
     backend = _get_backend(request)
@@ -420,12 +425,16 @@ async def bootstrap_flagged(
     _remember_flagged_bootstrap_read(
         normalized_reader, version, workspace=workspace, namespace=resolved_namespace
     )
+    workspace_fields = await _workspace_pin_fields(
+        backend, selection_key, workspace=workspace, namespace=resolved_namespace
+    )
     return {
         "reader_id": normalized_reader,
         "bootstrap_selection": selection_key,
         "bootstrap_ready": True,
         "flagged_version": version,
-        "flagged_count": len(rows),
+        **_flagged_pin_counts(version, selection_key, len(rows)),
+        **workspace_fields,
         "items": rows,
     }
 
@@ -1000,20 +1009,27 @@ async def delete_namespace(
 
 @router.post("/memory/{uuid}/flag", response_model=FlagResponse)
 async def flag_memory(
-    request: Request, uuid: str, bootstrap_scope: str | None = None
+    request: Request,
+    uuid: str,
+    bootstrap_scope: str | None = None,
+    pin_priority: int | None = Query(default=None, ge=0, le=100),
 ) -> FlagResponse:
     _require_tier("agent")
     backend = _get_backend(request)
-    if bootstrap_scope is None:
-        flagged = await backend.flag_memory(uuid)
-    else:
-        flagged = await backend.flag_memory(uuid, bootstrap_scope=bootstrap_scope)
+    kwargs: dict[str, Any] = {}
+    if bootstrap_scope is not None:
+        kwargs["bootstrap_scope"] = bootstrap_scope
+    if pin_priority is not None:
+        kwargs["pin_priority"] = pin_priority
+    flagged = await backend.flag_memory(uuid, **kwargs)
     fetch_by_uuid = getattr(backend, "fetch_memory_by_uuid", None)
     row = await fetch_by_uuid(uuid) if flagged and fetch_by_uuid is not None else None
     return FlagResponse(
         uuid=uuid,
         flagged=flagged,
         bootstrap_scope=(row or {}).get("bootstrap_scope"),
+        # The rank this call set; null means it left the stored rank unchanged.
+        pin_priority=pin_priority if flagged else None,
     )
 
 

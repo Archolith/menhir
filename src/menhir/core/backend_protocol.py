@@ -80,9 +80,12 @@ class MemoryBackend(Protocol):
         ...
 
     async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
-        """Mark a memory node as permanently retained."""
+        """Mark a memory node as permanently retained; pin_priority (0-100) orders startup pins."""
         ...
 
     async def unflag_memory(self, node_uuid: str) -> bool:
@@ -279,6 +282,15 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
     ) -> str:
         """Get the current version hash of flagged memories."""
+        ...
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        """Count the startup pins a bootstrap read selects, keyed by bootstrap scope."""
         ...
 
     async def fetch_memories_by_scope(

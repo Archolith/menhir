@@ -867,6 +867,32 @@ def test_read_flagged_then_recall_context_flow(stubbed_mcp_state):
     assert context_payload["recent"][0]["name"] == "Daily focus"
 
 
+def test_read_flagged_reports_omissions_and_keeps_pin_text(stubbed_mcp_state, monkeypatch):
+    _, adapter, _ = stubbed_mcp_state
+    rule = ("Apply this project rule first.\n" + "x" * 400)[:400]
+    long_rule = "b" * 1_500
+    pins = [{"uuid": f"pin-{idx}", "content": f"Rule {idx}"} for idx in range(12)]
+    pins[0].update(content=rule, summary="Short summary that omits the rule")
+    pins[1].update(content="", summary=long_rule)
+    monkeypatch.setattr(adapter, "fetch_flagged_memories", lambda limit: pins[:limit])
+    adapter.flagged_version = "general:12:stubflagged"
+
+    limited = _parse_json_text(asyncio.run(read_flagged_memories(limit=10)))
+    assert limited["flagged_count"] == 10
+    assert limited["flagged_total"] == 12
+    assert limited["truncated"] is True
+    assert limited["bootstrap_ready"] is True
+    assert limited["flagged_version"] == adapter.flagged_version
+    assert limited["items"][0]["summary"] == rule
+    assert "summary_truncated" not in limited["items"][0]
+    assert limited["items"][1]["summary"] == long_rule[:999] + "…"
+    assert limited["items"][1]["summary_truncated"] is True
+
+    complete = _parse_json_text(asyncio.run(read_flagged_memories(limit=12)))
+    assert complete["flagged_count"] == complete["flagged_total"] == 12
+    assert complete["truncated"] is False
+
+
 def test_recall_context_includes_similarity_for_relevant_hits(stubbed_mcp_state):
     built, graph_adapter, _ = stubbed_mcp_state
 

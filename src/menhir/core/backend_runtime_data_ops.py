@@ -90,19 +90,19 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
         await self._require_own_memory(node_uuid)
-        if bootstrap_scope is None:
-            return bool(
-                await self._off_loop(self.built.graph_adapter.flag_memory, node_uuid)
-            )
+        kwargs: dict[str, Any] = {}
+        if bootstrap_scope is not None:
+            kwargs["bootstrap_scope"] = bootstrap_scope
+        if pin_priority is not None:
+            kwargs["pin_priority"] = pin_priority
         return bool(
-            await self._off_loop(
-                self.built.graph_adapter.flag_memory,
-                node_uuid,
-                bootstrap_scope=bootstrap_scope,
-            )
+            await self._off_loop(self.built.graph_adapter.flag_memory, node_uuid, **kwargs)
         )
 
     async def unflag_memory(self, node_uuid: str) -> bool:
@@ -646,6 +646,22 @@ class RuntimeProviderDataOpsMixin:
                 self.built.graph_adapter.fetch_flagged_memory_bootstrap_version, **kwargs
             )
         )
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        kwargs: dict[str, Any] = {}
+        if workspace is not None:
+            kwargs["workspace"] = workspace
+        if namespace is not None:
+            kwargs["namespace"] = namespace
+        counts = await self._off_loop(
+            self.built.graph_adapter.fetch_flagged_pin_counts, **kwargs
+        )
+        return {str(scope): int(pins) for scope, pins in dict(counts).items()}
 
     async def fetch_memories_by_scope(
         self, scope: str, limit: int = 20, *, namespace: str | None = None

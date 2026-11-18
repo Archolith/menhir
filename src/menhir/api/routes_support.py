@@ -639,6 +639,7 @@ class FlagResponse(BaseModel):
     uuid: str
     flagged: bool
     bootstrap_scope: str | None = None
+    pin_priority: int | None = None
 
 
 class UnflagResponse(BaseModel):
@@ -800,6 +801,7 @@ _BACKEND_METHODS = {
     "fetch_recent_memories",
     "fetch_flagged_memories",
     "fetch_flagged_memory_bootstrap_version",
+    "fetch_flagged_pin_counts",
     "fetch_memories_by_scope",
     "fetch_memories_by_type",
     "get_scan_fingerprint",

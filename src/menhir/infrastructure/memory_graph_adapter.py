@@ -974,11 +974,14 @@ class MemoryGraphAdapter:
         return int(result["deleted"])
 
     def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
         """Persist the explicit v1 retention override on a node."""
         return self._memory_queries.flag_memory(
-            node_uuid, bootstrap_scope=bootstrap_scope
+            node_uuid, bootstrap_scope=bootstrap_scope, pin_priority=pin_priority
         )
 
     def unflag_memory(self, node_uuid: str) -> bool:
@@ -1253,6 +1256,17 @@ class MemoryGraphAdapter:
     ) -> str:
         """Return a deterministic version fingerprint for the flagged-memory set."""
         return self._memory_queries.fetch_flagged_memory_bootstrap_version(
+            workspace=workspace, namespace=namespace
+        )
+
+    def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        """Count the startup pins a bootstrap read selects, keyed by bootstrap scope."""
+        return self._memory_queries.fetch_flagged_pin_counts(
             workspace=workspace, namespace=namespace
         )
 
