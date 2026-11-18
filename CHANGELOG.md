@@ -2,6 +2,9 @@
 
 - MCP and REST honor a supplied recall limit up to 50. Omitted limits keep their existing
   defaults, with a note when reranking cuts the result list to its configured cap.
+- `recall_context_memories` treats a supplied `limit` the same way and returns the note as
+  `relevant_note`. A client newer than its server retries a rejected explicit limit once
+  without the flag and says the server may have capped the results.
 
 ## 2026-11-17 - Preserve the receipt when enrichment scheduling fails (#663)
 

@@ -21,7 +21,7 @@ async def recall_context_memories(
     reader_id: str = "default",
     query: str = "",
     preset: str = "knowledge",
-    limit: int = 5,
+    limit: int | None = None,
     recent_limit: int = 5,
     namespace: str = "",
     workspace: str = "",
@@ -36,7 +36,7 @@ async def recall_context_memories(
         reader_id: Stable bot/client identifier used for bootstrap gating.
         query: Optional natural-language query for relevant context retrieval.
         preset: Ranking preset for relevant retrieval when query is provided.
-        limit: Max relevant results to return (default: 5).
+        limit: Max relevant results to return (default 5). An explicit limit overrides the default rerank cap, up to 50 results.
         recent_limit: Max recent context rows to include (default: 5).
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         workspace: Registered key selecting general + workspace bootstrap pins.
@@ -74,7 +74,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
         reader_id: str = "default",
         query: str = "",
         preset: str = "knowledge",
-        limit: int = 5,
+        limit: int | None = None,
         recent_limit: int = 5,
         namespace: str = "",
         workspace: str = "",
@@ -108,6 +108,8 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 f"(current_flagged_version={flagged_version})",
                 code="bootstrap_required",
             )
+        if limit is not None and limit < 1:
+            raise McpToolRefusal(f"Invalid limit {limit!r}: limit must be at least 1.")
         relevant: dict[str, object] = {}
         query_text = (query or "").strip()
         relevant_rows: list[dict[str, object]] = []
@@ -116,7 +118,8 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 relevant = await backend.recall(
                     query_text,
                     preset=preset,
-                    limit=limit,
+                    limit=5 if limit is None else limit,
+                    **({"limit_is_explicit": True} if limit is not None else {}),
                     include_session=True,
                     wait_for_pending=True,
                     **({"include_warden_status": True} if include_warden_status else {}),
@@ -187,6 +190,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                    if include_warden_status and relevant.get("warden_status") is not None else {}),
                 **({"relevant_warden_notice": relevant["warden_notice"]}
                    if relevant.get("warden_notice") else {}),
+                **({"relevant_note": relevant["note"]} if relevant.get("note") else {}),
                 "flagged_version": flagged_version,
                 "query": query_text or None,
                 "preset": preset if query_text else None,

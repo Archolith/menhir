@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from menhir.domain.recall import normalize_source_memory_sources
 
 
@@ -144,7 +146,25 @@ class BackendClientOpsMixin:
             params["counted_verdict_limit"] = int(counted_verdict_limit)
         if source_memory_sources is not None:
             params["source_memory_sources"] = list(normalize_source_memory_sources(source_memory_sources))
-        return await self._request("recall", params)
+        if not limit_is_explicit:
+            return await self._request("recall", params)
+        try:
+            return await self._request("recall", params)
+        except httpx.HTTPStatusError as exc:
+            # A server older than #661 rejects the unknown kwarg with a bare 500. Recall is a
+            # read, so retry once without the flag; a real 500 fails the retry too and raises.
+            if exc.response.status_code != 500:
+                raise
+            params.pop("limit_is_explicit")
+            result = await self._request("recall", params)
+        skew_note = (
+            "The server did not accept an explicit limit and may have capped results; "
+            "it may be older than this client."
+        )
+        if isinstance(result, dict):
+            note = result.get("note")
+            result["note"] = f"{note} | {skew_note}" if note else skew_note
+        return result
 
     async def recall_history(
         self,
