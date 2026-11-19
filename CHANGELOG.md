@@ -1,3 +1,11 @@
+## 2026-11-18 - Retry a timed-out source-memory embedding (#409)
+
+- Source-memory ingestion retries one embedding timeout before finishing enrichment. A
+  subsequent failure leaves the receipt available for the source-embedding repair job.
+- Regression tests cover a successful second attempt and a repeated timeout.
+- The episode status response reports source-search readiness separately from graph
+  enrichment, including when a source is awaiting an embedding.
+
 ## 2026-11-17 - Report truncated startup pins (#674)
 
 - Bootstrap reads report the matching pin total and whether any pins were omitted. MCP

@@ -1015,6 +1015,7 @@ def test_get_enrichment_status_returns_episode_snapshot(stubbed_mcp_state):
 
     assert "episode_id: 123e4567-e89b-12d3-a456-426614174999" in result
     assert "status: READY" in result
+    assert "source_search_status: UNKNOWN" in result
     assert "substage: complete" in result
     assert "attempts: 1" in result
     assert "llm_tasks_attempt: 4" in result

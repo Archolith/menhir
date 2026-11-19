@@ -645,6 +645,7 @@ def _format_episode_status(
             f"enriched_episode_uuid: {row.get('resolved_episode_uuid') or '(pending)'}",
             f"timed_out: {timed_out}",
             f"updates: {len(history)}",
+            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
         ]
     )
     lines.append(
@@ -652,6 +653,11 @@ def _format_episode_status(
             state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
         )
     )
+    if row.get("source_search_status") == "PENDING":
+        lines.append(
+            "source_search_guidance: A compatible source embedding is missing. Check this "
+            "same receipt again after embedding repair. The enrichment wait tracks graph work."
+        )
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):
