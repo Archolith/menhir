@@ -631,7 +631,6 @@ def _format_episode_status(
     lines.extend(
         [
             f"status: {row.get('processing_state') or 'UNKNOWN'}",
-            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
             f"stage: {row.get('processing_stage') or '(none)'}",
             f"substage: {row.get('processing_substage') or '(none)'}",
             f"progress: {float(row.get('processing_progress') or 0.0):.1f}",
@@ -646,6 +645,7 @@ def _format_episode_status(
             f"enriched_episode_uuid: {row.get('resolved_episode_uuid') or '(pending)'}",
             f"timed_out: {timed_out}",
             f"updates: {len(history)}",
+            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
         ]
     )
     lines.append(
