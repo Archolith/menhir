@@ -631,6 +631,7 @@ def _format_episode_status(
     lines.extend(
         [
             f"status: {row.get('processing_state') or 'UNKNOWN'}",
+            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
             f"stage: {row.get('processing_stage') or '(none)'}",
             f"substage: {row.get('processing_substage') or '(none)'}",
             f"progress: {float(row.get('processing_progress') or 0.0):.1f}",
@@ -652,6 +653,11 @@ def _format_episode_status(
             state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
         )
     )
+    if row.get("source_search_status") == "PENDING":
+        lines.append(
+            "source_search_guidance: A compatible source embedding is missing. Check this "
+            "same receipt again after embedding repair. The enrichment wait tracks graph work."
+        )
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):

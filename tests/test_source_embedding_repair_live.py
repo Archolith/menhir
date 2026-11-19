@@ -6,10 +6,12 @@ Run with:  pytest --run-online tests/test_source_embedding_repair_live.py
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from menhir.core.backend_runtime_admin_ops import RuntimeProviderAdminOpsMixin
 from menhir.infrastructure.episode_repository import EpisodeRepository
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.source_embedding_repair import repair_source_embeddings
@@ -64,6 +66,20 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_rep
     _episode(graph, "e-edited", "READY", content="before edit")
     _episode(graph, "e-pending", "PENDING", content="pending text")
 
+    class StatusBackend(RuntimeProviderAdminOpsMixin):
+        built = SimpleNamespace(
+            graph_adapter=adapter,
+            graphiti_client=SimpleNamespace(embedder_ref=SimpleNamespace(
+                config=SimpleNamespace(embedding_model="m-1", embedding_dim=2),
+            )),
+        )
+        _off_loop = staticmethod(asyncio.to_thread)
+
+    backend = StatusBackend()
+    before = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert before["processing_state"] == "READY"
+    assert before["source_search_status"] == "PENDING"
+
     async def embed(text: str) -> list[float]:
         if text == "before edit":  # the episode changes while its vector is being computed
             graph.execute("MATCH (n:Episodic {uuid: 'e-edited'}) SET n.content = 'after edit'")
@@ -71,6 +87,12 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_rep
 
     result = asyncio.run(repair_source_embeddings(adapter, embed=embed, model_name=lambda: "m-1"))
     assert _stamp(graph, "e-ready") == ([10.0, 1.0], "m-1")
+    after = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert after["processing_state"] == "READY"
+    assert after["source_search_status"] == "READY"
+    assert [row["uuid"] for row in adapter.search_episode_embeddings(
+        [10.0, 1.0], model="m-1", namespace="default",
+    )] == ["e-ready"]
     assert _stamp(graph, "e-edited") == (None, None)      # stale vector refused
     assert _stamp(graph, "e-pending") == (None, None)     # still owned by the ingest step
     assert result["written"] == 1 and result["skipped"] == 1

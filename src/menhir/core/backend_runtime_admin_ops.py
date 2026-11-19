@@ -9,6 +9,11 @@ from typing import Any
 from menhir.config import redact_uri_credentials
 from menhir.core.tenancy import require_own_object
 from menhir.infrastructure.providers import ProviderConfig
+from menhir.services.embedding_identity import (
+    LEGACY_EMBEDDING_MODELS,
+    comparable_model,
+    embedder_model_name,
+)
 
 from .backend_shared import _to_jsonable
 
@@ -103,11 +108,31 @@ class RuntimeProviderAdminOpsMixin:
     async def fetch_episode_processing(
         self, episode_uuid: str
     ) -> dict[str, Any] | None:
-        return _to_jsonable(
-            await self._off_loop(
-                self.built.graph_adapter.fetch_episode_processing, episode_uuid
-            )
+        row = await self._off_loop(
+            self.built.graph_adapter.fetch_episode_processing, episode_uuid
         )
+        if row is None or "source_search_eligible" not in row:
+            return _to_jsonable(row)
+        client = self.built.graphiti_client
+        model = comparable_model(embedder_model_name(client))
+        embedder = getattr(client, "embedder_ref", None)
+        expected_size = getattr(getattr(embedder, "config", None), "embedding_dim", None)
+        row = dict(row)
+        eligible = row.pop("source_search_eligible")
+        size = row.pop("source_embedding_size")
+        stamped_model = row.pop("source_embedding_model")
+        if not eligible:
+            status = "UNAVAILABLE"
+        elif not size or (expected_size and size != expected_size):
+            status = "PENDING"
+        elif model and stamped_model not in (model, *LEGACY_EMBEDDING_MODELS):
+            status = "PENDING"
+        elif not expected_size:
+            status = "UNKNOWN"
+        else:
+            status = "READY"
+        row["source_search_status"] = status
+        return _to_jsonable(row)
 
     async def list_episode_processing(
         self, *, states: list[str] | None = None, limit: int = 25,
