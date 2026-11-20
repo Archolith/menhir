@@ -79,6 +79,35 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    async def record_turn_evidence(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        declarant: str | None = None,
+        session_id: str | None = None,
+        occurred_at: str | None = None,
+        namespace: str | None = None,
+        source_kind: str = "unknown",
+        source_id: str | None = None,
+        source_client: str | None = None,
+        hook_version: str | None = None,
+        cwd: str | None = None,
+        transcript_path: str | None = None,
+        triage_reason: list[str] | None = None,
+        triage_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        turn_key: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Capture one turn as a :TurnEvidence node, as `POST /api/turn-evidence` does (#717).
+
+        Idempotent on turn_key (or prompt_id). Returns {turn_id, created, recorded_at,
+        occurred_at}; pass turn_id to queue_episode(turn_evidence_uuid=...). Empty text or an
+        unknown role raises ValueError.
+        """
+        ...
+
     async def flag_memory(
         self,
         node_uuid: str,
