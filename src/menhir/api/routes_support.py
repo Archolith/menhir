@@ -781,6 +781,7 @@ def _require_phase3_adapter(request: Request):
 
 _BACKEND_METHODS = {
     "queue_episode",
+    "record_turn_evidence",
     "flag_memory",
     "unflag_memory",
     "promote_memory",
@@ -904,6 +905,8 @@ _OP_TIER_OPERATOR = {
 }
 _OP_TIER_AGENT = {
     "queue_episode", "flag_memory", "unflag_memory", "enqueue_pending_episode",
+    # Agent, matching POST /api/turn-evidence: it writes evidence, deletes nothing.
+    "record_turn_evidence",
     "ingest_document", "scan_and_write_project",
     "create_todo", "close_todo", "delete_todo", "close_stale_todos",
     # Todo lifecycle and lineage. Same standing as the artifact writes below: each moves a

@@ -1,3 +1,12 @@
+## 2026-11-20 - record_turn_evidence on the backend client (#717)
+
+- `MemoryBackend`, `RuntimeProvider` and `BackendClient` gain `record_turn_evidence`, the same
+  capture as `POST /api/turn-evidence` (same fields and defaults, idempotent on `turn_key` or
+  `prompt_id`). A `BackendClient` caller can now record a turn and pass its `turn_id` to
+  `queue_episode(turn_evidence_uuid=...)` without a separate REST call.
+- The internal backend route dispatches it at agent tier, like the REST route, and forces a pinned
+  client's namespace onto it. Recall and the REST route are unchanged.
+
 ## 2026-11-17 - Report truncated startup pins (#674)
 
 - Bootstrap reads report the matching pin total and whether any pins were omitted. MCP
