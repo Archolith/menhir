@@ -1,3 +1,18 @@
+## 2026-11-21 - Sarcasm and unaffirmed third-party claims stay out of facts and scalar values (#283)
+
+- Extraction (both self-endpoint instruction blocks in `graphiti_extraction_policy.py`): sarcasm and
+  irony are not affirmative facts; store the meant sense or only the literal events. Negation,
+  questions and hypotheticals were already covered by "Preserve negation".
+- Typed scalars (`TYPED_SCALAR_SYSTEM_PROMPT`): emit only values the episode presents as true. No
+  value from sarcasm, and none from another person's claim that the speaker does not affirm.
+- Measured with `scripts/probe_nonveridical_extraction.py` (84 single-turn cases), 3 runs per arm on
+  a 50-case subset, gpt-6-luna Flex. Fact leaks from sarcasm: 15 of 24 on main, 2 of 24 with the
+  rules; no other category leaked on either arm. Missed true facts: 18 of 96 on main, 23 of 96 with
+  the rules (mostly q-06 and rep-04). Scalars, one run: the sarcastic values and the contradicted
+  third-party value are gone, and the sincere controls keep theirs.
+- The prompts' examples are new, and `tests/test_nonveridical_extraction_guards.py` fails if any
+  prompt quotes a 4-word run of the probe corpus.
+
 ## 2026-11-21 - Ranked source memories; build_context admits them one at a time (P7)
 
 - Each `source_memories` entry carries a `rank` (1 = best match, by cosine; ties keep search
