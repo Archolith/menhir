@@ -323,6 +323,8 @@ class SourceMemoryResponse(BaseModel):
     reference_time: str | None = None
     cosine: float
     source: str | None = None
+    # Relevance position within the section (1 = best); the list itself is oldest first.
+    rank: int | None = None
 
 
 class RecallResponse(BaseModel):

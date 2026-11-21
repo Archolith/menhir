@@ -8,18 +8,19 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from menhir.domain.assertion_operations import is_counting_occurrence, is_value_claim
-from menhir.domain.recall_provenance import provenance_label
-from menhir.domain.recall_visibility import memory_lifecycle_note
-
 from menhir.domain.recall import (
     QueryPreset,
     RecallResult,
     ScoredMemory,
+    SourceMemory,
 )
+from menhir.domain.recall_provenance import provenance_label
+from menhir.domain.recall_visibility import memory_lifecycle_note
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,50 @@ class ContextResult:
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
+
+SOURCE_MEMORY_HEADER = "Source memories (raw episodes, oldest first):"
+
+
+def _source_line(sm: SourceMemory) -> str:
+    return f"  - {sm.reference_time or 'unknown time'} | {sm.content}"
+
+
+def _pack_source_memories(
+    sources: Sequence[SourceMemory],
+    remaining_tokens: int,
+    tokens_for: Callable[[str], int],
+) -> tuple[str | None, int, bool]:
+    """Admit source memories one at a time, best rank first, within ``remaining_tokens``.
+
+    Returns ``(block, tokens, cut)``: the rendered section (``None`` when nothing fits), its
+    token count, and whether any source was left out. Admission order is ``rank`` (1 = best),
+    falling back to cosine for entries without one (older payloads); a source that does not
+    fit is skipped and smaller lower-ranked ones still get their turn, as ranked items do.
+    Admitted sources are displayed oldest first, like the recall section itself. Each trial
+    block is measured whole, so the header and separators always fall inside the budget.
+    """
+    order = sorted(
+        range(len(sources)),
+        key=lambda i: (
+            sources[i].rank if sources[i].rank is not None else math.inf,
+            -sources[i].cosine,
+        ),
+    )
+    admitted: list[int] = []
+    block: str | None = None
+    tokens = 0
+    for i in order:
+        trial = sorted((*admitted, i))
+        candidate = "\n".join(
+            [SOURCE_MEMORY_HEADER, *(_source_line(sources[j]) for j in trial)]
+        )
+        candidate_tokens = tokens_for(candidate)
+        if candidate_tokens > remaining_tokens:
+            continue
+        admitted = trial
+        block, tokens = candidate, candidate_tokens
+    return block, tokens, len(admitted) < len(sources)
 
 
 @dataclass
@@ -570,20 +615,20 @@ class ContextBuilderService:
 
         # Source-memory lane (additive):
         # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
-        # ranked list so it supplements rather than displaces relevance order. A
-        # per-request knob-off (or lane failure) adds no lines and preserves the context byte-for-byte.
+        # ranked list so it supplements rather than displaces relevance order. Sources are
+        # admitted one at a time by rank within what is left of the budget (P7), not
+        # all-or-nothing. A per-request knob-off (or lane failure) adds no lines and
+        # preserves the context byte-for-byte.
         if recall_result.source_memories:
-            source_lines = ["Source memories (raw episodes, oldest first):"]
-            for sm in recall_result.source_memories:
-                source_lines.append(
-                    f"  - {sm.reference_time or 'unknown time'} | {sm.content}"
-                )
-            source_block = "\n".join(source_lines)
-            source_tokens = _tokens_for(source_block)
-            if running_tokens + source_tokens <= effective_budget:
+            source_block, source_tokens, source_cut = _pack_source_memories(
+                recall_result.source_memories,
+                effective_budget - running_tokens,
+                _tokens_for,
+            )
+            if source_block is not None:
                 lines.append(source_block)
                 running_tokens += source_tokens
-            else:
+            if source_cut:
                 truncated = True
 
         # Track actual memory count — advisory lines are not memories.

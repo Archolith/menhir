@@ -239,7 +239,8 @@ src/menhir/
 |   |- recall_service.py  Public RecallService dataclass and API facade (conditional event-history authority layer)
 |   |- recall_policies.py  Pure retrieval, temporal, and authority policy helpers
 |   |- recall_support.py  Rehydration, facet/frontier, adjacency, and post-recall operations
-|   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly
+|   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly (source memories ranked by cosine, returned oldest first)
+|   |- context_builder.py  build_context: ranked memories first, then source memories admitted one at a time by rank within max_tokens
 |   |- ingest_service.py  Public IngestService dataclass and composition facade
 |   |- ingest_queue.py / ingest_worker.py / ingest_intake.py  Queue lifecycle, enrichment workers, and intake operations
 |   |- ingest_limits.py  Shared memory text and diff size bounds at write entry points

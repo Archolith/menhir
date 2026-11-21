@@ -1,3 +1,14 @@
+## 2026-11-21 - Ranked source memories; build_context admits them one at a time (P7)
+
+- Each `source_memories` entry carries a `rank` (1 = best match, by cosine; ties keep search
+  order). The section stays oldest first on the wire and in the REST/MCP payloads; `rank` is
+  additive and `None` where no ranking was computed (`recall_history`, older servers).
+- `build_context` admits sources one at a time by rank within the budget left after the ranked
+  items, skipping any that do not fit, instead of dropping the whole section when it does not fit.
+  Admitted sources are shown oldest first. When every source fits, the output is byte-identical
+  to before. Entries without a rank are admitted by cosine.
+- Recall item ranking and the items' share of the `build_context` budget are unchanged.
+
 ## 2026-11-21 - Benchmark graph layer surfaces (`benchmarks/layer-surface.toml`)
 
 - Declares the files behind each stored benchmark graph layer (ingest, lifecycle, scalar) and the
