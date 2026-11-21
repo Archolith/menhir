@@ -1232,6 +1232,9 @@ MENHIR STRUCTURAL CURRENT-MESSAGE AUTHOR ENDPOINT:
   is ambiguous. Omit an uncertain attribution rather than inventing a substitute author entity.
 - Preserve negation. Questions, hypothetical statements, and other speakers' claims are not
   affirmative facts about the author. Relation interpretation is inference, not owner confirmation.
+- Sarcasm and irony are not affirmative facts. When the message itself contradicts the literal
+  claim (`oh sure, I'm a brilliant gardener, every plant I own is dead`), store the meant
+  sense or only the literal events, never the ironic claim.
 - Emit `{endpoint.marker}` only when at least one extracted edge about the current author uses it.
 """
 
@@ -1257,6 +1260,9 @@ MENHIR STRUCTURAL USER ENDPOINT:
 {writer_is_human}- Do not use `{marker}` for application users, customers, accounts, roles, permissions,
   database tables, collections, or for anyone speaking inside quoted or reported speech.
 - Preserve negation. Questions and hypothetical statements are not facts about the human user.
+- Sarcasm and irony are not affirmative facts. When the message itself contradicts the literal
+  claim (`oh sure, I'm a brilliant gardener, every plant I own is dead`), store the meant
+  sense or only the literal events, never the ironic claim.
 - Emit `{marker}` only when at least one extracted edge about the human user uses it.
 """
 

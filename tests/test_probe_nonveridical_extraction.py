@@ -124,3 +124,15 @@ def test_namespaces_are_per_case_and_run():
     p = _probe()
     assert p.namespace_for("R1", "neg-01") == "p283-r1-neg-01"
     assert p.namespace_for("r1", "neg-01") != p.namespace_for("r2", "neg-01")
+
+
+def test_majority_verdict_and_agreement():
+    p = _probe()
+    out = p.majority([{"asserted": True, "fact_ref": "f1"}, {"asserted": False, "fact_ref": None},
+                      {"asserted": True, "fact_ref": "f2"}])
+    assert out == {"asserted": True, "fact_ref": "f1", "agreement": 2 / 3}
+    assert p.majority([{"asserted": False, "fact_ref": None}])["asserted"] is False
+
+
+def test_judge_counts_a_self_report_as_asserting_it():
+    assert "user describes themself as X" in _probe().JUDGE_SYSTEM

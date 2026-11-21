@@ -45,6 +45,9 @@ JUDGE_SYSTEM = (
     "no fact does. Rules: (1) a fact that keeps the turn's modality (the user plans to, wants to, "
     "wishes, did not, asked whether, was told that, joked that) does not assert an unhedged "
     "proposition, but it does assert a proposition that itself states the plan, wish or report; "
+    "a fact in which the user says, describes or calls something (user says they are X, user "
+    "describes themself as X, user calls the boss a genius) DOES assert it, unless the fact itself "
+    "marks it as sarcasm or irony; "
     "(2) a fact whose invalid_at or expired_at is on or before the speech date describes an ended "
     "state and does not assert that state still holds; (3) a future-tense fact (the user will, is "
     "going to) does not assert that the thing has already happened. "
@@ -122,6 +125,15 @@ def parse_verdict(text: str) -> tuple[bool, str | None]:
         raise ValueError(f"unparseable verdict: {text!r}")
     ref = tail.strip() or None
     return head == "ASSERTED", (None if ref in (None, "none") else ref)
+
+
+def majority(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    """Majority verdict over judge samples; the cited fact comes from an agreeing sample."""
+    yes = [x for x in samples if x["asserted"]]
+    asserted = len(yes) * 2 > len(samples)
+    pick = (yes if asserted else [x for x in samples if not x["asserted"]])[0]
+    return {"asserted": asserted, "fact_ref": pick["fact_ref"],
+            "agreement": max(len(yes), len(samples) - len(yes)) / len(samples)}
 
 
 def summarize(cases: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -244,16 +256,19 @@ def stage_judge(args, cases):
 
     def one(item):
         c, i, p = item
-        resp = client.chat.completions.create(
-            model=JUDGE_MODEL, service_tier="flex",
-            messages=judge_messages(c, p["text"], stored[c["id"]]))
-        text = resp.choices[0].message.content or ""
-        asserted, ref = parse_verdict(text)
+        samples = []
+        for _ in range(args.judge_samples):
+            resp = client.chat.completions.create(
+                model=JUDGE_MODEL, service_tier="flex",
+                messages=judge_messages(c, p["text"], stored[c["id"]]))
+            text = resp.choices[0].message.content or ""
+            asserted, ref = parse_verdict(text)
+            samples.append({"asserted": asserted, "fact_ref": ref, "raw": text,
+                            "service_tier": getattr(resp, "service_tier", None),
+                            "usage": resp.usage.model_dump() if resp.usage else None})
         with lock:
-            append_jsonl(path, {"id": verdict_key(c["id"], i), "asserted": asserted,
-                                "fact_ref": ref, "raw": text,
-                                "service_tier": getattr(resp, "service_tier", None),
-                                "usage": resp.usage.model_dump() if resp.usage else None})
+            append_jsonl(path, {"id": verdict_key(c["id"], i), **majority(samples),
+                                "samples": samples})
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         list(pool.map(one, todo))
@@ -305,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--timeout", type=float, default=300.0)
     ap.add_argument("--base-url", help="served Menhir for the views stage")
+    ap.add_argument("--judge-samples", type=int, default=3, help="judge calls per proposition (odd)")
     args = ap.parse_args(argv)
     cases = load_corpus()
     if args.only:
