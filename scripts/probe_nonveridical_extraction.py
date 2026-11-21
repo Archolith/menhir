@@ -3,9 +3,9 @@
 Each corpus case is one user turn, ingested through the production composition root
 (`build_memory_services` + `prepare_memory_runtime`, the path the server uses) into its own
 namespace with `occurred_at` = the case's speech date. Once the episodes are READY or FAILED, the
-case's stored RELATES_TO facts and entity summaries are dumped, and an LLM judge decides whether any
-of them asserts the case's `proposition` as true. Expected: absent for non-veridical cases, present
-for controls.
+case's stored RELATES_TO facts (with valid/invalid/expired times) and entity summaries are dumped,
+and an LLM judge decides, per proposition, whether any stored fact asserts it. Each proposition
+expects absent (a leak if asserted) or present (a miss if not).
 
 Stages (each writes JSONL under --out; reruns skip finished cases):
 
@@ -37,14 +37,20 @@ RESERVED_PORTS = {7687, 7474, 7688}
 JUDGE_MODEL = "gpt-6-luna"
 
 JUDGE_SYSTEM = (
-    "You check what a memory system stored from one user turn. You get the turn, a proposition, "
-    "and the stored facts. Answer ASSERTED if any stored fact states the proposition as true "
-    "(happened, holds, or is the user's real situation), even in different words. Answer "
-    "NOT_ASSERTED if no fact does. A fact that keeps the turn's modality (the user plans to, "
-    "wishes, did not, asked whether, was told that) does not assert the proposition. "
+    "You check what a memory system stored from one user turn. You get the turn and its speech "
+    "date, one proposition, and the stored facts with their time fields. Answer ASSERTED if any "
+    "stored fact states the proposition as true, even in different words. Answer NOT_ASSERTED if "
+    "no fact does. Rules: (1) a fact that keeps the turn's modality (the user plans to, wants to, "
+    "wishes, did not, asked whether, was told that, joked that) does not assert an unhedged "
+    "proposition, but it does assert a proposition that itself states the plan, wish or report; "
+    "(2) a fact whose invalid_at or expired_at is on or before the speech date describes an ended "
+    "state and does not assert that state still holds; (3) a future-tense fact (the user will, is "
+    "going to) does not assert that the thing has already happened. "
     "Reply with one line: ASSERTED or NOT_ASSERTED, then ' | ' and the uuid of the fact that "
     "asserts it, or 'none'."
 )
+CATEGORIES = {"negated", "question", "counterfactual", "roleplay", "plan_modal", "reported",
+              "sarcasm", "mixed", "third_party", "control"}
 
 
 # ---------------------------------------------------------------- pure helpers (offline-tested)
@@ -55,17 +61,28 @@ def load_corpus(path: Path = CORPUS) -> list[dict[str, Any]]:
     dupes = [i for i, n in Counter(ids).items() if n > 1]
     if dupes:
         raise ValueError(f"duplicate case ids: {dupes}")
+    known = set(ids)
     for c in cases:
-        missing = {"id", "category", "speech_date", "turn", "proposition", "expect"} - c.keys()
+        missing = {"id", "category", "speech_date", "turn", "propositions"} - c.keys()
         if missing:
             raise ValueError(f"{c.get('id')}: missing {sorted(missing)}")
-        if c["expect"] not in ("absent", "present"):
-            raise ValueError(f"{c['id']}: expect must be absent or present")
-        if (c["category"] == "control") != (c["expect"] == "present"):
-            raise ValueError(f"{c['id']}: only controls expect present")
+        if c["category"] not in CATEGORIES:
+            raise ValueError(f"{c['id']}: unknown category {c['category']}")
+        props = c["propositions"]
+        if not props or any(p.get("expect") not in ("absent", "present") or not p.get("text")
+                            for p in props):
+            raise ValueError(f"{c['id']}: each proposition needs text and expect absent|present")
+        if c["category"] == "control" and any(p["expect"] != "present" for p in props):
+            raise ValueError(f"{c['id']}: a control's propositions must all be present")
+        if c.get("pair") and c["pair"] not in known:
+            raise ValueError(f"{c['id']}: pair {c['pair']} is not a case")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c["speech_date"]):
             raise ValueError(f"{c['id']}: speech_date must be YYYY-MM-DD")
     return cases
+
+
+def verdict_key(case_id: str, index: int) -> str:
+    return f"{case_id}#{index}"
 
 
 def namespace_for(run_id: str, case_id: str) -> str:
@@ -79,16 +96,20 @@ def check_neo4j_uri(uri: str) -> None:
 
 
 def fact_lines(row: dict[str, Any]) -> list[str]:
-    lines = [f"{f['uuid']}: {f['fact']}" for f in row.get("facts", [])]
+    lines = []
+    for f in row.get("facts", []):
+        times = [f"{k}={f[k]}" for k in ("valid_at", "invalid_at", "expired_at") if f.get(k)]
+        lines.append(f"{f['uuid']}: {f['fact']}" + (f" [{', '.join(times)}]" if times else ""))
     lines += [f"{e['uuid']}: (entity {e['name']}) {e['summary']}"
               for e in row.get("entities", []) if e.get("summary")]
     return lines
 
 
-def judge_messages(case: dict[str, Any], row: dict[str, Any]) -> list[dict[str, str]]:
+def judge_messages(case: dict[str, Any], proposition: str,
+                   row: dict[str, Any]) -> list[dict[str, str]]:
     stored = "\n".join(fact_lines(row)) or "(nothing stored)"
     user = (f"Turn (said {case['speech_date']}): {case['turn']}\n"
-            f"Proposition: {case['proposition']}\n\nStored facts:\n{stored}")
+            f"Proposition: {proposition}\n\nStored facts:\n{stored}")
     return [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": user}]
 
 
@@ -102,20 +123,23 @@ def parse_verdict(text: str) -> tuple[bool, str | None]:
 
 
 def summarize(cases: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Per category: `leak` = an absent proposition was asserted; `miss` = a present one was not."""
     by_cat: dict[str, Counter] = defaultdict(Counter)
     wrong = []
     for c in cases:
-        v = verdicts.get(c["id"])
         cat = by_cat[c["category"]]
-        if v is None:
-            cat["ungraded"] += 1
-            continue
-        cat["n"] += 1
-        ok = v["asserted"] == (c["expect"] == "present")
-        cat["ok" if ok else "wrong"] += 1
-        if not ok:
-            wrong.append({"id": c["id"], "category": c["category"], "turn": c["turn"],
-                          "proposition": c["proposition"], "fact": v.get("fact_ref")})
+        for i, p in enumerate(c["propositions"]):
+            v = verdicts.get(verdict_key(c["id"], i))
+            if v is None:
+                cat["ungraded"] += 1
+                continue
+            cat[f"{p['expect']}_n"] += 1
+            if v["asserted"] == (p["expect"] == "present"):
+                continue
+            kind = "leak" if p["expect"] == "absent" else "miss"
+            cat[kind] += 1
+            wrong.append({"id": c["id"], "kind": kind, "category": c["category"],
+                          "turn": c["turn"], "proposition": p["text"], "fact": v.get("fact_ref")})
     return {"by_category": {k: dict(v) for k, v in sorted(by_cat.items())}, "wrong": wrong}
 
 
@@ -208,14 +232,19 @@ def stage_judge(args, cases):
     done = read_jsonl(path)
     client = OpenAI()
     for c in cases:
-        if c["id"] in done or c["id"] not in stored:
+        if c["id"] not in stored:
             continue
-        resp = client.chat.completions.create(model=JUDGE_MODEL, service_tier="flex",
-                                              messages=judge_messages(c, stored[c["id"]]))
-        text = resp.choices[0].message.content or ""
-        asserted, ref = parse_verdict(text)
-        append_jsonl(path, {"id": c["id"], "asserted": asserted, "fact_ref": ref, "raw": text,
-                            "usage": resp.usage.model_dump() if resp.usage else None})
+        for i, p in enumerate(c["propositions"]):
+            key = verdict_key(c["id"], i)
+            if key in done:
+                continue
+            resp = client.chat.completions.create(
+                model=JUDGE_MODEL, service_tier="flex",
+                messages=judge_messages(c, p["text"], stored[c["id"]]))
+            text = resp.choices[0].message.content or ""
+            asserted, ref = parse_verdict(text)
+            append_jsonl(path, {"id": key, "asserted": asserted, "fact_ref": ref, "raw": text,
+                                "usage": resp.usage.model_dump() if resp.usage else None})
 
 
 def stage_report(args, cases):
