@@ -9,6 +9,16 @@
   to before. Entries without a rank are admitted by cosine.
 - Recall item ranking and the items' share of the `build_context` budget are unchanged.
 
+## 2026-11-21 - Benchmark graph layer surfaces (`benchmarks/layer-surface.toml`)
+
+- Declares the files behind each stored benchmark graph layer (ingest, lifecycle, scalar) and the
+  recall surface. archolith-bench will mark a stored layer with the last commit that changed its
+  files and reuse it only while that commit is unchanged.
+- `tests/test_bench_layer_surface.py` (offline, AST) fails when the declaration stops matching the
+  code: a glob, file or entry that no longer exists, or a layer file importing a menhir module that
+  is neither in the layer nor in a reviewed `[[outside]]` group with a reason. When code moves,
+  update the declaration in the same PR.
+
 ## 2026-11-20 - Build ops on the backend client (P4a)
 
 - `MemoryBackend`, `RuntimeProvider` and `BackendClient` gain `fetch_namespace_build_counts` and
