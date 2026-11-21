@@ -148,13 +148,14 @@ async def _ingest_case(stack, case, ns, timeout_s):
     from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
 
     session = f"p283-{case['id']}"
+    said = f"{case['speech_date']}T12:00:00Z"
     turn_id = TurnEvidenceRepository(stack.neo4j).record_turn_evidence(
-        text=case["turn"], role="user", declarant="user", namespace=ns,
+        text=case["turn"], role="user", declarant="user", namespace=ns, occurred_at=said,
         source_kind="claude_code_hook", session_id=session, prompt_id=f"p-{case['id']}",
     )["turn_id"]
     result = await stack.ingest_service.queue_episode_for_enrichment(
         case["turn"], new_session(user_id="dev", session_id=session), "user",
-        namespace=ns, occurred_at=f"{case['speech_date']}T12:00:00Z", turn_evidence_uuid=turn_id,
+        namespace=ns, occurred_at=said, turn_evidence_uuid=turn_id,
     )
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
