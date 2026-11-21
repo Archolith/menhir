@@ -6,6 +6,9 @@ moved verbatim from that module, which still defines and re-exports the composed
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from menhir.domain.projection import ProjectionTarget
 from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessAssessment,
@@ -27,29 +30,57 @@ from menhir.infrastructure.projection_lifecycle_repository_encoding import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class _ProjectionLifecycleReadsMixin:
     """Pending queue reads, atomic fence/materialize/receipt/certify commits, freshness."""
 
     def pending(
         self, *, definition_id: str | None = None, limit: int = 100
     ) -> tuple[ProjectionWorkToken, ...]:
-        """Return bounded dirty work; queue emptiness is not a freshness certificate.
+        """Return dirty work. Workers must request their own definition.
 
-        Workers must use a definition-scoped read: filtering after LIMIT can starve
-        one definition behind unrelated work. Unscoped reads remain diagnostic.
+        An unscoped diagnostic read remains strict and raises on corruption.
+        Scoped worker reads quarantine malformed generations and continue scanning
+        instead of treating a bad first page as an empty or permanently stuck queue.
+        Queue emptiness is never a freshness certificate.
         """
 
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be an integer >= 1")
-        if definition_id is not None:
-            definition_id = _require_nonblank("definition_id", definition_id)
-        definition_filter = "AND w.definition_id = $definition_id" if definition_id else ""
+        if definition_id is None:
+            return self._pending_unscoped(limit=limit)
+        definition_id = _require_nonblank("definition_id", definition_id)
+        return self._pending_scoped(definition_id=definition_id, limit=limit)
+
+    @staticmethod
+    def _pending_token(row: dict[str, Any]) -> ProjectionWorkToken:
+        current_version = row.get("current_definition_version")
+        if current_version is None:
+            raise ProjectionLifecycleCorruptionError(
+                "projection work references a missing definition"
+            )
+        token = _work_token_from_row(row)
+        try:
+            current_version = int(current_version)
+        except (TypeError, ValueError) as exc:
+            raise ProjectionLifecycleCorruptionError(
+                "projection work references an invalid definition version"
+            ) from exc
+        if token.definition_version != current_version:
+            raise ProjectionLifecycleCorruptionError(
+                "projection work version disagrees with shared-current definition"
+            )
+        return token
+
+    def _pending_unscoped(self, *, limit: int) -> tuple[ProjectionWorkToken, ...]:
+        """Preserve strict diagnostics and the original oldest-first order."""
         rows = self._neo4j.execute(
-            f"""
+            """
             MATCH (w:ProjectionWorkState)
             WHERE w.generation > coalesce(w.applied_generation,0)
-              {definition_filter}
-            OPTIONAL MATCH (d:ProjectionDefinitionState {{definition_id:w.definition_id}})
+            OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:w.definition_id})
             RETURN w.work_key AS work_key,
                    w.definition_id AS definition_id,
                    w.definition_version AS definition_version,
@@ -61,22 +92,144 @@ class _ProjectionLifecycleReadsMixin:
             ORDER BY w.dirty_at ASC, w.work_key ASC
             LIMIT $limit
             """,
-            {"limit": limit, "definition_id": definition_id},
+            {"limit": limit},
         )
+        return tuple(self._pending_token(dict(row)) for row in rows)
+
+    def _pending_scoped(
+        self, *, definition_id: str, limit: int
+    ) -> tuple[ProjectionWorkToken, ...]:
+        """Scan whole pages, skipping and quarantining exact corrupt generations.
+
+        The already-seen keys avoid relying on OFFSET while quarantine and other
+        writers change the eligible set. The scan budget raises rather than
+        returning a misleading empty result under a pathological corrupt backlog.
+        """
         tokens: list[ProjectionWorkToken] = []
-        for row in rows:
-            current_version = row.get("current_definition_version")
-            if current_version is None:
+        seen_keys: list[str] = []
+        scan_budget = max(1_000, limit * 10)
+        while len(tokens) < limit:
+            page_size = min(100, max(32, limit - len(tokens)))
+            rows = self._neo4j.execute(
+                """
+                MATCH (w:ProjectionWorkState)
+                WHERE w.definition_id = $definition_id
+                  AND w.generation > coalesce(w.applied_generation,0)
+                  AND (w.quarantine_generation IS NULL
+                       OR w.quarantine_generation <> w.generation)
+                  AND NOT w.work_key IN $seen_keys
+                OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:w.definition_id})
+                RETURN w.work_key AS work_key,
+                       w.definition_id AS definition_id,
+                       w.definition_version AS definition_version,
+                       d.current_version AS current_definition_version,
+                       w.target_json AS target_json,
+                       w.generation AS generation,
+                       w.target_present AS target_present,
+                       w.reason AS reason
+                ORDER BY w.dirty_at ASC, w.work_key ASC
+                LIMIT $limit
+                """,
+                {
+                    "definition_id": definition_id,
+                    "seen_keys": seen_keys,
+                    "limit": page_size,
+                },
+            )
+            if not rows:
+                break
+            for raw in rows:
+                row = dict(raw)
+                work_key = row.get("work_key")
+                if not isinstance(work_key, str) or not work_key:
+                    raise ProjectionLifecycleCorruptionError(
+                        "scoped projection work has no usable work_key to quarantine"
+                    )
+                seen_keys.append(work_key)
+                if str(row.get("definition_id") or "") != definition_id:
+                    raise ProjectionLifecycleCorruptionError(
+                        "scoped pending query returned work from another definition"
+                    )
+                try:
+                    token = self._pending_token(row)
+                except ProjectionLifecycleCorruptionError as exc:
+                    self._quarantine_pending_generation(row, reason=str(exc))
+                else:
+                    tokens.append(token)
+                if len(tokens) >= limit:
+                    break
+            if len(seen_keys) >= scan_budget and len(tokens) < limit:
                 raise ProjectionLifecycleCorruptionError(
-                    "projection work references a missing definition"
+                    "projection pending scan budget exhausted; "
+                    "retry after quarantined work is inspected"
                 )
-            token = _work_token_from_row(dict(row))
-            if token.definition_version != int(current_version):
-                raise ProjectionLifecycleCorruptionError(
-                    "projection work version disagrees with shared-current definition"
-                )
-            tokens.append(token)
         return tuple(tokens)
+
+    def _quarantine_pending_generation(self, row: dict[str, Any], *, reason: str) -> None:
+        """Quarantine only if the bad row is *still* the exact generation read.
+
+        The coordination-epoch write acquires the row lock BEFORE the CAS
+        predicates are evaluated, so a concurrent re-dirty cannot be hidden.
+        """
+        params = {
+            "work_key": row["work_key"],
+            "definition_id": row["definition_id"],
+            "definition_version": row.get("definition_version"),
+            "generation": row.get("generation"),
+            "target_json": row.get("target_json"),
+            "reason": reason[:500],
+        }
+
+        def quarantine(tx: Neo4jTransaction) -> bool:
+            updated = tx.execute(
+                """
+                MATCH (w:ProjectionWorkState {work_key:$work_key})
+                SET w.coordination_epoch=coalesce(w.coordination_epoch,0)+1
+                WITH w
+                WHERE w.definition_id=$definition_id
+                  AND (w.definition_version=$definition_version
+                       OR (w.definition_version IS NULL AND $definition_version IS NULL))
+                  AND w.generation=$generation
+                  AND (w.target_json=$target_json
+                       OR (w.target_json IS NULL AND $target_json IS NULL))
+                  AND w.generation > coalesce(w.applied_generation,0)
+                SET w.quarantine_generation=$generation,
+                    w.quarantine_definition_version=$definition_version,
+                    w.quarantine_reason=$reason,
+                    w.quarantined_at=datetime()
+                RETURN w.work_key AS work_key
+                """,
+                params,
+            )
+            return len(updated) == 1
+
+        if self._neo4j.execute_write(quarantine):
+            logger.warning(
+                "Quarantined corrupt projection work %s for definition %s: %s",
+                row["work_key"], row["definition_id"], reason,
+            )
+        else:
+            logger.warning(
+                "Skipped quarantine of changed projection work %s; "
+                "a newer generation may be eligible on the next scan",
+                row["work_key"],
+            )
+
+    def quarantined_pending_count(self, *, definition_id: str | None = None) -> int:
+        """Operational count of currently quarantined, still-dirty work."""
+        if definition_id is not None:
+            definition_id = _require_nonblank("definition_id", definition_id)
+        rows = self._neo4j.execute(
+            """
+            MATCH (w:ProjectionWorkState)
+            WHERE w.generation > coalesce(w.applied_generation,0)
+              AND w.quarantine_generation = w.generation
+              AND ($definition_id IS NULL OR w.definition_id = $definition_id)
+            RETURN count(w) AS quarantined
+            """,
+            {"definition_id": definition_id},
+        )
+        return int(rows[0]["quarantined"]) if len(rows) == 1 else 0
 
     def commit(
         self,
