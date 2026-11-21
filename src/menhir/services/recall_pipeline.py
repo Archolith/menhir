@@ -289,6 +289,12 @@ async def _build_source_memories(
                 cosine=float(row.get("cosine") or 0.0),
                 source=row.get("source") or None,
             ))
+        # Rank by relevance before the chronological display sort, so consumers that must
+        # cut the section (build_context's budget) keep the best matches. The sort is stable,
+        # so equal cosines keep the lane's order (search order, or spread's pick order).
+        by_relevance = sorted(range(len(section)), key=lambda i: -section[i].cosine)
+        for rank, i in enumerate(by_relevance, start=1):
+            section[i] = replace(section[i], rank=rank)
         section.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
         return tuple(section), None, int((perf_counter() - started) * 1000)
     except Exception as exc:
