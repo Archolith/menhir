@@ -111,6 +111,58 @@ class RuntimeProviderDataOpsMixin:
         )
         return _to_jsonable(result)
 
+    @staticmethod
+    def _require_build_namespace(namespace: str | None, op: str) -> str:
+        ns = (namespace or "").strip()
+        if not ns:
+            raise ValueError(f"{op} requires a non-empty namespace")
+        return ns
+
+    async def fetch_namespace_build_counts(
+        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+    ) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "fetch_namespace_build_counts")
+        result = await self._off_loop(
+            self.built.graph_adapter.fetch_namespace_build_counts, ns, submitted_epoch_millis
+        )
+        return _to_jsonable(result)
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        ns = self._require_build_namespace(namespace, "list_failed_evidence_projections")
+        result = await self._off_loop(
+            self.built.graph_adapter.list_failed_evidence_projections, ns
+        )
+        return _to_jsonable(result)
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "promote_namespace_scope")
+        # Same default-silo refusal as delete_namespace.
+        if ns == DEFAULT_NAMESPACE:
+            raise ValueError(f"refusing to promote the default/shared namespace: {namespace!r}.")
+        # The namespace is a mutation target: a pinned caller naming another silo is refused.
+        pin = pinned_namespace()
+        if pin and ns != pin:
+            raise PermissionError(
+                f"Refused: this client is pinned to namespace {pin!r} and cannot promote "
+                f"namespace {ns!r}."
+            )
+        result = await self._off_loop(self.built.graph_adapter.promote_namespace_scope, ns)
+        return _to_jsonable(result)
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "reset_namespace")
+        # Mirrors phase3_reset_impl: delete_namespace (default refusal, pin check, max_nodes gate
+        # unless force), then the :TurnEvidence purge it does not cover.
+        deleted = await self.delete_namespace(ns, force=force)
+        turn_evidence_deleted = await self._off_loop(
+            self.built.graph_adapter.purge_turn_evidence, ns
+        )
+        return {
+            "namespace": ns,
+            "nodes_deleted": int(deleted.get("deleted", 0) or 0),
+            "turn_evidence_deleted": int(turn_evidence_deleted),
+        }
+
     async def _require_own_memory(self, node_uuid: str) -> None:
         """Refuse a pinned caller that named another silo's memory node.
 

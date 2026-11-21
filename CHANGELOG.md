@@ -1,3 +1,15 @@
+## 2026-11-20 - Build ops on the backend client (P4a)
+
+- `MemoryBackend`, `RuntimeProvider` and `BackendClient` gain `fetch_namespace_build_counts` and
+  `list_failed_evidence_projections` (read tier), and `promote_namespace_scope` and
+  `reset_namespace` (operator tier, recorded as destructive ops by the internal dispatch). Each
+  takes a required `namespace` (blank raises ValueError), so the dispatch forces a pinned
+  client's silo onto it.
+- The Cypher lives in `infrastructure/build_report_queries.py`, fully parameterized. The count and
+  failed-projection reads raise rather than return sentinels. `promote_namespace_scope` refuses
+  the default namespace; `reset_namespace` is `POST /api/phase3/reset` as one call, with `force` passed to
+  `delete_namespace`.
+
 ## 2026-11-20 - record_turn_evidence on the backend client (#717)
 
 - `MemoryBackend`, `RuntimeProvider` and `BackendClient` gain `record_turn_evidence`, the same
