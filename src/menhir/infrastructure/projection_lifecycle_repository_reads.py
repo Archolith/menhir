@@ -229,7 +229,11 @@ class _ProjectionLifecycleReadsMixin:
             """,
             {"definition_id": definition_id},
         )
-        return int(rows[0]["quarantined"]) if len(rows) == 1 else 0
+        if len(rows) != 1:
+            raise ProjectionLifecycleCorruptionError(
+                "quarantine count did not return exactly one row"
+            )
+        return int(rows[0]["quarantined"])
 
     def commit(
         self,
@@ -269,6 +273,8 @@ class _ProjectionLifecycleReadsMixin:
                        w.target_json AS target_json,
                        w.generation AS generation,
                        coalesce(w.applied_generation,0) AS applied_generation,
+                       w.quarantine_generation AS quarantine_generation,
+                       w.quarantine_definition_version AS quarantine_definition_version,
                        w.target_present AS target_present,
                        w.reason AS reason
                 """,
@@ -295,6 +301,13 @@ class _ProjectionLifecycleReadsMixin:
                     "projection work token no longer names the current generation/state"
                 )
             applied_generation = int(rows[0].get("applied_generation", 0) or 0)
+            if (
+                rows[0].get("quarantine_generation") == token.generation
+                and rows[0].get("quarantine_definition_version") == token.definition_version
+            ):
+                raise ProjectionLifecycleCorruptionError(
+                    "cannot certify quarantined projection work generation"
+                )
             if applied_generation == token.generation:
                 raise ProjectionWorkAlreadyCompletedError(
                     "projection work generation is already completed"
