@@ -244,6 +244,7 @@ def stage_judge(args, cases):
             text = resp.choices[0].message.content or ""
             asserted, ref = parse_verdict(text)
             append_jsonl(path, {"id": key, "asserted": asserted, "fact_ref": ref, "raw": text,
+                                "service_tier": getattr(resp, "service_tier", None),
                                 "usage": resp.usage.model_dump() if resp.usage else None})
 
 
