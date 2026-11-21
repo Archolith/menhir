@@ -2112,9 +2112,14 @@ class MemoryGraphAdapter:
         return self._turn_evidence.count_namespace(namespace)
 
     def fetch_namespace_build_counts(
-        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
     ) -> dict[str, Any]:
-        return self._build_report.namespace_build_counts(namespace, submitted_epoch_millis)
+        return self._build_report.namespace_build_counts(
+            namespace, submitted_epoch_millis, sections
+        )
 
     def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
         return self._build_report.failed_evidence_projections(namespace)

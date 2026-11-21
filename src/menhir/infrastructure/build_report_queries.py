@@ -11,6 +11,8 @@ from typing import Any
 
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 
+BUILD_COUNT_SECTIONS = ("state", "scalar", "integrity")
+
 _STATE_QUERY = (
     "MATCH (e:Episodic {namespace:$ns}) RETURN "
     "sum(CASE WHEN e.processing_state='PENDING' THEN 1 ELSE 0 END) AS pending, "
@@ -135,20 +137,36 @@ class BuildReportQueries:
         return int(self._one(query, params, what).get("c") or 0)
 
     def namespace_build_counts(
-        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
     ) -> dict[str, Any]:
+        wanted = set(BUILD_COUNT_SECTIONS if sections is None else sections)
+        unknown = wanted - set(BUILD_COUNT_SECTIONS)
+        if unknown:
+            raise ValueError(f"unknown build count sections: {sorted(unknown)}")
         ns = namespace
         params = {"ns": ns}
-        row = self._one(_STATE_QUERY, params, "state")
-        state = {
-            key: int(row.get(key) or 0)
-            for key in ("pending", "ready", "enriching", "failed", "llm_tasks",
-                        "processing_attempts", "total")
-        }
-        scalar = {
-            key: self._count(query, params, f"scalar.{key}")
-            for key, query in _SCALAR_QUERIES.items()
-        }
+        out: dict[str, Any] = {"namespace": ns}
+        if "state" in wanted:
+            row = self._one(_STATE_QUERY, params, "state")
+            out["state"] = {
+                key: int(row.get(key) or 0)
+                for key in ("pending", "ready", "enriching", "failed", "llm_tasks",
+                            "processing_attempts", "total")
+            }
+        if "scalar" in wanted:
+            out["scalar"] = {
+                key: self._count(query, params, f"scalar.{key}")
+                for key, query in _SCALAR_QUERIES.items()
+            }
+        if "integrity" in wanted:
+            out["integrity"] = self._integrity(ns, submitted_epoch_millis)
+        return out
+
+    def _integrity(self, ns: str, submitted_epoch_millis: list[int] | None) -> dict[str, Any]:
+        params = {"ns": ns}
         store_params = {"ns": ns, "store_only": EXTRACTION_MODE_STORE_ONLY}
         admitted = self._one(_ADMITTED_QUERY, store_params, "integrity.admitted")
         unsubmitted: int | None = None
@@ -158,7 +176,7 @@ class BuildReportQueries:
                 {"ns": ns, "epochs": [int(e) for e in submitted_epoch_millis]},
                 "integrity.episodes_valid_at_unsubmitted",
             )
-        integrity = {
+        return {
             "user_turns_admitted": int(admitted.get("admitted") or 0),
             "admitted_turns_unprojected": int(admitted.get("unprojected") or 0),
             "assertions_unfounded": self._count(
@@ -169,7 +187,6 @@ class BuildReportQueries:
             "cross_namespace_links": self._count(
                 _CROSS_NAMESPACE_QUERY, {"nl": ns.lower()}, "integrity.cross_namespace_links"),
         }
-        return {"namespace": ns, "state": state, "scalar": scalar, "integrity": integrity}
 
     def failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
         rows = self._rows(_FAILED_PROJECTIONS_QUERY, {"ns": namespace})

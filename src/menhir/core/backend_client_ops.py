@@ -143,11 +143,18 @@ class BackendClientOpsMixin:
         )
 
     async def fetch_namespace_build_counts(
-        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "fetch_namespace_build_counts",
-            {"namespace": namespace, "submitted_epoch_millis": submitted_epoch_millis},
+            {
+                "namespace": namespace,
+                "submitted_epoch_millis": submitted_epoch_millis,
+                "sections": sections,
+            },
         )
 
     async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:

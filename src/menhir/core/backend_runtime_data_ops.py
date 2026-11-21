@@ -119,11 +119,17 @@ class RuntimeProviderDataOpsMixin:
         return ns
 
     async def fetch_namespace_build_counts(
-        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
     ) -> dict[str, Any]:
         ns = self._require_build_namespace(namespace, "fetch_namespace_build_counts")
         result = await self._off_loop(
-            self.built.graph_adapter.fetch_namespace_build_counts, ns, submitted_epoch_millis
+            self.built.graph_adapter.fetch_namespace_build_counts,
+            ns,
+            submitted_epoch_millis,
+            sections,
         )
         return _to_jsonable(result)
 

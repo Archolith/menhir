@@ -60,7 +60,7 @@ def test_backend_client_sends_op_name_and_params() -> None:
     base = "/api/internal/backend/"
     assert seen == [
         (base + "fetch_namespace_build_counts",
-         {"namespace": "ns-a", "submitted_epoch_millis": [1, 2]}),
+         {"namespace": "ns-a", "submitted_epoch_millis": [1, 2], "sections": None}),
         (base + "list_failed_evidence_projections", {"namespace": "ns-a"}),
         (base + "promote_namespace_scope", {"namespace": "ns-a"}),
         (base + "reset_namespace", {"namespace": "ns-a", "force": False}),
@@ -123,7 +123,7 @@ def test_runtime_provider_calls_adapter_with_namespace() -> None:
         {"uuid": "u", "processing_error": None}]
     out = asyncio.run(p.promote_namespace_scope("ns-a"))
     assert out["entities_promoted"] == 1
-    assert a.calls[0] == ("counts", ("ns-a", [7]), {})
+    assert a.calls[0] == ("counts", ("ns-a", [7], None), {})
     assert a.calls[1] == ("failed", ("ns-a",), {})
     assert a.calls[2] == ("promote", ("ns-a",), {})
 
@@ -211,6 +211,60 @@ def test_epochs_omitted_leaves_valid_at_unsubmitted_none() -> None:
     out = BuildReportQueries(fake).namespace_build_counts("ns-a")
     assert out["integrity"]["episodes_valid_at_unsubmitted"] is None
     assert not any("epochs" in p for _, p in fake.calls)
+
+
+def test_sections_limit_the_queries_run() -> None:
+    fake = _FakeNeo4j()
+    out = BuildReportQueries(fake).namespace_build_counts("ns-a", sections=["state"])
+    assert set(out) == {"namespace", "state"}
+    assert len(fake.calls) == 1 and "processing_state='PENDING'" in fake.calls[0][0]
+
+
+def test_unknown_section_raises() -> None:
+    with pytest.raises(ValueError):
+        BuildReportQueries(_FakeNeo4j()).namespace_build_counts("ns-a", sections=["nope"])
+
+
+# Clause checks ported from archolith-bench tests of the same queries (before they moved here).
+def _integrity_queries() -> dict[str, str]:
+    from menhir.infrastructure import build_report_queries as m
+    return {
+        "admitted": m._ADMITTED_QUERY, "time_unpaired": m._TIME_UNPAIRED_QUERY,
+        "valid_at": m._VALID_AT_UNSUBMITTED_QUERY, "scalar": " ".join(m._SCALAR_QUERIES.values()),
+    }
+
+
+def test_integrity_exempts_store_only_from_projection_and_pairing() -> None:
+    import re
+    q = _integrity_queries()
+    # Admission still counts a store-only admitter; only the projection check skips it.
+    admitted = re.search(r"EXISTS \{[^}]*\} AS admitted", q["admitted"]).group(0)
+    assert "store_only" not in admitted
+    assert "coalesce(q.extraction_mode, '') <> $store_only } AS extracted" in q["admitted"]
+    assert "WHEN extracted AND NOT projected" in q["admitted"]
+    assert "coalesce(q.extraction_mode, '') <> $store_only" in q["time_unpaired"]
+
+
+def test_verbatim_skip_passes_only_through_ready_projection_at_same_time() -> None:
+    q = _integrity_queries()["time_unpaired"]
+    assert (
+        "q.processing_substage = 'verbatim_skipped' AND q.extraction_skipped_for IS NOT NULL "
+        "AS skipped" in q
+    )
+    assert "OPTIONAL MATCH (p:Episodic {namespace:$ns}) WHERE skipped" in q
+    assert "AND p.uuid = q.extraction_skipped_for" in q
+    assert "coalesce(p.is_evidence_projection, false) AND p.processing_state = 'READY'" in q
+    assert (
+        "datetime(toString(ps[0].reference_time)).epochMillis "
+        "= datetime(toString(q.reference_time)).epochMillis THEN 0 ELSE 1 END" in q
+    )
+
+
+def test_scalar_views_split_state_and_history_and_valid_at_uses_epochs() -> None:
+    q = _integrity_queries()
+    assert "view_kind:'scalar_state'" in q["scalar"]
+    assert "view_kind:'scalar_history'" in q["scalar"]
+    assert "epochMillis IN $epochs" in q["valid_at"]
 
 
 def test_empty_read_raises() -> None:

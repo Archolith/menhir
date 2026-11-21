@@ -164,9 +164,15 @@ class MemoryBackend(Protocol):
         ...
 
     async def fetch_namespace_build_counts(
-        self, namespace: str, submitted_epoch_millis: list[int] | None = None
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
     ) -> dict[str, Any]:
         """Per-namespace build counts: {namespace, state, scalar, integrity}.
+
+        `sections` limits the read to some of "state", "scalar", "integrity" (default all);
+        omitted sections are absent from the result. An unknown section raises ValueError.
 
         `namespace` is required (blank raises ValueError). `episodes_valid_at_unsubmitted` is
         None unless submitted_epoch_millis is given. A failed or empty read raises.
