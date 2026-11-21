@@ -122,6 +122,9 @@ class MemoryGraphAdapter:
         self._views = ViewRepository(self.neo4j)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
+        from menhir.infrastructure.build_report_queries import BuildReportQueries
+
+        self._build_report = BuildReportQueries(self.neo4j)
         from menhir.infrastructure.tool_event_repository import ToolEventRepository
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
@@ -2107,6 +2110,22 @@ class MemoryGraphAdapter:
 
     def count_turn_evidence(self, namespace: str) -> int:
         return self._turn_evidence.count_namespace(namespace)
+
+    def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._build_report.namespace_build_counts(
+            namespace, submitted_epoch_millis, sections
+        )
+
+    def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return self._build_report.failed_evidence_projections(namespace)
+
+    def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return self._build_report.promote_namespace_scope(namespace)
 
     def purge_turn_evidence(self, namespace: str) -> int:
         """Delete `:TurnEvidence` for a namespace (not covered by group_id-keyed delete_namespace)."""

@@ -163,6 +163,40 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Per-namespace build counts: {namespace, state, scalar, integrity}.
+
+        `sections` limits the read to some of "state", "scalar", "integrity" (default all);
+        omitted sections are absent from the result. An unknown section raises ValueError.
+
+        `namespace` is required (blank raises ValueError). `episodes_valid_at_unsubmitted` is
+        None unless submitted_epoch_millis is given. A failed or empty read raises.
+        """
+        ...
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        """FAILED evidence-projection episodes in a namespace: [{uuid, processing_error}], by uuid."""
+        ...
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        """Promote SESSION-scope entities and RELATES_TO edges of one namespace to PERSISTENT.
+
+        Refuses the default/shared namespace. Returns {namespace, entities_promoted, edges_promoted}.
+        """
+        ...
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        """Equivalent of POST /api/phase3/reset: delete_namespace, then purge its turn evidence.
+
+        `force` is passed to delete_namespace (its max_nodes gate). Returns {namespace, nodes_deleted, turn_evidence_deleted}.
+        """
+        ...
+
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         """Re-queue a pending episode for enrichment processing."""
         ...
