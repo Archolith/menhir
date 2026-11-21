@@ -159,7 +159,7 @@ class RuntimeProviderDataOpsMixin:
         ns = self._require_build_namespace(namespace, "reset_namespace")
         # Mirrors phase3_reset_impl: delete_namespace (default refusal, pin check, max_nodes gate
         # unless force), then the :TurnEvidence purge it does not cover.
-        deleted = await self.delete_namespace(ns, force=force)
+        deleted = await self.delete_namespace(namespace=ns, force=force)
         turn_evidence_deleted = await self._off_loop(
             self.built.graph_adapter.purge_turn_evidence, ns
         )

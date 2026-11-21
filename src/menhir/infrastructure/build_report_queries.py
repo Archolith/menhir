@@ -58,7 +58,7 @@ _ADMITTED_QUERY = (
 )
 
 _UNFOUNDED_QUERY = (
-    "MATCH (a) WHERE (a:TypedAssertion OR a:TypedEventAssertion) AND a.namespace = $ns "
+    "MATCH (a {namespace:$ns}) WHERE (a:TypedAssertion OR a:TypedEventAssertion) "
     "AND NOT EXISTS { MATCH (:TurnEvidence {namespace:$ns})-[:FOUNDS]->(a) } "
     "AND NOT EXISTS { MATCH (:TurnEvidence {namespace:$ns})<-[:ADMITTED_ON]-(:Episodic)"
     "-[:GROUNDS]->(a) } RETURN count(a) AS c"
@@ -107,12 +107,12 @@ _FAILED_PROJECTIONS_QUERY = (
 )
 
 _PROMOTE_ENTITIES_QUERY = (
-    "MATCH (n:Entity) WHERE n.group_id = $ns AND coalesce(n.scope,'SESSION')='SESSION' "
+    "MATCH (n:Entity {group_id:$ns}) WHERE coalesce(n.scope,'SESSION')='SESSION' "
     "SET n.scope='PERSISTENT' RETURN count(*) AS c"
 )
 _PROMOTE_EDGES_QUERY = (
-    "MATCH ()-[r:RELATES_TO]->() WHERE r.group_id = $ns "
-    "AND coalesce(r.scope,'SESSION')='SESSION' SET r.scope='PERSISTENT' RETURN count(*) AS c"
+    "MATCH ()-[r:RELATES_TO {group_id:$ns}]->() "
+    "WHERE coalesce(r.scope,'SESSION')='SESSION' SET r.scope='PERSISTENT' RETURN count(*) AS c"
 )
 
 
@@ -123,8 +123,7 @@ class BuildReportQueries:
         self.neo4j = neo4j
 
     def _rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-        # Reads, and absolute-value SETs: re-executing after an ambiguous failure is harmless.
-        rows = self.neo4j.execute(query, params=params, safe_to_reexecute=True)
+        rows = self.neo4j.execute(query, params=params)
         return list(rows or [])
 
     def _one(self, query: str, params: dict[str, Any], what: str) -> dict[str, Any]:
