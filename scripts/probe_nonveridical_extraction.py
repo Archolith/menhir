@@ -230,22 +230,29 @@ def stage_judge(args, cases):
     stored = read_jsonl(out / "stored.jsonl")
     path = out / "verdicts.jsonl"
     done = read_jsonl(path)
-    client = OpenAI()
-    for c in cases:
-        if c["id"] not in stored:
-            continue
-        for i, p in enumerate(c["propositions"]):
-            key = verdict_key(c["id"], i)
-            if key in done:
-                continue
-            resp = client.chat.completions.create(
-                model=JUDGE_MODEL, service_tier="flex",
-                messages=judge_messages(c, p["text"], stored[c["id"]]))
-            text = resp.choices[0].message.content or ""
-            asserted, ref = parse_verdict(text)
-            append_jsonl(path, {"id": key, "asserted": asserted, "fact_ref": ref, "raw": text,
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+
+    client = OpenAI(timeout=900, max_retries=6)  # Flex can queue; the SDK backs off 429s
+    lock = Lock()
+    todo = [(c, i, p) for c in cases if c["id"] in stored
+            for i, p in enumerate(c["propositions"]) if verdict_key(c["id"], i) not in done]
+
+    def one(item):
+        c, i, p = item
+        resp = client.chat.completions.create(
+            model=JUDGE_MODEL, service_tier="flex",
+            messages=judge_messages(c, p["text"], stored[c["id"]]))
+        text = resp.choices[0].message.content or ""
+        asserted, ref = parse_verdict(text)
+        with lock:
+            append_jsonl(path, {"id": verdict_key(c["id"], i), "asserted": asserted,
+                                "fact_ref": ref, "raw": text,
                                 "service_tier": getattr(resp, "service_tier", None),
                                 "usage": resp.usage.model_dump() if resp.usage else None})
+
+    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        list(pool.map(one, todo))
 
 
 def stage_report(args, cases):
