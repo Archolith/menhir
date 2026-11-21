@@ -30,16 +30,26 @@ from menhir.infrastructure.projection_lifecycle_repository_encoding import (
 class _ProjectionLifecycleReadsMixin:
     """Pending queue reads, atomic fence/materialize/receipt/certify commits, freshness."""
 
-    def pending(self, *, limit: int = 100) -> tuple[ProjectionWorkToken, ...]:
-        """Return bounded dirty work; queue emptiness is not a freshness certificate."""
+    def pending(
+        self, *, definition_id: str | None = None, limit: int = 100
+    ) -> tuple[ProjectionWorkToken, ...]:
+        """Return bounded dirty work; queue emptiness is not a freshness certificate.
+
+        Workers must use a definition-scoped read: filtering after LIMIT can starve
+        one definition behind unrelated work. Unscoped reads remain diagnostic.
+        """
 
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be an integer >= 1")
+        if definition_id is not None:
+            definition_id = _require_nonblank("definition_id", definition_id)
+        definition_filter = "AND w.definition_id = $definition_id" if definition_id else ""
         rows = self._neo4j.execute(
-            """
+            f"""
             MATCH (w:ProjectionWorkState)
             WHERE w.generation > coalesce(w.applied_generation,0)
-            OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:w.definition_id})
+              {definition_filter}
+            OPTIONAL MATCH (d:ProjectionDefinitionState {{definition_id:w.definition_id}})
             RETURN w.work_key AS work_key,
                    w.definition_id AS definition_id,
                    w.definition_version AS definition_version,
@@ -51,7 +61,7 @@ class _ProjectionLifecycleReadsMixin:
             ORDER BY w.dirty_at ASC, w.work_key ASC
             LIMIT $limit
             """,
-            {"limit": limit},
+            {"limit": limit, "definition_id": definition_id},
         )
         tokens: list[ProjectionWorkToken] = []
         for row in rows:
