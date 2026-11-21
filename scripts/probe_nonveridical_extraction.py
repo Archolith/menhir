@@ -173,10 +173,12 @@ async def _ingest_case(stack, case, ns, timeout_s):
 
     session = f"p283-{case['id']}"
     said = f"{case['speech_date']}T12:00:00Z"
-    turn_id = TurnEvidenceRepository(stack.neo4j).record_turn_evidence(
+    # off the loop: the evidence write takes the namespace fence lock (erasure_fence)
+    turn_id = (await asyncio.to_thread(
+        TurnEvidenceRepository(stack.neo4j).record_turn_evidence,
         text=case["turn"], role="user", declarant="user", namespace=ns, occurred_at=said,
         source_kind="claude_code_hook", session_id=session, prompt_id=f"p-{case['id']}",
-    )["turn_id"]
+    ))["turn_id"]
     result = await stack.ingest_service.queue_episode_for_enrichment(
         case["turn"], new_session(user_id="dev", session_id=session), "user",
         namespace=ns, occurred_at=said, turn_evidence_uuid=turn_id,
