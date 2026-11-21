@@ -11,11 +11,13 @@ Stages (each writes JSONL under --out; reruns skip finished cases):
 
     ingest  python scripts/probe_nonveridical_extraction.py ingest --out DIR
     judge   python scripts/probe_nonveridical_extraction.py judge  --out DIR
+    views   python scripts/probe_nonveridical_extraction.py views  --out DIR --base-url URL
     report  python scripts/probe_nonveridical_extraction.py report --out DIR
 
 `ingest` WRITES to the graph in NEO4J_URI and refuses the shared ports (7687, 7474, 7688): point it
 at a throwaway container. It pins the telemetry DB under --out. LLM calls go to OpenAI Flex.
-Scalar Views (the typed-scalar lane, POST /api/phase3/run) are not covered here.
+`views` runs one consolidation pass per case namespace through a Menhir served over the same graph
+(POST /api/phase3/run, then GET /api/views) and saves the scalar Views and abstention receipts.
 """
 
 from __future__ import annotations
@@ -257,6 +259,35 @@ def stage_judge(args, cases):
         list(pool.map(one, todo))
 
 
+def stage_views(args, cases):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+
+    import httpx
+
+    out = Path(args.out)
+    stored = read_jsonl(out / "stored.jsonl")
+    path = out / "views.jsonl"
+    done = read_jsonl(path)
+    base = args.base_url.rstrip("/")
+    lock = Lock()
+    todo = [c for c in cases if c["id"] in stored and c["id"] not in done]
+
+    def one(case):
+        ns = stored[case["id"]]["namespace"]
+        with httpx.Client(timeout=900) as client:
+            run = client.post(f"{base}/api/phase3/run", json={"namespace": ns})
+            run.raise_for_status()
+            views = client.get(f"{base}/api/views", params={"namespace": ns, "limit": 100})
+            views.raise_for_status()
+        with lock:
+            append_jsonl(path, {"id": case["id"], "namespace": ns, "run": run.json(),
+                                "views": views.json()})
+
+    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        list(pool.map(one, todo))
+
+
 def stage_report(args, cases):
     out = Path(args.out)
     report = summarize(cases, read_jsonl(out / "verdicts.jsonl"))
@@ -267,12 +298,13 @@ def stage_report(args, cases):
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("stage", choices=("ingest", "judge", "report"))
+    ap.add_argument("stage", choices=("ingest", "judge", "views", "report"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--run-id", default="r1")
     ap.add_argument("--only", nargs="*", help="case ids to run (default: all)")
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--timeout", type=float, default=300.0)
+    ap.add_argument("--base-url", help="served Menhir for the views stage")
     args = ap.parse_args(argv)
     cases = load_corpus()
     if args.only:
@@ -281,6 +313,10 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(stage_ingest(args, cases))
     elif args.stage == "judge":
         stage_judge(args, cases)
+    elif args.stage == "views":
+        if not args.base_url:
+            raise SystemExit("views needs --base-url")
+        stage_views(args, cases)
     else:
         stage_report(args, cases)
     return 0
