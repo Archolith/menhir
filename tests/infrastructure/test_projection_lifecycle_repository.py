@@ -366,10 +366,11 @@ def test_pending_definition_scoping_happens_before_limit() -> None:
     assert len(pending) == 1
     assert pending[0].target.subject_id == "scalar-only"
     query, params = fake.executed[0]
-    assert "AND w.definition_id = $definition_id" in query
-    assert query.index("AND w.definition_id = $definition_id") < query.index("LIMIT $limit")
+    assert "WHERE w.definition_id = $definition_id" in query
+    assert query.index("WHERE w.definition_id = $definition_id") < query.index("LIMIT $limit")
     assert params["definition_id"] == "scalar-state"
-    assert params["limit"] == 1
+    assert params["limit"] >= 1
+    assert params["seen_keys"] == []
 
 
 @pytest.mark.unit
@@ -1002,6 +1003,35 @@ def test_projection_pending_scoped_query_skips_many_older_foreign_jobs(
     assert lifecycle.pending(definition_id=other.definition_id, limit=1)[0].definition_id == (
         other.definition_id
     )
+
+
+@pytest.mark.online
+def test_scoped_pending_live_quarantines_full_bad_page_without_starving_valid_work(
+    test_neo4j_repo,
+) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    definition = _definition(1)
+    lifecycle.publish_definition(definition, semantic_hash="quarantine-batch-v1")
+    corrupt = lifecycle.dirty_targets(
+        definition, [_target(f"invalid-{i:03d}") for i in range(36)],
+        reason="first_page",
+    )
+    good = lifecycle.dirty_targets(
+        definition, [_target("last-valid")], reason="later",
+    )[0]
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState)
+        WHERE w.work_key IN $keys
+        SET w.definition_version=99
+        """,
+        {"keys": [token.work_key for token in corrupt]},
+    )
+
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == (good,)
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 36
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == (good,)
 
 
 @pytest.mark.online
