@@ -157,7 +157,7 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 # ---------------------------------------------------------------- live stages
 
-_STATES = ("MATCH (e:Episodic {group_id:$ns}) WHERE e.processing_state IS NOT NULL "
+_STATES = ("MATCH (e:Episodic) WHERE e.namespace = $ns AND e.processing_state IS NOT NULL "
            "RETURN e.uuid AS uuid, e.processing_state AS state")
 _FACTS = ("MATCH (s:Entity)-[r:RELATES_TO {group_id:$ns}]->(t:Entity) "
           "RETURN r.uuid AS uuid, r.fact AS fact, s.name AS source, t.name AS target, "
