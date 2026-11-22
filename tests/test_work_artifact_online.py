@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from threading import Barrier, Event
 from typing import Any
 
 import pytest
 
-from menhir.domain.work_artifact import ArtifactStatus, ArtifactType
+from menhir.domain.work_artifact import ArtifactStatus, ArtifactType, DeclarationStatus
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
 
 pytestmark = [pytest.mark.online, pytest.mark.timeout(60)]
@@ -190,7 +191,7 @@ def test_a_superseded_artifact_cannot_supersede_its_replacement(test_neo4j_repo:
     b_uuid = _artifact(repo, title="b")
 
     assert repo.supersede_artifact(a_uuid, b_uuid)["applied"] is True
-    assert repo.supersede_artifact(b_uuid, a_uuid)["applied"] is False
+    assert repo.supersede_artifact(b_uuid, a_uuid) == {"applied": False, "reason": "replacement_terminal"}
     assert _state(graph, a_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
     assert _state(graph, b_uuid) == {"status": ArtifactStatus.SUPERSEDED, "replacements": [a_uuid]}
 
@@ -202,8 +203,9 @@ def test_a_deferred_artifact_cannot_be_a_replacement(test_neo4j_repo: Any) -> No
     new_uuid = _artifact(repo, title="new")
     assert repo.transition_status(new_uuid, ArtifactStatus.DEFERRED)["applied"] is True
 
-    assert repo.supersede_artifact(new_uuid, old_uuid)["applied"] is False
+    assert repo.supersede_artifact(new_uuid, old_uuid) == {"applied": False, "reason": "replacement_terminal"}
     assert _state(graph, old_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+    assert _state(graph, new_uuid) == {"status": ArtifactStatus.DEFERRED, "replacements": []}
 
 
 def test_a_longer_supersession_cycle_is_refused(test_neo4j_repo: Any) -> None:
@@ -214,33 +216,62 @@ def test_a_longer_supersession_cycle_is_refused(test_neo4j_repo: Any) -> None:
 
     assert repo.supersede_artifact(a_uuid, b_uuid)["applied"] is True
     assert repo.supersede_artifact(c_uuid, a_uuid)["applied"] is True
-    assert repo.supersede_artifact(b_uuid, c_uuid)["applied"] is False
+    assert repo.supersede_artifact(b_uuid, c_uuid) == {"applied": False, "reason": "replacement_terminal"}
+    assert _state(graph, a_uuid) == {"status": ArtifactStatus.SUPERSEDED, "replacements": [c_uuid]}
+    assert _state(graph, b_uuid) == {"status": ArtifactStatus.SUPERSEDED, "replacements": [a_uuid]}
     assert _state(graph, c_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
 
 
-def test_concurrent_opposite_supersessions_have_one_winner(test_neo4j_repo: Any) -> None:
-    """A->B racing B->A: the sorted lock order must serialize them so only one edge forms."""
+def test_opposite_supersession_waits_for_the_held_lock_then_refuses(test_neo4j_repo: Any) -> None:
+    """A->B is held uncommitted with both locks taken; B->A must block, then read B as SUPERSEDED.
+
+    Exercises the lock order and the read-after-lock in supersede_artifact (#678 review F5).
+    """
     graph = test_neo4j_repo
     plain_repo = WorkArtifactRepository(graph)
     a_uuid = _artifact(plain_repo, title="a")
     b_uuid = _artifact(plain_repo, title="b")
-    both_started = Barrier(2, timeout=15)
 
-    class SynchronizedGraph:
+    captured: dict[str, Any] = {}
+
+    class CapturingGraph:
         def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-            if "SET first.lifecycle_revision" in query:
-                both_started.wait()
-            return graph.execute(query, params)
+            captured.update(query=query, params=params)
+            return [{"applied": 1}]
 
-    repo = WorkArtifactRepository(SynchronizedGraph())
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [
-            pool.submit(repo.supersede_artifact, new, old)
-            for new, old in ((a_uuid, b_uuid), (b_uuid, a_uuid))
-        ]
-        results = [future.result(timeout=20) for future in futures]
+    WorkArtifactRepository(CapturingGraph()).supersede_artifact(a_uuid, b_uuid)
 
-    assert sorted(result["applied"] for result in results) == [False, True]
-    states = [_state(graph, a_uuid), _state(graph, b_uuid)]
-    assert sorted(s["status"] for s in states) == [ArtifactStatus.PROPOSED, ArtifactStatus.SUPERSEDED]
-    assert sum(len(s["replacements"]) for s in states) == 1
+    with graph._get_driver().session(database=graph.database) as session:
+        tx = session.begin_transaction()
+        try:
+            assert tx.run(captured["query"], captured["params"]).single()["applied"] == 1
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                opposite = pool.submit(plain_repo.supersede_artifact, b_uuid, a_uuid)
+                with pytest.raises(FutureTimeout):
+                    opposite.result(timeout=2)
+                tx.commit()
+                result = opposite.result(timeout=20)
+        finally:
+            if tx.closed() is False:
+                tx.rollback()
+
+    assert result == {"applied": False, "reason": "replacement_terminal"}
+    assert _state(graph, a_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+    assert _state(graph, b_uuid) == {"status": ArtifactStatus.SUPERSEDED, "replacements": [a_uuid]}
+
+
+def test_a_supersedes_declaration_from_a_superseded_artifact_is_rejected(test_neo4j_repo: Any) -> None:
+    """v3 supersedes v2 first; v2's later "supersedes: v1" declaration is rejected, v1 stays live."""
+    graph = test_neo4j_repo
+    repo = WorkArtifactRepository(graph)
+    v1 = _artifact(repo, title="decl-chain-v1")
+    v2 = _artifact(repo, title="decl-chain-v2")
+    v3 = _artifact(repo, title="decl-chain-v3")
+    assert repo.supersede_artifact(v3, v2)["applied"] is True
+
+    out = repo.declare_from_frontmatter(v2, {"supersedes": ["decl-chain-v1"]})
+
+    assert [(r["status"], r["reason"], r["target_uuid"]) for r in out["results"]] == [
+        (DeclarationStatus.REJECTED, "replacement_terminal", v1)
+    ]
+    assert _state(graph, v1) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
