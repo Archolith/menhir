@@ -42,10 +42,11 @@ These are deliberate and documented, so please do not report them as findings:
 - **Loopback no-auth mode.** With no key configured, the server serves an unauthenticated
   API on loopback. It refuses to bind a non-loopback address in that state unless
   `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH=1` is set, which is documented as unsafe.
-- **Erasure keeps extracted entities and facts (#417).** Deleting or erasing a memory does
-  not remove the entities and fact edges extracted from it, which can restate its content.
-  Deleting the namespace removes them. A fix is planned after 0.3.0; see the README's known
-  limitations.
+- **Erasure can leave some derived text behind (#423).** Since 0.3.9, erasing a memory deletes
+  the entities and fact edges only it supports and blanks shared ones for re-derivation. Data
+  with no recorded provenance is left in place and the reply says `erased_incomplete`, and a
+  model-written paraphrase of the erased memory is not yet checked for in re-derived text.
+  Deleting the namespace removes everything in it; see the README's known limitations.
 - **Stored memory content reaches the LLM unsanitized.** The contradiction check and the
   edge-fact repair / compression paths pass stored content into prompts without
   sanitization, so content written into memory can influence those LLM calls. This is a

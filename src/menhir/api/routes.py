@@ -8,7 +8,7 @@ from uuid import uuid4
 from typing import Any
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
@@ -20,6 +20,7 @@ from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
 
+from .route_tools import enforce_route_tool_allowlist
 from .scrub_route import ScrubbingAPIRoute
 from .routes_handlers import (
     backend_invoke_impl,
@@ -92,7 +93,11 @@ from .routes_support import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", route_class=ScrubbingAPIRoute)
+router = APIRouter(
+    prefix="/api",
+    route_class=ScrubbingAPIRoute,
+    dependencies=[Depends(enforce_route_tool_allowlist)],
+)
 _INTERNAL_BACKEND_PREFIX = "/internal/backend"
 
 

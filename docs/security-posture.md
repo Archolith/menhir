@@ -27,8 +27,9 @@ Primary threats considered:
 - DoS / resource amplification (JWKS refetch, rate-limit table growth, open DCR).
 - Reverse-proxy trust confusion (peer-address vs. real-client collapse).
 
-**Data removal limit (0.3.0, #423).** Deleting or erasing a memory does not remove the entities
-and fact edges extracted from it, which can restate its content. Namespace deletion removes a
+**Data removal limit (#423).** Since 0.3.9, erasing a memory deletes the entities and fact edges
+only it supports and blanks shared ones for re-derivation. Data with no recorded provenance is
+left and the reply says `erased_incomplete`. Namespace deletion removes a
 non-default namespace's memories and derived graph data, but refuses `default` and does not remove
 TODOs, WorkArtifacts or the shared structure graph (see [your data](your-data.md)). See
 [erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge).
