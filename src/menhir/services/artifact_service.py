@@ -122,6 +122,14 @@ class ArtifactService:
             new = await asyncio.to_thread(self.graph_adapter.fetch_artifact, new_id)
             if old is None or new is None:
                 return {"status": "not_found", "old_id": old_id, "new_id": new_id}
-            reason = "already_historical" if _is_historical(old) else "replacement_historical"
+            if old.get("superseded_by") == new_id:
+                # A retry of a supersession that already applied (e.g. after a lost response).
+                return {"status": "superseded", "old_id": old_id, "new_id": new_id}
+            if _is_historical(old):
+                reason = "already_historical"
+            elif _is_historical(new):
+                reason = "replacement_historical"
+            else:
+                reason = "not_applied"
             return {"status": "refused", "reason": reason, "old_id": old_id, "new_id": new_id}
         return {"status": "superseded", "old_id": old_id, "new_id": new_id}

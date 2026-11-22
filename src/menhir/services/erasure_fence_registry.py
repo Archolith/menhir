@@ -209,12 +209,6 @@ COPIERS: tuple[CopierEntry, ...] = (
         "new caller-supplied artifact text with a fresh uuid; no erased source",
     ),
     CopierEntry(
-        _I + "artifact_repository", "ArtifactRepository.supersede_artifact",
-        "artifact status and supersession ids", Gate.EXEMPT,
-        "writes only artifact_status, the two artifact ids, last_accessed and a lock counter; "
-        "copies no text (#741 lock-then-match form hides the labels from the scan)",
-    ),
-    CopierEntry(
         _I + "candidate_repository", "CandidateRepository.create_candidate",
         "candidate content from the caller", Gate.EXEMPT,
         "new caller-supplied text (MCP add_candidate -> backend create_candidate); lane G O-8 "

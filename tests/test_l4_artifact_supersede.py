@@ -31,8 +31,12 @@ def test_supersede_locks_in_id_order_then_guards_both_statuses() -> None:
     assert call["params"]["first_id"] == "alpha" and call["params"]["second_id"] == "zeta"
     # Both lock writes come before the status guard.
     guard = q.index("WHERE old.artifact_id <> new.artifact_id")
-    assert q.index("SET first.artifact_lock_revision") < guard
-    assert q.index("SET second.artifact_lock_revision") < guard
+    assert q.index("SET first._artifact_supersede_lock = true") < guard
+    assert q.index("SET second._artifact_supersede_lock = true") < guard
+    # Nothing stored: each token is removed in the same statement.
+    assert "REMOVE first._artifact_supersede_lock" in q and "REMOVE second._artifact_supersede_lock" in q
+    # Every copy of either id is checked, not just the matched pair.
+    assert q.index("x.artifact_id IN [$old_id, $new_id]") < guard
     assert "coalesce(old.artifact_status, '') <> 'historical' AND old.superseded_by IS NULL" in q
     assert "coalesce(new.artifact_status, '') <> 'historical' AND new.superseded_by IS NULL" in q
 
@@ -57,9 +61,12 @@ def _art(status: str, superseded_by: str | None = None) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("store", "expected"),
     [
-        ({"a": _art("historical", "b"), "b": _art("trusted")}, ("refused", "already_historical")),
+        ({"a": _art("historical", "c"), "b": _art("trusted")}, ("refused", "already_historical")),
         ({"a": _art("trusted"), "b": _art("historical", "c")}, ("refused", "replacement_historical")),
         ({"a": _art("trusted")}, ("not_found", None)),
+        # A retry after the first call applied reports success, not a refusal.
+        ({"a": _art("historical", "b"), "b": _art("trusted")}, ("superseded", None)),
+        ({"a": _art("trusted"), "b": _art("trusted")}, ("refused", "not_applied")),
     ],
 )
 def test_service_reports_refusal_apart_from_not_found(store, expected) -> None:
@@ -121,3 +128,26 @@ def test_opposite_concurrent_supersessions_have_one_winner(test_neo4j_repo: Any)
     assert sorted(results) == [False, True]
     states = sorted(_row(graph, x)["status"] for x in (a, b))
     assert states.count("historical") == 1
+
+
+@pytest.mark.online
+@pytest.mark.timeout(60)
+def test_a_historical_duplicate_copy_blocks_supersession(test_neo4j_repo: Any) -> None:
+    # artifact_id is not unique-constrained: a historical second copy of the replacement id
+    # must still refuse, or a cycle can close at id level.
+    graph = test_neo4j_repo
+    repo = ArtifactRepository(graph)
+    a, b = (f"l4-{name}-{uuid4().hex[:8]}" for name in "ab")
+    _create(repo, a)
+    _create(repo, b)
+    graph.execute(
+        "CREATE (:Entity {artifact_id: $id, is_artifact: true, artifact_status: 'historical', "
+        "superseded_by: $other})",
+        {"id": b, "other": a},
+    )
+    assert repo.supersede_artifact(a, b) is False
+    assert graph.execute(
+        "MATCH (n:Entity) WHERE n.artifact_id IN [$a, $b] AND n._artifact_supersede_lock IS NOT NULL "
+        "RETURN count(n) AS n",
+        {"a": a, "b": b},
+    )[0]["n"] == 0

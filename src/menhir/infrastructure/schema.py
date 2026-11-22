@@ -36,7 +36,9 @@ ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS = (
 
 
 def get_artifact_reconciliation_schema_queries() -> list[str]:
-    """DDL activated only after the source-v2 preparation preflight passes."""
+    """Artifact reconciliation DDL. Phase one runs it at every bootstrap (and startup requires
+    these constraints, #742); `activate_artifact_reconciliation_schema` runs it again after the
+    source-v2 preparation preflight."""
     return [
         "DROP INDEX work_artifact_uuid_idx IF EXISTS",
         "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
