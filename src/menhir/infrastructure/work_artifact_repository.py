@@ -1335,7 +1335,8 @@ class WorkArtifactRepository:
         refuses the relation so an edge can never imply a status change it did
         not make. Same-type only, and an already-superseded artifact is refused
         rather than re-superseded, so the recorded replacement stays the one
-        that applied.
+        that applied. A terminal replacement is refused too, which keeps
+        SUPERSEDES acyclic (#678); chains must therefore be recorded oldest first.
         """
         now = datetime.now(timezone.utc).isoformat()
         first_uuid, second_uuid = sorted((new_uuid, old_uuid))

@@ -145,7 +145,8 @@ These are three different acts and the difference is the UUID.
   which was the original.
 - **Replace** — a new document that makes an old one obsolete. Mint a new UUID, then call
   `supersede_artifact`. Moving the old file into `archive/` is not a replacement and does not record
-  one.
+  one. The replacement must not be superseded or deferred itself, so record a chain oldest first:
+  after v3 supersedes v2, v2 can no longer supersede v1; supersede v1 with v3 instead.
 
 ## What needs an MCP call and what does not
 
