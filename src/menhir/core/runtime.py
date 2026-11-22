@@ -757,9 +757,11 @@ async def _initialize_services(
         )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
+            from menhir.core.bootstrap import _duplicate_values_suffix
+
             raise RuntimeError(
                 "candidate-readonly requires the production graph schema to be present; "
-                "schema creation is fenced"
+                "schema creation is fenced." + await _duplicate_values_suffix(graph_adapter)
             )
     else:
         record_lifecycle_event(component="runtime_init", event="prepare_memory_runtime", state="started")

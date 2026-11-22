@@ -36,7 +36,9 @@ ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS = (
 
 
 def get_artifact_reconciliation_schema_queries() -> list[str]:
-    """DDL activated only after the source-v2 preparation preflight passes."""
+    """Artifact reconciliation DDL. Phase one runs it at every bootstrap (and startup requires
+    these constraints, #742); `activate_artifact_reconciliation_schema` runs it again after the
+    source-v2 preparation preflight."""
     return [
         "DROP INDEX work_artifact_uuid_idx IF EXISTS",
         "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
@@ -118,6 +120,14 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "project_identity_root_unique",
     "structure_project_path_unique",
     "episodic_ingest_key_unique",
+    # #742: every constraint phase one creates is required, so a CREATE that fails (e.g. over
+    # duplicate values) refuses writers instead of being swallowed in bootstrap failures.
+    "work_artifact_uuid_unique",
+    "artifact_source_uuid_unique",
+    "artifact_source_locator_unique",
+    "artifact_reconcile_cursor_repository_unique",
+    "metric_uuid_unique",
+    "turn_evidence_key_unique",
 )
 
 # Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
@@ -152,6 +162,18 @@ PHASE_ONE_REQUIRED_CONSTRAINTS = (
         ("Episodic",),
         ("ingest_key",),
     ),
+    ("work_artifact_uuid_unique", "UNIQUENESS", "NODE", ("WorkArtifact",), ("artifact_uuid",)),
+    ("artifact_source_uuid_unique", "UNIQUENESS", "NODE", ("ArtifactSource",), ("source_uuid",)),
+    ("artifact_source_locator_unique", "UNIQUENESS", "NODE", ("ArtifactSource",), ("current_locator_key",)),
+    (
+        "artifact_reconcile_cursor_repository_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ArtifactReconciliationCursor",),
+        ("repository",),
+    ),
+    ("metric_uuid_unique", "UNIQUENESS", "NODE", ("Metric",), ("uuid",)),
+    ("turn_evidence_key_unique", "UNIQUENESS", "NODE", ("TurnEvidence",), ("turn_key",)),
 )
 
 

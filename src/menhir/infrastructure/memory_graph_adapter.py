@@ -199,6 +199,26 @@ class MemoryGraphAdapter:
             for name, expected in required_constraints.items()
         )
 
+    def phase_one_constraint_duplicates(self) -> dict[str, int]:
+        """Per required uniqueness constraint, how many values are held by more than one node.
+
+        Diagnostic for a refused startup (#742): a CREATE CONSTRAINT over duplicate values fails,
+        so the count tells the operator what to repair. Only nonzero counts are returned.
+        """
+        counts: dict[str, int] = {}
+        for name, _type, _entity, labels, properties in PHASE_ONE_REQUIRED_CONSTRAINTS:
+            label = ":".join(f"`{item}`" for item in labels)
+            present = " AND ".join(f"n.`{prop}` IS NOT NULL" for prop in properties)
+            keys = ", ".join(f"n.`{prop}` AS k{idx}" for idx, prop in enumerate(properties))
+            rows = self.neo4j.execute(
+                f"MATCH (n:{label}) WHERE {present} "
+                f"WITH {keys}, count(*) AS n WHERE n > 1 RETURN count(*) AS duplicates"
+            )
+            value = int(rows[0].get("duplicates", 0)) if rows else 0
+            if value:
+                counts[name] = value
+        return counts
+
     def scalar_state_schema_ready(self) -> bool:
         """Return True when the ScalarStateView typed-assertion DDL is online. Feature-scoped: a
         deploy with `enable_scalar_state` should gate on this in addition to phase_one. These

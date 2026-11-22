@@ -1,3 +1,21 @@
+## 2026-11-22 - Startup requires every phase-one uniqueness constraint; L4 supersession refuses historical endpoints (#741, #742)
+
+- `infrastructure/schema.py`, `infrastructure/memory_graph_adapter.py`, `core/bootstrap.py`,
+  `core/runtime.py`: startup now requires all ten uniqueness constraints phase one creates, up from
+  four: added `work_artifact_uuid_unique`, `artifact_source_uuid_unique`,
+  `artifact_source_locator_unique`, `artifact_reconcile_cursor_repository_unique`,
+  `metric_uuid_unique` and `turn_evidence_key_unique`. If one cannot be created, writer startup
+  (and candidate-readonly startup) is refused, and the message counts the duplicated values that
+  block each constraint. **Upgrade note:** an install whose graph holds duplicates for any of these
+  refuses to start until they are repaired; installs that already have the constraints are
+  unaffected.
+- `infrastructure/artifact_repository.py`, `services/artifact_service.py`: L4
+  `supersede_artifact` write-locks every node with either id, then refuses when any copy of either
+  id is historical (no b->a after a->b, no overwrite of `superseded_by`). The service reports
+  `refused` with a reason, separate from `not_found`, and treats a retry of an applied
+  supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
+  structural.
+
 ## 2026-11-22 - Client tool allowlist on resource listings, named REST routes and the explorer (#657, #658)
 
 - `api/mcp_remote.py`, `mcp/contracts.py`: `resources/list` and `resources/templates/list` show a
