@@ -33,6 +33,16 @@ class FakeScorer:
         return [next(v for k, v in self.by_name.items() if p.startswith(k)) for p in passages]
 
 
+class IndexScorer:
+    """Distinct logits by the 'Entry NN' index: lower index scores higher."""
+
+    label = "fake"
+    device = "cpu"
+
+    def score(self, query, passages):
+        return [2.0 - int(p.split()[1][:2]) / 100 for p in passages]
+
+
 def _meta(uuid, name, edges=3):
     return {
         "uuid": uuid, "name": name, "scope": "PERSISTENT", "type": "SEMANTIC",
@@ -262,10 +272,15 @@ async def test_explicit_limit_bypasses_cap_through_backend_transport(
     from menhir.core.backend_client_ops import BackendClientOpsMixin
     from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
 
-    monkeypatch.setattr(cer, "load_reranker", lambda *_: FakeScorer({"Entry": 2.0}))
-    candidates = [(f"entity-{idx}", f"Entry {idx:02d}", 0.85) for idx in range(60)]
+    # Strict order everywhere (#747): tied scores and wall-clock last_accessed let the
+    # two calls order ties differently, so the top-7 comparison flaked.
+    monkeypatch.setattr(cer, "load_reranker", lambda *_: IndexScorer())
+    candidates = [(f"entity-{idx}", f"Entry {idx:02d}", 0.85 - idx * 0.001) for idx in range(60)]
     stub_graphiti_client.search_scored_results = candidates
-    stub_memory_graph_adapter.candidate_metadata = [_meta(uuid, name) for uuid, name, _ in candidates]
+    fixed_time = datetime(2026, 1, 1, tzinfo=UTC)
+    stub_memory_graph_adapter.candidate_metadata = [
+        {**_meta(uuid, name), "last_accessed": fixed_time} for uuid, name, _ in candidates
+    ]
     monkeypatch.setattr(stub_memory_graph_adapter, "stale_anchored_memories", lambda **_: [], raising=False)
     runtime = RuntimeProviderDataOpsMixin()
     runtime.built = SimpleNamespace(
