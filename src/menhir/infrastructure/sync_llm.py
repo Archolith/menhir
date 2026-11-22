@@ -13,6 +13,7 @@ import logging
 from typing import Any, Callable, Mapping
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.circuit_breaker import CircuitBreaker, CircuitOpenError
 from menhir.infrastructure.observability import (
     complete_llm_usage_call,
     fail_llm_usage_call,
@@ -34,6 +35,7 @@ def make_sync_chat(
     settings: MemorySettings, *, temperature: float = 0.7, max_tokens: int = 512,
     model: str | None = None, disable_reasoning: bool = False,
     extra_body: Mapping[str, Any] | None = None, timeout_s: float | None = None,
+    breaker: CircuitBreaker | None = None,
 ) -> SyncChat | None:
     """Return a sync `(system, user) -> str` chat callable, or None when no usable chat provider is
     configured (missing api key / model). None lets callers disable the job rather than crash.
@@ -50,7 +52,10 @@ def make_sync_chat(
     local server's `chat_template_kwargs`. Empty/None adds nothing.
 
     `timeout_s` replaces the per-request timeout (None = DEFAULT_REQUEST_TIMEOUT_S), for a slow
-    local server; SDK retries stay off either way."""
+    local server; SDK retries stay off either way.
+
+    `breaker` is the LLM breaker for the same provider (#639): while it refuses, a call raises
+    CircuitOpenError without a provider call, and a billing refusal seen here hard-opens it."""
     cfg = ProviderConfig.for_chat(settings)
     if not cfg.api_key or not cfg.chat_model:
         logger.info("sync chat seam unavailable: no api_key/chat_model for the configured provider")
@@ -102,6 +107,13 @@ def make_sync_chat(
     extra: dict[str, Any] = {"extra_body": body} if body else {}
 
     def _complete(system: str, user: str) -> str:
+        if breaker is not None:
+            refusal = breaker.refusal_snapshot()
+            if refusal is not None:
+                raise CircuitOpenError(
+                    f"Circuit breaker open for {breaker.name}; sync chat not sent",
+                    snapshot=refusal,
+                )
         handle = start_llm_usage_call(
             kind="chat",
             model=model,
@@ -128,6 +140,8 @@ def make_sync_chat(
             )
         except Exception as exc:
             fail_llm_usage_call(handle, exc)
+            if breaker is not None:
+                breaker.report_quota_refusal_threadsafe(exc)
             raise
         complete_llm_usage_call(handle, result=resp)
         return (resp.choices[0].message.content or "").strip()

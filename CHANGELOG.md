@@ -1,3 +1,23 @@
+## 2026-11-22 - Breaker gaps after #638: sync clients, probe wait, reranker, degraded drill-downs (#639, #640, #641, #642)
+
+- #639: the sync view embedder and the personal-memory sync chat take the Graphiti breaker for the
+  same endpoint (`sync_client_breakers`; none when the base URLs differ). While it refuses, the
+  embedder returns `None` and the chat raises `CircuitOpenError`, with no provider call. A billing
+  refusal either one sees hard-opens that breaker: `report_quota_refusal_threadsafe` runs the
+  hard-open on the breaker's loop under its lock, so a worker thread never writes breaker state.
+- #640: `CircuitBreaker.call(wait_for_probe_s=...)` lets a call that arrives during a half-open
+  probe wait for the probe's outcome (bounded) instead of failing at once. Every path that ends a
+  probe, cancellation included, wakes the waiters. Only `create_batch` (ingest's concurrent
+  batches) waits, up to the request timeout; recall and search embed through `create`, which
+  still refuses at once so they fall back to keyword search.
+- #641: Graphiti's cross-encoder is wrapped (`BreakerGuardedCrossEncoder`), so the `reranker`
+  snapshot reports real calls. Menhir's searches use RRF today, so it stays closed in practice;
+  snapshot keys are unchanged.
+- #642: with the embed breaker open, `recall_history` returns no memories and a note ("semantic
+  search off: ... ; recall_history needs embeddings ..."), and a timeline `query` returns the
+  same note instead of raising. An ordinary embed error still raises. The source-memory and
+  observation lanes log a breaker refusal at INFO without a traceback.
+
 ## 2026-11-21 - supersede_artifact refuses a terminal replacement (#678)
 
 - `supersession_cypher` now also requires the replacing artifact to be non-terminal. Before, after

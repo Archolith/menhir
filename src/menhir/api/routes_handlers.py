@@ -68,19 +68,25 @@ async def phase3_run_impl(
         getattr(settings, "personal_memory_consolidation_chat_extra_body", "") or "",
         env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY")
     pm_timeout_s = float(getattr(settings, "personal_memory_consolidation_chat_timeout_s", 0) or 0)
+    from menhir.infrastructure.graphiti_client import sync_client_breakers
+
+    chat_breaker, embed_breaker = sync_client_breakers(
+        getattr(runtime_ctx.built, "graphiti_client", None), settings)
     chat = make_sync_chat(
         settings, model=pm_model,
         max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
         disable_reasoning=bool(getattr(
             settings, "personal_memory_consolidation_disable_reasoning", False)),
         **({"extra_body": pm_extra_body} if pm_extra_body else {}),
-        **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}))
+        **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}),
+        **({"breaker": chat_breaker} if chat_breaker is not None else {}))
     if chat is None:
         raise HTTPException(
             status_code=503,
             detail="no sync chat provider configured for personal-memory consolidation",
         )
-    embed = make_view_embedder(settings)
+    embed = make_view_embedder(
+        settings, **({"breaker": embed_breaker} if embed_breaker is not None else {}))
     # A consolidation pass MUTATES the namespace it runs over, so the namespace is the target
     # of the action, not a filter on it -- forcing the pin here would silently re-aim the run at
     # the caller's own silo and consolidate data it did not ask to touch. Refused instead.
