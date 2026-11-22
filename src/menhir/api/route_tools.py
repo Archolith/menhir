@@ -38,7 +38,8 @@ REST_ROUTE_TOOLS: dict[tuple[str, str], str | None] = {
     ("POST", "/api/phase3/run"): None,
     ("GET", "/api/phase3/status"): None,
     ("GET", "/api/views"): None,
-    ("POST", "/api/phase3/reset"): "delete_namespace",
+    # Also purges turn evidence, so it is broader than delete_namespace: no tool.
+    ("POST", "/api/phase3/reset"): None,
     ("POST", "/api/admin/clients"): "mint_client",
     ("GET", "/api/admin/clients"): "list_clients",
     ("POST", "/api/admin/clients/{client_id}/revoke"): "revoke_client",
@@ -58,6 +59,15 @@ def _is_restricted() -> bool:
     return contracts.get_request_tool_allowlist() is not None or bool(
         contracts.get_client_tool_allowlist()
     )
+
+
+def refuse_restricted_client(surface: str) -> None:
+    """Refuse any client with a tool allowlist from a surface that maps to no tool."""
+    if _is_restricted():
+        raise HTTPException(
+            status_code=403,
+            detail=f"the {surface} maps to no tool and is refused for clients with a tool allowlist",
+        )
 
 
 async def enforce_route_tool_allowlist(request: Request) -> None:

@@ -92,3 +92,10 @@ def test_the_census_every_resource_type_is_visible_to_an_unrestricted_operator(m
     mapping = mcp_remote._resource_type_by_uri()
     assert set(mapping) == ALL_URIS
     assert all(contracts.resource_listed_for_request(t) for t in RESOURCE_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_a_query_auth_caller_is_listed_nothing(listed, monkeypatch) -> None:
+    # Every resource read refuses query auth, so listing must not advertise any.
+    monkeypatch.setattr(contracts, "request_uses_query_auth", lambda: True)
+    assert await listed() == set()

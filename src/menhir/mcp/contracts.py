@@ -380,6 +380,8 @@ def resource_listed_for_request(resource_type: Any) -> bool:
     Mirrors the read gates in ``BaseJsonResource.execute`` so a listing never shows what a
     read would refuse. An empty tier applies no tier filter, matching ``tools/list``.
     """
+    if request_uses_query_auth():
+        return False  # every resource read refuses query auth
     governing = getattr(resource_type, "governing_tool", "")
     if not governing or not tool_allowed_for_request(governing):
         return False

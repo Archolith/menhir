@@ -143,3 +143,24 @@ async def test_the_dependency_skips_the_internal_dispatch_route(monkeypatch, bin
 
     await enforce_route_tool_allowlist(_Request())  # type: ignore[arg-type]
     assert route_tools.INTERNAL_DISPATCH_PATH == INTERNAL_DISPATCH_PATH
+
+
+def test_phase3_reset_is_refused_even_with_delete_namespace(client, bind) -> None:
+    # The route also purges turn evidence, so it maps to no tool.
+    bind(frozenset({"delete_namespace"}))
+    response = client.post("/api/phase3/reset", json={})
+    assert response.status_code == 403 and "no tool mapping" in response.json()["detail"]
+
+
+def test_the_explorer_refuses_a_restricted_client(bind) -> None:
+    from fastapi import HTTPException
+
+    from menhir.explorer.app import _require_explorer_readonly
+
+    bind()
+    _require_explorer_readonly()  # unrestricted: no refusal
+    for policy, env in ((RECALL_ONLY, frozenset()), (None, RECALL_ONLY)):
+        bind(policy, env)
+        with pytest.raises(HTTPException) as err:
+            _require_explorer_readonly()
+        assert err.value.status_code == 403 and "explorer" in err.value.detail
