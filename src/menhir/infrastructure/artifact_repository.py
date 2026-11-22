@@ -230,8 +230,7 @@ class ArtifactRepository:
             MATCH (second:Entity {artifact_id: $second_id})
             SET second.artifact_lock_revision = coalesce(second.artifact_lock_revision, 0) + 1
             WITH first, second
-            WITH CASE WHEN first.artifact_id = $new_id THEN first ELSE second END AS new,
-                 CASE WHEN first.artifact_id = $old_id THEN first ELSE second END AS old
+            MATCH (old:Entity {artifact_id: $old_id}), (new:Entity {artifact_id: $new_id})
             WHERE old.artifact_id <> new.artifact_id
               AND coalesce(old.artifact_status, '') <> 'historical' AND old.superseded_by IS NULL
               AND coalesce(new.artifact_status, '') <> 'historical' AND new.superseded_by IS NULL
