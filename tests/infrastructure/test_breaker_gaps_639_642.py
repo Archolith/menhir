@@ -285,6 +285,14 @@ def fake_openai(monkeypatch: pytest.MonkeyPatch):
     _FakeOpenAI.error = None
     _FakeOpenAI.calls = 0
     yield _FakeOpenAI
+    # A fake billing refusal sets the process-wide provider state that /ready reads.
+    from menhir.infrastructure.observability import (
+        clear_provider_auth_failure,
+        clear_provider_quota_exhaustion,
+    )
+
+    clear_provider_quota_exhaustion()
+    clear_provider_auth_failure()
 
 
 def _view_embed(breaker):
