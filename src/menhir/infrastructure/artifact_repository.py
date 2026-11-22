@@ -217,10 +217,24 @@ class ArtifactRepository:
         """Mark `old_id` historical, link (new)-[:SUPERSEDES]->(old). Never deletes
         (invariant 7). Returns True if the old artifact was found and superseded."""
         now = datetime.now(timezone.utc).isoformat()
+        # #741: lock both endpoints (sorted id order, as WorkArtifact supersession does) before
+        # reading status, then refuse a historical endpoint on either side. A historical
+        # replacement would let b->a follow a->b (a cycle); a historical old would overwrite the
+        # recorded replacement.
+        first_id, second_id = sorted((old_id, new_id))
         rows = self.neo4j.execute(
             """
-            MATCH (old:Entity {artifact_id: $old_id}), (new:Entity {artifact_id: $new_id})
+            MATCH (first:Entity {artifact_id: $first_id})
+            SET first.artifact_lock_revision = coalesce(first.artifact_lock_revision, 0) + 1
+            WITH first
+            MATCH (second:Entity {artifact_id: $second_id})
+            SET second.artifact_lock_revision = coalesce(second.artifact_lock_revision, 0) + 1
+            WITH first, second
+            WITH CASE WHEN first.artifact_id = $new_id THEN first ELSE second END AS new,
+                 CASE WHEN first.artifact_id = $old_id THEN first ELSE second END AS old
             WHERE old.artifact_id <> new.artifact_id
+              AND coalesce(old.artifact_status, '') <> 'historical' AND old.superseded_by IS NULL
+              AND coalesce(new.artifact_status, '') <> 'historical' AND new.superseded_by IS NULL
             SET old.artifact_status = 'historical',
                 old.superseded_by = $new_id,
                 old.last_accessed = datetime($now),
@@ -228,7 +242,7 @@ class ArtifactRepository:
             MERGE (new)-[:SUPERSEDES]->(old)
             RETURN count(old) AS superseded
             """,
-            {"old_id": old_id, "new_id": new_id, "now": now},
+            {"old_id": old_id, "new_id": new_id, "first_id": first_id, "second_id": second_id, "now": now},
         )
         return bool(rows and int(rows[0].get("superseded", 0)) > 0)
 

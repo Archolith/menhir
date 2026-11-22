@@ -118,6 +118,14 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "project_identity_root_unique",
     "structure_project_path_unique",
     "episodic_ingest_key_unique",
+    # #742: every constraint phase one creates is required, so a CREATE that fails (e.g. over
+    # duplicate values) refuses writers instead of being swallowed in bootstrap failures.
+    "work_artifact_uuid_unique",
+    "artifact_source_uuid_unique",
+    "artifact_source_locator_unique",
+    "artifact_reconcile_cursor_repository_unique",
+    "metric_uuid_unique",
+    "turn_evidence_key_unique",
 )
 
 # Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
@@ -152,6 +160,18 @@ PHASE_ONE_REQUIRED_CONSTRAINTS = (
         ("Episodic",),
         ("ingest_key",),
     ),
+    ("work_artifact_uuid_unique", "UNIQUENESS", "NODE", ("WorkArtifact",), ("artifact_uuid",)),
+    ("artifact_source_uuid_unique", "UNIQUENESS", "NODE", ("ArtifactSource",), ("source_uuid",)),
+    ("artifact_source_locator_unique", "UNIQUENESS", "NODE", ("ArtifactSource",), ("current_locator_key",)),
+    (
+        "artifact_reconcile_cursor_repository_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ArtifactReconciliationCursor",),
+        ("repository",),
+    ),
+    ("metric_uuid_unique", "UNIQUENESS", "NODE", ("Metric",), ("uuid",)),
+    ("turn_evidence_key_unique", "UNIQUENESS", "NODE", ("TurnEvidence",), ("turn_key",)),
 )
 
 

@@ -43,6 +43,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_historical(art: Mapping[str, Any]) -> bool:
+    return art.get("status") == "historical" or bool(art.get("superseded_by"))
+
+
 def _evidence_dicts(evidence: Sequence[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for e in evidence or ():
@@ -95,7 +99,7 @@ class ArtifactService:
         if art is None:
             return {"status": "not_found", "artifact_id": artifact_id}
         promotable = has_promotable_evidence(str(e.get("kind", "")) for e in art.get("evidence") or [])
-        is_historical = art.get("status") == "historical" or bool(art.get("superseded_by"))
+        is_historical = _is_historical(art)
         if not can_promote(has_promotable_evidence=promotable, is_historical=is_historical):
             reason = "historical" if is_historical else "no_promotable_evidence"
             return {"status": "refused", "reason": reason, "artifact_id": artifact_id}
@@ -113,5 +117,11 @@ class ArtifactService:
             return {"status": "refused", "reason": "self_supersede", "artifact_id": old_id}
         ok = await asyncio.to_thread(self.graph_adapter.supersede_l4_artifact, old_id, new_id)
         if not ok:
-            return {"status": "not_found", "old_id": old_id, "new_id": new_id}
+            # Diagnostic read only; the refusal itself was decided under the lock.
+            old = await asyncio.to_thread(self.graph_adapter.fetch_artifact, old_id)
+            new = await asyncio.to_thread(self.graph_adapter.fetch_artifact, new_id)
+            if old is None or new is None:
+                return {"status": "not_found", "old_id": old_id, "new_id": new_id}
+            reason = "already_historical" if _is_historical(old) else "replacement_historical"
+            return {"status": "refused", "reason": reason, "old_id": old_id, "new_id": new_id}
         return {"status": "superseded", "old_id": old_id, "new_id": new_id}
