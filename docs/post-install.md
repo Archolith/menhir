@@ -103,7 +103,9 @@ Keep configuration and verified data backups for a separately approved deploymen
 weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
 (#411; see
 [source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
-Deleting or erasing a memory keeps the entities and fact edges extracted from it (#423; see
+Erasing a memory deletes the entities and fact edges only it supports and blanks shared ones for
+re-derivation; data with no recorded provenance is left and the reply says `erased_incomplete`
+(#423; see
 [erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge)).
 
 ## 1b. Or do it in one step
