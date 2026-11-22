@@ -1,3 +1,18 @@
+## 2026-11-21 - supersede_artifact refuses a terminal replacement (#678)
+
+- `supersession_cypher` now also requires the replacing artifact to be non-terminal. Before, after
+  A superseded B, B (SUPERSEDED) could supersede A and form a SUPERSEDES cycle; a DEFERRED artifact
+  could also be named as a replacement.
+- No cycle can form: every node in one is the old side of an earlier edge, so already SUPERSEDED,
+  and no writer moves an artifact out of a terminal state. Online tests cover A->B then B->A, a
+  three-node cycle, a DEFERRED replacement, a rejected `supersedes:` declaration, and B->A blocking
+  on an uncommitted A->B that holds both locks, then refusing once it commits.
+- A refusal caused by the replacement names it: reason `replacement_terminal`. Other refusals keep
+  `type_mismatch_already_terminal_or_namespace_incompatible`.
+- Chains must be recorded oldest first: once v3 supersedes v2, v2 can no longer supersede v1;
+  supersede v1 with v3. Documented in `.agent/endpoints.md` and `artifact_authoring.md`.
+- Not covered: an artifact can still be moved to DEFERRED after it replaced another (no cycle).
+
 ## 2026-11-21 - Sarcasm and unaffirmed third-party claims stay out of facts and scalar values (#283)
 
 - Extraction (both self-endpoint instruction blocks in `graphiti_extraction_policy.py`): sarcasm and

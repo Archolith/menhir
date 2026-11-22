@@ -818,13 +818,16 @@ Declare a relationship between two artifacts.
 Concept id: `mcp.tool.supersede_artifact`
 
 Record that one artifact replaces another.
-- **`new_uuid`** (str): The replacing artifact.
+- **`new_uuid`** (str): The replacing artifact. Must not be `SUPERSEDED` or `DEFERRED`.
 - **`old_uuid`** (str): The artifact being replaced.
 - Writes the `SUPERSEDES` edge and moves the old artifact to `SUPERSEDED` in one statement:
   an edge pointing at an artifact still marked `APPROVED`, or a `SUPERSEDED` artifact with
   no record of what replaced it, are both states the graph must never hold.
 - Same-type only. An already-terminal artifact is refused rather than re-superseded, so the
   recorded replacement stays the one that applied.
+- A terminal replacement is refused too, so `SUPERSEDES` never forms a cycle (#678). Record a
+  chain oldest first: once v3 supersedes v2, `supersede_artifact(v2, v1)` is refused and v1
+  stays live. Supersede v1 with v3 directly instead.
 
 ### `transition_artifact`
 Concept id: `mcp.tool.transition_artifact`
