@@ -81,6 +81,35 @@ class CircuitOpenError(Exception):
         self.snapshot = snapshot
 
 
+def circuit_open_cause(exc: BaseException) -> CircuitOpenError | None:
+    """The CircuitOpenError behind ``exc``, if a breaker refused the call (#630)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, CircuitOpenError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def provider_unavailable_reason(exc: BaseException) -> str | None:
+    """Why a provider call stopped, when the cause is a known provider state, else None (#743).
+
+    Covers a billing refusal and a breaker refusing the call. Both are already reported by the
+    breaker, so a caller reports them as unavailable, without a traceback. Any other error,
+    timeouts and 5xx included, returns None and stays an error.
+    """
+    refusal = circuit_open_cause(exc)
+    if refusal is not None:
+        snap = refusal.snapshot or {}
+        why = " (billing)" if snap.get("reason") == QUOTA_REASON_CODE else ""
+        return f"circuit breaker {snap.get('name') or 'unknown'} is {snap.get('state') or 'open'}{why}"
+    if isinstance(exc, Exception) and quota_exhausted_error(exc) is not None:
+        return "provider refused for billing"
+    return None
+
+
 def should_trip_circuit(exc: Exception) -> bool:
     """Return True when the exception indicates a service-health failure.
 
@@ -148,6 +177,102 @@ class CircuitBreaker:
     # Bumped on every billing hard-open, so a probe can tell whether one happened while it ran.
     _hard_open_seq: int = field(default=0, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    # Set when the running probe settles, by any path; a caller allowed to wait for it awaits this
+    # instead of being refused (#640).
+    _probe_settled: asyncio.Event | None = field(default=None, init=False, repr=False)
+    # The loop this breaker's calls run on, so a sync caller on a worker thread can report a
+    # billing refusal to it (#639). Set by call().
+    _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
+    _report_tasks: set[asyncio.Future[Any]] = field(default_factory=set, init=False, repr=False)
+
+    def _start_probe(self) -> None:
+        self._probe_in_flight = True
+        self._probe_settled = asyncio.Event()
+
+    def _end_probe(self) -> None:
+        """Free the probe slot and wake every caller waiting on the probe. Loop thread only."""
+        self._probe_in_flight = False
+        settled, self._probe_settled = self._probe_settled, None
+        if settled is not None:
+            settled.set()
+
+    def _hard_open(self, *, is_probe: bool) -> CircuitState:
+        """Billing state: open now, no failure threshold and no 30 s probes. Caller holds _lock."""
+        previous = self._state
+        self._failures += 1
+        self._state = CircuitState.OPEN
+        self._opened_at = monotonic()
+        if is_probe:
+            # A non-probe refusal recorded while a probe runs must not free the probe slot, or
+            # a second probe can start beside the first.
+            self._end_probe()
+        self._hard_open_reason = QUOTA_REASON_CODE
+        self._hard_open_seq += 1
+        return previous
+
+    async def _record_hard_open(self, previous: CircuitState, quota_error: Exception) -> None:
+        from menhir.infrastructure.telemetry import record_lifecycle_event
+
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="circuit_breaker",
+                event=f"{previous.value}->{self._state.value}",
+                state="transition",
+                details={"breaker": self.name, "reason": QUOTA_REASON_CODE},
+            )
+        )
+        logger.warning(
+            "Circuit breaker %s hard-open: %s (next probe in %.0fs)",
+            self.name, quota_error, QUOTA_COOLDOWN_SECONDS,
+        )
+
+    async def record_quota_refusal(self, exc: BaseException) -> bool:
+        """Hard-open for a billing refusal a caller got outside call() (#639).
+
+        For provider clients that cannot go through call(), such as the sync view embedder and
+        sync chat. Anything that is not a billing refusal is ignored; returns whether it opened.
+        """
+        quota_error = quota_exhausted_error(exc) if isinstance(exc, Exception) else None
+        if quota_error is None:
+            return False
+        async with self._lock:
+            previous = self._hard_open(is_probe=False)
+            # Inside the lock, as in _call: the hard-open is recorded before another call runs.
+            await self._record_hard_open(previous, quota_error)
+        return True
+
+    def report_quota_refusal_threadsafe(self, exc: BaseException) -> None:
+        """record_quota_refusal from sync code on any thread. Never raises, never blocks.
+
+        State changes run on the breaker's loop, under its lock, so they cannot interleave with
+        a call() in progress. Before any call() has run there is no loop, so the hard-open is
+        applied directly; a first call() racing that write can at most run once more.
+        """
+        try:
+            if not isinstance(exc, Exception) or quota_exhausted_error(exc) is None:
+                return
+            loop = self._loop
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if loop is None or loop.is_closed():
+                if running is None:
+                    self._hard_open(is_probe=False)
+                    logger.warning("Circuit breaker %s hard-open: %s", self.name, exc)
+                    return
+                loop = running
+            if running is loop:
+                task = loop.create_task(self.record_quota_refusal(exc))
+                # Held until done: the loop keeps only a weak reference to a task.
+                self._report_tasks.add(task)
+                task.add_done_callback(self._report_tasks.discard)
+            else:
+                asyncio.run_coroutine_threadsafe(self.record_quota_refusal(exc), loop)
+        except Exception:
+            logger.warning("Circuit breaker %s: could not record a billing refusal", self.name,
+                           exc_info=True)
 
     def _effective_cooldown(self) -> float:
         return QUOTA_COOLDOWN_SECONDS if self._hard_open_reason else self.cooldown_seconds
@@ -187,7 +312,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failures = 0
         self._opened_at = None
-        self._probe_in_flight = False
+        self._end_probe()
         self._hard_open_reason = None
 
     async def _acquire_or_abandon(self, is_probe: bool, *, healthy: bool) -> None:
@@ -218,7 +343,7 @@ class CircuitBreaker:
         learned it is down): return to OPEN with a fresh cooldown so the next
         caller may probe again.
         """
-        self._probe_in_flight = False
+        self._end_probe()
         if healthy:
             self._state = CircuitState.CLOSED
             self._failures = 0
@@ -228,20 +353,50 @@ class CircuitBreaker:
             self._state = CircuitState.OPEN
             self._opened_at = monotonic()
 
-    async def call(self, fn: Callable[[], Awaitable[T]]) -> T:
+    async def call(
+        self, fn: Callable[[], Awaitable[T]], *, wait_for_probe_s: float = 0.0
+    ) -> T:
         """Execute fn with circuit breaker state transitions.
 
         Every exception leaving here is tagged with this breaker's name unless an inner breaker
         tagged it first, so an outer breaker can tell its own provider's failures from another's.
+
+        ``wait_for_probe_s`` > 0: a call that arrives while a half-open probe is running waits up
+        to that long for the probe's outcome instead of being refused at once (#640). It then
+        runs if the probe closed the breaker, and is refused if the probe failed.
         """
+        self._loop = asyncio.get_running_loop()
         try:
-            return await self._call(fn)
+            return await self._call(fn, wait_for_probe_s=wait_for_probe_s)
         except Exception as exc:
             tag_breaker_origin(exc, self.name)
             raise
 
-    async def _call(self, fn: Callable[[], Awaitable[T]]) -> T:
+    async def _call(self, fn: Callable[[], Awaitable[T]], *, wait_for_probe_s: float = 0.0) -> T:
         """All state transitions happen inside this method under _lock."""
+
+        deadline = monotonic() + max(0.0, wait_for_probe_s)
+        while True:
+            settled, is_probe, probe_seq = await self._admit(deadline)
+            if settled is None:
+                break
+            # Wait outside the lock, so the probe can take it to settle. Every path that ends a
+            # probe sets the event, cancellation included; the deadline bounds a hung probe.
+            try:
+                await asyncio.wait_for(settled.wait(), timeout=max(0.0, deadline - monotonic()))
+            except (asyncio.TimeoutError, TimeoutError):
+                raise CircuitOpenError(
+                    f"Circuit breaker open for {self.name}; "
+                    f"state={self._state.value} probe in flight (waited {wait_for_probe_s:.0f}s)",
+                    snapshot=self.state_snapshot(),
+                ) from None
+        return await self._run(fn, is_probe=is_probe, probe_seq=probe_seq)
+
+    async def _admit(self, deadline: float) -> tuple[asyncio.Event | None, bool, int]:
+        """Admit this call, refuse it (raises), or hand back the running probe's event to wait on.
+
+        Returns ``(event, is_probe, probe_seq)``; ``event`` is None when the call is admitted.
+        """
 
         from menhir.infrastructure.telemetry import record_lifecycle_event
 
@@ -255,7 +410,7 @@ class CircuitBreaker:
                     # Transition to HALF_OPEN — this caller is the probe
                     previous = self._state
                     self._state = CircuitState.HALF_OPEN
-                    self._probe_in_flight = True
+                    self._start_probe()
                     # DELIBERATELY SYNCHRONOUS, unlike every other telemetry write in this file.
                     # This one sits inside the lock, between setting `_probe_in_flight = True` and
                     # the caller reaching `await fn()` -- the only stretch not covered by the
@@ -279,16 +434,22 @@ class CircuitBreaker:
                     )
             elif self._state == CircuitState.HALF_OPEN:
                 if self._probe_in_flight:
+                    if self._probe_settled is not None and monotonic() < deadline:
+                        return self._probe_settled, False, 0
                     raise CircuitOpenError(
                         f"Circuit breaker open for {self.name}; "
                         f"state={self._state.value} probe in flight",
                         snapshot=self.state_snapshot(),
                     )
                 # Should not reach here — but treat as probe
-                self._probe_in_flight = True
+                self._start_probe()
 
-            is_probe = self._state == CircuitState.HALF_OPEN
-            probe_seq = self._hard_open_seq
+            return None, self._state == CircuitState.HALF_OPEN, self._hard_open_seq
+
+    async def _run(self, fn: Callable[[], Awaitable[T]], *, is_probe: bool, probe_seq: int) -> T:
+        """Run an admitted call and record its outcome."""
+
+        from menhir.infrastructure.telemetry import record_lifecycle_event
 
         # Execute outside the lock
         try:
@@ -310,7 +471,7 @@ class CircuitBreaker:
                 try:
                     if is_probe:
                         self._state = CircuitState.OPEN
-                        self._probe_in_flight = False
+                        self._end_probe()
                         self._opened_at = monotonic()
                         if self._hard_open_seq == probe_seq:
                             self._hard_open_reason = None
@@ -323,30 +484,8 @@ class CircuitBreaker:
                 raise
             try:
                 if quota_error is not None:
-                    # Billing state: hard-open now, no failure threshold and no 30 s probes.
-                    previous = self._state
-                    self._failures += 1
-                    self._state = CircuitState.OPEN
-                    self._opened_at = monotonic()
-                    if is_probe:
-                        # A non-probe call refused while a probe runs must not free the probe
-                        # slot, or a second probe can start beside the first.
-                        self._probe_in_flight = False
-                    self._hard_open_reason = QUOTA_REASON_CODE
-                    self._hard_open_seq += 1
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="circuit_breaker",
-                            event=f"{previous.value}->{self._state.value}",
-                            state="transition",
-                            details={"breaker": self.name, "reason": QUOTA_REASON_CODE},
-                        )
-                    )
-                    logger.warning(
-                        "Circuit breaker %s hard-open: %s (next probe in %.0fs)",
-                        self.name, quota_error, QUOTA_COOLDOWN_SECONDS,
-                    )
+                    previous = self._hard_open(is_probe=is_probe)
+                    await self._record_hard_open(previous, quota_error)
                 elif should_trip_circuit(exc):
                     self._failures += 1
                     if is_probe:
@@ -356,7 +495,7 @@ class CircuitBreaker:
                         previous = self._state
                         self._state = CircuitState.OPEN
                         self._opened_at = monotonic()
-                        self._probe_in_flight = False
+                        self._end_probe()
                         if self._hard_open_seq == probe_seq:
                             # A billing refusal recorded while this probe ran still stands.
                             self._hard_open_reason = None
@@ -392,7 +531,7 @@ class CircuitBreaker:
                         self._state = CircuitState.CLOSED
                         self._failures = 0
                         self._opened_at = None
-                        self._probe_in_flight = False
+                        self._end_probe()
                         self._hard_open_reason = None
                         await asyncio.to_thread(
                             partial(
@@ -431,7 +570,7 @@ class CircuitBreaker:
                 self._state = CircuitState.CLOSED
                 self._failures = 0
                 self._opened_at = None
-                self._probe_in_flight = False
+                self._end_probe()
                 self._hard_open_reason = None
                 await asyncio.to_thread(
                     partial(

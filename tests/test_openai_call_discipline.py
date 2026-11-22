@@ -65,6 +65,8 @@ _TIMEOUTS_ALLOWED: dict[str, tuple[int, str]] = {
     ),
     "services/maintenance_scheduler.py": (3, "stop / lease-lost event waits"),
     INFRA + "dns_cache.py": (1, "connect-timeout bound on a getaddrinfo lookup (no OpenAI call)"),
+    INFRA + "circuit_breaker.py": (
+        1, "bounded wait on another call's half-open probe event (#640); no call of its own"),
 }
 
 

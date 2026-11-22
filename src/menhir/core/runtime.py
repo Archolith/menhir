@@ -404,6 +404,10 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         logger.warning(
             "personal-memory counting enabled but scalar state is disabled; "
             "counting needs scalar state and will do nothing")
+    from menhir.infrastructure.graphiti_client import sync_client_breakers
+
+    chat_breaker, embed_breaker = sync_client_breakers(
+        getattr(built, "graphiti_client", None), settings)
     personal_memory_llm = None
     if (scalar_state_enabled or counting_enabled) and settings is not None:
         from menhir.config.settings_model import parse_extra_body
@@ -420,7 +424,8 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             disable_reasoning=bool(getattr(
                 settings, "personal_memory_consolidation_disable_reasoning", False)),
             **({"extra_body": pm_extra_body} if pm_extra_body else {}),
-            **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}))
+            **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}),
+            **({"breaker": chat_breaker} if chat_breaker is not None else {}))
         if personal_memory_llm is None:
             logger.warning(
                 "personal-memory consolidation or scalar state enabled but no sync chat provider; job disabled")
@@ -442,7 +447,11 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         structure_watcher_interval_s=getattr(settings, "structure_watcher_interval_s", 1800.0),
         structure_watcher_enabled=getattr(settings, "structure_watcher_enabled", True),
         experience_counter_enabled=getattr(settings, "experience_counter_enabled", True),
-        experience_embed=make_view_embedder(settings) if settings is not None else None,
+        experience_embed=(
+            make_view_embedder(
+                settings, **({"breaker": embed_breaker} if embed_breaker is not None else {}))
+            if settings is not None else None
+        ),
         experience_embed_version=view_embedder_version(settings) if settings is not None else None,
         # Same embedder and model stamp as the ingest-time step (enrichment_steps.embed_episode_content).
         source_embedding_embed=getattr(getattr(built, "graphiti_client", None), "embed_query", None),
