@@ -1,3 +1,7 @@
+## 2026-11-22 - Graphiti fork 0.31.2.post4: entity-edge save fixes (Archolith/graphiti #28-#30)
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post4`, fork commit `d94da8d7`. Pins, docs and release checks updated.
+
 ## 2026-11-22 - Phase 3 reports a billing refusal or open breaker as unavailable (#743)
 
 - `POST /api/phase3/run` answers 503 (`phase 3 consolidation unavailable: <reason>`) when the
