@@ -746,9 +746,13 @@ def _require_explorer_readonly() -> None:
     `_require_tier` so the two surfaces cannot drift apart in how they rank tiers or shape the
     403.
     """
+    from menhir.api.route_tools import refuse_restricted_client
     from menhir.api.routes_support import _require_tier
 
     _require_tier("readonly")
+    # Explorer routes map to no single tool, so a client with a tool allowlist is refused
+    # the whole explorer (fail closed, as for unmapped /api routes).
+    refuse_restricted_client("explorer")
 
 
 def _require_explorer_agent() -> None:
