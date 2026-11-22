@@ -1379,6 +1379,23 @@ class MemoryGraphAdapter:
     def set_conflict_group_status(self, group_id: str, status: str) -> int:
         return self._consolidation.set_conflict_group_status(group_id, status)
 
+    def set_conflict_member_status(
+        self, group_id: str, node_uuid: str, *, from_status: str, to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        return self._consolidation.set_conflict_member_status(
+            group_id, node_uuid, from_status=from_status, to_status=to_status, namespace=namespace
+        )
+
+    def remove_conflict_member(
+        self, group_id: str, node_uuid: str, *, from_status: str,
+        resolution_status: str = "false_positive", namespace: str | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.remove_conflict_member(
+            group_id, node_uuid, from_status=from_status,
+            resolution_status=resolution_status, namespace=namespace,
+        )
+
     def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "unresolved", limit: int = 200,
         namespace: str | None = None,
@@ -1540,6 +1557,7 @@ class MemoryGraphAdapter:
         namespace: str | None = None,
         created_before: datetime | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_groups(
             status=status,
@@ -1547,6 +1565,7 @@ class MemoryGraphAdapter:
             namespace=namespace,
             created_before=created_before,
             oldest_first=oldest_first,
+            include_all_members=include_all_members,
         )
 
     def list_conflict_pairs(

@@ -103,6 +103,9 @@ async def recover_stale_leases(
 #: are done being handled automatically -- no scheduler pass will ever pick them up again.
 _NEVER_RETRIED_CLASSIFICATIONS = ("terminal", "manual_review")
 
+#: A conflict group pending LLM review for longer than this triggers a queue-health WARNING (#651).
+_PENDING_CONFLICT_WARN_S = 24 * 3600
+
 
 async def observe_queue_health(
     ingest_service: SchedulerIngestService,
@@ -130,7 +133,22 @@ async def observe_queue_health(
         "pending_count": overview.get("pending_count"),
         "enriching_count": overview.get("enriching_count"),
         "failed_count": overview.get("failed_count"),
+        "pending_conflict_groups": overview.get("pending_conflict_groups"),
+        "oldest_pending_conflict_at": overview.get("oldest_pending_conflict_at"),
     }
+
+    oldest_pending_at = _parse_timestamp(overview.get("oldest_pending_conflict_at"))
+    if oldest_pending_at is not None:
+        pending_age = datetime.now(timezone.utc) - oldest_pending_at
+        if pending_age.total_seconds() > _PENDING_CONFLICT_WARN_S:
+            logger.warning(
+                "STALE PENDING CONFLICTS: %s conflict group(s) are still pending LLM review; "
+                "the oldest since %s (%.1f hours). Their members are served flagged "
+                "'possible_conflict' until the LLM review confirms or clears them.",
+                overview.get("pending_conflict_groups"),
+                overview.get("oldest_pending_conflict_at"),
+                pending_age.total_seconds() / 3600,
+            )
 
     try:
         signatures = await asyncio.to_thread(

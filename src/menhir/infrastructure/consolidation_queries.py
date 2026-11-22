@@ -707,16 +707,21 @@ class ConsolidationRepository:
             OPTIONAL MATCH (orphan:Entity)
             WHERE orphan.conflict_group_id = retired_group_id
               AND {automatic_lifecycle_protection_cypher("orphan")}
-            WITH a, b, canonical_group_id, collect(orphan) AS orphans
+            WITH a, b, canonical_group_id, collect(orphan) AS orphans,
+              // #654: a confirmed member is never sent back to review by a new pair.
+              // Read before the SET below assigns the group id.
+              (a.conflict_group_id IS NOT NULL AND a.conflict_status = 'unresolved') AS a_confirmed,
+              (b.conflict_group_id IS NOT NULL AND b.conflict_status = 'unresolved') AS b_confirmed
             SET a.conflict_group_id  = canonical_group_id,
-                a.conflict_status    = $initial_status,
+                a.conflict_status    = CASE WHEN a_confirmed THEN 'unresolved' ELSE $initial_status END,
                 a.conflict_created_at = coalesce(a.conflict_created_at, datetime()),
                 b.conflict_group_id  = canonical_group_id,
-                b.conflict_status    = $initial_status,
+                b.conflict_status    = CASE WHEN b_confirmed THEN 'unresolved' ELSE $initial_status END,
                 b.conflict_created_at = coalesce(b.conflict_created_at, datetime())
+            // #654: members absorbed from a merged group keep their own status and age.
             FOREACH (o IN orphans |
                 SET o.conflict_group_id = canonical_group_id,
-                    o.conflict_status   = $initial_status
+                    o.conflict_created_at = coalesce(o.conflict_created_at, datetime())
             )
             RETURN canonical_group_id, 2 + size(orphans) AS updated
             """,
@@ -746,6 +751,112 @@ class ConsolidationRepository:
             params={"group_id": group_id, "status": status},
         )
         return int(rows[0].get("updated", 0)) if rows else 0
+
+    def set_conflict_member_status(
+        self,
+        group_id: str,
+        node_uuid: str,
+        *,
+        from_status: str,
+        to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        """Move one member from ``from_status`` to ``to_status`` (#654).
+
+        Compare-and-set: a member that left the group or changed status since it was
+        read is not touched, so a concurrent review or resolution wins. Returns whether
+        the member was updated.
+        """
+        ns = str(namespace).strip() if namespace is not None else ""
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n:Entity)
+            WHERE n.uuid = $uuid
+              AND n.conflict_group_id = $group_id
+              AND n.conflict_status = $from_status
+              AND {tenant_scope_cypher("n")}
+              AND {automatic_lifecycle_protection_cypher("n")}
+            SET n.conflict_status = $to_status
+            RETURN count(n) AS updated
+            """,
+            params={
+                "uuid": node_uuid,
+                "group_id": group_id,
+                "from_status": from_status,
+                "to_status": to_status,
+                **tenant_scope_params(ns or None),
+            },
+        )
+        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+
+    def remove_conflict_member(
+        self,
+        group_id: str,
+        node_uuid: str,
+        *,
+        from_status: str,
+        resolution_status: str = "false_positive",
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        """Take one member out of a group after review cleared all its pairs (#654).
+
+        Compare-and-set on ``from_status`` like ``set_conflict_member_status``. When fewer
+        than two members remain, the group is dissolved: a group of one is not a conflict.
+
+        Every current member is write-locked before the remainder is counted. A concurrent
+        ``set_conflict`` joining through an existing member writes that member, so it either
+        commits before the recount (and is counted) or waits for this statement.
+
+        Returns ``removed`` (bool), ``dissolved`` (bool) and ``remaining_uuids``.
+        """
+        ns = str(namespace).strip() if namespace is not None else ""
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (target:Entity)
+            WHERE target.uuid = $uuid
+              AND target.conflict_group_id = $group_id
+              AND target.conflict_status = $from_status
+              AND {tenant_scope_cypher("target")}
+              AND {automatic_lifecycle_protection_cypher("target")}
+            MATCH (lockm:Entity)
+            WHERE lockm.conflict_group_id = $group_id
+            SET lockm._conflict_group_lock = true
+            REMOVE lockm._conflict_group_lock
+            WITH DISTINCT target
+            // Re-check under the lock: a concurrent review may have moved it already.
+            WHERE target.conflict_group_id = $group_id
+              AND target.conflict_status = $from_status
+            SET target.conflict_group_id = null,
+                target.conflict_status = $resolution_status
+            WITH target
+            OPTIONAL MATCH (m:Entity)
+            WHERE m.conflict_group_id = $group_id
+              AND {tenant_scope_cypher("m")}
+              AND {automatic_lifecycle_protection_cypher("m")}
+            WITH target, collect(m) AS remaining
+            FOREACH (r IN CASE WHEN size(remaining) < 2 THEN remaining ELSE [] END |
+                SET r.conflict_group_id = null,
+                    r.conflict_status = $resolution_status
+            )
+            RETURN size(remaining) < 2 AS dissolved,
+                   [r IN remaining | r.uuid] AS remaining_uuids
+            """,
+            params={
+                "uuid": node_uuid,
+                "group_id": group_id,
+                "from_status": from_status,
+                "resolution_status": resolution_status,
+                **tenant_scope_params(ns or None),
+            },
+        )
+        if not rows:
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        row = rows[0]
+        return {
+            "removed": True,
+            "dissolved": bool(row.get("dissolved")),
+            "remaining_uuids": [str(u) for u in (row.get("remaining_uuids") or [])],
+        }
 
     def requeue_conflicts_for_llm_review(
         self,
@@ -798,8 +909,13 @@ class ConsolidationRepository:
         namespace: str | None = None,
         created_before: datetime | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, Any]]:
         """Return grouped conflicts keyed by conflict_group_id.
+
+        ``include_all_members`` (opt-in, #654) selects groups that have at least one member
+        in ``status`` but returns every live member of each, with its own status. The
+        per-member LLM review needs the whole group to compare a member against.
 
         When ``status`` is ``None`` all conflict statuses are included.
 
@@ -841,6 +957,36 @@ class ConsolidationRepository:
         # Both fragments below are constants chosen here, never caller text -- Cypher cannot
         # parameterize a sort direction, so this stays interpolation and stays a closed set.
         order = "ASC" if oldest_first else "DESC"
+
+        if include_all_members:
+            return self.neo4j.execute(
+                f"""
+                MATCH (n:Entity)
+                WHERE n.conflict_group_id IS NOT NULL
+                  AND ($status IS NULL OR n.conflict_status = $status)
+                  AND {tenant_scope_cypher("n")}
+                  AND {automatic_lifecycle_protection_cypher("n")}
+                WITH n.conflict_group_id AS group_id,
+                     min(n.conflict_created_at) AS created_at{cutoff_clause}
+                ORDER BY created_at {order}
+                LIMIT $limit
+                MATCH (m:Entity)
+                WHERE m.conflict_group_id = group_id
+                  AND {tenant_scope_cypher("m")}
+                  AND {automatic_lifecycle_protection_cypher("m")}
+                WITH group_id, created_at, collect({{
+                       uuid: m.uuid,
+                       name: m.name,
+                       content: coalesce(m.summary, m.content, ''),
+                       status: m.conflict_status,
+                       scope: m.scope,
+                       node_created_at: m.created_at
+                     }}) AS members
+                RETURN group_id, created_at, members
+                ORDER BY created_at {order}
+                """,
+                params=params,
+            )
 
         return self.neo4j.execute(
             f"""

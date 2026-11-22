@@ -332,7 +332,13 @@ class MemoryQueryRepository:
                    count(CASE WHEN n:Episodic AND effective_state = 'READY' THEN 1 END) AS ready_count,
                    count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count,
                    max(CASE WHEN n:Episodic AND effective_state = 'FAILED'
-                            THEN n.processing_completed_at END) AS latest_failed_at
+                            THEN n.processing_completed_at END) AS latest_failed_at,
+                   count(DISTINCT CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                                        AND n.conflict_status = 'pending_llm_review'
+                                       THEN n.conflict_group_id END) AS pending_conflict_groups,
+                   min(CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                                 AND n.conflict_status = 'pending_llm_review'
+                            THEN n.conflict_created_at END) AS oldest_pending_conflict_at
             """,
             params or None,
         )
@@ -371,8 +377,14 @@ class MemoryQueryRepository:
             "ready_count": 0,
             "failed_count": 0,
             "latest_failed_at": None,
+            "pending_conflict_groups": 0,
+            "oldest_pending_conflict_at": None,
         }
         overview["latest_failed_at"] = _iso_utc_or_none(overview.get("latest_failed_at"))
+        overview["pending_conflict_groups"] = int(overview.get("pending_conflict_groups") or 0)
+        overview["oldest_pending_conflict_at"] = _iso_utc_or_none(
+            overview.get("oldest_pending_conflict_at")
+        )
         overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
         overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)
         overview["admission_provenance"] = admission_provenance_state(

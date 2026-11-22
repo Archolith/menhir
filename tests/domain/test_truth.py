@@ -112,8 +112,11 @@ class TestWardenLabel:
         assert WardenLabel.UNCERTAIN        == "uncertain"
         assert WardenLabel.SUSPICIOUS_CHAIN == "suspicious_chain"
 
-    def test_has_four_labels(self) -> None:
-        assert len(WardenLabel) == 4
+        assert WardenLabel.POSSIBLE_CONFLICT == "possible_conflict"
+        assert WardenLabel.UNSETTLED_CONFLICT == "unsettled_conflict"
+
+    def test_has_six_labels(self) -> None:
+        assert len(WardenLabel) == 6
 
     def test_isinstance_check(self) -> None:
         # A bare string does NOT satisfy the enum; a WardenLabel value does.

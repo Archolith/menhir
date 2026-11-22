@@ -133,6 +133,9 @@ class AssertionPipeline:
                 oracle_packet=packet,
                 recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))
                                    and candidate.metadata.get("conflict_status") == "unresolved"),
+                pending_conflict=(bool(candidate.metadata.get("conflict_group_id"))
+                                  and candidate.metadata.get("conflict_status") == "pending_llm_review"),
+                unsettled_conflict=candidate.metadata.get("conflict_status") == "auto-resolved",
             )
             verdict = self.chain.evaluate(ctx)
             result = AdmissionResult(

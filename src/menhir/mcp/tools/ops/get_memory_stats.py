@@ -149,6 +149,11 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append(f"  Flagged:     {overview.get('flagged_count', '?'):>6}")
         lines.append(f"  Persistent:  {overview.get('persistent_count', '?'):>6}")
         lines.append(f"  Session:     {overview.get('session_count', '?'):>6}")
+        pending_conflicts = int(overview.get("pending_conflict_groups") or 0)
+        lines.append(f"  Pending conflicts: {pending_conflicts:>6}  (groups awaiting LLM review)")
+        oldest_pending = overview.get("oldest_pending_conflict_at")
+        if pending_conflicts and oldest_pending:
+            lines.append(f"  Oldest pending conflict: {oldest_pending}")
         lines.append("")
 
         # ── Enrichment Pipeline ──

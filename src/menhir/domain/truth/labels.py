@@ -25,3 +25,5 @@ class WardenLabel(str, Enum):
     CONFLICT          = "conflict"           # contradicted, under active conflict
     UNCERTAIN         = "uncertain"          # low belief confidence, use with hedging
     SUSPICIOUS_CHAIN  = "suspicious_chain"   # meta-memory chain too deep (Guard 3)
+    POSSIBLE_CONFLICT = "possible_conflict"  # similarity-flagged, not yet LLM-reviewed (#651)
+    UNSETTLED_CONFLICT = "unsettled_conflict"  # confirmed, auto-resolved without a decision (#652)

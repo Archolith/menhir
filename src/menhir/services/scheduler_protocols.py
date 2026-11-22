@@ -155,6 +155,9 @@ class LifecycleServiceProtocol(Protocol):
     async def confirm_pending_conflicts(self, *, limit: int, verbose: bool = False, status: str = "pending_llm_review") -> dict[str, Any]:
         ...
 
+    async def record_conflict_pair(self, uuid: str, other_uuid: str) -> tuple[str, int] | None:
+        ...
+
 
 class SchedulerLeaseStoreProtocol(Protocol):
     def try_acquire(self, *, lease_name: str, owner_id: str, owner_pid: int, lease_duration_s: float) -> bool:
