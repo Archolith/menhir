@@ -67,6 +67,7 @@ from menhir.infrastructure.circuit_breaker import (  # noqa: E402
     CircuitBreaker,
     CircuitOpenError,
     breaker_origin,
+    circuit_open_cause,
     tag_breaker_origin,
 )
 from menhir.infrastructure.providers import DEFAULT_REQUEST_TIMEOUT_S  # noqa: E402
@@ -369,17 +370,7 @@ class BreakerGuardedCrossEncoder(CrossEncoderClient):  # type: ignore[misc,valid
         return await self.breaker.call(lambda: self.inner.rank(query, passages))
 
 
-def _circuit_open_cause(exc: BaseException) -> CircuitOpenError | None:
-    """Return the CircuitOpenError behind `exc`, if a breaker refused the call (#630)."""
-
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        if isinstance(current, CircuitOpenError):
-            return current
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return None
+_circuit_open_cause = circuit_open_cause
 
 
 @dataclass

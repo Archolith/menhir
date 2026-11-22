@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.infrastructure.circuit_breaker import provider_unavailable_reason
 from menhir.core.tenancy import require_namespace_target, resolve_namespace_filter
 from menhir.core.request_context import get_request_tool_allowlist
 from menhir.mcp.service_access import get_client_tool_allowlist, get_pinned_namespace
@@ -28,6 +29,8 @@ from .routes_support import (
     Phase3ViewsResponse,
     RevokeClientResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _scalar_dirty(adapter: Any, settings: Any, namespace: str) -> bool:
@@ -92,32 +95,43 @@ async def phase3_run_impl(
     # the caller's own silo and consolidate data it did not ask to touch. Refused instead.
     ns = require_namespace_target(body.namespace, action="run consolidation over")
     selected = await _scalar_dirty(adapter, settings, ns)
-    result = await consolidate_personal_memory(
-        adapter,
-        llm_complete=chat,
-        embed=embed,
-        namespaces=[ns],
-        k=body.k,
-        source=body.source,
-        call_budget=body.call_budget,
-        enable_scalar_state=getattr(settings, "personal_memory_scalar_state_enabled", False),
-        scalar_state_perceiver_version=getattr(
-            settings,
-            "personal_memory_scalar_state_perceiver_version",
-            "v1",
-        ),
-        scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
-        scalar_embed_version=view_embedder_version(settings),
-        scalar_history_enabled=getattr(
-            settings, "personal_memory_scalar_history_enabled", False),
-        scalar_approximate_enabled=bool(
-            getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
-        enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
-        counting_perceiver_version=getattr(
-            settings, "personal_memory_counting_perceiver_version", "v1"),
-        counting_lease_seconds=getattr(
-            settings, "personal_memory_counting_lease_seconds", 900),
-    )
+    try:
+        result = await consolidate_personal_memory(
+            adapter,
+            llm_complete=chat,
+            embed=embed,
+            namespaces=[ns],
+            k=body.k,
+            source=body.source,
+            call_budget=body.call_budget,
+            enable_scalar_state=getattr(settings, "personal_memory_scalar_state_enabled", False),
+            scalar_state_perceiver_version=getattr(
+                settings,
+                "personal_memory_scalar_state_perceiver_version",
+                "v1",
+            ),
+            scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
+            scalar_embed_version=view_embedder_version(settings),
+            scalar_history_enabled=getattr(
+                settings, "personal_memory_scalar_history_enabled", False),
+            scalar_approximate_enabled=bool(
+                getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
+            enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
+            counting_perceiver_version=getattr(
+                settings, "personal_memory_counting_perceiver_version", "v1"),
+            counting_lease_seconds=getattr(
+                settings, "personal_memory_counting_lease_seconds", 900),
+        )
+    except Exception as exc:
+        # #743: a billing refusal or an open breaker is a known provider state the breaker
+        # already reported, not a server fault. The pass stopped; the namespace stays dirty.
+        reason = provider_unavailable_reason(exc)
+        if reason is None:
+            raise
+        logger.warning("phase 3 consolidation of %s stopped: %s", ns, reason)
+        raise HTTPException(
+            status_code=503, detail=f"phase 3 consolidation unavailable: {reason}"
+        ) from None
     dirty_after = await _scalar_dirty(adapter, settings, ns)
     counting_dirty_after = None
     if (getattr(settings, "personal_memory_counting_enabled", False)

@@ -81,6 +81,35 @@ class CircuitOpenError(Exception):
         self.snapshot = snapshot
 
 
+def circuit_open_cause(exc: BaseException) -> CircuitOpenError | None:
+    """The CircuitOpenError behind ``exc``, if a breaker refused the call (#630)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, CircuitOpenError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def provider_unavailable_reason(exc: BaseException) -> str | None:
+    """Why a provider call stopped, when the cause is a known provider state, else None (#743).
+
+    Covers a billing refusal and a breaker refusing the call. Both are already reported by the
+    breaker, so a caller reports them as unavailable, without a traceback. Any other error,
+    timeouts and 5xx included, returns None and stays an error.
+    """
+    refusal = circuit_open_cause(exc)
+    if refusal is not None:
+        snap = refusal.snapshot or {}
+        why = " (billing)" if snap.get("reason") == QUOTA_REASON_CODE else ""
+        return f"circuit breaker {snap.get('name') or 'unknown'} is {snap.get('state') or 'open'}{why}"
+    if isinstance(exc, Exception) and quota_exhausted_error(exc) is not None:
+        return "provider refused for billing"
+    return None
+
+
 def should_trip_circuit(exc: Exception) -> bool:
     """Return True when the exception indicates a service-health failure.
 
