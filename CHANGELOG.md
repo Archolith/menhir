@@ -15,6 +15,7 @@
   `refused` with a reason, separate from `not_found`, and treats a retry of an applied
   supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
   structural.
+
 ## 2026-11-22 - Client tool allowlist on resource listings, named REST routes and the explorer (#657, #658)
 
 - `api/mcp_remote.py`, `mcp/contracts.py`: `resources/list` and `resources/templates/list` show a
