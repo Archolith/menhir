@@ -1,3 +1,12 @@
+## 2026-11-21 - supersede_artifact refuses a terminal replacement (#678)
+
+- `supersession_cypher` now also requires the replacing artifact to be non-terminal. Before, after
+  A superseded B, B (SUPERSEDED) could supersede A and form a SUPERSEDES cycle; a DEFERRED artifact
+  could also be named as a replacement.
+- No cycle can form: every node in one is the old side of an earlier edge, so already SUPERSEDED,
+  and no writer moves an artifact out of a terminal state. Online tests cover A->B then B->A, a
+  three-node cycle, a DEFERRED replacement, and A->B racing B->A.
+
 ## 2026-11-21 - Sarcasm and unaffirmed third-party claims stay out of facts and scalar values (#283)
 
 - Extraction (both self-endpoint instruction blocks in `graphiti_extraction_policy.py`): sarcasm and

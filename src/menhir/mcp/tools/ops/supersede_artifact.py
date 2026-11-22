@@ -17,7 +17,7 @@ async def supersede_artifact(new_uuid: str, old_uuid: str, namespace: str = "") 
     the graph must never hold.
 
     Args:
-        new_uuid: The replacing artifact.
+        new_uuid: The replacing artifact. Must not be superseded or deferred.
         old_uuid: The artifact being replaced. Must be the same type and not
                   already terminal.
 
@@ -76,6 +76,7 @@ class SupersedeArtifactTool(BaseTextTool):
         raise McpToolRefusal(
             f"Refused: {old_uuid} was not superseded. Supersession is same-type only, the "
             "artifacts must share a namespace, and an already-superseded or deferred artifact "
-            "is not re-superseded so the recorded replacement stays the one that applied.",
+            "is not re-superseded so the recorded replacement stays the one that applied. "
+            "The replacement must not be superseded or deferred itself.",
             code="refused",
         )

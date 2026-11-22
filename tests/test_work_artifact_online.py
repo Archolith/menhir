@@ -180,3 +180,67 @@ def test_supersession_rolls_back_edge_if_status_write_fails(test_neo4j_repo: Any
     with pytest.raises(Exception, match="(?i)(property|map|type)"):
         WorkArtifactRepository(FaultGraph()).supersede_artifact(new_uuid, old_uuid)
     assert _state(graph, old_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+
+
+def test_a_superseded_artifact_cannot_supersede_its_replacement(test_neo4j_repo: Any) -> None:
+    """#678: A->B then B->A would form a SUPERSEDES cycle."""
+    graph = test_neo4j_repo
+    repo = WorkArtifactRepository(graph)
+    a_uuid = _artifact(repo, title="a")
+    b_uuid = _artifact(repo, title="b")
+
+    assert repo.supersede_artifact(a_uuid, b_uuid)["applied"] is True
+    assert repo.supersede_artifact(b_uuid, a_uuid)["applied"] is False
+    assert _state(graph, a_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+    assert _state(graph, b_uuid) == {"status": ArtifactStatus.SUPERSEDED, "replacements": [a_uuid]}
+
+
+def test_a_deferred_artifact_cannot_be_a_replacement(test_neo4j_repo: Any) -> None:
+    graph = test_neo4j_repo
+    repo = WorkArtifactRepository(graph)
+    old_uuid = _artifact(repo, title="old")
+    new_uuid = _artifact(repo, title="new")
+    assert repo.transition_status(new_uuid, ArtifactStatus.DEFERRED)["applied"] is True
+
+    assert repo.supersede_artifact(new_uuid, old_uuid)["applied"] is False
+    assert _state(graph, old_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+
+
+def test_a_longer_supersession_cycle_is_refused(test_neo4j_repo: Any) -> None:
+    """A->B, C->A, then B->C would close a three-node cycle."""
+    graph = test_neo4j_repo
+    repo = WorkArtifactRepository(graph)
+    a_uuid, b_uuid, c_uuid = (_artifact(repo, title=t) for t in ("a", "b", "c"))
+
+    assert repo.supersede_artifact(a_uuid, b_uuid)["applied"] is True
+    assert repo.supersede_artifact(c_uuid, a_uuid)["applied"] is True
+    assert repo.supersede_artifact(b_uuid, c_uuid)["applied"] is False
+    assert _state(graph, c_uuid) == {"status": ArtifactStatus.PROPOSED, "replacements": []}
+
+
+def test_concurrent_opposite_supersessions_have_one_winner(test_neo4j_repo: Any) -> None:
+    """A->B racing B->A: the sorted lock order must serialize them so only one edge forms."""
+    graph = test_neo4j_repo
+    plain_repo = WorkArtifactRepository(graph)
+    a_uuid = _artifact(plain_repo, title="a")
+    b_uuid = _artifact(plain_repo, title="b")
+    both_started = Barrier(2, timeout=15)
+
+    class SynchronizedGraph:
+        def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            if "SET first.lifecycle_revision" in query:
+                both_started.wait()
+            return graph.execute(query, params)
+
+    repo = WorkArtifactRepository(SynchronizedGraph())
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(repo.supersede_artifact, new, old)
+            for new, old in ((a_uuid, b_uuid), (b_uuid, a_uuid))
+        ]
+        results = [future.result(timeout=20) for future in futures]
+
+    assert sorted(result["applied"] for result in results) == [False, True]
+    states = [_state(graph, a_uuid), _state(graph, b_uuid)]
+    assert sorted(s["status"] for s in states) == [ArtifactStatus.PROPOSED, ArtifactStatus.SUPERSEDED]
+    assert sum(len(s["replacements"]) for s in states) == 1
