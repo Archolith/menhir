@@ -1,3 +1,19 @@
+## 2026-11-22 - Conflicts needing attention appear as an operator warning, like FAILED saves
+
+- `infrastructure/telemetry/operator_warnings_store.py`, `core/backend_runtime_admin_ops.py`,
+  `mcp/formatters.py`, `mcp/tools/ops/acknowledge_warning.py`: a new `conflicts` operator warning.
+  It is raised while any conflict group is confirmed and undecided, or has waited over 24 hours for
+  LLM review. It shows on `add_memory`, `add_memory_and_track` and the session-start tools, and is
+  listed in `get_memory_stats`. `acknowledge_warning(kind="conflicts")` silences it until a
+  conflict is newly confirmed or newly stuck. Like `failed_episodes` it counts every silo and is
+  hidden from namespace-pinned callers.
+- `infrastructure/memory_queries.py`: `fetch_memory_overview` adds `unresolved_conflict_groups`,
+  `stale_pending_conflict_groups` and `latest_conflict_attention_at`, read in the same overview
+  call the FAILED warning already shares.
+- `infrastructure/consolidation_queries.py`: members record `conflict_confirmed_at` when review
+  confirms them or a PROMOTED pair routes them to `unresolved` (structural in
+  `graph_text_inventory.py`).
+
 ## 2026-11-22 - Conflict lifecycle: pending conflicts are visible, review covers every member, enrichment queues conflicts (#651, #652, #654, #655)
 
 - `domain/warden.py`, `domain/truth/labels.py`, `services/assertion_pipeline.py`: recall flags a

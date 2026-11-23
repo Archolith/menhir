@@ -67,6 +67,10 @@ from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
 
+#: A conflict pending LLM review longer than this counts as stuck (the review runs hourly).
+#: Matches the queue-health warning threshold in ``scheduler_tasks``.
+STALE_PENDING_CONFLICT_DURATION = "PT24H"
+
 #: CF-332: the absorbed-block header written by conflict resolution, as a Cypher literal.
 ABSORBED_BLOCK_SEPARATOR_CYPHER = json.dumps(ABSORBED_BLOCK_SEPARATOR)
 
@@ -338,7 +342,29 @@ class MemoryQueryRepository:
                                        THEN n.conflict_group_id END) AS pending_conflict_groups,
                    min(CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
                                  AND n.conflict_status = 'pending_llm_review'
-                            THEN n.conflict_created_at END) AS oldest_pending_conflict_at
+                            THEN n.conflict_created_at END) AS oldest_pending_conflict_at,
+                   count(DISTINCT CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                                        AND n.conflict_status = 'unresolved'
+                                       THEN n.conflict_group_id END) AS unresolved_conflict_groups,
+                   count(DISTINCT CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                                        AND n.conflict_status = 'pending_llm_review'
+                                        AND n.conflict_created_at < datetime() - duration('{STALE_PENDING_CONFLICT_DURATION}')
+                                       THEN n.conflict_group_id END) AS stale_pending_conflict_groups,
+                   // When a group began needing attention: a member's confirmation (or detection,
+                   // for a PROMOTED pair or a pre-stamp graph), or a pending member going stale.
+                   // A new conflict needing attention moves this past an acknowledgement.
+                   max(CASE
+                         WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                              AND n.conflict_status = 'unresolved'
+                         THEN CASE WHEN n.conflict_confirmed_at IS NOT NULL
+                                        AND (n.conflict_created_at IS NULL
+                                             OR n.conflict_confirmed_at > n.conflict_created_at)
+                                   THEN n.conflict_confirmed_at ELSE n.conflict_created_at END
+                         WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                              AND n.conflict_status = 'pending_llm_review'
+                              AND n.conflict_created_at < datetime() - duration('{STALE_PENDING_CONFLICT_DURATION}')
+                         THEN n.conflict_created_at + duration('{STALE_PENDING_CONFLICT_DURATION}')
+                       END) AS latest_conflict_attention_at
             """,
             params or None,
         )
@@ -379,11 +405,21 @@ class MemoryQueryRepository:
             "latest_failed_at": None,
             "pending_conflict_groups": 0,
             "oldest_pending_conflict_at": None,
+            "unresolved_conflict_groups": 0,
+            "stale_pending_conflict_groups": 0,
+            "latest_conflict_attention_at": None,
         }
         overview["latest_failed_at"] = _iso_utc_or_none(overview.get("latest_failed_at"))
         overview["pending_conflict_groups"] = int(overview.get("pending_conflict_groups") or 0)
         overview["oldest_pending_conflict_at"] = _iso_utc_or_none(
             overview.get("oldest_pending_conflict_at")
+        )
+        overview["unresolved_conflict_groups"] = int(overview.get("unresolved_conflict_groups") or 0)
+        overview["stale_pending_conflict_groups"] = int(
+            overview.get("stale_pending_conflict_groups") or 0
+        )
+        overview["latest_conflict_attention_at"] = _iso_utc_or_none(
+            overview.get("latest_conflict_attention_at")
         )
         overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
         overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)

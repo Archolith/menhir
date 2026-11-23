@@ -812,6 +812,29 @@ def _operator_warning_line(entry: Any) -> str | None:
             f"WARNING: {summary}. Enrichment cannot progress until provider "
             "credits are added; stop waiting on queued episodes."
         )
+    elif kind == "conflicts":
+        try:
+            confirmed = int(entry.get("unresolved_groups") or 0)
+            stale = int(entry.get("stale_pending_groups") or 0)
+        except (TypeError, ValueError):
+            return None
+        if confirmed <= 0 and stale <= 0:
+            return None
+        parts = []
+        if confirmed:
+            parts.append(
+                f"{confirmed} group{'' if confirmed == 1 else 's'} of contradicting memories "
+                f"{'is' if confirmed == 1 else 'are'} confirmed and undecided"
+            )
+        if stale:
+            parts.append(
+                f"{stale} possible conflict group{'' if stale == 1 else 's'} "
+                f"{'has' if stale == 1 else 'have'} waited over 24h for LLM review"
+            )
+        text = (
+            f"WARNING: {'; '.join(parts)}. Recall flags these memories; "
+            "see list_conflicts or review_inbox to decide them."
+        )
     elif kind != "failed_episodes":
         # A kind from a newer serve: its own summary.
         return f"WARNING: {summary}." if summary else None

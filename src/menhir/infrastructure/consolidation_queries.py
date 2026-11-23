@@ -720,10 +720,14 @@ class ConsolidationRepository:
                 a.conflict_status    = CASE WHEN a_confirmed THEN 'unresolved' ELSE $initial_status END,
                 a.conflict_created_at = CASE WHEN a_fresh THEN datetime()
                                              ELSE coalesce(a.conflict_created_at, datetime()) END,
+                a.conflict_confirmed_at = CASE WHEN NOT a_confirmed AND $initial_status = 'unresolved'
+                                               THEN datetime() ELSE a.conflict_confirmed_at END,
                 b.conflict_group_id  = canonical_group_id,
                 b.conflict_status    = CASE WHEN b_confirmed THEN 'unresolved' ELSE $initial_status END,
                 b.conflict_created_at = CASE WHEN b_fresh THEN datetime()
-                                             ELSE coalesce(b.conflict_created_at, datetime()) END
+                                             ELSE coalesce(b.conflict_created_at, datetime()) END,
+                b.conflict_confirmed_at = CASE WHEN NOT b_confirmed AND $initial_status = 'unresolved'
+                                               THEN datetime() ELSE b.conflict_confirmed_at END
             // #654: members absorbed from a merged group keep their own status and age.
             // A member resolved after the orphan read must not be left in a live group
             // with a terminal status, so anything not live goes back to review.
@@ -787,7 +791,9 @@ class ConsolidationRepository:
               AND n.conflict_status = $from_status
               AND {tenant_scope_cypher("n")}
               AND {automatic_lifecycle_protection_cypher("n")}
-            SET n.conflict_status = $to_status
+            SET n.conflict_status = $to_status,
+                n.conflict_confirmed_at = CASE WHEN $to_status = 'unresolved'
+                                               THEN datetime() ELSE n.conflict_confirmed_at END
             RETURN count(n) AS updated
             """,
             params={
