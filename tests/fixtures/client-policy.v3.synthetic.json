@@ -39,7 +39,7 @@
       }
     }
   },
-  "canonical_digest": "b35a037656f7bb409c928078de39de95e0e020b6e184f1524f2d4eb555e472ab",
+  "canonical_digest": "42c94bfe81033918dff876b7295f07f9045aa9d8aecead2b41c340038ebf3049",
   "clients": {
     "example-chatgpt-web": {
       "label": "chatgpt-chat",
@@ -108,6 +108,18 @@
       "profiles": [
         "core",
         "curate"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=agy": {
+      "label": "agent-smith-agy",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
       ],
       "scopes": [
         "menhir:read",

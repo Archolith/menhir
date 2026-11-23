@@ -196,6 +196,19 @@ def test_agent_smith_client_metadata_is_stable_public_client():
     ).json()
     assert opencode["scope"] == "menhir:read menhir:write offline_access"
 
+    agy = _client(settings).get(
+        "/oauth/client-metadata/agent-smith.json?client=agy"
+    ).json()
+    assert agy["client_id"] == (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=agy"
+    )
+    assert agy["client_name"] == "Agent Smith - Antigravity CLI"
+    assert agy["redirect_uris"] == [
+        "http://127.0.0.1:43694/oauth/callback",
+        "http://localhost:43694/oauth/callback",
+    ]
+    assert agy["scope"] == "menhir:read menhir:write offline_access"
+
 
 def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
     from menhir.api.oauth_as_metadata import _AGENT_SMITH_CLIENTS
@@ -215,10 +228,10 @@ def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
         for client_key in _AGENT_SMITH_CLIENTS
     ]
 
-    assert len(payloads) == 12
-    assert len({payload["client_id"] for payload in payloads}) == 12
-    assert len({payload["client_name"] for payload in payloads}) == 12
-    assert len({payload["redirect_uris"][0] for payload in payloads}) == 12
+    assert len(payloads) == 13
+    assert len({payload["client_id"] for payload in payloads}) == 13
+    assert len({payload["client_name"] for payload in payloads}) == 13
+    assert len({payload["redirect_uris"][0] for payload in payloads}) == 13
 
 
 def test_retired_reasonix_client_is_not_published():

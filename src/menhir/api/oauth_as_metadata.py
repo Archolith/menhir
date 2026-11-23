@@ -27,6 +27,7 @@ _AGENT_SMITH_CLIENTS: dict[str, tuple[str, int]] = {
     "cline": ("Agent Smith - Cline", 43691),
     "wsl-claude": ("Agent Smith - Claude (WSL)", 43692),
     "wsl-opencode": ("Agent Smith - OpenCode (WSL)", 43693),
+    "agy": ("Agent Smith - Antigravity CLI", 43694),
 }
 _OPERATOR_AGENT_SMITH_CLIENTS = frozenset({"claude", "codex", "wsl-claude"})
 
