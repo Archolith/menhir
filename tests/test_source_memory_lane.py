@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.infrastructure.cypher import EPISODE_NOT_ERASED
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -49,9 +50,11 @@ def test_episode_embedding_query_has_predicates_and_is_read_only() -> None:
     assert "structure_role IS NULL" in query
     assert "is_evidence_projection" in query
     assert "view_class = 'FACT'" in query
-    # Menhir-own queue nodes only; failed enrichments excluded.
+    # Menhir-own queue nodes only. A failed enrichment stays recallable (#662); only an
+    # erase tombstone is excluded.
     assert "n.processing_state IS NOT NULL" in query
-    assert "n.processing_state <> 'FAILED'" in query
+    assert "n.processing_state <> 'FAILED'" not in query
+    assert EPISODE_NOT_ERASED in query
     # Stale-dimension embeddings are skipped, not errored.
     assert "size(n.content_embedding) = size($query_vector)" in query
     # Shared tenancy predicate via tenant_scope_cypher, always included.
@@ -103,7 +106,8 @@ def test_backfill_listing_has_namespace_and_processing_state_predicates() -> Non
     query, params = neo4j.calls[0]
     assert "n.content_embedding IS NULL" in query
     assert "n.processing_state IS NOT NULL" in query
-    assert "n.processing_state <> 'FAILED'" in query
+    assert "n.processing_state <> 'FAILED'" not in query
+    assert EPISODE_NOT_ERASED in query
     assert "structure_role IS NULL" in query
     assert "is_evidence_projection" in query
     assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in query

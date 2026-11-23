@@ -343,29 +343,10 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
         ctx.graphiti_episode_max_estimated_tokens,
     )
     if preflight_rejection is not None:
-        # PART 2: Create raw-capture for terminal breakage (preflight oversize rejection).
-        # This is best-effort — capture failure must not break the failure handling itself.
-        try:
-            episode_content = compose_episode_body(ctx.claimed)
-            if episode_content.strip():
-                # Short name: first ~60 chars of content
-                capture_name = episode_content[:60].replace("\n", " ").strip()
-                await asyncio.to_thread(
-                    ctx.graph_adapter.create_raw_capture_entity,
-                    episode_uuid=ctx.episode_uuid,
-                    name=capture_name,
-                    content=episode_content,
-                    namespace=str(ctx.claimed.get("namespace") or "default"),
-                    session_id=str(ctx.claimed.get("session_id") or ""),
-                    user_id=str(ctx.claimed.get("user_id") or ""),
-                    source=str(ctx.claimed.get("source") or "claude-code"),
-                )
-        except Exception as e:
-            logger.warning(
-                "Failed to create raw-capture for oversized episode %s: %s",
-                ctx.episode_uuid,
-                e,
-            )
+        # An oversized episode is parked before the main path embeds it. Embed it here (the
+        # embed truncates and never raises), so the source-memory lane can still recall its
+        # text (#662). No raw-capture copy: it was never retired if the episode later succeeded.
+        await embed_episode_content(ctx)
 
         failed = ctx.graph_adapter.mark_episode_failed(
             ctx.episode_uuid,

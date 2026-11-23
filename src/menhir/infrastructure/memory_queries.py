@@ -733,7 +733,9 @@ class MemoryQueryRepository:
             "size(n.content_embedding) = size($query_vector)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            # A FAILED enrichment keeps its text recallable here (#662); only an erase
+            # tombstone (also FAILED, substage deleted_by_user) is excluded.
+            EPISODE_NOT_ERASED,
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]

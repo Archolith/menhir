@@ -515,10 +515,12 @@ class MemoryGraphAdapter:
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
-            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only
+            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only,
+            settled_only=settled_only,
         )
 
     def create_evidence_projection(
@@ -708,52 +710,11 @@ class MemoryGraphAdapter:
         return self._episodes.mark_raw_capture_superseded(episode_uuid)
 
     def fail_exhausted_pending_episodes(self, *, max_attempts: int) -> int:
-        """Mark exhausted PENDING episodes as FAILED, with raw-capture creation for each.
+        """Mark exhausted PENDING episodes as FAILED.
 
-        PART 2: Creates raw-capture entities for exhausted episodes with content before
-        marking them as failed, so terminal breakage preserves the episode text for recall.
-
-        This body was dead until 2026-08-19: a second, bare-delegation definition of the same
-        method later in the class shadowed it, so an exhausted episode was marked FAILED with
-        no raw capture and its text never reached recall (recall searches ``:Entity``; the
-        surviving ``:Episodic`` node is not one). Restoring it also switches its cost back on,
-        which is why ``fetch_exhausted_pending_episodes`` is now bounded by a LIMIT and
-        ``raw_capture_for`` is indexed -- the per-episode MERGE below is a label scan without it.
+        No raw-capture copy is written (#662): a FAILED episode stays recallable through the
+        source-memory lane, and the repair job embeds it if the ingest step never did.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Fetch episodes that will be marked as exhausted
-        exhausted_episodes = self._episodes.fetch_exhausted_pending_episodes(
-            max_attempts=max_attempts
-        )
-
-        # Create raw-captures for episodes with content (best-effort, don't block failure)
-        for row in exhausted_episodes:
-            content = str(row.get("content") or "").strip()
-            if content:  # Only create capture if there's content
-                try:
-                    episode_uuid = row.get("episode_uuid")
-                    capture_name = content[:60].replace("\n", " ").strip()
-                    self.create_raw_capture_entity(
-                        episode_uuid=episode_uuid,
-                        name=capture_name,
-                        content=content,
-                        namespace=row.get("namespace") or "default",
-                        session_id=row.get("session_id") or "",
-                        user_id=row.get("user_id") or "",
-                        source=row.get("source") or "claude-code",
-                        read_epoch=int(row.get("fence_epoch") or 0),
-                    )
-                except Exception as e:
-                    logger.debug(
-                        "Failed to create raw-capture for exhausted episode %s: %s",
-                        row.get("episode_uuid"),
-                        e,
-                    )
-
-        # Now mark all exhausted episodes as failed
         return self._episodes.fail_exhausted_pending_episodes(max_attempts=max_attempts)
 
     def fetch_episode_processing(self, episode_uuid: str) -> dict[str, Any] | None:

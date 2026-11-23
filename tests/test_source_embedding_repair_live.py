@@ -43,8 +43,11 @@ def test_listing_ready_only_selects_finished_unembedded_episodes(test_neo4j_repo
     repo = EpisodeRepository(graph)
     ready = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, ready_only=True)}
     every = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50)}
+    settled = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, settled_only=True)}
     assert ready == {"r-ready"}
-    assert every == {"r-ready", "r-pending", "r-enriching"}
+    # A FAILED episode is source-recallable (#662), so it is listed for embedding too.
+    assert settled == {"r-ready", "r-failed"}
+    assert every == {"r-ready", "r-pending", "r-enriching", "r-failed"}
 
 
 def test_write_is_refused_when_content_no_longer_matches(test_neo4j_repo: Any) -> None:
