@@ -4,16 +4,24 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
-## 2026-11-22 - Agent Smith OAuth client for Antigravity CLI (`agy`), Stage A
+## 2026-11-22 - Agent Smith OAuth clients come from the client policy
 
-- `src/menhir/api/oauth_as_metadata.py`: adds `?client=agy` ("Agent Smith - Antigravity CLI",
-  callback port 43694). `gemini` (43683) and `gemini-config` (43685) stay until the agy cutover is
-  proven live; a later release retires them.
-- `tests/fixtures/client-policy.v3.synthetic.json`, `client-policy.synthetic.json`: both admit
-  `?client=agy` at agent tier with `menhir:read menhir:write`; canonical digests recomputed.
-- Tests: `test_oauth_as_metadata.py` (13 clients, agy metadata), `test_client_policy_v3.py`
-  (agy admitted at agent tier and refused operator, v2 and v3 fixtures).
-- Production `client-policy.json` is not changed here; it is updated at deploy.
+- `src/menhir/api/oauth_as_metadata.py`: the hardcoded Agent Smith table (`_AGENT_SMITH_CLIENTS`,
+  `_OPERATOR_AGENT_SMITH_CLIENTS`) is removed. `/oauth/client-metadata/agent-smith.json?client=<key>`
+  and the local CIMD resolution in authorize now publish a document only when the loaded client
+  policy lists that exact client_id with a `registration` (client name, loopback redirect URIs).
+  Scope comes from the policy. No policy, no registration or a client removed from the policy:
+  404 / no local document. URLs, client_ids and ports are unchanged.
+- **Deploy precondition:** the production `client-policy.json` must give every Agent Smith client a
+  `registration` matching its stored `oauth_clients` row (same name, `http://127.0.0.1:<port>` then
+  `http://localhost:<port>` callback), or startup refuses on drift. Adding or retiring a harness
+  (e.g. `agy` 43694, later `gemini`/`gemini-config`) is then a policy change, not a release.
+- `tests/fixtures/client-policy*.synthetic.json`: Agent Smith entries carry registrations and both
+  admit `?client=agy`; digests recomputed.
+- Tests: `test_oauth_as_metadata.py` (documents from registrations, 404 without policy, removed or
+  unregistered client, foreign issuer), `test_oauth_cimd.py` (local resolution needs the policy;
+  registrations reconcile with rows stored by the old table; drift refuses startup),
+  `test_client_policy_v3.py` (agy agent tier on v2 and v3; no table fallback).
 
 ## 2026-11-15 - Hardening: loopback request checks, ingest path containment, structure signatures
 

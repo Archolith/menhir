@@ -410,12 +410,13 @@ def test_agent_smith_cimd_scope_follows_the_policy_tier(tmp_path: Path) -> None:
     document = agent_smith_client_document_for_id(CODEX, _metadata_settings(), authority)
     assert document is not None
     assert document["scope"] == "menhir:read menhir:write offline_access"
-    # Without the policy the built-in table still says operator.
-    legacy = agent_smith_client_document_for_id(CODEX, _metadata_settings())
-    assert legacy["scope"] == "menhir:read menhir:write menhir:admin offline_access"
+    # The policy is the only source: no policy, no Agent Smith document.
+    assert agent_smith_client_document_for_id(CODEX, _metadata_settings()) is None
 
 
-def test_agent_smith_cimd_scope_falls_back_when_client_not_in_policy(tmp_path: Path) -> None:
+def test_agent_smith_client_not_in_policy_has_no_document(tmp_path: Path) -> None:
+    from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
+
     claude = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude"
     payload = _payload()
     del payload["clients"][claude]
@@ -423,9 +424,7 @@ def test_agent_smith_cimd_scope_falls_back_when_client_not_in_policy(tmp_path: P
     products["claude"]["client_ids"].remove(claude)
     authority = _load(tmp_path, payload)
 
-    assert _metadata_scope(authority, "claude") == (
-        "menhir:read menhir:write menhir:admin offline_access"
-    )
+    assert agent_smith_client_document_for_id(claude, _metadata_settings(), authority) is None
 
 
 @pytest.mark.parametrize("value", ["silo-a", "  silo-a ", None, 7])

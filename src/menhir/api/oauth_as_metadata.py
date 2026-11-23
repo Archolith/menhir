@@ -6,7 +6,6 @@ from archolith_oauth import AuthorizationServerConfig, authorization_server_meta
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from menhir.access_contract import AGENT_SCOPES, OPERATOR_SCOPES
 from menhir.api.client_policy import ClientPolicyAuthority
 from menhir.config import MemorySettings
 from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
@@ -14,22 +13,7 @@ from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 router = APIRouter()
 
 _REFRESH_TTL_DEFAULT_S = 30 * 24 * 60 * 60
-_AGENT_SMITH_CLIENTS: dict[str, tuple[str, int]] = {
-    "claude": ("Agent Smith - Claude", 43681),
-    "codex": ("Agent Smith - Codex", 43682),
-    "gemini": ("Agent Smith - Gemini", 43683),
-    "antigravity-ide": ("Agent Smith - Antigravity IDE", 43684),
-    "gemini-config": ("Agent Smith - Gemini Config", 43685),
-    "opencode": ("Agent Smith - OpenCode", 43686),
-    "qwen": ("Agent Smith - Qwen", 43687),
-    "goose": ("Agent Smith - Goose", 43688),
-    "zcode": ("Agent Smith - ZCode", 43690),
-    "cline": ("Agent Smith - Cline", 43691),
-    "wsl-claude": ("Agent Smith - Claude (WSL)", 43692),
-    "wsl-opencode": ("Agent Smith - OpenCode (WSL)", 43693),
-    "agy": ("Agent Smith - Antigravity CLI", 43694),
-}
-_OPERATOR_AGENT_SMITH_CLIENTS = frozenset({"claude", "codex", "wsl-claude"})
+_AGENT_SMITH_METADATA_PATH = "/oauth/client-metadata/agent-smith.json"
 
 
 def _as_enabled(settings: object) -> bool:
@@ -63,18 +47,6 @@ def build_authorization_server_config(settings: object) -> AuthorizationServerCo
     )
 
 
-def _permission_scopes_for(
-    client_id: str, client_key: str, client_policy: ClientPolicyAuthority | None
-) -> frozenset[str]:
-    # The policy owns each client's tier; the built-in table is only the
-    # fallback for deployments that run without a client policy.
-    if client_policy is not None:
-        policy = client_policy.clients.get(client_id)
-        if policy is not None:
-            return policy.scopes
-    return OPERATOR_SCOPES if client_key in _OPERATOR_AGENT_SMITH_CLIENTS else AGENT_SCOPES
-
-
 def agent_smith_client_document_for_id(
     client_id: str,
     settings: object,
@@ -82,37 +54,35 @@ def agent_smith_client_document_for_id(
 ) -> dict[str, object] | None:
     """Build a locally authoritative Agent Smith CIMD document for *client_id*.
 
-    These identities are published by this same process and admitted only by
-    the digest-bound production policy. Resolving them locally avoids an
+    The deployment's digest-bound client policy owns these identities: a
+    document exists only when the policy lists this exact client_id with a
+    ``registration`` (client name and loopback redirect URIs). No policy, or
+    no registration, means no document. Resolving them locally avoids an
     availability dependency on Cloudflare allowing the VPS to hairpin through
     its own public hostname. Every other HTTPS client_id still uses the shared
-    SSRF-guarded outbound resolver. When *client_policy* lists the client, its
-    advertised scope is the policy's.
+    SSRF-guarded outbound resolver.
     """
 
     config = build_authorization_server_config(settings)
-    prefix = f"{config.issuer}/oauth/client-metadata/agent-smith.json?client="
-    if not client_id.startswith(prefix):
+    prefix = f"{config.issuer}{_AGENT_SMITH_METADATA_PATH}?client="
+    if client_policy is None or not client_id.startswith(prefix):
         return None
-    client_key = client_id[len(prefix) :]
-    profile = _AGENT_SMITH_CLIENTS.get(client_key)
-    if profile is None or client_id != f"{prefix}{client_key}":
+    if not client_id[len(prefix) :]:
         return None
-    client_name, callback_port = profile
+    policy = client_policy.clients.get(client_id)
+    if policy is None or policy.registration is None:
+        return None
+    registration = policy.registration
     as_metadata = authorization_server_metadata(config)
-    permission_scopes = _permission_scopes_for(client_id, client_key, client_policy)
     advertised_scopes = [
         scope
         for scope in as_metadata["scopes_supported"]
-        if scope in permission_scopes or scope == "offline_access"
+        if scope in policy.scopes or scope == "offline_access"
     ]
     return {
         "client_id": client_id,
-        "client_name": client_name,
-        "redirect_uris": [
-            f"http://127.0.0.1:{callback_port}/oauth/callback",
-            f"http://localhost:{callback_port}/oauth/callback",
-        ],
+        "client_name": registration.client_name,
+        "redirect_uris": list(registration.redirect_uris),
         "grant_types": as_metadata["grant_types_supported"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
@@ -166,25 +136,18 @@ async def agent_smith_client_metadata(request: Request) -> JSONResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     client_key = request.query_params.get("client", "")
-    profile = _AGENT_SMITH_CLIENTS.get(client_key)
-    if profile is None:
-        raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
-    client_id = (
-        f"{config.issuer}/oauth/client-metadata/agent-smith.json?client={client_key}"
-    )
+    client_id = f"{config.issuer}{_AGENT_SMITH_METADATA_PATH}?client={client_key}"
     document = agent_smith_client_document_for_id(
         client_id,
         settings,
         getattr(request.app.state, "client_policy", None),
     )
-    if document is None:  # pragma: no cover - guarded by the profile lookup above
+    if document is None:
         raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
     return JSONResponse(document)
 
 
 __all__ = [
-    "_AGENT_SMITH_CLIENTS",
-    "_OPERATOR_AGENT_SMITH_CLIENTS",
     "agent_smith_client_document_for_id",
     "_as_enabled",
     "agent_smith_client_metadata",

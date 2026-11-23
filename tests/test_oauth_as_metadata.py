@@ -161,47 +161,70 @@ def test_refresh_config_receives_issue_flag_and_ttl():
     assert config.issue_refresh_tokens is False
 
 
-def test_agent_smith_client_metadata_is_stable_public_client():
-    settings = SimpleNamespace(
-        oauth_as_enabled=True,
-        oauth_public_base_url="https://memory.example.com",
-        oauth_as_refresh_tokens_enabled=True,
-        oauth_scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
-        oauth_admin_scopes=("menhir:admin",),
-    )
+_AGENT_SMITH = "/oauth/client-metadata/agent-smith.json?client="
+_AGENT_SMITH_SETTINGS = SimpleNamespace(
+    oauth_as_enabled=True,
+    oauth_public_base_url="https://memory.example.com",
+    oauth_as_refresh_tokens_enabled=True,
+    oauth_scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
+    oauth_admin_scopes=("menhir:admin",),
+)
 
-    response = _client(settings).get(
-        "/oauth/client-metadata/agent-smith.json?client=claude"
-    )
+
+def agent_smith_policy(tmp_path, issuer="https://memory.example.com", edit=None):
+    """Load the v3 synthetic policy with its client ids rebased onto *issuer*."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from menhir.api.client_policy import load_client_policy
+
+    source = Path(__file__).resolve().parent / "fixtures" / "client-policy.v3.synthetic.json"
+    text = source.read_text(encoding="utf-8").replace("https://menhir.example.com", issuer)
+    payload = json.loads(text)
+    if edit is not None:
+        edit(payload)
+    payload.pop("canonical_digest", None)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    digest = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    payload["canonical_digest"] = digest
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return load_client_policy(str(path), digest)
+
+
+def _policy_client(settings, policy) -> TestClient:
+    app = FastAPI()
+    app.state.settings = settings
+    if policy is not None:
+        app.state.client_policy = policy
+    app.include_router(oauth_as_metadata_router)
+    return TestClient(app)
+
+
+def test_agent_smith_client_metadata_comes_from_policy_registration(tmp_path):
+    client = _policy_client(_AGENT_SMITH_SETTINGS, agent_smith_policy(tmp_path))
+
+    response = client.get(_AGENT_SMITH + "claude")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
-    payload = response.json()
-    assert payload["client_id"] == (
-        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=claude"
-    )
-    assert payload["client_name"] == "Agent Smith - Claude"
-    assert payload["token_endpoint_auth_methods_supported"] == ["none"]
-    assert payload["redirect_uris"] == [
-        "http://127.0.0.1:43681/oauth/callback",
-        "http://localhost:43681/oauth/callback",
-    ]
-    assert payload["grant_types"] == ["authorization_code", "refresh_token"]
-    assert payload["scope"] == (
-        "menhir:read menhir:write menhir:admin offline_access"
-    )
-
-    opencode = _client(settings).get(
-        "/oauth/client-metadata/agent-smith.json?client=opencode"
-    ).json()
+    assert response.json() == {
+        "client_id": "https://memory.example.com" + _AGENT_SMITH + "claude",
+        "client_name": "Agent Smith - Claude",
+        "redirect_uris": [
+            "http://127.0.0.1:43681/oauth/callback",
+            "http://localhost:43681/oauth/callback",
+        ],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scope": "menhir:read menhir:write menhir:admin offline_access",
+    }
+    opencode = client.get(_AGENT_SMITH + "opencode").json()
     assert opencode["scope"] == "menhir:read menhir:write offline_access"
-
-    agy = _client(settings).get(
-        "/oauth/client-metadata/agent-smith.json?client=agy"
-    ).json()
-    assert agy["client_id"] == (
-        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=agy"
-    )
+    agy = client.get(_AGENT_SMITH + "agy").json()
     assert agy["client_name"] == "Agent Smith - Antigravity CLI"
     assert agy["redirect_uris"] == [
         "http://127.0.0.1:43694/oauth/callback",
@@ -210,23 +233,12 @@ def test_agent_smith_client_metadata_is_stable_public_client():
     assert agy["scope"] == "menhir:read menhir:write offline_access"
 
 
-def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
-    from menhir.api.oauth_as_metadata import _AGENT_SMITH_CLIENTS
-
-    settings = SimpleNamespace(
-        oauth_as_enabled=True,
-        oauth_public_base_url="https://memory.example.com",
-        oauth_as_refresh_tokens_enabled=True,
-        oauth_scopes_supported=("menhir:read", "menhir:write"),
-        oauth_admin_scopes=(),
-    )
-    client = _client(settings)
-    payloads = [
-        client.get(
-            f"/oauth/client-metadata/agent-smith.json?client={client_key}"
-        ).json()
-        for client_key in _AGENT_SMITH_CLIENTS
-    ]
+def test_agent_smith_clients_have_distinct_ids_names_and_ports(tmp_path):
+    policy = agent_smith_policy(tmp_path)
+    prefix = "https://memory.example.com" + _AGENT_SMITH
+    keys = [cid[len(prefix):] for cid in policy.clients if cid.startswith(prefix)]
+    client = _policy_client(_AGENT_SMITH_SETTINGS, policy)
+    payloads = [client.get(_AGENT_SMITH + key).json() for key in keys]
 
     assert len(payloads) == 13
     assert len({payload["client_id"] for payload in payloads}) == 13
@@ -234,25 +246,54 @@ def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
     assert len({payload["redirect_uris"][0] for payload in payloads}) == 13
 
 
-def test_retired_reasonix_client_is_not_published():
-    settings = SimpleNamespace(
-        oauth_as_enabled=True,
-        oauth_public_base_url="https://memory.example.com",
-    )
-
-    response = _client(settings).get(
-        "/oauth/client-metadata/agent-smith.json?client=reasonix"
-    )
+def test_agent_smith_metadata_needs_a_client_policy():
+    response = _client(_AGENT_SMITH_SETTINGS).get(_AGENT_SMITH + "claude")
 
     assert response.status_code == 404
 
 
-def test_retired_shared_agent_smith_client_is_not_published():
-    settings = SimpleNamespace(
-        oauth_as_enabled=True,
-        oauth_public_base_url="https://memory.example.com",
-    )
+def test_client_removed_from_policy_is_not_published(tmp_path):
+    cid = "https://memory.example.com" + _AGENT_SMITH + "gemini"
 
-    response = _client(settings).get("/oauth/client-metadata/agent-smith.json")
+    def drop_gemini(payload):
+        del payload["clients"][cid]
+        for product in payload["access_contract"]["products"].values():
+            if cid in product.get("client_ids", []):
+                product["client_ids"].remove(cid)
+
+    policy = agent_smith_policy(tmp_path, edit=drop_gemini)
+    client = _policy_client(_AGENT_SMITH_SETTINGS, policy)
+
+    assert client.get(_AGENT_SMITH + "gemini").status_code == 404
+    assert client.get(_AGENT_SMITH + "claude").status_code == 200
+
+
+def test_policy_client_without_registration_is_not_published(tmp_path):
+    cid = "https://memory.example.com" + _AGENT_SMITH + "codex"
+
+    def strip_registration(payload):
+        del payload["clients"][cid]["registration"]
+
+    policy = agent_smith_policy(tmp_path, edit=strip_registration)
+
+    response = _policy_client(_AGENT_SMITH_SETTINGS, policy).get(_AGENT_SMITH + "codex")
 
     assert response.status_code == 404
+
+
+def test_agent_smith_document_refuses_foreign_issuer_ids(tmp_path):
+    from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
+
+    foreign = agent_smith_policy(tmp_path, issuer="https://other.example.com")
+    foreign_id = "https://other.example.com" + _AGENT_SMITH + "claude"
+
+    assert foreign.clients.get(foreign_id) is not None
+    assert agent_smith_client_document_for_id(foreign_id, _AGENT_SMITH_SETTINGS, foreign) is None
+
+
+def test_unknown_and_missing_client_keys_are_not_published(tmp_path):
+    client = _policy_client(_AGENT_SMITH_SETTINGS, agent_smith_policy(tmp_path))
+
+    assert client.get(_AGENT_SMITH + "reasonix").status_code == 404
+    assert client.get("/oauth/client-metadata/agent-smith.json").status_code == 404
+    assert client.get(_AGENT_SMITH).status_code == 404
