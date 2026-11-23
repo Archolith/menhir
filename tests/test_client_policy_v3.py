@@ -22,6 +22,7 @@ CATALOG = frozenset(TIERS)
 CHATGPT = "https://chatgpt.com/oauth/client.json"
 CODEX = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex"
 GEMINI = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=gemini"
+AGY = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=agy"
 READONLY = "example-web-client-1"
 OPERATOR_SCOPES = ["menhir:read", "menhir:write", "menhir:admin"]
 
@@ -302,6 +303,17 @@ def test_v2_fixture_still_loads() -> None:
 
     assert authority.version == 2
     assert authority.clients[CHATGPT].maximum_tier == "operator"
+
+
+@pytest.mark.parametrize("source", [V3, V2])
+def test_agy_agent_smith_client_is_admitted_at_agent_tier(source: Path) -> None:
+    authority = load_client_policy(str(source), _payload(source)["canonical_digest"], tool_catalog=CATALOG)
+    scopes = authority.clients[AGY].oauth_scopes
+
+    assert set(scopes) == {"menhir:read", "menhir:write"}
+    assert authority.require_client(client_id=AGY, scopes=scopes, tier="agent")
+    with pytest.raises(PermissionError, match="tier exceeds"):
+        authority.require_client(client_id=AGY, scopes=scopes, tier="operator")
 
 
 def test_v2_product_list_is_free_form(tmp_path: Path) -> None:

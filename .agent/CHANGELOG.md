@@ -4,6 +4,17 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-22 - Agent Smith OAuth client for Antigravity CLI (`agy`), Stage A
+
+- `src/menhir/api/oauth_as_metadata.py`: adds `?client=agy` ("Agent Smith - Antigravity CLI",
+  callback port 43694). `gemini` (43683) and `gemini-config` (43685) stay until the agy cutover is
+  proven live; a later release retires them.
+- `tests/fixtures/client-policy.v3.synthetic.json`, `client-policy.synthetic.json`: both admit
+  `?client=agy` at agent tier with `menhir:read menhir:write`; canonical digests recomputed.
+- Tests: `test_oauth_as_metadata.py` (13 clients, agy metadata), `test_client_policy_v3.py`
+  (agy admitted at agent tier and refused operator, v2 and v3 fixtures).
+- Production `client-policy.json` is not changed here; it is updated at deploy.
+
 ## 2026-11-15 - Hardening: loopback request checks, ingest path containment, structure signatures
 
 - `src/menhir/api/auth.py`, `api/server_support.py`: credential-free loopback grants also check the
@@ -124,17 +135,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
   fact's endpoints would flag the user node on every recall. That link is deferred to post-MVP.
 - Written only when `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER` is on.
 - `tests/test_edge_invalidation_statement_order_records.py`, `tests/test_edge_invalidation_statement_order_records_online.py`.
-
-## 2026-10-25 - Statement-order veto on edge invalidation (#168 2a)
-
-- Graphiti orders supersession by event date (`valid_at`), so an older statement whose event dates
-  later ("had it for 3 months") ended a newer one ("switched yesterday"). The invalidation hook now
-  answers KEEP on NEWER_CANDIDATE and CONTRADICTION when the cause was said before the target, and
-  both facts stay live. "Said" is the episode time: this call's episode for its own mention, the
-  stored `r.reference_time` (read by uuid and `group_id`, cached per call) for any other edge.
-- Veto only: it never ends a fact today's code keeps. The #377 authority check still answers
-  first. A missing or unparseable time keeps today's answer; a failed lookup answers KEEP. OWN_END
-  is unchanged.
-- `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER`, default on; `false` restores the old behaviour.
-  Applies at ingest, so existing graphs change only for facts written after it is on.
-- `tests/test_edge_invalidation_statement_order.py`, `tests/test_edge_invalidation_statement_order_online.py`.
