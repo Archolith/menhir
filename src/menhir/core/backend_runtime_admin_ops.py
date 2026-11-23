@@ -19,12 +19,13 @@ from .backend_shared import _to_jsonable
 
 logger = logging.getLogger(__name__)
 
-#: FAILED-count snapshot for ``get_operator_warnings``: (monotonic deadline, count,
-#: latest_failed_at). Module-level, because ``RuntimeProvider`` is built per request and an
+#: Graph snapshot for ``get_operator_warnings``: (monotonic deadline, failed count,
+#: latest_failed_at, confirmed conflict groups, stale pending groups, conflict attention time). Module-level, because ``RuntimeProvider`` is built per request and an
 #: instance attribute never reached a second call, so every write re-ran the full-graph
 #: aggregate (#488 F1). Same 60s TTL as ``formatters._stuck_count_cache``.
 _FAILED_OVERVIEW_TTL_S = 60.0
-_failed_overview_cache: tuple[float, int, str | None] | None = None
+_failed_overview_cache: tuple[float, int, str | None, int, int, str | None] | None = None
+_EMPTY_OVERVIEW_SNAPSHOT: tuple[int, str | None, int, int, str | None] = (0, None, 0, 0, None)
 _failed_overview_lock = threading.Lock()
 
 
@@ -352,26 +353,31 @@ class RuntimeProviderAdminOpsMixin:
             )
         )
 
-    async def _failed_overview_snapshot(self, fresh: bool) -> tuple[int, str | None]:
-        """(FAILED count, newest FAILED time), shared across instances for the TTL."""
+    async def _failed_overview_snapshot(
+        self, fresh: bool
+    ) -> tuple[int, str | None, int, int, str | None]:
+        """FAILED and conflict counts from one overview read, shared across instances for the TTL."""
         global _failed_overview_cache
         from time import monotonic
 
         with _failed_overview_lock:
             cached = _failed_overview_cache
         if cached is not None and not fresh and monotonic() < cached[0]:
-            return cached[1], cached[2]
+            return cached[1:]  # type: ignore[return-value]
         try:
-            overview = await self.fetch_memory_overview()
+            overview = (await self.fetch_memory_overview()) or {}
             snapshot = (
-                int((overview or {}).get("failed_count") or 0),
-                (overview or {}).get("latest_failed_at"),
+                int(overview.get("failed_count") or 0),
+                overview.get("latest_failed_at"),
+                int(overview.get("unresolved_conflict_groups") or 0),
+                int(overview.get("stale_pending_conflict_groups") or 0),
+                overview.get("latest_conflict_attention_at"),
             )
         except Exception:  # noqa: BLE001 - provider warnings must still be reported
             logger.debug("could not read FAILED count for operator warnings", exc_info=True)
             # Keep the last known count rather than reporting none while the graph is failing,
             # and hold it for the TTL so a slow graph is not re-aggregated on every write (F7).
-            snapshot = (cached[1], cached[2]) if cached is not None else (0, None)
+            snapshot = cached[1:] if cached is not None else _EMPTY_OVERVIEW_SNAPSHOT  # type: ignore[assignment]
         with _failed_overview_lock:
             _failed_overview_cache = (monotonic() + _FAILED_OVERVIEW_TTL_S, *snapshot)
         return snapshot
@@ -402,13 +408,22 @@ class RuntimeProviderAdminOpsMixin:
         rows = await self._off_loop(self.telemetry.list_operator_warnings)
         # The overview is a full-graph aggregate and add_memory polls this on every write, so
         # it is shared for 60s (the same TTL the legacy count used). Acks read it fresh.
-        failed_count, latest_failed_at = await self._failed_overview_snapshot(fresh)
+        (
+            failed_count,
+            latest_failed_at,
+            unresolved_conflicts,
+            stale_conflicts,
+            conflict_attention_at,
+        ) = await self._failed_overview_snapshot(fresh)
         return build_operator_warnings(
             rows,
             auth_failure=last_provider_auth_failure(),
             quota_exhaustion=last_provider_quota_exhaustion(),
             failed_count=failed_count,
             latest_failed_at=latest_failed_at,
+            unresolved_conflict_groups=unresolved_conflicts,
+            stale_pending_conflict_groups=stale_conflicts,
+            latest_conflict_attention_at=conflict_attention_at,
         )
 
     async def acknowledge_operator_warning(
@@ -416,6 +431,7 @@ class RuntimeProviderAdminOpsMixin:
     ) -> dict[str, Any]:
         from menhir.clock import utc_now_iso
         from menhir.infrastructure.telemetry.operator_warnings_store import (
+            KIND_CONFLICTS,
             KIND_FAILED_EPISODES,
             WARNING_KINDS,
         )
@@ -441,6 +457,8 @@ class RuntimeProviderAdminOpsMixin:
             watermark = None
             if kind == KIND_FAILED_EPISODES:
                 watermark = w.get("latest_failed_at") or utc_now_iso()
+            elif kind == KIND_CONFLICTS:
+                watermark = w.get("latest_conflict_attention_at") or utc_now_iso()
             ok = await self._off_loop(
                 self.telemetry.ack_operator_warning,
                 kind,

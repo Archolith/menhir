@@ -61,11 +61,17 @@ from menhir.infrastructure.graph_text_inventory import (
     ABSORBED_BLOCK_SEPARATOR,
     ENTITY_STRUCTURAL_PROPERTIES,
 )
+from menhir.infrastructure.consolidation_queries import automatic_lifecycle_protection_cypher
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
+
+#: A conflict pending LLM review longer than this counts as stuck (the review runs hourly).
+#: Matches the queue-health warning threshold in ``scheduler_tasks``.
+STALE_PENDING_CONFLICT_SECONDS = 24 * 3600
+STALE_PENDING_CONFLICT_DURATION = f"PT{STALE_PENDING_CONFLICT_SECONDS}S"
 
 #: CF-332: the absorbed-block header written by conflict resolution, as a Cypher literal.
 ABSORBED_BLOCK_SEPARATOR_CYPHER = json.dumps(ABSORBED_BLOCK_SEPARATOR)
@@ -319,7 +325,11 @@ class MemoryQueryRepository:
             MATCH (n)
             WHERE (n:Entity OR n:Episodic){node_filter}
             {skip_projection_lookup_cypher("n", "p")}
-            WITH n, {effective_state_cypher("n", "p")} AS effective_state
+            WITH n, {effective_state_cypher("n", "p")} AS effective_state,
+                 CASE WHEN n:Entity AND n.conflict_group_id IS NOT NULL
+                      THEN {automatic_lifecycle_protection_cypher("n")}
+                      ELSE false END AS conflict_live,
+                 coalesce(n.conflict_pending_since, n.conflict_created_at) AS pending_since
             RETURN count(n) AS total_memories,
                    count(CASE WHEN n:Entity THEN 1 END) AS entity_count,
                    count(CASE WHEN n:Episodic THEN 1 END) AS episode_count,
@@ -332,7 +342,33 @@ class MemoryQueryRepository:
                    count(CASE WHEN n:Episodic AND effective_state = 'READY' THEN 1 END) AS ready_count,
                    count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count,
                    max(CASE WHEN n:Episodic AND effective_state = 'FAILED'
-                            THEN n.processing_completed_at END) AS latest_failed_at
+                            THEN n.processing_completed_at END) AS latest_failed_at,
+                   count(DISTINCT CASE WHEN conflict_live
+                                        AND n.conflict_status = 'pending_llm_review'
+                                       THEN n.conflict_group_id END) AS pending_conflict_groups,
+                   min(CASE WHEN conflict_live
+                                 AND n.conflict_status = 'pending_llm_review'
+                            THEN pending_since END) AS oldest_pending_conflict_at,
+                   count(DISTINCT CASE WHEN conflict_live
+                                        AND n.conflict_status = 'unresolved'
+                                       THEN n.conflict_group_id END) AS unresolved_conflict_groups,
+                   count(DISTINCT CASE WHEN conflict_live
+                                        AND n.conflict_status = 'pending_llm_review'
+                                        AND pending_since < datetime() - duration('{STALE_PENDING_CONFLICT_DURATION}')
+                                       THEN n.conflict_group_id END) AS stale_pending_conflict_groups,
+                   // When a group began needing attention: a member's confirmation (or detection,
+                   // for a PROMOTED pair or a pre-stamp graph), or a pending member going stale.
+                   // A new conflict needing attention moves this past an acknowledgement.
+                   max(CASE
+                         WHEN conflict_live AND n.conflict_status = 'unresolved'
+                         THEN CASE WHEN n.conflict_confirmed_at IS NOT NULL
+                                        AND (n.conflict_created_at IS NULL
+                                             OR n.conflict_confirmed_at > n.conflict_created_at)
+                                   THEN n.conflict_confirmed_at ELSE n.conflict_created_at END
+                         WHEN conflict_live AND n.conflict_status = 'pending_llm_review'
+                              AND pending_since < datetime() - duration('{STALE_PENDING_CONFLICT_DURATION}')
+                         THEN pending_since + duration('{STALE_PENDING_CONFLICT_DURATION}')
+                       END) AS latest_conflict_attention_at
             """,
             params or None,
         )
@@ -371,8 +407,24 @@ class MemoryQueryRepository:
             "ready_count": 0,
             "failed_count": 0,
             "latest_failed_at": None,
+            "pending_conflict_groups": 0,
+            "oldest_pending_conflict_at": None,
+            "unresolved_conflict_groups": 0,
+            "stale_pending_conflict_groups": 0,
+            "latest_conflict_attention_at": None,
         }
         overview["latest_failed_at"] = _iso_utc_or_none(overview.get("latest_failed_at"))
+        overview["pending_conflict_groups"] = int(overview.get("pending_conflict_groups") or 0)
+        overview["oldest_pending_conflict_at"] = _iso_utc_or_none(
+            overview.get("oldest_pending_conflict_at")
+        )
+        overview["unresolved_conflict_groups"] = int(overview.get("unresolved_conflict_groups") or 0)
+        overview["stale_pending_conflict_groups"] = int(
+            overview.get("stale_pending_conflict_groups") or 0
+        )
+        overview["latest_conflict_attention_at"] = _iso_utc_or_none(
+            overview.get("latest_conflict_attention_at")
+        )
         overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
         overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)
         overview["admission_provenance"] = admission_provenance_state(

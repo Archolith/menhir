@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archolith-menhir"
-version = "0.3.12"
+version = "0.3.13"
 description = "Provenance, governed context, and code-impact analysis for coding agents."
 readme = "README.md"
 maintainers = [{ name = "Archolith", email = "contact@archolith.dev" }]
@@ -14,7 +14,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Archolith fork of stable Graphiti 0.31.2, with native Menhir extension hooks.
     # Its distribution name differs from the graphiti_core import package.
-    "archolith-graphiti-core==0.31.2.post3",
+    "archolith-graphiti-core==0.31.2.post4",
     # credential detection on memory writes (domain/secret_scrub.py)
     "detect-secrets==1.5.0",
     "fastapi>=0.115,<1",

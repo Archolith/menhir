@@ -53,7 +53,7 @@ wheels = [
 
 [[package]]
 name = "archolith-graphiti-core"
-version = "0.31.2.post3"
+version = "0.31.2.post4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -66,9 +66,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/41/0b/6dc9a9899265df8acebb01c472ba9dedd4ac61db88c971c022f5bd33a230/archolith_graphiti_core-0.31.2.post3.tar.gz", hash = "sha256:0a5b7c30826e9722b2240571bc5f419f58cea66b97f4d8f551581b75f3e36fcb", size = 7343817, upload-time = "2026-11-12T02:12:01.287Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/43/56c4741577efa91648525294817bab7f74da70c50a233b86ada9af80c972/archolith_graphiti_core-0.31.2.post4.tar.gz", hash = "sha256:cf120823571198f81af073a699510fcf9128a5f4a09ea2843cbc2cfb952ea1c3", size = 7362121, upload-time = "2026-11-22T20:44:59.970Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/4d/1f06987f59936d1589b9ee4882dce16db7bbdd5565891a9d9dc4918e0150/archolith_graphiti_core-0.31.2.post3-py3-none-any.whl", hash = "sha256:a468f66bb63c673f9fece7cfddf082df1a533950ee7629b06c2707767d5be515", size = 447632, upload-time = "2026-11-12T02:11:59.105Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/11/caf183b7d71f8e889d794f57e3cf53cc642a54081ade33cc3b2196652afe/archolith_graphiti_core-0.31.2.post4-py3-none-any.whl", hash = "sha256:b147016b628591069afaf3d255a1215f3f116c6d5dcbfcc068164c966da307a8", size = 451134, upload-time = "2026-11-22T20:44:58.365Z" },
 ]
 
 [[package]]
@@ -85,7 +85,7 @@ wheels = [
 
 [[package]]
 name = "archolith-menhir"
-version = "0.3.12"
+version = "0.3.13"
 source = { editable = "." }
 dependencies = [
     { name = "archolith-graphiti-core" },
@@ -124,7 +124,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "archolith-graphiti-core", specifier = "==0.31.2.post3" },
+    { name = "archolith-graphiti-core", specifier = "==0.31.2.post4" },
     { name = "archolith-mcp-framework", specifier = "==0.2.0" },
     { name = "archolith-oauth", specifier = "==0.3.1" },
     { name = "detect-secrets", specifier = "==1.5.0" },

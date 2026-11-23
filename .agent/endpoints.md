@@ -450,8 +450,10 @@ Scan persistent entity nodes for similarity-based conflicts.
 Concept id: `mcp.tool.run_llm_conflict_review`
 
 Run LLM contradiction confirmation on `pending_llm_review` conflicts immediately.
-- **`limit`** (int, optional): Max groups to process (default: 20).
-- Confirmed contradictions become `unresolved` (visible in `list_conflicts`), false positives are cleared.
+- **`limit`** (int, optional): Max groups to process, and max LLM calls (default: 20).
+- Each pending member is compared with the rest of its group. A confirmed member becomes
+  `unresolved` (visible in `list_conflicts`); a member whose every pair is rejected leaves the group
+  as `false_positive`, and a group left with one member is dissolved.
 
 ### `requeue_conflicts_for_llm_review`
 Concept id: `mcp.tool.requeue_conflicts_for_llm_review`
@@ -480,11 +482,13 @@ restart the loop.
 Concept id: `mcp.tool.acknowledge_warning`
 Required tier: `operator`
 
-Silence an operator warning (`provider_auth`, `provider_billing` or `failed_episodes`) in
-`add_memory`, `add_memory_and_track`, `recall_context_memories`, `read_flagged_memories` and
-`build_context` output. The ack covers the current incident only: a provider warning comes back
-after the condition clears and recurs, and `failed_episodes` comes back when an episode fails
-after the ack. `get_memory_stats` keeps listing acknowledged warnings while they are active.
+Silence an operator warning (`provider_auth`, `provider_billing`, `failed_episodes` or
+`conflicts`) in `add_memory`, `add_memory_and_track`, `recall_context_memories`,
+`read_flagged_memories` and `build_context` output. The ack covers the current incident only: a
+provider warning comes back after the condition clears and recurs, `failed_episodes` comes back
+when an episode fails after the ack, and `conflicts` comes back when a conflict is confirmed, or
+has waited over 24h for LLM review, after the ack. `failed_episodes` and `conflicts` count every
+silo, so a namespace-pinned caller does not see them. `get_memory_stats` keeps listing acknowledged warnings while they are active.
 - `subject`: LLM call kind (`chat`, `embedding`, `response`) for provider kinds; empty acks all.
 - Returns what was acknowledged, or that nothing was active.
 
@@ -818,13 +822,16 @@ Declare a relationship between two artifacts.
 Concept id: `mcp.tool.supersede_artifact`
 
 Record that one artifact replaces another.
-- **`new_uuid`** (str): The replacing artifact.
+- **`new_uuid`** (str): The replacing artifact. Must not be `SUPERSEDED` or `DEFERRED`.
 - **`old_uuid`** (str): The artifact being replaced.
 - Writes the `SUPERSEDES` edge and moves the old artifact to `SUPERSEDED` in one statement:
   an edge pointing at an artifact still marked `APPROVED`, or a `SUPERSEDED` artifact with
   no record of what replaced it, are both states the graph must never hold.
 - Same-type only. An already-terminal artifact is refused rather than re-superseded, so the
   recorded replacement stays the one that applied.
+- A terminal replacement is refused too, so `SUPERSEDES` never forms a cycle (#678). Record a
+  chain oldest first: once v3 supersedes v2, `supersede_artifact(v2, v1)` is refused and v1
+  stays live. Supersede v1 with v3 directly instead.
 
 ### `transition_artifact`
 Concept id: `mcp.tool.transition_artifact`

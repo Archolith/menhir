@@ -5,7 +5,7 @@ runtime dependencies, an MCP client connection, and whichever optional agent int
 has explicitly chosen.
 
 If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
-installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.31.2.post3`.
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.31.2.post4`.
 Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
 reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
 checkout, a fresh installation is:
@@ -99,11 +99,13 @@ when enabled or when perceiver versions change. Review namespace/version and his
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.
 Keep configuration and verified data backups for a separately approved deployment rollback.
 
-**Known limitations in 0.3.12.** The source checks on five scalar kinds (duration, frequency,
+**Known limitations in 0.3.13.** The source checks on five scalar kinds (duration, frequency,
 weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
 (#411; see
 [source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
-Deleting or erasing a memory keeps the entities and fact edges extracted from it (#423; see
+Erasing a memory deletes the entities and fact edges only it supports and blanks shared ones for
+re-derivation; data with no recorded provenance is left and the reply says `erased_incomplete`
+(#423; see
 [erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge)).
 
 ## 1b. Or do it in one step

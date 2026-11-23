@@ -278,7 +278,7 @@ def supersession_cypher(new: str = "new", old: str = "old") -> str:
     there too, which is the distinction this finding turns on.
 
     The rule, stated once: same known type, not itself, valid known statuses,
-    the superseded artifact is not already terminal, and compatible namespaces.
+    neither artifact is already terminal, and compatible namespaces.
     `TERMINAL_ANY` is the domain's own set, so adding a terminal status reaches
     this predicate without a separate infrastructure edit.
 
@@ -292,6 +292,8 @@ def supersession_cypher(new: str = "new", old: str = "old") -> str:
         f"{new}.status IN $valid_statuses_by_type[{new}.artifact_type]",
         f"{old}.status IN $valid_statuses_by_type[{old}.artifact_type]",
         f"NOT {old}.status IN $terminal",
+        # #678: a terminal replacement would let B->A follow A->B and form a cycle.
+        f"NOT {new}.status IN $terminal",
         namespace_compatibility_cypher(owner=new, subordinate=old),
     ])
 

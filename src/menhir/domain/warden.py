@@ -71,6 +71,8 @@ class WardenContext:
     candidate_scope: MemoryScope | None = None  # where the candidate memory lives
     oracle_packet: OraclePacket | None = None   # the R7 combiner output for this candidate
     recorded_conflict: bool = False  # persisted conflict group with unresolved status
+    pending_conflict: bool = False   # conflict group still pending_llm_review (#651)
+    unsettled_conflict: bool = False  # conflict auto-resolved without a decision (#652)
 
 
 @runtime_checkable
@@ -198,6 +200,19 @@ class ContradictionWarden:
 
     def evaluate(self, ctx: WardenContext) -> WardenVerdict:
         if not self._contradicted(ctx):
+            # Pending / auto-resolved members are flagged under every intent, never refused.
+            if ctx.pending_conflict:
+                return WardenVerdict(
+                    WardenDecision.FLAG, self.name,
+                    reason="possible conflict, not yet reviewed",
+                    label=WardenLabel.POSSIBLE_CONFLICT,
+                )
+            if ctx.unsettled_conflict:
+                return WardenVerdict(
+                    WardenDecision.FLAG, self.name,
+                    reason="contradiction confirmed earlier, auto-resolved without a decision",
+                    label=WardenLabel.UNSETTLED_CONFLICT,
+                )
             return WardenVerdict(WardenDecision.ADMIT, self.name, reason="no contradiction")
         if ctx.intent is QueryIntent.CURRENT:
             return WardenVerdict(

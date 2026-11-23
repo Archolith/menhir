@@ -84,9 +84,11 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "erasure_scrubbed_epoch", "raw_capture", "raw_capture_for", "absorbed_from",
         "merged_from", "merge_irreversible",
         # Write-lock tokens: a boolean set and removed in the same statement (#431), never stored.
-        "_candidate_review_lock",
+        "_candidate_review_lock", "_artifact_supersede_lock", "_conflict_group_lock",
         # Conflict and supersession links (uuids and enums).
-        "conflict_group_id", "conflict_status", "conflict_created_at", "supersedes",
+        "conflict_group_id", "conflict_status", "conflict_created_at", "conflict_confirmed_at",
+        "conflict_pending_since",
+        "supersedes",
         "superseded_by", "resolution_status", "resolution_reason",
         # Code-structure graph (paths, symbols, commits: repository metadata, not memory).
         "structure_project_id", "structure_project", "structure_role", "structure_path",

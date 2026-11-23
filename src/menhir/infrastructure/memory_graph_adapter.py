@@ -122,6 +122,9 @@ class MemoryGraphAdapter:
         self._views = ViewRepository(self.neo4j)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
+        from menhir.infrastructure.build_report_queries import BuildReportQueries
+
+        self._build_report = BuildReportQueries(self.neo4j)
         from menhir.infrastructure.tool_event_repository import ToolEventRepository
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
@@ -195,6 +198,26 @@ class MemoryGraphAdapter:
             actual_constraints.get(name) == expected
             for name, expected in required_constraints.items()
         )
+
+    def phase_one_constraint_duplicates(self) -> dict[str, int]:
+        """Per required uniqueness constraint, how many values are held by more than one node.
+
+        Diagnostic for a refused startup (#742): a CREATE CONSTRAINT over duplicate values fails,
+        so the count tells the operator what to repair. Only nonzero counts are returned.
+        """
+        counts: dict[str, int] = {}
+        for name, _type, _entity, labels, properties in PHASE_ONE_REQUIRED_CONSTRAINTS:
+            label = ":".join(f"`{item}`" for item in labels)
+            present = " AND ".join(f"n.`{prop}` IS NOT NULL" for prop in properties)
+            keys = ", ".join(f"n.`{prop}` AS k{idx}" for idx, prop in enumerate(properties))
+            rows = self.neo4j.execute(
+                f"MATCH (n:{label}) WHERE {present} "
+                f"WITH {keys}, count(*) AS n WHERE n > 1 RETURN count(*) AS duplicates"
+            )
+            value = int(rows[0].get("duplicates", 0)) if rows else 0
+            if value:
+                counts[name] = value
+        return counts
 
     def scalar_state_schema_ready(self) -> bool:
         """Return True when the ScalarStateView typed-assertion DDL is online. Feature-scoped: a
@@ -1356,6 +1379,28 @@ class MemoryGraphAdapter:
     def set_conflict_group_status(self, group_id: str, status: str) -> int:
         return self._consolidation.set_conflict_group_status(group_id, status)
 
+    def set_conflict_member_status(
+        self, group_id: str, node_uuid: str, *, from_status: str, to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        return self._consolidation.set_conflict_member_status(
+            group_id, node_uuid, from_status=from_status, to_status=to_status, namespace=namespace
+        )
+
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        return self._consolidation.auto_resolve_settled_conflict_group(group_id)
+
+    def remove_conflict_member(
+        self, group_id: str, node_uuid: str, *, from_status: str,
+        resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.remove_conflict_member(
+            group_id, node_uuid, from_status=from_status,
+            resolution_status=resolution_status, namespace=namespace,
+            reviewed_uuids=reviewed_uuids,
+        )
+
     def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "unresolved", limit: int = 200,
         namespace: str | None = None,
@@ -1517,6 +1562,7 @@ class MemoryGraphAdapter:
         namespace: str | None = None,
         created_before: datetime | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_groups(
             status=status,
@@ -1524,6 +1570,7 @@ class MemoryGraphAdapter:
             namespace=namespace,
             created_before=created_before,
             oldest_first=oldest_first,
+            include_all_members=include_all_members,
         )
 
     def list_conflict_pairs(
@@ -2107,6 +2154,22 @@ class MemoryGraphAdapter:
 
     def count_turn_evidence(self, namespace: str) -> int:
         return self._turn_evidence.count_namespace(namespace)
+
+    def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._build_report.namespace_build_counts(
+            namespace, submitted_epoch_millis, sections
+        )
+
+    def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return self._build_report.failed_evidence_projections(namespace)
+
+    def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return self._build_report.promote_namespace_scope(namespace)
 
     def purge_turn_evidence(self, namespace: str) -> int:
         """Delete `:TurnEvidence` for a namespace (not covered by group_id-keyed delete_namespace)."""

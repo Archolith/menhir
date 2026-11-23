@@ -1326,6 +1326,7 @@ class StubMemoryGraphAdapter:
     sharpness_updates: dict[str, float] = field(default_factory=dict)
     conflict_calls: list[dict[str, object]] = field(default_factory=list)
     conflict_groups: dict[str, dict[str, object]] = field(default_factory=dict)
+    removed_conflict_members: list[tuple[str, str, str]] = field(default_factory=list)
     resolve_conflict_calls: list[dict[str, object]] = field(default_factory=list)
     merge_entity_calls: list[dict[str, object]] = field(default_factory=list)
     related_edge_calls: list[dict[str, object]] = field(default_factory=list)
@@ -1539,6 +1540,57 @@ class StubMemoryGraphAdapter:
             member["status"] = status
         return len(group["members"])
 
+    def set_conflict_member_status(
+        self, group_id: str, node_uuid: str, *, from_status: str, to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        group = self.conflict_groups.get(group_id)
+        for member in (group or {}).get("members", []):
+            if str(member.get("uuid")) == node_uuid and member.get("status") == from_status:
+                member["status"] = to_status
+                # Mirror the members in the group-level status the older stubs read.
+                if group is not None and {m.get("status") for m in group["members"]} == {to_status}:
+                    group["status"] = to_status
+                return True
+        return False
+
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        group = self.conflict_groups.get(group_id)
+        members = (group or {}).get("members", [])
+        if not members or any(m.get("status") != "unresolved" for m in members):
+            return []
+        uuids = [str(m.get("uuid")) for m in members]
+        group["status"] = "auto-resolved"
+        members.clear()
+        self.resolve_conflict_calls.append({
+            "group_id": group_id, "action": "keep_both", "resolution_status": "auto-resolved",
+        })
+        return uuids
+
+    def remove_conflict_member(
+        self, group_id: str, node_uuid: str, *, from_status: str,
+        resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
+    ) -> dict[str, object]:
+        group = self.conflict_groups.get(group_id)
+        members = (group or {}).get("members", [])
+        target = next(
+            (m for m in members if str(m.get("uuid")) == node_uuid and m.get("status") == from_status),
+            None,
+        )
+        if target is None:
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        others = {str(m.get("uuid")) for m in members if m is not target}
+        if reviewed_uuids is not None and not others <= set(reviewed_uuids):
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        members.remove(target)
+        self.removed_conflict_members.append((group_id, node_uuid, resolution_status))
+        remaining = [str(m.get("uuid")) for m in members]
+        dissolved = len(members) < 2
+        if dissolved:
+            members.clear()
+        return {"removed": True, "dissolved": dissolved, "remaining_uuids": remaining}
+
     def list_conflict_groups(
         self,
         *,
@@ -1547,10 +1599,18 @@ class StubMemoryGraphAdapter:
         namespace: str | None = None,
         created_before: object | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, object]]:
         results = []
         for group in self.conflict_groups.values():
-            if status is not None and group.get("status") != status:
+            if include_all_members:
+                if not group.get("members"):
+                    continue
+                if status is not None and not any(
+                    m.get("status") == status for m in group.get("members", [])
+                ):
+                    continue
+            elif status is not None and group.get("status") != status:
                 continue
             results.append({
                 "group_id": group["group_id"],

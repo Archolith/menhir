@@ -23,7 +23,7 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.3.12`. Menhir is built for a single operator, requires
+The current package version is `0.3.13`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
 [known limitations](#known-limitations) before relying on it for personal memory.
 
@@ -530,8 +530,8 @@ unlinked nodes -- and small models refuse more readily than large ones.
 
 To prove the whole path without leaving test data behind, write into a throwaway namespace,
 recall from it, then delete that namespace. Deleting a single memory removes the episode and
-its projections but keeps the entities and fact edges extracted from it, and those can restate
-its content (see [known limitations](#known-limitations)). The namespace teardown removes the
+its projections, and deletes or blanks the entities and fact edges extracted from it (see
+[known limitations](#known-limitations)). The namespace teardown removes the
 namespace's memories and derived graph data, but it refuses `default` and does not remove TODOs,
 WorkArtifacts or the shared code-structure graph (see [`docs/your-data.md`](docs/your-data.md)).
 
@@ -713,14 +713,15 @@ the private `Archolith/menhir-deploy` repository.
 
 ## Known limitations
 
-These are known gaps in 0.3.12, each with a planned fix:
+These are known gaps in 0.3.13, each with a planned fix:
 
 - **Erasure can leave some derived text behind.** `delete_memory` removes the memory, its
   episode, evidence turns, projections and scalar assertions. Since 0.3.9, entities and facts
   extracted from it are handled by provenance (#423). One only that memory supports is deleted. One
   other memories also support is blanked and re-derived from them. Two gaps remain:
   - Older data with no recorded provenance is left in place, and the reply says
-    `erased_incomplete`.
+    `erased_incomplete` (as it does for other steps that could not finish, such as unaddressable
+    sidecar rows).
   - Nothing yet verifies that a model-written paraphrase of the erased memory doesn't survive in
     re-derived text.
 
@@ -781,7 +782,7 @@ set through the MCP gateway.
 | `review_candidate` | Approve a candidate (it becomes an ordinary, contradiction-checked memory) or reject it (deleted). Operator tier |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
 | `promote_memory` | Mark persistent memory as operator-designated authority |
-| `delete_memory` | Delete a memory under operator control (extracted entities and facts remain; see [known limitations](#known-limitations)) |
+| `delete_memory` | Delete a memory under operator control (entities and facts only that memory supports are deleted, shared ones are blanked and re-derived; see [known limitations](#known-limitations)) |
 
 ### Recall and context
 

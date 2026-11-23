@@ -475,16 +475,29 @@ async def test_process_pending_episode_marks_ready_after_graphiti(
     assert len(adapter.stamp_calls) == 1
 
 
-def _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch) -> dict:
-    """Wrap the stub's add_episode to record peak simultaneous occupancy."""
+def _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch, hold_until: int | None = None) -> dict:
+    """Wrap the stub's add_episode to record peak simultaneous occupancy.
+
+    With ``hold_until``, each call waits (up to 5 s) until that many calls have been inside at
+    once, so a slow runner can't finish one call before the next starts (#748).
+    """
     state = {"inside": 0, "peak": 0}
     orig = stub_graphiti_client.add_episode
+    reached = asyncio.Event()
 
     async def tracking_add(**kwargs):
         state["inside"] += 1
         state["peak"] = max(state["peak"], state["inside"])
+        if hold_until is not None and state["inside"] >= hold_until:
+            reached.set()
         try:
-            await asyncio.sleep(0.02)
+            if hold_until is not None:
+                try:
+                    await asyncio.wait_for(reached.wait(), timeout=5)
+                except TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(0.02)
             return await orig(**kwargs)
         finally:
             state["inside"] -= 1
@@ -528,7 +541,7 @@ async def test_concurrent_enrichment_parallelizes_across_namespaces(
     adapter = stub_memory_graph_adapter
     service = IngestService(graphiti_client=stub_graphiti_client, graph_adapter=adapter, llm=stub_llm_adapter)
     service.configure(ingest_concurrency=3)
-    state = _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch)
+    state = _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch, hold_until=3)
 
     uuids = []
     for i in range(6):
@@ -3158,11 +3171,16 @@ def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() ->
         def list_conflict_groups(
             self, *, status: str | None, limit: int, namespace: str | None = None,
             created_before: object | None = None, oldest_first: bool = False,
+            include_all_members: bool = False,
         ) -> list[dict]:
             return [
                 {"group_id": "stale-group", "created_at": stale_created},
                 {"group_id": "fresh-group", "created_at": fresh_created},
             ]
+
+        def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+            resolved_groups.append(group_id)
+            return ["a", "b"]
 
         def resolve_conflict_group(self, group_id: str, action: str, **kwargs: object) -> dict:
             resolved_groups.append(group_id)

@@ -323,6 +323,8 @@ class SourceMemoryResponse(BaseModel):
     reference_time: str | None = None
     cosine: float
     source: str | None = None
+    # Relevance position within the section (1 = best); the list itself is oldest first.
+    rank: int | None = None
 
 
 class RecallResponse(BaseModel):
@@ -781,6 +783,11 @@ def _require_phase3_adapter(request: Request):
 
 _BACKEND_METHODS = {
     "queue_episode",
+    "record_turn_evidence",
+    "fetch_namespace_build_counts",
+    "list_failed_evidence_projections",
+    "promote_namespace_scope",
+    "reset_namespace",
     "flag_memory",
     "unflag_memory",
     "promote_memory",
@@ -881,6 +888,9 @@ _BACKEND_METHODS = {
 # forbidden — memory-governance.md §4).
 _OP_TIER_OPERATOR = {
     "delete_memory", "erase_memory", "delete_namespace",
+    # Build ops (P4a): reset_namespace is phase3 reset (delete + evidence purge); promote rewrites
+    # every SESSION entity/edge scope in a silo.
+    "reset_namespace", "promote_namespace_scope",
     # Read-only, but previews every record in a silo: operator, like the deletes it feeds.
     "list_namespace_records",
     "resolve_conflict_group", "requeue_conflicts_for_llm_review", "scan_for_conflicts",
@@ -904,6 +914,8 @@ _OP_TIER_OPERATOR = {
 }
 _OP_TIER_AGENT = {
     "queue_episode", "flag_memory", "unflag_memory", "enqueue_pending_episode",
+    # Agent, matching POST /api/turn-evidence: it writes evidence, deletes nothing.
+    "record_turn_evidence",
     "ingest_document", "scan_and_write_project",
     "create_todo", "close_todo", "delete_todo", "close_stale_todos",
     # Todo lifecycle and lineage. Same standing as the artifact writes below: each moves a

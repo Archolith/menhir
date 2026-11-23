@@ -836,10 +836,11 @@ async def run_recall_lab(
                 for arm in arms
                 if arm not in healthy_arms
             ]
+            # No query text and no raw error text in logs (privacy.py: no memory content in a log line).
             logger.warning(
-                "Recall Lab judge skipped for query=%r: fewer than two healthy arms; failures=%s",
-                request.query,
-                failures,
+                "Recall Lab judge skipped (query_chars=%d): fewer than two healthy arms; failures=%s",
+                len(request.query),
+                [{**f, "error": _redact_error_text(f["error"])} for f in failures],
             )
             judgment = {
                 "ok": False,

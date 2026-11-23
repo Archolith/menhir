@@ -7,17 +7,18 @@ from menhir.mcp.service_access import get_request_session
 from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 
-_KINDS = ("provider_auth", "provider_billing", "failed_episodes")
+_KINDS = ("provider_auth", "provider_billing", "failed_episodes", "conflicts")
 
 
 async def acknowledge_warning(kind: str, subject: str = "") -> str:
     """Acknowledge an operator warning so it stops appearing in tool responses.
 
     The acknowledgement covers the current incident only: if the condition clears and later
-    recurs (or, for failed_episodes, a new episode fails), the warning is raised again.
+    recurs (or, for failed_episodes, a new episode fails; for conflicts, a new conflict is
+    confirmed or goes stale in review), the warning is raised again.
 
     Args:
-        kind: provider_auth, provider_billing, or failed_episodes.
+        kind: provider_auth, provider_billing, failed_episodes, or conflicts.
         subject: LLM call kind (chat, embedding, response) for provider kinds; empty
             acknowledges every active subject of the kind.
 
@@ -32,7 +33,7 @@ class AcknowledgeWarningTool(BaseTextTool):
     name = "acknowledge_warning"
     scope = ToolScope.GLOBAL
     required_tier = "operator"
-    description = "Acknowledge an operator warning (provider_auth, provider_billing, failed_episodes) for its current incident."
+    description = "Acknowledge an operator warning (provider_auth, provider_billing, failed_episodes, conflicts) for its current incident."
     title = "Acknowledge Warning"
     oauth_scopes = ("menhir:admin",)
     read_only_hint = False

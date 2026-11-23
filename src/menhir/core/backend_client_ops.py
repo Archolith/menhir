@@ -53,6 +53,50 @@ class BackendClientOpsMixin:
             params["store_only"] = True
         return await self._request("queue_episode", params)
 
+    async def record_turn_evidence(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        declarant: str | None = None,
+        session_id: str | None = None,
+        occurred_at: str | None = None,
+        namespace: str | None = None,
+        source_kind: str = "unknown",
+        source_id: str | None = None,
+        source_client: str | None = None,
+        hook_version: str | None = None,
+        cwd: str | None = None,
+        transcript_path: str | None = None,
+        triage_reason: list[str] | None = None,
+        triage_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        turn_key: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "record_turn_evidence",
+            {
+                "text": text,
+                "role": role,
+                "declarant": declarant,
+                "session_id": session_id,
+                "occurred_at": occurred_at,
+                "namespace": namespace,
+                "source_kind": source_kind,
+                "source_id": source_id,
+                "source_client": source_client,
+                "hook_version": hook_version,
+                "cwd": cwd,
+                "transcript_path": transcript_path,
+                "triage_reason": triage_reason,
+                "triage_version": triage_version,
+                "metadata": metadata,
+                "turn_key": turn_key,
+                "prompt_id": prompt_id,
+            },
+        )
+
     async def flag_memory(
         self,
         node_uuid: str,
@@ -97,6 +141,32 @@ class BackendClientOpsMixin:
                 "dry_run": dry_run,
             },
         )
+
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "fetch_namespace_build_counts",
+            {
+                "namespace": namespace,
+                "submitted_epoch_millis": submitted_epoch_millis,
+                "sections": sections,
+            },
+        )
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return list(
+            await self._request("list_failed_evidence_projections", {"namespace": namespace}) or []
+        )
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return await self._request("promote_namespace_scope", {"namespace": namespace})
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        return await self._request("reset_namespace", {"namespace": namespace, "force": force})
 
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         return bool(

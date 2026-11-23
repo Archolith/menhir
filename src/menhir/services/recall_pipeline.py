@@ -61,7 +61,7 @@ from menhir.domain.retrieval_trace_models import (
     ScoringTrace,
     ViewReachability,
 )
-from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.infrastructure.graphiti_client import GraphitiClient, _circuit_open_cause
 from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
 from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
@@ -199,7 +199,25 @@ def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
     return view.get("recall_eligible") is True
 
 
-def embed_breaker_note(graphiti_client: Any) -> str | None:
+def embed_refusal_note(graphiti_client: Any, exc: BaseException, consequence: str) -> str | None:
+    """The breaker note when ``exc`` is the embed breaker stopping a call, else None (#642).
+
+    Covers a refusal and the provider error that tripped the breaker; None while it is closed,
+    so an ordinary embed failure still raises.
+    """
+    classify = getattr(graphiti_client, "_embed_unavailable", None)
+    try:
+        stopped = classify(exc) if callable(classify) else None
+    except Exception:
+        stopped = None
+    if stopped is None and _circuit_open_cause(exc) is None:
+        return None
+    return embed_breaker_note(graphiti_client, consequence=consequence)
+
+
+def embed_breaker_note(
+    graphiti_client: Any, *, consequence: str = "results are keyword-only"
+) -> str | None:
     """Say why semantic matching is off when the embed breaker is not closed (#632).
 
     Reads the breaker snapshot once per recall; None when closed or unreadable.
@@ -223,7 +241,7 @@ def embed_breaker_note(graphiti_client: Any) -> str | None:
         when = "probe due now"
     else:
         when = f"next probe in {max(1, math.ceil(remaining / 60))}m"
-    return f"semantic search off: {cause} ({when}); results are keyword-only"
+    return f"semantic search off: {cause} ({when}); {consequence}"
 
 
 async def _build_source_memories(
@@ -289,9 +307,19 @@ async def _build_source_memories(
                 cosine=float(row.get("cosine") or 0.0),
                 source=row.get("source") or None,
             ))
+        # Rank by relevance before the chronological display sort, so consumers that must
+        # cut the section (build_context's budget) keep the best matches. The sort is stable,
+        # so equal cosines keep the lane's order (search order, or spread's pick order).
+        by_relevance = sorted(range(len(section)), key=lambda i: -section[i].cosine)
+        for rank, i in enumerate(by_relevance, start=1):
+            section[i] = replace(section[i], rank=rank)
         section.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
         return tuple(section), None, int((perf_counter() - started) * 1000)
     except Exception as exc:
+        if _circuit_open_cause(exc) is not None:
+            # Expected while the embed breaker refuses, and recall already carries its note.
+            logger.info("Source-memory lane skipped: embedding unavailable (%s)", exc)
+            return None, "Source-memory lane unavailable", int((perf_counter() - started) * 1000)
         logger.error(
             "Source-memory lane unavailable: %s: %s",
             exc.__class__.__name__,
@@ -433,7 +461,15 @@ async def run_recall_history(
     if not stripped:
         raise ValueError("recall_history requires a non-empty query")
     effective_limit = max(1, min(50, int(limit)))
-    query_vector = await service.graphiti_client.embed_query(stripped)
+    try:
+        query_vector = await service.graphiti_client.embed_query(stripped)
+    except Exception as exc:
+        note = embed_refusal_note(
+            service.graphiti_client, exc, "recall_history needs embeddings, so nothing was searched"
+        )
+        if note is None:
+            raise
+        return RecallHistoryResult(query=stripped, memories=(), note=note)
     rows = await asyncio.to_thread(
         service.graph_adapter.search_episode_embeddings,
         query_vector,
@@ -1503,10 +1539,14 @@ async def _run_recall(
                     details={"observations_added": obs_added,
                              "authority_annotations": auth_added,
                              "intent": _intent.value, "query": query[:120]})
-        except Exception:
-            logger.exception(
-                "observation injection failed query=%r; leaving recall unchanged", query[:60]
-            )
+        except Exception as exc:
+            if _circuit_open_cause(exc) is not None:
+                # #642: expected while the embed breaker refuses; recall already carries its note.
+                logger.info("observation injection skipped: embedding unavailable (%s)", exc)
+            else:
+                logger.exception(
+                    "observation injection failed query=%r; leaving recall unchanged", query[:60]
+                )
         _t_phases["observation_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Scalar history advisory lane (flag-gated) ---
