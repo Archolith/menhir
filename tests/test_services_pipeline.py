@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import logging
 import os
 import time
 from pathlib import Path
@@ -1125,14 +1124,15 @@ async def test_process_pending_episode_cleans_up_after_setup_failure(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_process_pending_episode_warns_when_raw_capture_fails(
+async def test_oversized_episode_is_embedded_before_it_is_parked(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
     stub_graphiti_client: "StubGraphitiClient",
     stub_llm_adapter: object,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """#662: an oversized episode is rejected before Graphiti, but embedded first, so the
+    source-memory lane can still recall its text. No raw-capture copy is written."""
     adapter = stub_memory_graph_adapter
+    stub_graphiti_client.embed_query_result = [0.25, 0.5]
     service = IngestService(
         graphiti_client=stub_graphiti_client,
         graph_adapter=adapter,
@@ -1140,8 +1140,8 @@ async def test_process_pending_episode_warns_when_raw_capture_fails(
     )
     service._graphiti_episode_max_estimated_tokens = 8
     episode_uuid = adapter.create_pending_episode(
-        episode_uuid="pending-capture-fail",
-        name="episode-capture-fail",
+        episode_uuid="pending-oversize-embed",
+        name="episode-oversize-embed",
         content="x" * 128,
         session_id="session-1",
         user_id="user-1",
@@ -1149,32 +1149,24 @@ async def test_process_pending_episode_warns_when_raw_capture_fails(
         source_confidence=0.5,
     )
 
-    def fail_capture(**kwargs: object) -> None:
-        raise OSError("capture storage unavailable")
+    await service._process_pending_episode(episode_uuid)
 
-    monkeypatch.setattr(adapter, "create_raw_capture_entity", fail_capture)
-    with caplog.at_level(logging.WARNING, logger="menhir.services.enrichment_steps"):
-        await service._process_pending_episode(episode_uuid)
-
-    capture_errors = [record for record in caplog.records if "Failed to create raw-capture" in record.message]
-    assert len(capture_errors) == 1
-    assert capture_errors[0].levelno == logging.WARNING
-    assert episode_uuid in capture_errors[0].message
-    assert "capture storage unavailable" in capture_errors[0].message
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert adapter.pending_episode_rows[episode_uuid]["content"] == "x" * 128
+    assert adapter.episode_embeddings_written[episode_uuid][0] == [0.25, 0.5]
+    assert adapter.raw_capture_calls == []
     assert stub_graphiti_client.add_episode_calls == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_process_pending_episode_rejects_oversized_with_raw_capture(
+async def test_process_pending_episode_rejects_oversized_without_raw_capture(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
     stub_llm_adapter: object,
 ) -> None:
-    """An oversized episode is rejected in the worker BEFORE Graphiti is called, marked
-    FAILED, but its prose is preserved as a raw-capture entity (Part 2 substrate
-    guarantee: terminally-broken episodes stay recallable)."""
+    """An oversized episode is rejected in the worker BEFORE Graphiti is called and marked
+    FAILED. Its text stays recallable through the source-memory lane (#662), so no raw-capture
+    copy is written, even when the embedder is unavailable (the repair job embeds it later)."""
 
     class RecordingGraphitiClient:
         add_episode_calls: list[dict[str, object]] = []
@@ -1205,8 +1197,7 @@ async def test_process_pending_episode_rejects_oversized_with_raw_capture(
 
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert client.add_episode_calls == []            # rejected before Graphiti
-    assert len(adapter.raw_capture_calls) == 1       # prose preserved (Part 2)
-    assert adapter.raw_capture_calls[0]["episode_uuid"] == episode_uuid
+    assert adapter.raw_capture_calls == []           # no duplicate copy (#662)
 
 
 @pytest.mark.unit

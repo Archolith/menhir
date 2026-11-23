@@ -1,4 +1,4 @@
-"""Maintenance job: embed READY source-memory episodes whose ingest-time embed never landed.
+"""Maintenance job: embed settled source-memory episodes whose ingest-time embed never landed.
 
 The ingest step (``enrichment_steps.embed_episode_content``) is best-effort: a timeout or embedder
 error is logged and swallowed so enrichment never stalls, and nothing retried it. On the o500 build
@@ -6,9 +6,10 @@ error is logged and swallowed so enrichment never stalls, and nothing retried it
 never surface in the source-memory section. This job is the retry.
 
 Scope, deliberately narrow:
-- READY episodes only. PENDING/ENRICHING ones still have the ingest step ahead of them, FAILED ones
-  are retried by ``retry_failed_enrichments`` (whose re-run embeds), so READY + missing is exactly
-  the set the ingest step gave up on.
+- READY and FAILED episodes only (#662). PENDING/ENRICHING ones still have the ingest step ahead
+  of them. A FAILED episode is recallable through the source-memory lane, and a terminal or
+  manual-review failure is never re-run, so nothing else would ever embed it. Erase tombstones
+  are excluded by the listing.
 - Missing embeddings only, never model re-embedding. Two processes with different embed models
   would otherwise overwrite each other's vectors forever; model migration stays with
   ``scripts/backfill_episode_embeddings.py``.
@@ -62,7 +63,7 @@ async def repair_source_embeddings(
             None,
             PAGE_SIZE,
             after_uuid=after_uuid,
-            ready_only=True,
+            settled_only=True,
         )
         if not rows:
             break

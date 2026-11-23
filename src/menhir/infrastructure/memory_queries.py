@@ -48,6 +48,7 @@ from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
     EPISODE_NOT_ERASED,
+    EPISODE_NOT_MARKED,
     FACT_TEMPORAL_FIELDS,
     FACT_NOT_REDERIVE_PENDING,
     FACT_TEXT_PRESENT,
@@ -443,6 +444,8 @@ class MemoryQueryRepository:
             "(n:Entity OR n:Episodic)",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
+            # Legacy raw-capture copies duplicate a source episode's text (#662).
+            "NOT coalesce(n['raw_capture'], false)",
         ]
         params: dict[str, Any] = {"limit": safe_limit}
         if namespace is not None and str(namespace).strip():
@@ -721,8 +724,9 @@ class MemoryQueryRepository:
         the same silo; None is unscoped), so only memories generic recall could surface are
         searched. Only
         Menhir's own queue nodes match (`menhir_queue_episode_cypher`; `processing_state` alone
-        does not identify them -- the schema migration stamps it on Graphiti's episodes too, #215)
-        and FAILED enrichments are excluded. A
+        does not identify them -- the schema migration stamps it on Graphiti's episodes too, #215).
+        A FAILED enrichment stays searchable (#662); erase tombstones and episodes with an erase
+        marker (sealed, delete not yet applied) are excluded. A
         stale-dimension embedding is skipped by the size guard instead of erroring
         the query. Evidence projections are excluded by
         `non_structural_memory_cypher`.
@@ -733,7 +737,11 @@ class MemoryQueryRepository:
             "size(n.content_embedding) = size($query_vector)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            # A FAILED enrichment keeps its text recallable here (#662); an erase tombstone
+            # (also FAILED, substage deleted_by_user) is not, nor is an episode whose erase is
+            # sealed but not yet applied.
+            EPISODE_NOT_ERASED,
+            EPISODE_NOT_MARKED,
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]
@@ -755,6 +763,8 @@ class MemoryQueryRepository:
         if resolved_only or subject_uuid is not None:
             # The resolved episode must itself be one `timeline_anchor` could return (same
             # shared predicates), so hidden/FAILED/foreign episodes do not use up LIMIT slots.
+            # A FAILED receipt never anchors either, even with a resolved episode (#662).
+            where.append("n.processing_state <> 'FAILED'")
             episode_pattern = "(g:Episodic)"
             if subject_uuid is not None:
                 episode_pattern = "(:Entity {uuid:$subject_uuid})<-[:MENTIONS]-(g:Episodic)"

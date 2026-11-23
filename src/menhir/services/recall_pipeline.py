@@ -362,6 +362,10 @@ def _memory_admitted(
     # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
     if meta.get("structure_role") is not None:
         return False
+    # A raw-capture copy of a failed episode (written before #662) duplicates the episode, which
+    # the source-memory lane now returns, and was never retired when the episode later succeeded.
+    if meta.get("raw_capture") is True:
+        return False
     scope = str(meta.get("scope") or NodeScope.SESSION)
     freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
     # CANDIDATE is the human-review tier: never recalled until approved

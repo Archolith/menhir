@@ -114,6 +114,7 @@ class SchedulerGraphAdapter(Protocol):
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 

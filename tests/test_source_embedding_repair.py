@@ -24,9 +24,10 @@ class _Graph:
         self.list_calls: list[dict[str, Any]] = []
 
     def list_episodes_missing_content_embedding(self, namespace=None, limit=100, *, after_uuid=None,
-                                                model=None, ready_only=False):
+                                                model=None, ready_only=False, settled_only=False):
         self.list_calls.append({"namespace": namespace, "limit": limit, "after_uuid": after_uuid,
-                                "model": model, "ready_only": ready_only})
+                                "model": model, "ready_only": ready_only,
+                                "settled_only": settled_only})
         rows = [{"uuid": u, "content": c} for u, c in sorted(self.contents.items())
                 if u not in self.written and (after_uuid is None or u > after_uuid)]
         return rows[:limit]
@@ -53,9 +54,10 @@ def test_embeds_ready_missing_rows_with_the_model_stamp() -> None:
     result = _run(graph, _ok)
     assert graph.written == {"a": ([5.0], "m-1"), "b": ([4.0], "m-1")}
     assert result == {"written": 2, "failed": 0, "skipped": 0, "embed_calls": 2, "stopped": None}
-    # READY-only and missing-only: never a model re-embed (model=None), all namespaces.
-    assert all(c["ready_only"] is True and c["model"] is None and c["namespace"] is None
-               for c in graph.list_calls)
+    # Settled (READY or FAILED, #662) and missing-only: never a model re-embed (model=None),
+    # all namespaces.
+    assert all(c["settled_only"] is True and c["ready_only"] is False and c["model"] is None
+               and c["namespace"] is None for c in graph.list_calls)
 
 
 def test_a_failed_row_is_counted_and_the_run_moves_past_it() -> None:
@@ -163,6 +165,20 @@ def test_set_binds_the_write_to_expected_content_only_when_given() -> None:
     (q1, p1), (q2, p2) = neo4j.calls
     assert "$expected_content IS NULL OR n.content = $expected_content" in q1
     assert p1["expected_content"] is None and p2["expected_content"] == "text"
+
+
+def test_listing_settled_only_keeps_ready_and_failed() -> None:
+    from menhir.infrastructure.cypher import EPISODE_NOT_ERASED
+
+    neo4j = _Recording()
+    repo = EpisodeRepository(neo4j)  # type: ignore[arg-type]
+    repo.list_episodes_missing_content_embedding(None, 10, settled_only=True)
+    query, params = neo4j.calls[0]
+    assert "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])" in query
+    assert params["settled_only"] is True
+    # Erase tombstones (FAILED, deleted_by_user) are never listed for embedding.
+    assert EPISODE_NOT_ERASED in query
+    assert "n.processing_state <> 'FAILED'" not in query
 
 
 def test_listing_ready_only_adds_the_state_predicate() -> None:

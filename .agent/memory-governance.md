@@ -140,9 +140,10 @@ class as a missing receipt.
 > requires — and an irreversible act with no undo trail requires the most of all.
 
 Exists: bridged deletion, keep-both conflict defaults, the revision archive, the three hotfix
-disarms of scalar-gated destruction.
+disarms of scalar-gated destruction, and recall of terminal ingest failures (a FAILED episode's
+text is returned by the source-memory lane, #662; raw-capture copies are no longer written).
 Missing (all planned, none built): unmerge-sufficient audit trails before any merge executes,
-the raw-capture fallback for terminal ingest failures, archive-reading rehydration (compression
+archive-reading rehydration (compression
 is currently a one-way door), a recoverable middle rung for session consolidation, and destruction
 *warrants* — a destructive sweep should name its authorizing policy and evidence in its receipt,
 so "why is this gone" is always answerable.

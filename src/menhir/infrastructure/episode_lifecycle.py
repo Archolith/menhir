@@ -651,12 +651,15 @@ class EpisodeLifecycleRepository:
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
         model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
-        of PENDING/ENRICHING ones. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        of PENDING/ENRICHING ones. ``settled_only`` keeps READY and FAILED ones: a FAILED episode
+        is recallable through the source-memory lane too (#662), and terminal failures are never
+        re-run by the retry job. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
         cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
         skips are never re-listed ahead of the rest (audit F1).
 
@@ -664,7 +667,7 @@ class EpisodeLifecycleRepository:
         visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
         'default' are the same silo; None is unscoped), `menhir_queue_episode_cypher` (only
         Menhir's own queue nodes -- never Graphiti's episodes, which the schema migration also
-        stamps with `processing_state`, #215), and the guard that excludes FAILED enrichments -- so
+        stamps with `processing_state`, #215), and the guard that excludes erase tombstones -- so
         the backfill writes embeddings only for episodes the recall lane would ever
         surface. Idempotent by construction: a node gains `content_embedding` and
         drops out of this listing.
@@ -678,8 +681,11 @@ class EpisodeLifecycleRepository:
             "($after_uuid IS NULL OR n.uuid > $after_uuid)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            EPISODE_NOT_ERASED,
+            # Never send erase-sealed text to the embedder (the write would be refused anyway).
+            EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
+            "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]
@@ -688,6 +694,7 @@ class EpisodeLifecycleRepository:
             "after_uuid": after_uuid,
             "model": model,
             "ready_only": bool(ready_only),
+            "settled_only": bool(settled_only),
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
@@ -1672,7 +1679,9 @@ class EpisodeLifecycleRepository:
         source_eligible = " AND ".join((
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            # Same as the source-memory read: FAILED stays searchable (#662).
+            EPISODE_NOT_ERASED,
+            EPISODE_NOT_MARKED,
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ))

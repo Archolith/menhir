@@ -314,7 +314,7 @@ def build_operator_warnings(
             KIND_FAILED_EPISODES,
             SUBJECT_GLOBAL,
             row,
-            f"{failed_count} FAILED episode(s) are stored but not recallable",
+            f"{failed_count} FAILED episode(s) are stored with no entities or facts",
             count=int(failed_count),
             latest_failed_at=latest_failed_at,
         )

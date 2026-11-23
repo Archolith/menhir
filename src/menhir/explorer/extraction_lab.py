@@ -115,8 +115,11 @@ async def _run_extraction_arm(
             extract_nodes,
             resolve_extracted_nodes,
         )
+        from graphiti_core.edge_expiry import edge_expiry_kwargs
+        from graphiti_core.edge_invalidation import edge_invalidation_kwargs
         from graphiti_core.utils.maintenance.edge_operations import (
             extract_edges,
+            preserved_attributes_kwargs,
             resolve_extracted_edges,
         )
         from graphiti_core.utils.bulk_utils import resolve_edge_pointers
@@ -240,8 +243,16 @@ async def _run_extraction_arm(
 
         # Step 4: resolve_extracted_edges
         edges = resolve_edge_pointers(extracted_edges, uuid_map)
+        # #265: pass the production Graphiti's hooks the way add_episode does, so anchored-time
+        # expiry and preserved attributes behave here as they do at ingest.
+        graphiti = graphiti_client.client
         resolved_edges, invalidated_edges, new_edges = await resolve_extracted_edges(
             clients, edges, current_episode, resolved_nodes, {}, edge_type_map,
+            **edge_expiry_kwargs(getattr(graphiti, "edge_expiry_hook", None)),
+            **edge_invalidation_kwargs(getattr(graphiti, "edge_invalidation_hook", None)),
+            **preserved_attributes_kwargs(
+                getattr(graphiti, "preserved_edge_attributes", frozenset())
+            ),
         )
 
         # Serialize results
