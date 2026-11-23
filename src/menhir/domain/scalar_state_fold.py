@@ -161,8 +161,8 @@ def _money_decimal(value: Any) -> Decimal | None:
 
 def _turn_key(row: dict[str, Any]) -> str:
     """The turn a row was read from. `grounding_id` is the raw grounding (the TurnEvidence turn_id for
-    turn-grounded rows); `episode_uuid` is only the admitting Episodic and is empty for most hook
-    turns, so it cannot identify the turn."""
+    turn-grounded rows); `episode_uuid` is the View receipt: the admitting Episodic, or the turn id
+    when no episode was admitted on the turn (#311), so it cannot identify the turn by itself."""
     return str(row.get("grounding_id") or row.get("episode_uuid") or "")
 
 

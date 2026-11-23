@@ -710,7 +710,7 @@ class ScalarViewRepositoryMixin:
                 stated_span: a.stated_span, valid_at: he.valid_at,
                 evidence_tier: a.evidence_tier,
                 episode_uuid: CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
-                                   ELSE coalesce(admitted_episode_uuids[0], '') END,
+                                   ELSE coalesce(admitted_episode_uuids[0], te.turn_id, '') END,
                 source_episode_uuid: CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
                                           ELSE coalesce(admitted_episode_uuids[0], '') END,
                 turn_id: CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END

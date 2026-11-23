@@ -144,7 +144,7 @@ class TypedAssertionWriteMixin:
                    a.unit AS unit, a.operation AS operation, a.value AS value,
                    a.value_json AS value_json, a.stated_span AS stated_span,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
-                        ELSE coalesce(admitted_episode_uuids[0], '') END AS episode_uuid,
+                        ELSE coalesce(admitted_episode_uuids[0], te.turn_id, '') END AS episode_uuid,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
                         ELSE coalesce(admitted_episode_uuids[0], '') END AS source_episode_uuid,
                    CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END AS turn_id,
