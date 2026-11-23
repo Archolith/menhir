@@ -137,6 +137,8 @@ class TypedAssertionWriteMixin:
             OPTIONAL MATCH (te:TurnEvidence {{turn_id: a.episode_uuid}})
             OPTIONAL MATCH (source_ep:Episodic)-[:ADMITTED_ON]->(te)
             WITH a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids
+            // #311: with no admitted episode the turn is the receipt, but only when it is usable
+            // View evidence; the write gate refuses any other and would abort the rebuild.
             RETURN a.assertion_id AS assertion_id, a.claim_key AS claim_key,
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
                    a.namespace AS namespace,
@@ -144,7 +146,7 @@ class TypedAssertionWriteMixin:
                    a.unit AS unit, a.operation AS operation, a.value AS value,
                    a.value_json AS value_json, a.stated_span AS stated_span,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
-                        ELSE coalesce(admitted_episode_uuids[0], '') END AS episode_uuid,
+                        ELSE coalesce(admitted_episode_uuids[0], CASE WHEN coalesce(te.evidence_finalized, false) AND NOT coalesce(te.evidence_quarantined, false) THEN te.turn_id END, '') END AS episode_uuid,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
                         ELSE coalesce(admitted_episode_uuids[0], '') END AS source_episode_uuid,
                    CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END AS turn_id,

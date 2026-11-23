@@ -14,6 +14,20 @@
 - #265: the extraction lab passes the edge expiry, invalidation and preserved-attribute hooks
   that ingest uses.
 
+## 2026-11-22 - A scalar View from a not-yet-admitted turn is recallable (#311)
+
+- `infrastructure/typed_assertion_write_repository.py`, `projection_coverage_repository.py`,
+  `scalar_view_repository.py`: when a turn-anchored assertion's TurnEvidence has no admitting
+  Episodic, its `episode_uuid` is the turn id instead of `''`. The folded View's receipt is then
+  that turn, it gets a TurnEvidence `MENTIONS` edge, and recall's live-provenance check passes;
+  before, the View had an empty receipt and stayed hidden. The turn is used only when it is
+  usable View evidence (finalized, not quarantined): a turn captured before finalization existed
+  keeps the empty receipt, because the write gate would refuse it and abort the entity's rebuild.
+  A finalized admitting episode becomes the receipt; the write path resolves a non-finalized one
+  back to its turn. `source_episode_uuid` still reports admitted episodes only.
+- Live tests cover the turn-only View, finalized and non-finalized admitters, a View rebuilt
+  after admission, and a legacy turn that must not abort the rebuild.
+
 ## 2026-11-22 - Retry a timed-out source-memory embedding (#409)
 
 - Source-memory ingestion retries one embedding timeout before finishing enrichment. A
@@ -125,23 +139,3 @@
   the failure as `provider_unavailable` (retryable) rather than `scheduler_error`.
 - Both use `provider_unavailable_reason` (circuit_breaker.py); `circuit_open_cause` moved there
   from graphiti_client.py, which keeps the old private name as an alias.
-
-## 2026-11-22 - Breaker gaps after #638: sync clients, probe wait, reranker, degraded drill-downs (#639, #640, #641, #642)
-
-- #639: the sync view embedder and the personal-memory sync chat take the Graphiti breaker for the
-  same endpoint (`sync_client_breakers`; none when the base URLs differ). While it refuses, the
-  embedder returns `None` and the chat raises `CircuitOpenError`, with no provider call. A billing
-  refusal either one sees hard-opens that breaker: `report_quota_refusal_threadsafe` runs the
-  hard-open on the breaker's loop under its lock, so a worker thread never writes breaker state.
-- #640: `CircuitBreaker.call(wait_for_probe_s=...)` lets a call that arrives during a half-open
-  probe wait for the probe's outcome (bounded) instead of failing at once. Every path that ends a
-  probe, cancellation included, wakes the waiters. Only `create_batch` (ingest's concurrent
-  batches) waits, up to the request timeout; recall and search embed through `create`, which
-  still refuses at once so they fall back to keyword search.
-- #641: Graphiti's cross-encoder is wrapped (`BreakerGuardedCrossEncoder`), so the `reranker`
-  snapshot reports real calls. Menhir's searches use RRF today, so it stays closed in practice;
-  snapshot keys are unchanged.
-- #642: with the embed breaker open, `recall_history` returns no memories and a note ("semantic
-  search off: ... ; recall_history needs embeddings ..."), and a timeline `query` returns the
-  same note instead of raising. An ordinary embed error still raises. The source-memory and
-  observation lanes log a breaker refusal at INFO without a traceback.
