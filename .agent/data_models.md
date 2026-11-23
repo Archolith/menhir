@@ -729,8 +729,12 @@ Concept id: `model.conflict`
 | Field | Type | Notes |
 |-------|------|-------|
 | `conflict_group_id` | string | Groups mutually conflicting node pairs |
-| `conflict_status` | string | `pending_llm_review`, `unresolved`, `false_positive`, `resolved`, `auto-resolved` |
+| `conflict_status` | string | Per member. `pending_llm_review` (recall flags `possible_conflict`), `unresolved` (LLM-confirmed or PROMOTED pair; recall refuses under current intent, flags otherwise), `false_positive`, `resolved`, `auto-resolved` (confirmed, aged out after 14 days undecided; recall flags `unsettled_conflict`) |
 | `conflict_created_at` | timestamp | First conflict detection time |
+
+A new pair never downgrades a confirmed (`unresolved`) member, and merging groups keeps each live
+member's status; a node joining fresh starts a new `conflict_created_at` (#654). The 14-day
+auto-resolve skips any group that still holds a pending member. Conflicts are queued at enrichment time as well as at consolidation (#655).
 
 ## Recall Lab experiment history
 

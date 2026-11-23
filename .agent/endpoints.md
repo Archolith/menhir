@@ -450,8 +450,10 @@ Scan persistent entity nodes for similarity-based conflicts.
 Concept id: `mcp.tool.run_llm_conflict_review`
 
 Run LLM contradiction confirmation on `pending_llm_review` conflicts immediately.
-- **`limit`** (int, optional): Max groups to process (default: 20).
-- Confirmed contradictions become `unresolved` (visible in `list_conflicts`), false positives are cleared.
+- **`limit`** (int, optional): Max groups to process, and max LLM calls (default: 20).
+- Each pending member is compared with the rest of its group. A confirmed member becomes
+  `unresolved` (visible in `list_conflicts`); a member whose every pair is rejected leaves the group
+  as `false_positive`, and a group left with one member is dissolved.
 
 ### `requeue_conflicts_for_llm_review`
 Concept id: `mcp.tool.requeue_conflicts_for_llm_review`

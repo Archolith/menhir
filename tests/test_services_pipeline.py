@@ -3171,11 +3171,16 @@ def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() ->
         def list_conflict_groups(
             self, *, status: str | None, limit: int, namespace: str | None = None,
             created_before: object | None = None, oldest_first: bool = False,
+            include_all_members: bool = False,
         ) -> list[dict]:
             return [
                 {"group_id": "stale-group", "created_at": stale_created},
                 {"group_id": "fresh-group", "created_at": fresh_created},
             ]
+
+        def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+            resolved_groups.append(group_id)
+            return ["a", "b"]
 
         def resolve_conflict_group(self, group_id: str, action: str, **kwargs: object) -> dict:
             resolved_groups.append(group_id)

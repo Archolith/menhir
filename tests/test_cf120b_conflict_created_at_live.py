@@ -61,6 +61,10 @@ class _RepoAdapter:
         self.resolved.append(group_id)
         return {"member_uuids": []}
 
+    def auto_resolve_settled_conflict_group(self, group_id):
+        self.resolved.append(group_id)
+        return ["m1", "m2"]
+
 
 def test_the_driver_returns_a_type_that_breaks_naive_datetime_arithmetic(
     test_neo4j_repo, conflict_repo

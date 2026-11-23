@@ -1298,8 +1298,8 @@ async def stamp_and_finalize(
     # Best-effort semantic correlation check (Step 8)
     # After nodes are committed, check if they correlate with existing entities.
     # Correlations create RELATES_TO edges (0.7–0.85 sim) or trigger merge (>0.95 sim).
-    # Conflict-range pairs (0.85–0.95) are returned for the lifecycle service to flag.
-    correlation_conflicts = 0
+    # Conflict-range pairs (0.85–0.95) are queued for LLM review below (#655).
+    conflict_pairs: list[tuple[str, str]] = []
     _fence_check(ctx)
     try:
         from menhir.services.correlation_service import CorrelationService
@@ -1322,7 +1322,16 @@ async def stamp_and_finalize(
             corr_result = await correlation_service.check_correlation(
                 node.uuid, node_query, namespace=namespace,
             )
-            correlation_conflicts += corr_result.conflicts
+            # One conflict per node is queued; later pairs are fallbacks for a pair that is
+            # suppressed or cannot be written.
+            # A node absorbed by a merge is gone; its conflict pairs are moot.
+            results = corr_result.results or []
+            if not any(r.action == "merged" for r in results):
+                conflict_pairs.extend(
+                    (str(r.source_uuid), str(r.target_uuid))
+                    for r in results
+                    if r.action == "conflict" and r.target_uuid and r.target_uuid != node.uuid
+                )
             if corr_result.related > 0 or corr_result.merged > 0:
                 logger.info(
                     "Correlation check: node=%s related=%d merged=%d conflicts=%d",
@@ -1330,6 +1339,30 @@ async def stamp_and_finalize(
                 )
     except Exception:
         logger.warning("Correlation check failed (best-effort)", exc_info=True)
+    # #655: persist conflicts found at write time instead of waiting for consolidation.
+    # The fence check sits outside the try, like the steps above, so FenceLost still
+    # reaches the worker.
+    if conflict_pairs and ctx.lifecycle_service is not None:
+        flagged: set[str] = set()
+        for source_uuid, target_uuid in conflict_pairs:
+            if source_uuid in flagged:
+                continue
+            _fence_check(ctx)
+            try:
+                recorded = await ctx.lifecycle_service.record_conflict_pair(source_uuid, target_uuid)
+            except Exception:
+                logger.warning(
+                    "Conflict queue write failed for %s <-> %s (best-effort)",
+                    source_uuid, target_uuid, exc_info=True,
+                )
+                continue
+            # updated == 0: one side is gone or protected, so nothing was written.
+            if recorded is not None and recorded[1] > 0:
+                flagged.add(source_uuid)
+                logger.info(
+                    "Enrichment conflict queued: %s <-> %s (group=%s)",
+                    source_uuid, target_uuid, recorded[0],
+                )
     if ctx.lifecycle_service is not None:
         _fence_check(ctx)
         entity_uuids = [node.uuid for node in extracted_nodes]
