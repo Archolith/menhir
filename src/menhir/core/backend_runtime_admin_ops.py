@@ -9,6 +9,11 @@ from typing import Any
 from menhir.config import redact_uri_credentials
 from menhir.core.tenancy import require_own_object
 from menhir.infrastructure.providers import ProviderConfig
+from menhir.services.embedding_identity import (
+    LEGACY_EMBEDDING_MODELS,
+    comparable_model,
+    embedder_model_name,
+)
 
 from .backend_shared import _to_jsonable
 
@@ -26,6 +31,30 @@ _failed_overview_lock = threading.Lock()
 
 class SchedulerStartBlockedInBenchmarkMode(RuntimeError):
     """Force-takeover tried to start the maintenance scheduler under benchmark isolation."""
+
+
+def source_search_status(
+    *, eligible: bool, size: object, stamped_model: object, processing_state: object,
+    model: str | None, expected_size: int | None,
+) -> tuple[str, str | None]:
+    """Source-search readiness of one receipt, and why it is not ready (#409).
+
+    ``missing``: no vector yet; the ingest step embeds an in-flight episode and the repair job a
+    finished one. ``size_mismatch`` / ``model_mismatch``: a vector exists that recall cannot use;
+    only a re-embed (``scripts/backfill_episode_embeddings.py``) changes that.
+    """
+    if not eligible:
+        return "UNAVAILABLE", None
+    if not size:
+        state = str(processing_state or "").upper()
+        return "PENDING", ("missing" if state in {"READY", "FAILED"} else "missing_in_flight")
+    if expected_size and size != expected_size:
+        return "PENDING", "size_mismatch"
+    if model and stamped_model not in (model, *LEGACY_EMBEDDING_MODELS):
+        return "PENDING", "model_mismatch"
+    if not expected_size:
+        return "UNKNOWN", None
+    return "READY", None
 
 
 class RuntimeProviderAdminOpsMixin:
@@ -104,11 +133,30 @@ class RuntimeProviderAdminOpsMixin:
     async def fetch_episode_processing(
         self, episode_uuid: str
     ) -> dict[str, Any] | None:
-        return _to_jsonable(
-            await self._off_loop(
-                self.built.graph_adapter.fetch_episode_processing, episode_uuid
-            )
+        row = await self._off_loop(
+            self.built.graph_adapter.fetch_episode_processing, episode_uuid
         )
+        if row is None or "source_search_eligible" not in row:
+            return _to_jsonable(row)
+        from menhir.infrastructure.embedding_dimensions import (
+            expected_graphiti_embedding_dimension,
+        )
+
+        row = dict(row)
+        status, reason = source_search_status(
+            eligible=bool(row.pop("source_search_eligible")),
+            size=row.pop("source_embedding_size"),
+            stamped_model=row.pop("source_embedding_model"),
+            processing_state=row.get("processing_state"),
+            model=comparable_model(embedder_model_name(self.built.graphiti_client)),
+            # Recall compares against the live query vector; this is the size that vector has.
+            # None (an embedder whose size is not known) reports UNKNOWN, never a false PENDING.
+            expected_size=expected_graphiti_embedding_dimension(self.built.settings),
+        )
+        row["source_search_status"] = status
+        if reason:
+            row["source_search_reason"] = reason
+        return _to_jsonable(row)
 
     async def list_episode_processing(
         self, *, states: list[str] | None = None, limit: int = 25,
