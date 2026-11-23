@@ -33,6 +33,30 @@ class SchedulerStartBlockedInBenchmarkMode(RuntimeError):
     """Force-takeover tried to start the maintenance scheduler under benchmark isolation."""
 
 
+def source_search_status(
+    *, eligible: bool, size: object, stamped_model: object, processing_state: object,
+    model: str | None, expected_size: int | None,
+) -> tuple[str, str | None]:
+    """Source-search readiness of one receipt, and why it is not ready (#409).
+
+    ``missing``: no vector yet; the ingest step embeds an in-flight episode and the repair job a
+    finished one. ``size_mismatch`` / ``model_mismatch``: a vector exists that recall cannot use;
+    only a re-embed (``scripts/backfill_episode_embeddings.py``) changes that.
+    """
+    if not eligible:
+        return "UNAVAILABLE", None
+    if not size:
+        state = str(processing_state or "").upper()
+        return "PENDING", ("missing" if state in {"READY", "FAILED"} else "missing_in_flight")
+    if expected_size and size != expected_size:
+        return "PENDING", "size_mismatch"
+    if model and stamped_model not in (model, *LEGACY_EMBEDDING_MODELS):
+        return "PENDING", "model_mismatch"
+    if not expected_size:
+        return "UNKNOWN", None
+    return "READY", None
+
+
 class RuntimeProviderAdminOpsMixin:
     """Conflict, scheduler, telemetry, and mutation operations for the in-process backend adapter."""
 
@@ -114,25 +138,24 @@ class RuntimeProviderAdminOpsMixin:
         )
         if row is None or "source_search_eligible" not in row:
             return _to_jsonable(row)
-        client = self.built.graphiti_client
-        model = comparable_model(embedder_model_name(client))
-        embedder = getattr(client, "embedder_ref", None)
-        expected_size = getattr(getattr(embedder, "config", None), "embedding_dim", None)
+        from menhir.infrastructure.embedding_dimensions import (
+            expected_graphiti_embedding_dimension,
+        )
+
         row = dict(row)
-        eligible = row.pop("source_search_eligible")
-        size = row.pop("source_embedding_size")
-        stamped_model = row.pop("source_embedding_model")
-        if not eligible:
-            status = "UNAVAILABLE"
-        elif not size or (expected_size and size != expected_size):
-            status = "PENDING"
-        elif model and stamped_model not in (model, *LEGACY_EMBEDDING_MODELS):
-            status = "PENDING"
-        elif not expected_size:
-            status = "UNKNOWN"
-        else:
-            status = "READY"
+        status, reason = source_search_status(
+            eligible=bool(row.pop("source_search_eligible")),
+            size=row.pop("source_embedding_size"),
+            stamped_model=row.pop("source_embedding_model"),
+            processing_state=row.get("processing_state"),
+            model=comparable_model(embedder_model_name(self.built.graphiti_client)),
+            # Recall compares against the live query vector; this is the size that vector has.
+            # None (an embedder whose size is not known) reports UNKNOWN, never a false PENDING.
+            expected_size=expected_graphiti_embedding_dimension(self.built.settings),
+        )
         row["source_search_status"] = status
+        if reason:
+            row["source_search_reason"] = reason
         return _to_jsonable(row)
 
     async def list_episode_processing(

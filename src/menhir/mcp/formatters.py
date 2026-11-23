@@ -615,6 +615,27 @@ def _episode_status_guidance(*, state: str | None, timed_out: bool) -> str:
     )
 
 
+#: What changes a PENDING source-search status, by reason (#409). The enrichment wait tracks
+#: graph work only; none of these is fixed by waiting on it.
+_SOURCE_SEARCH_GUIDANCE = {
+    "missing": (
+        "No source embedding yet. The embedding repair job retries it within minutes; check "
+        "this same receipt again later."
+    ),
+    "missing_in_flight": (
+        "No source embedding yet; the ingest step embeds it before this memory finishes."
+    ),
+    "size_mismatch": (
+        "The stored source embedding has a different size than the current embedder, so source "
+        "search cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+    "model_mismatch": (
+        "The stored source embedding was made by a different embedding model, so source search "
+        "cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+}
+
+
 def _format_episode_status(
     *,
     episode_uuid: str,
@@ -654,10 +675,9 @@ def _format_episode_status(
         )
     )
     if row.get("source_search_status") == "PENDING":
-        lines.append(
-            "source_search_guidance: A compatible source embedding is missing. Check this "
-            "same receipt again after embedding repair. The enrichment wait tracks graph work."
-        )
+        reason = str(row.get("source_search_reason") or "missing")
+        lines.append(f"source_search_reason: {reason}")
+        lines.append(f"source_search_guidance: {_SOURCE_SEARCH_GUIDANCE.get(reason, _SOURCE_SEARCH_GUIDANCE['missing'])}")
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):

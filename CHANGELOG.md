@@ -4,7 +4,12 @@
   subsequent failure leaves the receipt available for the source-embedding repair job.
 - Regression tests cover a successful second attempt and a repeated timeout.
 - The episode status response reports source-search readiness separately from graph
-  enrichment, including when a source is awaiting an embedding.
+  enrichment (`source_search_status`: READY, PENDING, UNKNOWN or UNAVAILABLE). The stored
+  vector is compared with the size the configured embedder produces, so an embedder smaller
+  than 1024 dimensions reads READY; when that size is not known the status is UNKNOWN.
+- A PENDING status carries `source_search_reason`, and the guidance names what changes it:
+  `missing` (the repair job), `missing_in_flight` (the ingest step), `size_mismatch` or
+  `model_mismatch` (a re-embed with `scripts/backfill_episode_embeddings.py`).
 
 ## 2026-11-22 - Conflicts needing attention appear as an operator warning, like FAILED saves
 

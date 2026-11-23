@@ -59,8 +59,16 @@ def test_write_is_refused_when_content_no_longer_matches(test_neo4j_repo: Any) -
     assert _stamp(graph, "c-1") == ([1.0], "m-1")
 
 
-def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_repo: Any) -> None:
+def test_repair_job_end_to_end_including_an_edit_during_the_embed(
+    test_neo4j_repo: Any, monkeypatch: Any,
+) -> None:
     graph = test_neo4j_repo
+    # The status compares against the size the configured embedder produces (the live query
+    # vector's size), resolved from settings; these vectors are 2-d.
+    monkeypatch.setattr(
+        "menhir.infrastructure.embedding_dimensions.expected_graphiti_embedding_dimension",
+        lambda settings: 2,
+    )
     adapter = MemoryGraphAdapter(graph)
     _episode(graph, "e-ready", "READY", content="ready text")
     _episode(graph, "e-edited", "READY", content="before edit")
@@ -69,6 +77,7 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_rep
     class StatusBackend(RuntimeProviderAdminOpsMixin):
         built = SimpleNamespace(
             graph_adapter=adapter,
+            settings=SimpleNamespace(),
             graphiti_client=SimpleNamespace(embedder_ref=SimpleNamespace(
                 config=SimpleNamespace(embedding_model="m-1", embedding_dim=2),
             )),
