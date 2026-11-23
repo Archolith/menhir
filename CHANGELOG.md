@@ -1,3 +1,8 @@
+## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.14. No dependency changes in this commit.
+- Upgrade note (#761): Agent Smith OAuth identities (`/oauth/client-metadata/agent-smith.json?client=<key>`) are served only from client-policy entries with a `registration`; the built-in table is gone. A deployment that uses Agent Smith must add those registrations to its policy in the same upgrade.
+
 ## 2026-11-22 - A memory whose enrichment fails stays recallable; extraction and lab fixes (#662, #483, #265)
 
 - #662: the source-memory lane (`search_episode_embeddings`) now returns FAILED episodes; only
@@ -129,13 +134,3 @@
 ## 2026-11-22 - Graphiti fork 0.31.2.post4: entity-edge save fixes (Archolith/graphiti #28-#30)
 
 - `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post4`, fork commit `d94da8d7`. Pins, docs and release checks updated.
-
-## 2026-11-22 - Phase 3 reports a billing refusal or open breaker as unavailable (#743)
-
-- `POST /api/phase3/run` answers 503 (`phase 3 consolidation unavailable: <reason>`) when the
-  pass stops on a billing refusal or an open breaker, instead of a 500 with a traceback. The
-  namespace stays dirty, as before. Any other error is unchanged.
-- The scheduler's job wrapper logs the same cases as one WARNING without a traceback and records
-  the failure as `provider_unavailable` (retryable) rather than `scheduler_error`.
-- Both use `provider_unavailable_reason` (circuit_breaker.py); `circuit_open_cause` moved there
-  from graphiti_client.py, which keeps the old private name as an alias.

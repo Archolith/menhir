@@ -1,3 +1,13 @@
+## 2026-11-22 - Phase 3 reports a billing refusal or open breaker as unavailable (#743)
+
+- `POST /api/phase3/run` answers 503 (`phase 3 consolidation unavailable: <reason>`) when the
+  pass stops on a billing refusal or an open breaker, instead of a 500 with a traceback. The
+  namespace stays dirty, as before. Any other error is unchanged.
+- The scheduler's job wrapper logs the same cases as one WARNING without a traceback and records
+  the failure as `provider_unavailable` (retryable) rather than `scheduler_error`.
+- Both use `provider_unavailable_reason` (circuit_breaker.py); `circuit_open_cause` moved there
+  from graphiti_client.py, which keeps the old private name as an alias.
+
 ## 2026-11-22 - Breaker gaps after #638: sync clients, probe wait, reranker, degraded drill-downs (#639, #640, #641, #642)
 
 - #639: the sync view embedder and the personal-memory sync chat take the Graphiti breaker for the
