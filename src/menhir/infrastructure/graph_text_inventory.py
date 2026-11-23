@@ -87,6 +87,7 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "_candidate_review_lock", "_artifact_supersede_lock", "_conflict_group_lock",
         # Conflict and supersession links (uuids and enums).
         "conflict_group_id", "conflict_status", "conflict_created_at", "conflict_confirmed_at",
+        "conflict_pending_since",
         "supersedes",
         "superseded_by", "resolution_status", "resolution_reason",
         # Code-structure graph (paths, symbols, commits: repository metadata, not memory).

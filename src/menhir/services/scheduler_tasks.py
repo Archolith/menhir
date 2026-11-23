@@ -20,6 +20,7 @@ from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
+from menhir.infrastructure.memory_queries import STALE_PENDING_CONFLICT_SECONDS
 from menhir.infrastructure.telemetry import record_failure_event
 from menhir.services.enrichment_failures import (
     classify_enrichment_failure,
@@ -104,7 +105,7 @@ async def recover_stale_leases(
 _NEVER_RETRIED_CLASSIFICATIONS = ("terminal", "manual_review")
 
 #: A conflict group pending LLM review for longer than this triggers a queue-health WARNING (#651).
-_PENDING_CONFLICT_WARN_S = 24 * 3600
+_PENDING_CONFLICT_WARN_S = STALE_PENDING_CONFLICT_SECONDS
 
 
 async def observe_queue_health(
