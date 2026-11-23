@@ -718,13 +718,13 @@ _stuck_count_cache: tuple[float, int] | None = None
 async def _standing_unrecallable_count(backend: object) -> int:
     """Return how many episodes are currently FAILED, hence holding content with no entities.
 
-    Recall searches `:Entity`, so a FAILED episode's text is in the graph but unreachable --
-    and `add_memory` has already told its caller the write succeeded. Surfacing the count in
+    A FAILED episode's text is found only by the source-memory lane (#662): it has no entities
+    or facts -- and `add_memory` has already told its caller the write succeeded. Surfacing the count in
     the write's own response is the only signal that reaches EVERY client (Claude, Codex,
     opencode, Qwen); a host hook would only cover whichever harness installs it.
 
     Counts all FAILED, not just the never-retried ones: from the caller's side "waiting for a
-    retry" and "parked forever" are the same state -- not recallable right now. The
+    retry" and "parked forever" are the same state -- no entities or facts right now. The
     terminal/manual_review split is an operator concern and lives in the queue-health warning.
 
     Best-effort by construction: a failure to count must never fail the write.
@@ -875,8 +875,8 @@ def _operator_warning_line(entry: Any) -> str | None:
             return None
         text = (
             f"WARNING: {unrecallable} earlier "
-            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
-            f"-- the text is stored but has no entities, so recall cannot return it. "
+            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED -- the text is "
+            f"stored and source-memory recall can return it, but it has no entities or facts. "
             f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
         )
     # No "how to silence this" text: these lines reach models at every tier, and silencing a

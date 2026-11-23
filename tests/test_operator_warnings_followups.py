@@ -405,8 +405,8 @@ _LEGACY_AUTH = (
     "failed episodes are retried automatically once a call succeeds."
 )
 _LEGACY_FAILED = (
-    "\nWARNING: 2 earlier memories are FAILED and NOT recallable "
-    "-- the text is stored but has no entities, so recall cannot return it. "
+    "\nWARNING: 2 earlier memories are FAILED -- the text is "
+    "stored and source-memory recall can return it, but it has no entities or facts. "
     "This write may end the same way; check get_enrichment_status(episode_id) if it matters."
 )
 

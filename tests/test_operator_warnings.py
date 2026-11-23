@@ -280,7 +280,7 @@ def test_backend_exception_falls_back_to_legacy_text() -> None:
     _fail_auth()
     summary = asyncio.run(_queue_summary(_Failing()))
     assert "rejected our credentials" in summary
-    assert "2 earlier memories are FAILED and NOT recallable" in summary
+    assert "2 earlier memories are FAILED -- the text is stored and source-memory recall" in summary
     assert "acknowledge_warning" not in summary  # nothing to ack against
 
 

@@ -682,6 +682,8 @@ class EpisodeLifecycleRepository:
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             EPISODE_NOT_ERASED,
+            # Never send erase-sealed text to the embedder (the write would be refused anyway).
+            EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
             "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
             non_structural_memory_cypher("n"),
@@ -1677,7 +1679,9 @@ class EpisodeLifecycleRepository:
         source_eligible = " AND ".join((
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            # Same as the source-memory read: FAILED stays searchable (#662).
+            EPISODE_NOT_ERASED,
+            EPISODE_NOT_MARKED,
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ))
