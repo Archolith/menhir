@@ -812,6 +812,31 @@ def _operator_warning_line(entry: Any) -> str | None:
             f"WARNING: {summary}. Enrichment cannot progress until provider "
             "credits are added; stop waiting on queued episodes."
         )
+    elif kind == "conflicts":
+        try:
+            confirmed = max(0, int(entry.get("unresolved_groups") or 0))
+            stale = max(0, int(entry.get("stale_pending_groups") or 0))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if confirmed <= 0 and stale <= 0:
+            return None
+        # A group can hold both a confirmed member and a stuck one, so the two counts are
+        # worded per group and not summed.
+        parts = []
+        if confirmed:
+            parts.append(
+                f"{confirmed} conflict group{'' if confirmed == 1 else 's'} "
+                f"{'has' if confirmed == 1 else 'have'} a confirmed contradiction nobody has "
+                "decided (see review_inbox or list_conflicts)"
+            )
+        if stale:
+            parts.append(
+                f"{stale} conflict group{'' if stale == 1 else 's'} "
+                f"{'has' if stale == 1 else 'have'} a possible contradiction waiting over 24h "
+                "for LLM review (run_llm_conflict_review retries it)"
+            )
+        text = f"WARNING: {'; '.join(parts)}. Recall marks or withholds these memories until then."
+
     elif kind != "failed_episodes":
         # A kind from a newer serve: its own summary.
         return f"WARNING: {summary}." if summary else None
@@ -898,7 +923,7 @@ async def _queue_summary(backend: object) -> str:
         entries = (
             await _legacy_operator_warnings(backend)
             if _benchmark_mode()
-            else await _unacked_operator_warnings(backend)
+            else _caller_visible_warnings(await _unacked_operator_warnings(backend))
         )
         lines = [line for line in map(_operator_warning_line, entries) if line]
     except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed

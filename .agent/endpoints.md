@@ -482,11 +482,13 @@ restart the loop.
 Concept id: `mcp.tool.acknowledge_warning`
 Required tier: `operator`
 
-Silence an operator warning (`provider_auth`, `provider_billing` or `failed_episodes`) in
-`add_memory`, `add_memory_and_track`, `recall_context_memories`, `read_flagged_memories` and
-`build_context` output. The ack covers the current incident only: a provider warning comes back
-after the condition clears and recurs, and `failed_episodes` comes back when an episode fails
-after the ack. `get_memory_stats` keeps listing acknowledged warnings while they are active.
+Silence an operator warning (`provider_auth`, `provider_billing`, `failed_episodes` or
+`conflicts`) in `add_memory`, `add_memory_and_track`, `recall_context_memories`,
+`read_flagged_memories` and `build_context` output. The ack covers the current incident only: a
+provider warning comes back after the condition clears and recurs, `failed_episodes` comes back
+when an episode fails after the ack, and `conflicts` comes back when a conflict is confirmed, or
+has waited over 24h for LLM review, after the ack. `failed_episodes` and `conflicts` count every
+silo, so a namespace-pinned caller does not see them. `get_memory_stats` keeps listing acknowledged warnings while they are active.
 - `subject`: LLM call kind (`chat`, `embedding`, `response`) for provider kinds; empty acks all.
 - Returns what was acknowledged, or that nothing was active.
 

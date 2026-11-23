@@ -731,6 +731,8 @@ Concept id: `model.conflict`
 | `conflict_group_id` | string | Groups mutually conflicting node pairs |
 | `conflict_status` | string | Per member. `pending_llm_review` (recall flags `possible_conflict`), `unresolved` (LLM-confirmed or PROMOTED pair; recall refuses under current intent, flags otherwise), `false_positive`, `resolved`, `auto-resolved` (confirmed, aged out after 14 days undecided; recall flags `unsettled_conflict`) |
 | `conflict_created_at` | timestamp | First conflict detection time |
+| `conflict_confirmed_at` | timestamp | When the member became `unresolved` (review or PROMOTED routing); drives the `conflicts` warning |
+| `conflict_pending_since` | timestamp | When the member last entered `pending_llm_review`; a member pending over 24h counts as stuck |
 
 A new pair never downgrades a confirmed (`unresolved`) member, and merging groups keeps each live
 member's status; a node joining fresh starts a new `conflict_created_at` (#654). The 14-day

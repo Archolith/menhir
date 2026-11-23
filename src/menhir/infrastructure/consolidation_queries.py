@@ -715,20 +715,35 @@ class ConsolidationRepository:
               // A node joining fresh starts a new age; a stale stamp from an earlier,
               // resolved conflict would make it look overdue at once.
               a.conflict_group_id IS NULL AS a_fresh,
-              b.conflict_group_id IS NULL AS b_fresh
+              b.conflict_group_id IS NULL AS b_fresh,
+              (a.conflict_group_id IS NOT NULL AND a.conflict_status = 'pending_llm_review') AS a_was_pending,
+              (b.conflict_group_id IS NOT NULL AND b.conflict_status = 'pending_llm_review') AS b_was_pending
             SET a.conflict_group_id  = canonical_group_id,
                 a.conflict_status    = CASE WHEN a_confirmed THEN 'unresolved' ELSE $initial_status END,
                 a.conflict_created_at = CASE WHEN a_fresh THEN datetime()
                                              ELSE coalesce(a.conflict_created_at, datetime()) END,
+                a.conflict_confirmed_at = CASE WHEN NOT a_confirmed AND $initial_status = 'unresolved'
+                                               THEN datetime() ELSE a.conflict_confirmed_at END,
+                a.conflict_pending_since = CASE
+                    WHEN NOT a_confirmed AND $initial_status = 'pending_llm_review' AND NOT a_was_pending
+                    THEN datetime() ELSE a.conflict_pending_since END,
                 b.conflict_group_id  = canonical_group_id,
                 b.conflict_status    = CASE WHEN b_confirmed THEN 'unresolved' ELSE $initial_status END,
                 b.conflict_created_at = CASE WHEN b_fresh THEN datetime()
-                                             ELSE coalesce(b.conflict_created_at, datetime()) END
+                                             ELSE coalesce(b.conflict_created_at, datetime()) END,
+                b.conflict_confirmed_at = CASE WHEN NOT b_confirmed AND $initial_status = 'unresolved'
+                                               THEN datetime() ELSE b.conflict_confirmed_at END,
+                b.conflict_pending_since = CASE
+                    WHEN NOT b_confirmed AND $initial_status = 'pending_llm_review' AND NOT b_was_pending
+                    THEN datetime() ELSE b.conflict_pending_since END
             // #654: members absorbed from a merged group keep their own status and age.
             // A member resolved after the orphan read must not be left in a live group
             // with a terminal status, so anything not live goes back to review.
             FOREACH (o IN orphans |
                 SET o.conflict_group_id = canonical_group_id,
+                    o.conflict_pending_since = CASE
+                        WHEN o.conflict_status IN ['pending_llm_review', 'unresolved']
+                        THEN o.conflict_pending_since ELSE datetime() END,
                     o.conflict_status = CASE
                         WHEN o.conflict_status IN ['pending_llm_review', 'unresolved']
                         THEN o.conflict_status ELSE 'pending_llm_review' END,
@@ -787,7 +802,9 @@ class ConsolidationRepository:
               AND n.conflict_status = $from_status
               AND {tenant_scope_cypher("n")}
               AND {automatic_lifecycle_protection_cypher("n")}
-            SET n.conflict_status = $to_status
+            SET n.conflict_status = $to_status,
+                n.conflict_confirmed_at = CASE WHEN $to_status = 'unresolved'
+                                               THEN datetime() ELSE n.conflict_confirmed_at END
             RETURN count(n) AS updated
             """,
             params={
@@ -949,7 +966,9 @@ class ConsolidationRepository:
             WHERE m.conflict_group_id = gid
               AND ($namespace IS NULL OR coalesce(m.namespace, 'default') = $namespace)
               AND {automatic_lifecycle_protection_cypher("m")}
-            SET m.conflict_status = 'pending_llm_review'
+            SET m.conflict_pending_since = CASE WHEN m.conflict_status = 'pending_llm_review'
+                                                THEN m.conflict_pending_since ELSE datetime() END,
+                m.conflict_status = 'pending_llm_review'
             RETURN count(DISTINCT gid) AS groups_requeued
             """,
             params={
