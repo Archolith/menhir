@@ -244,9 +244,9 @@ async def review_unresolved_conflicts(
 ) -> dict[str, object]:
     """Re-evaluate unresolved conflict groups through the LLM reviewer.
 
-    Groups that the LLM clears as false positives are resolved as keep_both.
-    Groups that the LLM confirms as genuine contradictions stay unresolved
-    for manual attention. This prevents the unresolved queue from growing
+    Each unresolved member is re-checked against its group (#654). A member whose
+    every pair the LLM rejects leaves the group as false_positive; confirmed members
+    stay unresolved for manual attention. This prevents the unresolved queue from growing
     indefinitely with pairs that are merely similar but not contradictory.
     """
     counts = await lifecycle_service.confirm_pending_conflicts(

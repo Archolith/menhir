@@ -1322,8 +1322,8 @@ async def stamp_and_finalize(
             corr_result = await correlation_service.check_correlation(
                 node.uuid, node_query, namespace=namespace,
             )
-            # Same pair order as consolidation: one conflict per node, the rest are
-            # fallbacks when the first is suppressed.
+            # One conflict per node is queued; later pairs are fallbacks for a pair that is
+            # suppressed or cannot be written.
             # A node absorbed by a merge is gone; its conflict pairs are moot.
             results = corr_result.results or []
             if not any(r.action == "merged" for r in results):
@@ -1343,11 +1343,11 @@ async def stamp_and_finalize(
     # The fence check sits outside the try, like the steps above, so FenceLost still
     # reaches the worker.
     if conflict_pairs and ctx.lifecycle_service is not None:
-        _fence_check(ctx)
         flagged: set[str] = set()
         for source_uuid, target_uuid in conflict_pairs:
             if source_uuid in flagged:
                 continue
+            _fence_check(ctx)
             try:
                 recorded = await ctx.lifecycle_service.record_conflict_pair(source_uuid, target_uuid)
             except Exception:
@@ -1356,7 +1356,8 @@ async def stamp_and_finalize(
                     source_uuid, target_uuid, exc_info=True,
                 )
                 continue
-            if recorded is not None:
+            # updated == 0: one side is gone or protected, so nothing was written.
+            if recorded is not None and recorded[1] > 0:
                 flagged.add(source_uuid)
                 logger.info(
                     "Enrichment conflict queued: %s <-> %s (group=%s)",

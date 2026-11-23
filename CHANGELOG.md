@@ -21,6 +21,10 @@
   correlation at enrichment are queued through the same path as consolidation
   (`record_conflict_pair`: cooldown, PROMOTED routing, `set_conflict`), one per node, instead of
   being counted and dropped (#655).
+- The 14-day auto-resolve now skips a group that still holds a pending member; it goes through
+  `auto_resolve_settled_conflict_group`, which re-checks under a group lock. Removal after review
+  is refused if a member joined since the verdict. A node joining a group fresh gets a new
+  `conflict_created_at`. Review drains the oldest groups first.
 
 ## 2026-11-22 - Startup requires every phase-one uniqueness constraint; L4 supersession refuses historical endpoints (#741, #742)
 

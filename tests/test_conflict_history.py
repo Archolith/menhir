@@ -242,6 +242,7 @@ class TestAutoResolveSuppression:
             "bridged_edges": 0,
             "member_uuids": ["n1", "n2", "n3"],
         }
+        adapter.auto_resolve_settled_conflict_group.return_value = ["n1", "n2", "n3"]
         settings = MemorySettings()
         svc = LifecycleService(
             graph_adapter=adapter,

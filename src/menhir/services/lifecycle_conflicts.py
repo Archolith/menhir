@@ -148,6 +148,9 @@ class LifecycleConflictMixin:
             limit=limit,
             namespace=namespace,
             include_all_members=True,
+            # Oldest first: with enrichment adding pairs (#655), newest-first would starve
+            # the oldest pending groups indefinitely.
+            oldest_first=True,
         )
         confirmed = cleared = errors = 0
         details: list[dict] = []
@@ -208,18 +211,21 @@ class LifecycleConflictMixin:
                 if str(member.get("status") or "") != status:
                     continue
                 uuid = str(member["uuid"])
+                if calls_left <= 0 and any(
+                    frozenset((uuid, str(o["uuid"]))) not in verdicts
+                    for o in members
+                    if str(o["uuid"]) != uuid and str(o["uuid"]) not in removed
+                ):
+                    # Out of budget: the remaining members wait for the next run, untouched.
+                    stop = True
+                    break
                 rejected: list[dict] = []
                 partner: dict | None = None
-                unanswered = deferred = False
+                unanswered = False
                 for other in members:
                     other_uuid = str(other["uuid"])
                     if other_uuid == uuid or other_uuid in removed:
                         continue
-                    if frozenset((uuid, other_uuid)) not in verdicts and calls_left <= 0:
-                        # Out of budget: leave this member for the next run, untouched.
-                        deferred = True
-                        stop = True
-                        break
                     verdict, called = await _verdict(member, other, group_id)
                     if verdict is None:
                         unanswered = True
@@ -241,13 +247,16 @@ class LifecycleConflictMixin:
                     rejected.append(other)
 
                 if partner is not None:
-                    group_confirmed = True
                     if status != "unresolved":
-                        await asyncio.to_thread(
+                        applied = await asyncio.to_thread(
                             self.graph_adapter.set_conflict_member_status,
                             group_id, uuid,
                             from_status=status, to_status="unresolved", namespace=namespace,
                         )
+                        if not applied:
+                            # Moved by a concurrent review or resolution; theirs stands.
+                            continue
+                    group_confirmed = True
                     logger.info(
                         "LLM confirmed conflict group=%s member=%s (%r vs %r)",
                         group_id, uuid, member.get("name"), partner.get("name"),
@@ -261,8 +270,6 @@ class LifecycleConflictMixin:
                             "snippet_a": (member.get("content") or "")[:120],
                             "snippet_b": (partner.get("content") or "")[:120],
                         })
-                elif deferred:
-                    pass
                 elif unanswered:
                     # A member is removed only when every pair was rejected; a missing
                     # verdict leaves it in place.
@@ -281,6 +288,7 @@ class LifecycleConflictMixin:
                         group_id, uuid,
                         from_status=status, resolution_status="false_positive",
                         namespace=namespace,
+                        reviewed_uuids=[str(o["uuid"]) for o in rejected] + sorted(removed),
                     )
                     if not outcome.get("removed"):
                         continue
@@ -333,6 +341,8 @@ class LifecycleConflictMixin:
         groups = self.graph_adapter.list_conflict_groups(
             status="unresolved",
             limit=limit,
+            # Every member, so a group still holding a pending member can be skipped.
+            include_all_members=True,
             # Ask for the OLDEST unresolved groups and push the age cutoff into the
             # database (CF-120). The newest-first default would return only fresh groups
             # that the filter below drops, so the stale backlog the job exists to drain
@@ -366,13 +376,16 @@ class LifecycleConflictMixin:
             group_id = str(group.get("group_id") or "")
             if not group_id:
                 continue
-            result = self.graph_adapter.resolve_conflict_group(
-                group_id,
-                action="keep_both",
-                resolution_status="auto-resolved",
-            )
+            # A pending member was never reviewed: auto-resolving it would label it a confirmed
+            # contradiction and suppress its pairs. Wait until review settles the group. The
+            # repository repeats this check under a lock.
+            if any(str(m.get("status") or "unresolved") != "unresolved"
+                   for m in (group.get("members") or [])):
+                continue
+            member_uuids = self.graph_adapter.auto_resolve_settled_conflict_group(group_id)
+            if not member_uuids:
+                continue
             # Blanket age-based resolution — suppress all pairs
-            member_uuids = result.get("member_uuids", [])
             for i, uuid_a in enumerate(member_uuids):
                 for uuid_b in member_uuids[i + 1:]:
                     self._record_suppression(

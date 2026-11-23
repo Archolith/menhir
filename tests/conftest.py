@@ -1554,9 +1554,23 @@ class StubMemoryGraphAdapter:
                 return True
         return False
 
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        group = self.conflict_groups.get(group_id)
+        members = (group or {}).get("members", [])
+        if not members or any(m.get("status") != "unresolved" for m in members):
+            return []
+        uuids = [str(m.get("uuid")) for m in members]
+        group["status"] = "auto-resolved"
+        members.clear()
+        self.resolve_conflict_calls.append({
+            "group_id": group_id, "action": "keep_both", "resolution_status": "auto-resolved",
+        })
+        return uuids
+
     def remove_conflict_member(
         self, group_id: str, node_uuid: str, *, from_status: str,
         resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
     ) -> dict[str, object]:
         group = self.conflict_groups.get(group_id)
         members = (group or {}).get("members", [])
@@ -1565,6 +1579,9 @@ class StubMemoryGraphAdapter:
             None,
         )
         if target is None:
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        others = {str(m.get("uuid")) for m in members if m is not target}
+        if reviewed_uuids is not None and not others <= set(reviewed_uuids):
             return {"removed": False, "dissolved": False, "remaining_uuids": []}
         members.remove(target)
         self.removed_conflict_members.append((group_id, node_uuid, resolution_status))

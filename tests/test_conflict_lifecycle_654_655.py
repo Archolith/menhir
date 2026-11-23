@@ -212,7 +212,7 @@ async def test_enrichment_conflict_creates_a_pending_group(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_enrichment_skips_suppressed_pair_and_takes_the_next(
+async def test_record_conflict_pair_returns_none_for_a_suppressed_pair(
     stub_memory_graph_adapter, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from menhir.services.lifecycle_service import LifecycleService
@@ -373,3 +373,199 @@ def test_live_overview_counts_pending_conflict_groups(test_neo4j_repo) -> None:
     overview = MemoryGraphAdapter(neo4j=test_neo4j_repo).fetch_memory_overview(namespace=ns)
     assert overview["pending_conflict_groups"] == 1
     assert str(overview["oldest_pending_conflict_at"]).startswith("2026-11-01")
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups on PR #756
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_auto_resolve_skips_a_group_with_a_pending_member(stub_memory_graph_adapter) -> None:
+    """F1: a pending member was never reviewed, so its group is not aged out."""
+    from menhir.services.lifecycle_service import LifecycleService
+
+    adapter = stub_memory_graph_adapter
+    _group(adapter, "mixed", {"a": "unresolved", "b": "unresolved", "n": "pending_llm_review"})
+    _group(adapter, "settled", {"c": "unresolved", "d": "unresolved"})
+    for g in adapter.conflict_groups.values():
+        g["created_at"] = "2020-01-01T00:00:00+00:00"
+    svc = LifecycleService(
+        graph_adapter=adapter, graphiti_client=MagicMock(), llm=None, settings=MemorySettings(),
+    )
+    store = MagicMock()
+
+    with patch("menhir.services.lifecycle_conflicts.telemetry_store", store):
+        assert svc.auto_resolve_stale_conflicts(max_age_days=14, limit=50) == 1
+
+    assert _statuses(adapter, "mixed") == {"a": "unresolved", "b": "unresolved", "n": "pending_llm_review"}
+    suppressed = {
+        frozenset((c.kwargs["uuid_a"], c.kwargs["uuid_b"]))
+        for c in store.record_conflict_resolution.call_args_list
+    }
+    assert suppressed == {frozenset("cd")}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_removal_waits_when_a_member_joined_after_review(stub_memory_graph_adapter) -> None:
+    """F2: the verdict covered A-B only; C joined during the LLM call, so A stays."""
+    adapter = stub_memory_graph_adapter
+    _group(adapter, "gj", {"a": "pending_llm_review", "b": "pending_llm_review"})
+
+    async def _verdict(*, name_a, content_a, name_b, content_b):
+        adapter.conflict_groups["gj"]["members"].append(
+            {"uuid": "c", "name": "c", "content": "c", "status": "pending_llm_review", "scope": "PERSISTENT"}
+        )
+        return False
+
+    svc = _lifecycle(adapter, verdict=_verdict)
+    with patch("menhir.services.lifecycle_conflicts.telemetry_store", MagicMock()):
+        await svc.confirm_pending_conflicts(limit=1)
+
+    assert adapter.removed_conflict_members == []
+    assert {"a", "b", "c"} <= set(_statuses(adapter, "gj"))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_large_group_still_progresses_under_a_small_budget(stub_memory_graph_adapter) -> None:
+    """F14: a member finishes its comparisons even past the budget, so a group larger than
+    the budget is not deferred forever."""
+    adapter = stub_memory_graph_adapter
+    _group(adapter, "big", {"a": "pending_llm_review", "b": "pending_llm_review", "c": "pending_llm_review"})
+    svc = _lifecycle(adapter, verdict=_pair_verdicts({
+        frozenset("ab"): False, frozenset("ac"): False, frozenset("bc"): False,
+    }))
+    with patch("menhir.services.lifecycle_conflicts.telemetry_store", MagicMock()):
+        await svc.confirm_pending_conflicts(limit=1)
+
+    assert adapter.removed_conflict_members == [("big", "a", "false_positive")]
+    assert svc.llm.confirm_contradiction.await_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enrichment_falls_through_when_a_pair_writes_nothing(
+    stub_memory_graph_adapter, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F11: updated == 0 (the other side is gone or protected) is not "queued"."""
+    from menhir.services import enrichment_steps as es
+    from menhir.services.correlation_service import CorrelationService
+    from menhir.services.correlation_service_types import CorrelationBatchResult, CorrelationResult
+    from menhir.services.ingest_gate import IngestGate
+
+    adapter = stub_memory_graph_adapter
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="ep-655b", name="ep-655b", content="x",
+        session_id="s", user_id="u", source="unit-test", source_confidence=0.5,
+    )
+    adapter.pending_episode_rows[episode_uuid]["processing_state"] = ProcessingState.ENRICHING
+    adapter.pending_episode_rows[episode_uuid]["processing_owner"] = "w-1"
+
+    async def _check(self, node_uuid, query, *, namespace=None, **_):
+        return CorrelationBatchResult(checked=1, conflicts=2, results=[
+            CorrelationResult(action="conflict", source_uuid=node_uuid, target_uuid="gone", similarity=0.9),
+            CorrelationResult(action="conflict", source_uuid=node_uuid, target_uuid="live", similarity=0.88),
+        ])
+
+    monkeypatch.setattr(CorrelationService, "check_correlation", _check)
+    monkeypatch.setattr(adapter, "_correlation", MagicMock(), raising=False)
+    lifecycle = MagicMock()
+    lifecycle.record_conflict_pair = AsyncMock(side_effect=[("g-gone", 0), ("g-live", 2)])
+    ctx = es.EnrichmentContext(
+        episode_uuid=episode_uuid, claimed={"content": "x", "namespace": "default"},
+        started=0.0, processing_attempts=1, worker_id="w-1",
+        graph_adapter=adapter, graphiti_client=MagicMock(), lifecycle_service=lifecycle,
+        llm=None, ingest_gate=IngestGate(1), processing_steps_total=5,
+        settings_record_revisions=False, ready_warning_ms=5000,
+        graphiti_add_episode_timeout_s=5.0, graphiti_episode_max_estimated_tokens=8000,
+        get_queue_depth=lambda: 0,
+    )
+    graphiti_result = SimpleNamespace(
+        episode=SimpleNamespace(uuid="e"), edges=[], episodic_edges=[],
+        nodes=[SimpleNamespace(uuid="new", name="n", content="c")],
+    )
+    with contextlib.suppress(Exception):
+        await es.stamp_and_finalize(ctx, graphiti_result)
+
+    assert [c.args for c in lifecycle.record_conflict_pair.await_args_list] == [
+        ("new", "gone"), ("new", "live"),
+    ]
+
+
+@pytest.mark.online
+def test_live_auto_resolve_only_settled_groups(test_neo4j_repo) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    a, b, n, _ = _ids("ar")
+    c, d, _, _ = _ids("as")
+    mixed, settled = f"g-{a}", f"g-{c}"
+    _seed(test_neo4j_repo, mixed, {a: "unresolved", b: "unresolved", n: "pending_llm_review"})
+    _seed(test_neo4j_repo, settled, {c: "unresolved", d: "unresolved"})
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    assert adapter.auto_resolve_settled_conflict_group(mixed) == []
+    assert sorted(adapter.auto_resolve_settled_conflict_group(settled)) == sorted([c, d])
+    assert _live_statuses(test_neo4j_repo, a, b, n, c, d) == {
+        a: (mixed, "unresolved"), b: (mixed, "unresolved"), n: (mixed, "pending_llm_review"),
+        c: (None, "auto-resolved"), d: (None, "auto-resolved"),
+    }
+
+
+@pytest.mark.online
+def test_live_removal_refused_for_an_unreviewed_member(test_neo4j_repo) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    a, b, c, _ = _ids("rr")
+    gid = f"g-{a}"
+    _seed(test_neo4j_repo, gid, {a: "pending_llm_review", b: "pending_llm_review", c: "pending_llm_review"})
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    out = adapter.remove_conflict_member(gid, a, from_status="pending_llm_review", reviewed_uuids=[b])
+    assert out["removed"] is False
+    out = adapter.remove_conflict_member(gid, a, from_status="pending_llm_review", reviewed_uuids=[b, c])
+    assert out["removed"] is True and out["dissolved"] is False
+
+
+@pytest.mark.online
+def test_live_fresh_join_resets_age_and_orphans_stay_live(test_neo4j_repo) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    a, b, c, d = _ids("fj")
+    g1, g2 = f"g1-{a}", f"g2-{c}"
+    _seed(test_neo4j_repo, g1, {a: "unresolved"})
+    # d stands for an orphan resolved after the read in a race: live group id, terminal status.
+    _seed(test_neo4j_repo, g2, {c: "pending_llm_review", d: "false_positive"})
+    test_neo4j_repo.execute(
+        "CREATE (:Entity {uuid: $u, name: $u, namespace: 'default', conflict_status: 'resolved', "
+        "conflict_created_at: datetime('2025-01-01T00:00:00Z')})",
+        params={"u": b},
+    )
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    adapter.set_conflict(b, a, "unused")
+    rows = test_neo4j_repo.execute(
+        "MATCH (n:Entity {uuid: $u}) RETURN n.conflict_created_at.year AS y", params={"u": b},
+    )
+    assert rows[0]["y"] >= 2026
+
+    adapter.set_conflict(a, c, "unused")
+    assert _live_statuses(test_neo4j_repo, c, d) == {
+        c: (g1, "pending_llm_review"), d: (g1, "pending_llm_review"),
+    }
+
+
+@pytest.mark.online
+def test_live_full_listing_with_age_cutoff_parses(test_neo4j_repo) -> None:
+    from datetime import datetime, timezone
+
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    a, b, _, _ = _ids("lc")
+    _seed(test_neo4j_repo, f"g-{a}", {a: "unresolved", b: "pending_llm_review"})
+    rows = MemoryGraphAdapter(neo4j=test_neo4j_repo).list_conflict_groups(
+        status="unresolved", include_all_members=True, oldest_first=True,
+        created_before=datetime(2100, 1, 1, tzinfo=timezone.utc),
+    )
+    row = next(r for r in rows if r["group_id"] == f"g-{a}")
+    assert {m["uuid"] for m in row["members"]} == {a, b}

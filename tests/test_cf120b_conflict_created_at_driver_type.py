@@ -60,6 +60,10 @@ class _Adapter:
         self.resolved.append(group_id)
         return {"member_uuids": []}
 
+    def auto_resolve_settled_conflict_group(self, group_id):
+        self.resolved.append(group_id)
+        return ["m1", "m2"]
+
 
 def _old(days: int = 90):
     return datetime.now(timezone.utc) - timedelta(days=days)

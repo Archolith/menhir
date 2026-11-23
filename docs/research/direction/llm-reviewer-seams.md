@@ -113,7 +113,8 @@ rides on. Seams 1-10 are the ones named in the brief; 11-13 are surfaced by the 
 - **Failure mode:** false "not a conflict" hides a real contradiction; false "conflict" nags the user.
 - **Fallback:** pair stays `pending_llm_review`, which recall flags as a possible conflict, and the
   queue-health check warns once the oldest is a day old. `auto_resolve_stale_conflicts` ages out only
-  confirmed (`unresolved`) groups after 14 days, as `auto-resolved`, which recall still flags.
+  groups whose members are all confirmed (`unresolved`), after 14 days, as `auto-resolved`, which
+  recall still flags.
 - **Subsystem:** SHIPPED `confirm_contradiction`; mirrored by belief `CONFLICT_SET`. **This is the
   existing reviewer and the template for all others.**
 

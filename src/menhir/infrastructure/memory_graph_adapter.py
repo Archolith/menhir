@@ -1387,13 +1387,18 @@ class MemoryGraphAdapter:
             group_id, node_uuid, from_status=from_status, to_status=to_status, namespace=namespace
         )
 
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        return self._consolidation.auto_resolve_settled_conflict_group(group_id)
+
     def remove_conflict_member(
         self, group_id: str, node_uuid: str, *, from_status: str,
         resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
     ) -> dict[str, Any]:
         return self._consolidation.remove_conflict_member(
             group_id, node_uuid, from_status=from_status,
             resolution_status=resolution_status, namespace=namespace,
+            reviewed_uuids=reviewed_uuids,
         )
 
     def requeue_conflicts_for_llm_review(
