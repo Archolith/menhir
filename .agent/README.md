@@ -150,6 +150,28 @@ Required workflow:
 
 Fall back to Grep/Read only when you need actual file content. Use `ingest_project(path)` to re-scan after significant structural changes (new files, renamed modules). The structure watcher re-scans automatically every 30 minutes for already-ingested projects; it does not auto-discover new repos.
 
+## Issue Priority
+
+Every GitHub issue gets exactly one priority label. The definitions match the label descriptions on
+`Archolith/menhir`:
+
+| Label | Meaning | When |
+|---|---|---|
+| `P1` | Wrong data, a privacy leak, or a broken supported path | Fix next |
+| `P2` | Correctness or privacy problem with a narrow window | Schedule soon |
+| `P3` | Fidelity or usability; no wrong data | Backlog |
+
+Review and audit severities (High/Medium/Low, Critical, etc.) are not priorities. When filing from a
+review, re-grade each finding against this table using current code:
+
+- Grade by consequence on a reachable path. A failure that is unreachable in the workflow that runs
+  the code, or that fails loudly (non-zero exit, crash, permanently unhealthy) without producing
+  wrong data, is P3 however the review rated it.
+- Dev-only tooling (`.agent/` scripts, test harnesses, dead code with no callers) is P3 unless it
+  can corrupt data, leak secrets, or spend money on a path something actually runs.
+- File one finding per issue, so each issue has one priority and one acceptance check. Drop
+  speculative refactors rather than bundling them.
+
 ## Project-Level Constraints
 
 - This project is a long-lived graph memory service and is expected to run with a Neo4j backend.
