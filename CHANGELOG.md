@@ -1,3 +1,14 @@
+## 2026-11-22 - A scalar View from a not-yet-admitted turn is recallable (#311)
+
+- `infrastructure/typed_assertion_write_repository.py`, `projection_coverage_repository.py`,
+  `scalar_view_repository.py`: when a turn-anchored assertion's TurnEvidence has no admitting
+  Episodic, its `episode_uuid` is the turn id instead of `''`. The folded View's receipt is then
+  that turn, it gets a TurnEvidence `MENTIONS` edge, and recall's live-provenance check passes;
+  before, the View had an empty receipt and stayed hidden. Once an episode admits the turn, the
+  receipt is that episode. `source_episode_uuid` still reports admitted episodes only.
+- Live tests cover the turn-only View, a View built after admission, and one built before
+  admission and rebuilt after it.
+
 ## 2026-11-22 - Retry a timed-out source-memory embedding (#409)
 
 - Source-memory ingestion retries one embedding timeout before finishing enrichment. A
@@ -129,18 +140,3 @@
   search off: ... ; recall_history needs embeddings ..."), and a timeline `query` returns the
   same note instead of raising. An ordinary embed error still raises. The source-memory and
   observation lanes log a breaker refusal at INFO without a traceback.
-
-## 2026-11-21 - supersede_artifact refuses a terminal replacement (#678)
-
-- `supersession_cypher` now also requires the replacing artifact to be non-terminal. Before, after
-  A superseded B, B (SUPERSEDED) could supersede A and form a SUPERSEDES cycle; a DEFERRED artifact
-  could also be named as a replacement.
-- No cycle can form: every node in one is the old side of an earlier edge, so already SUPERSEDED,
-  and no writer moves an artifact out of a terminal state. Online tests cover A->B then B->A, a
-  three-node cycle, a DEFERRED replacement, a rejected `supersedes:` declaration, and B->A blocking
-  on an uncommitted A->B that holds both locks, then refusing once it commits.
-- A refusal caused by the replacement names it: reason `replacement_terminal`. Other refusals keep
-  `type_mismatch_already_terminal_or_namespace_incompatible`.
-- Chains must be recorded oldest first: once v3 supersedes v2, v2 can no longer supersede v1;
-  supersede v1 with v3. Documented in `.agent/endpoints.md` and `artifact_authoring.md`.
-- Not covered: an artifact can still be moved to DEFERRED after it replaced another (no cycle).
