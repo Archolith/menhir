@@ -716,9 +716,9 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
     Runs unless the context turns ``source_memories_enabled`` off. Skips evidence
     projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
     and episodes that already carry an embedding, so the step is idempotent across
-    retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
-    ANY exception or timeout is logged at WARNING and swallowed: this lane must never
-    fail, delay-retry, or requeue enrichment.
+    retries. Each embedder attempt uses the 10s backoff-aware deadline. Retry one
+    timeout locally so a transient stall does not leave a READY receipt unsearchable.
+    Final failures are logged and swallowed without requeuing graph enrichment.
     """
     if not getattr(ctx, "source_memories_enabled", True):
         return
@@ -738,10 +738,17 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         content = prepare_memory_text(str(claimed.get("content") or ""), policy=non_refusing_policy())[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
         if not content.strip():
             return
-        embedding = await await_with_backoff_aware_timeout(
-            ctx.graphiti_client.embed_query(content),
-            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
-        )
+        try:
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.info("Retrying timed-out source-memory embedding episode_id=%s", ctx.episode_uuid)
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
         if not embedding:
             return
         model = _episode_embedder_model_name(ctx.graphiti_client)

@@ -1674,6 +1674,13 @@ class EpisodeLifecycleRepository:
         # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
         # let status readers compute a verbatim-skipped client's effective state
         # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
+        source_eligible = " AND ".join((
+            menhir_queue_episode_cypher("n"),
+            "n.processing_state IS NOT NULL",
+            "n.processing_state <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ))
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -1683,6 +1690,9 @@ class EpisodeLifecycleRepository:
                 MEMORY_RETURN_FIELDS,
                 "n.extraction_skipped_for AS extraction_skipped_for",
                 f"{skip_projection_map_cypher('p')} AS skip_projection",
+                f"coalesce(({source_eligible}), false) AS source_search_eligible",
+                "size(n.content_embedding) AS source_embedding_size",
+                "n.content_embedding_model AS source_embedding_model",
             )
             .limit("1")
             .build()

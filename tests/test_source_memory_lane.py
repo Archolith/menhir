@@ -328,7 +328,10 @@ async def test_ingest_step_swallows_embed_timeout(
 ) -> None:
     from menhir.services.enrichment_steps import embed_episode_content
 
-    async def _hang(_text):
+    calls = []
+
+    async def _hang(text):
+        calls.append(text)
         raise TimeoutError("embedder hung past the 10s bound")
 
     stub_graphiti_client.embed_query = _hang
@@ -338,9 +341,38 @@ async def test_ingest_step_swallows_embed_timeout(
         {"uuid": "ep-1", "content": "hello"},
         enabled=True,
     )
-    # Timeout is swallowed like any other lane error; enrichment continues.
     await embed_episode_content(ctx)
+    assert calls == ["hello", "hello"]
     assert stub_memory_graph_adapter.episode_embeddings_written == {}
+
+
+@pytest.mark.asyncio
+async def test_ingest_step_recovers_after_first_embed_deadline(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch
+) -> None:
+    import asyncio
+
+    from menhir.services import enrichment_steps
+
+    calls = []
+
+    async def embed(text):
+        calls.append(text)
+        if len(calls) == 1:
+            await asyncio.Future()
+        return [0.5, 0.5]
+
+    monkeypatch.setattr(enrichment_steps, "_SOURCE_MEMORY_EMBED_TIMEOUT_S", 0.01)
+    stub_graphiti_client.embed_query = embed
+    ctx = _ctx(
+        stub_graphiti_client, stub_memory_graph_adapter,
+        {"uuid": "ep-1", "content": "hello"}, enabled=True,
+    )
+
+    await enrichment_steps.embed_episode_content(ctx)
+
+    assert calls == ["hello", "hello"]
+    assert stub_memory_graph_adapter.episode_embeddings_written["ep-1"][0] == [0.5, 0.5]
 
 
 @pytest.mark.asyncio

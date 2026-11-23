@@ -6,10 +6,12 @@ Run with:  pytest --run-online tests/test_source_embedding_repair_live.py
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from menhir.core.backend_runtime_admin_ops import RuntimeProviderAdminOpsMixin
 from menhir.infrastructure.episode_repository import EpisodeRepository
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.source_embedding_repair import repair_source_embeddings
@@ -60,12 +62,35 @@ def test_write_is_refused_when_content_no_longer_matches(test_neo4j_repo: Any) -
     assert _stamp(graph, "c-1") == ([1.0], "m-1")
 
 
-def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_repo: Any) -> None:
+def test_repair_job_end_to_end_including_an_edit_during_the_embed(
+    test_neo4j_repo: Any, monkeypatch: Any,
+) -> None:
     graph = test_neo4j_repo
+    # The status compares against the size the configured embedder produces (the live query
+    # vector's size), resolved from settings; these vectors are 2-d.
+    monkeypatch.setattr(
+        "menhir.infrastructure.embedding_dimensions.expected_graphiti_embedding_dimension",
+        lambda settings: 2,
+    )
     adapter = MemoryGraphAdapter(graph)
     _episode(graph, "e-ready", "READY", content="ready text")
     _episode(graph, "e-edited", "READY", content="before edit")
     _episode(graph, "e-pending", "PENDING", content="pending text")
+
+    class StatusBackend(RuntimeProviderAdminOpsMixin):
+        built = SimpleNamespace(
+            graph_adapter=adapter,
+            settings=SimpleNamespace(),
+            graphiti_client=SimpleNamespace(embedder_ref=SimpleNamespace(
+                config=SimpleNamespace(embedding_model="m-1", embedding_dim=2),
+            )),
+        )
+        _off_loop = staticmethod(asyncio.to_thread)
+
+    backend = StatusBackend()
+    before = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert before["processing_state"] == "READY"
+    assert before["source_search_status"] == "PENDING"
 
     async def embed(text: str) -> list[float]:
         if text == "before edit":  # the episode changes while its vector is being computed
@@ -74,6 +99,12 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_rep
 
     result = asyncio.run(repair_source_embeddings(adapter, embed=embed, model_name=lambda: "m-1"))
     assert _stamp(graph, "e-ready") == ([10.0, 1.0], "m-1")
+    after = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert after["processing_state"] == "READY"
+    assert after["source_search_status"] == "READY"
+    assert [row["uuid"] for row in adapter.search_episode_embeddings(
+        [10.0, 1.0], model="m-1", namespace="default",
+    )] == ["e-ready"]
     assert _stamp(graph, "e-edited") == (None, None)      # stale vector refused
     assert _stamp(graph, "e-pending") == (None, None)     # still owned by the ingest step
     assert result["written"] == 1 and result["skipped"] == 1

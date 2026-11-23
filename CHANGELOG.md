@@ -1,3 +1,16 @@
+## 2026-11-22 - Retry a timed-out source-memory embedding (#409)
+
+- Source-memory ingestion retries one embedding timeout before finishing enrichment. A
+  subsequent failure leaves the receipt available for the source-embedding repair job.
+- Regression tests cover a successful second attempt and a repeated timeout.
+- The episode status response reports source-search readiness separately from graph
+  enrichment (`source_search_status`: READY, PENDING, UNKNOWN or UNAVAILABLE). The stored
+  vector is compared with the size the configured embedder produces, so an embedder smaller
+  than 1024 dimensions reads READY; when that size is not known the status is UNKNOWN.
+- A PENDING status carries `source_search_reason`, and the guidance names what changes it:
+  `missing` (the repair job), `missing_in_flight` (the ingest step), `size_mismatch` or
+  `model_mismatch` (a re-embed with `scripts/backfill_episode_embeddings.py`).
+
 ## 2026-11-22 - Conflicts needing attention appear as an operator warning, like FAILED saves
 
 - `infrastructure/telemetry/operator_warnings_store.py`, `core/backend_runtime_admin_ops.py`,
@@ -131,18 +144,3 @@
 - Chains must be recorded oldest first: once v3 supersedes v2, v2 can no longer supersede v1;
   supersede v1 with v3. Documented in `.agent/endpoints.md` and `artifact_authoring.md`.
 - Not covered: an artifact can still be moved to DEFERRED after it replaced another (no cycle).
-
-## 2026-11-21 - Sarcasm and unaffirmed third-party claims stay out of facts and scalar values (#283)
-
-- Extraction (both self-endpoint instruction blocks in `graphiti_extraction_policy.py`): sarcasm and
-  irony are not affirmative facts; store the meant sense or only the literal events. Negation,
-  questions and hypotheticals were already covered by "Preserve negation".
-- Typed scalars (`TYPED_SCALAR_SYSTEM_PROMPT`): emit only values the episode presents as true. No
-  value from sarcasm, and none from another person's claim that the speaker does not affirm.
-- Measured with `scripts/probe_nonveridical_extraction.py` (84 single-turn cases), 3 runs per arm on
-  a 50-case subset, gpt-6-luna Flex. Fact leaks from sarcasm: 15 of 24 on main, 2 of 24 with the
-  rules; no other category leaked on either arm. Missed true facts: 18 of 96 on main, 23 of 96 with
-  the rules (mostly q-06 and rep-04). Scalars, one run: the sarcastic values and the contradicted
-  third-party value are gone, and the sincere controls keep theirs.
-- The prompts' examples are new, and `tests/test_nonveridical_extraction_guards.py` fails if any
-  prompt quotes a 4-word run of the probe corpus.
