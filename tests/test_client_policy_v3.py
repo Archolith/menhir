@@ -22,6 +22,7 @@ CATALOG = frozenset(TIERS)
 CHATGPT = "https://chatgpt.com/oauth/client.json"
 CODEX = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex"
 GEMINI = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=gemini"
+AGY = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=agy"
 READONLY = "example-web-client-1"
 OPERATOR_SCOPES = ["menhir:read", "menhir:write", "menhir:admin"]
 
@@ -304,6 +305,17 @@ def test_v2_fixture_still_loads() -> None:
     assert authority.clients[CHATGPT].maximum_tier == "operator"
 
 
+@pytest.mark.parametrize("source", [V3, V2])
+def test_agy_agent_smith_client_is_admitted_at_agent_tier(source: Path) -> None:
+    authority = load_client_policy(str(source), _payload(source)["canonical_digest"], tool_catalog=CATALOG)
+    scopes = authority.clients[AGY].oauth_scopes
+
+    assert set(scopes) == {"menhir:read", "menhir:write"}
+    assert authority.require_client(client_id=AGY, scopes=scopes, tier="agent")
+    with pytest.raises(PermissionError, match="tier exceeds"):
+        authority.require_client(client_id=AGY, scopes=scopes, tier="operator")
+
+
 def test_v2_product_list_is_free_form(tmp_path: Path) -> None:
     payload = copy.deepcopy(_payload(V2))
     del payload["access_contract"]["products"]["opencode"]
@@ -398,12 +410,13 @@ def test_agent_smith_cimd_scope_follows_the_policy_tier(tmp_path: Path) -> None:
     document = agent_smith_client_document_for_id(CODEX, _metadata_settings(), authority)
     assert document is not None
     assert document["scope"] == "menhir:read menhir:write offline_access"
-    # Without the policy the built-in table still says operator.
-    legacy = agent_smith_client_document_for_id(CODEX, _metadata_settings())
-    assert legacy["scope"] == "menhir:read menhir:write menhir:admin offline_access"
+    # The policy is the only source: no policy, no Agent Smith document.
+    assert agent_smith_client_document_for_id(CODEX, _metadata_settings()) is None
 
 
-def test_agent_smith_cimd_scope_falls_back_when_client_not_in_policy(tmp_path: Path) -> None:
+def test_agent_smith_client_not_in_policy_has_no_document(tmp_path: Path) -> None:
+    from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
+
     claude = "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude"
     payload = _payload()
     del payload["clients"][claude]
@@ -411,9 +424,7 @@ def test_agent_smith_cimd_scope_falls_back_when_client_not_in_policy(tmp_path: P
     products["claude"]["client_ids"].remove(claude)
     authority = _load(tmp_path, payload)
 
-    assert _metadata_scope(authority, "claude") == (
-        "menhir:read menhir:write menhir:admin offline_access"
-    )
+    assert agent_smith_client_document_for_id(claude, _metadata_settings(), authority) is None
 
 
 @pytest.mark.parametrize("value", ["silo-a", "  silo-a ", None, 7])
