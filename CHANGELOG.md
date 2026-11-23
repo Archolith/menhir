@@ -11,8 +11,12 @@
   `stale_pending_conflict_groups` and `latest_conflict_attention_at`, read in the same overview
   call the FAILED warning already shares.
 - `infrastructure/consolidation_queries.py`: members record `conflict_confirmed_at` when review
-  confirms them or a PROMOTED pair routes them to `unresolved` (structural in
-  `graph_text_inventory.py`).
+  confirms them or a PROMOTED pair routes them to `unresolved`, and `conflict_pending_since` when
+  they enter review (including a requeue). Both are structural in `graph_text_inventory.py`.
+  The conflict counts in the overview skip protected members, which no conflict tool can list or
+  settle; pending age is measured from `conflict_pending_since`.
+- `mcp/formatters.py`: the `add_memory` warning lines apply the caller's redaction on the client
+  side, like the session-start surface.
 
 ## 2026-11-22 - Conflict lifecycle: pending conflicts are visible, review covers every member, enrichment queues conflicts (#651, #652, #654, #655)
 
