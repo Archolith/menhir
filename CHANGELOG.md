@@ -7,6 +7,14 @@
 - `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
 - `docs/hook-center-tool-events.md`: describes both rules.
 
+## 2026-11-24 - Conflict suppressions are no longer removed by age pruning (#959)
+
+- `infrastructure/telemetry/lifecycle_store_stats.py`: `conflict_resolutions` is out of the retention
+  tiers. Pruning it at 90 days re-opened conflict pairs that were already resolved and cut short a longer
+  `conflict_cooldown_days`. Rows already pruned are not restored.
+- `config/settings_model.py`: comment only.
+- `docs/your-data.md`: conflict suppressions are not age-pruned and erasure does not reach them.
+
 ## 2026-11-24 - Release bump PRs run stdio-e2e
 
 - `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
@@ -91,31 +99,3 @@
   settle; pending age is measured from `conflict_pending_since`.
 - `mcp/formatters.py`: the `add_memory` warning lines apply the caller's redaction on the client
   side, like the session-start surface.
-
-## 2026-11-22 - Conflict lifecycle: pending conflicts are visible, review covers every member, enrichment queues conflicts (#651, #652, #654, #655)
-
-- `domain/warden.py`, `domain/truth/labels.py`, `services/assertion_pipeline.py`: recall flags a
-  `pending_llm_review` member as `possible_conflict` and an `auto-resolved` one as
-  `unsettled_conflict`. Both are FLAG only, never refused (#651, #652). The 14-day auto-resolve job is
-  kept; a confirmed contradiction it ages out stays visibly marked.
-- `infrastructure/memory_queries.py`, `mcp/tools/ops/get_memory_stats.py`,
-  `services/scheduler_tasks.py`: stats show the pending-conflict backlog and its oldest entry; the
-  queue-health check warns when the oldest is over 24 hours old (#651).
-- `infrastructure/consolidation_queries.py`: `set_conflict` no longer overwrites the status of
-  members already in a group. A confirmed member stays `unresolved`, and members absorbed in a group
-  merge keep their own status (#654).
-- `services/lifecycle_conflicts.py`: LLM review compares each member in the reviewed status with the
-  rest of its group, instead of members 0 and 1 standing in for the whole group. Confirmed members
-  become `unresolved`; a member whose every pair is rejected leaves as `false_positive`, with those
-  pairs suppressed, and a group left with one member dissolves. Pair verdicts are cached per run, and
-  `limit` also caps LLM calls. New repository ops `set_conflict_member_status` and
-  `remove_conflict_member` (compare-and-set; the removal write-locks the group with a transient
-  `_conflict_group_lock` token) and `list_conflict_groups(include_all_members=True)` (#654).
-- `services/enrichment_steps.py`, `services/lifecycle_consolidation.py`: conflict pairs found by
-  correlation at enrichment are queued through the same path as consolidation
-  (`record_conflict_pair`: cooldown, PROMOTED routing, `set_conflict`), one per node, instead of
-  being counted and dropped (#655).
-- The 14-day auto-resolve now skips a group that still holds a pending member; it goes through
-  `auto_resolve_settled_conflict_group`, which re-checks under a group lock. Removal after review
-  is refused if a member joined since the verdict. A node joining a group fresh gets a new
-  `conflict_created_at`. Review drains the oldest groups first.
