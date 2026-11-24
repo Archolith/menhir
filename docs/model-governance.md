@@ -3,7 +3,7 @@
 **Purpose:** record every configurable LLM and embedding role Menhir invokes, where its
 code default is defined, and how an operator changes it without a silent model upgrade.
 
-**Verified against source:** 2026-11-23, package version `0.3.14`, Python `>=3.12`.
+**Verified against source:** 2026-11-24, package version `0.3.15`, Python `>=3.12`.
 
 This document records source behavior. It does not claim which models a live deployment
 currently uses. Deployment selection belongs in that deployment's protected environment

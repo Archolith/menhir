@@ -66,6 +66,84 @@ def test_production_surface_omits_general_api_explorer_and_sse(tmp_path: Path) -
     assert app.openapi_url is None
 
 
+async def _call_asgi(app, path: str, *, method: str = "POST", body: bytes = b"") -> tuple[int, bytes]:
+    sent: list[dict] = []
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"content-type", b"application/json"), (b"host", b"menhir.example.com")],
+        "client": ("203.0.113.9", 50000),
+        "server": ("menhir.example.com", 443),
+    }
+    await app(scope, receive, send)
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    payload = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return status, payload
+
+
+@pytest.mark.asyncio
+async def test_production_wrapped_app_refuses_mcp_http_path_with_trailing_newline(
+    tmp_path: Path,
+) -> None:
+    wrapped = create_app(
+        settings=_production_settings(
+            oauth_as_dir=str(tmp_path / "oauth"),
+            oauth_signing_key_path=str(tmp_path / "oauth-signing-key.test.json"),
+        )
+    )
+    rpc = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+
+    status, payload = await _call_asgi(wrapped, "/mcp-http\n", body=rpc)
+
+    assert status == 400
+    assert json.loads(payload)["code"] == "invalid_path"
+
+
+@pytest.mark.asyncio
+async def test_production_wrapped_app_refuses_every_plain_route_with_trailing_newline(
+    tmp_path: Path,
+) -> None:
+    settings = _production_settings(
+        oauth_as_dir=str(tmp_path / "oauth"),
+        oauth_signing_key_path=str(tmp_path / "oauth-signing-key.test.json"),
+    )
+    wrapped = create_app(settings=settings)
+    plain_paths = sorted(
+        {
+            route.path
+            for route in _all_routes(wrapped.app.app)
+            if getattr(route, "path_regex", None) is not None
+            and isinstance(getattr(route, "path", None), str)
+            and "{" not in route.path
+        }
+    )
+    assert "/mcp-http" in plain_paths
+
+    for path in plain_paths:
+        status, payload = await _call_asgi(wrapped, path + "\n")
+        assert status == 400, f"{path!r} + newline was not refused"
+        assert json.loads(payload)["code"] == "invalid_path", path
+
+
 @pytest.mark.asyncio
 async def test_readyz_does_not_expose_source_identity_publicly() -> None:
     state = SimpleNamespace(

@@ -1,3 +1,22 @@
+## 2026-11-22 - Client tool allowlist on resource listings, named REST routes and the explorer (#657, #658)
+
+- `api/mcp_remote.py`, `mcp/contracts.py`: `resources/list` and `resources/templates/list` show a
+  restricted client only what it could read (governing tool, tier, pin). A query-auth caller is
+  listed nothing, since every resource read refuses query auth. Resource reads keep their checks
+  and messages; one helper, `tool_allowed_for_request`, now backs reads, listing and REST.
+- `api/route_tools.py`, `api/routes.py`: each named `/api` route maps to the MCP tool it
+  corresponds to. A client with a tool allowlist (`MENHIR_CLIENT_TOOLS` or a client policy) gets
+  403 on a route whose tool it lacks, and on routes with no tool: the hook capture routes
+  (turn-evidence, episode-admission, tool-events), phase3 run/status/reset and views. Health and
+  ready stay open. An integration that sends a client name listed in `MENHIR_CLIENT_TOOLS` needs
+  that list to include the tools behind the routes it calls (for example `build_context` for
+  `/api/context`).
+- `explorer/app.py`: the explorer refuses any client with a tool allowlist.
+
+## 2026-11-22 - v0.3.13: Graphiti fork save fixes, breaker gaps closed, ranked source memories in build_context
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.13. No dependency changes in this commit.
+
 ## 2026-11-22 - Graphiti fork 0.31.2.post4: entity-edge save fixes (Archolith/graphiti #28-#30)
 
 - `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post4`, fork commit `d94da8d7`. Pins, docs and release checks updated.

@@ -1123,3 +1123,140 @@ def test_explorer_in_dev_mode_no_auth_required():
     resp = client.get("/explorer")
     assert resp.status_code == 200
     assert resp.json()["explorer"] == "home"
+
+
+# ── Control characters in the request path (#944) ────────────────────────────────
+
+_CONTROL_CHAR_PATHS = [
+    "/mcp-http%0A",
+    "/mcp-http%0D%0A",
+    "/mcp%0A",
+    "/mcp/x%0A",
+    "/api/secure%0A",
+    "/api/health%0A",
+    "/explorer%0A",
+    "/explorer/static%0A",
+    "/other%0A",
+    "/mcp-http%00",
+    "/mcp-http%7F",
+]
+
+
+def _recording_asgi_app() -> tuple[list[dict], object]:
+    seen: list[dict] = []
+
+    async def inner(scope, receive, send):
+        seen.append(scope)
+        if scope["type"] == "http":
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"inner"})
+
+    return seen, inner
+
+
+def _control_char_client(api_key: str) -> tuple[list[dict], TestClient]:
+    seen, inner = _recording_asgi_app()
+    wrapped = BearerAuthMiddleware(inner, api_key=api_key)
+    return seen, TestClient(wrapped, base_url="http://127.0.0.1")
+
+
+def test_test_client_delivers_decoded_control_character_in_scope_path():
+    """Guards the tests below against passing vacuously."""
+    seen, inner = _recording_asgi_app()
+    client = TestClient(inner, base_url="http://127.0.0.1")
+
+    client.get("/mcp-http%0A")
+    client.get("/mcp-http%0D%0A")
+    client.get("/mcp-http%00")
+    client.get("/mcp-http%7F")
+
+    assert [scope["path"] for scope in seen] == [
+        "/mcp-http\n",
+        "/mcp-http\r\n",
+        "/mcp-http\x00",
+        "/mcp-http\x7f",
+    ]
+
+
+@pytest.mark.parametrize("path", _CONTROL_CHAR_PATHS)
+@pytest.mark.parametrize("api_key", ["static-key", ""], ids=["static-mode", "no-auth-mode"])
+def test_control_character_path_is_refused_without_credential(path, api_key):
+    seen, client = _control_char_client(api_key)
+
+    resp = client.get(path)
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == "invalid_path"
+    assert "\n" not in resp.text
+    assert "\\n" not in resp.text
+    assert "mcp" not in resp.text.replace("invalid_path", "")
+    assert seen == []
+
+
+@pytest.mark.parametrize("path", _CONTROL_CHAR_PATHS)
+def test_control_character_path_is_refused_with_valid_bearer_key(path):
+    seen, client = _control_char_client("static-key")
+
+    resp = client.get(path, headers={"Authorization": "Bearer static-key"})
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "invalid_path"
+    assert seen == []
+
+
+def test_starlette_route_dollar_matches_before_trailing_newline():
+    """The reason for the refusal: a route regex matches a path this gate does not recognise."""
+    from starlette.routing import Match, Route
+
+    async def endpoint(request):
+        return JSONResponse({})
+
+    route = Route("/mcp-http", endpoint)
+    match, _ = route.matches({"type": "http", "path": "/mcp-http\n", "method": "GET"})
+
+    assert match == Match.FULL, (
+        "Starlette no longer matches '/mcp-http\\n' against Route('/mcp-http'); "
+        "the control-character refusal in BearerAuthMiddleware may no longer be needed"
+    )
+
+
+def test_ordinary_percent_encoded_paths_are_not_refused():
+    client = _build_app("static-key")
+
+    @client.app.app.get("/other/{name}")
+    async def other_named(name: str):
+        return JSONResponse({"name": name})
+
+    spaced = client.get("/other/a%20b")
+    non_ascii = client.get("/other/caf%C3%A9")
+    mcp = client.get("/mcp-http", headers={"Authorization": "Bearer static-key"})
+
+    assert spaced.status_code == 200
+    assert spaced.json() == {"name": "a b"}
+    assert non_ascii.status_code == 200
+    assert non_ascii.json() == {"name": "café"}
+    assert mcp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_websocket_scope_with_control_character_path_never_reaches_inner_app():
+    seen, inner = _recording_asgi_app()
+    wrapped = BearerAuthMiddleware(inner, api_key="static-key")
+    sent: list[dict] = []
+
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "path": "/mcp-http\n",
+        "headers": [(b"authorization", b"Bearer static-key")],
+        "client": ("127.0.0.1", 50000),
+    }
+    await wrapped(scope, receive, send)
+
+    assert seen == []

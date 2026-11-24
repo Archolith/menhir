@@ -3,11 +3,22 @@
 - #789: removed the dead doc-token benchmark script under `.agent/tools/` (whose scenario file and `.agent/user/` tree no longer exist) along with its `.agent/README.md` section, `user/` fallback paragraph, and `.agent/file-index.md` entry.
 - #792: removed the superseded M2 functional audit probe under `.agent/audit/` (which printed unconditional `CONFIRMED` lines for fixed security findings).
 - #793: removed the orphaned QuantState prototype script under `.agent/plans/backlog/` (whose companion plan is archived and fold logic is superseded by `domain/fold_algebra.py` and `domain/scalar_state_fold.py`).
-- #794: updated `.agent/audit/` docs and prompt templates to invoke `cth.auditprobe` with its supported `--type` values (`correctness`, `security`, `architecture`) instead of the removed local probe script.
+- #794: updated `.agent/audit/` docs and prompt templates to document installing `cth.auditprobe` and running the `auditprobe` entry point with its supported `--type` values (`correctness`, `security`, `architecture`).
 - #644: removed 19 unused imports from `services/recall_pipeline.py` while keeping the test-pinned `GRAPHITI_RRF_DUAL_METHOD_MAX` re-export.
 - #660 (partial, zero-bench-impact slice): removed unreachable `services/memory_oracle_service.py`, `services/windowed_recall.py`, `WeightedOracleCombiner`, and unused `WardenLabel.UNCERTAIN`/`SUSPICIOUS_CHAIN`; documented `#566`/`#579`/`#659` on kept oracle/warden branches and corrected stale default-off comments in `recall_pipeline.py`, `config/settings_model.py`, and `recall_support.py`. Modules still imported by `archolith-bench` (`structure_temporal`, `exhaustion`/`ExhaustionWarden`, `BeliefScorer`) were intentionally kept.
 - #802: removed the duplicate `remote_manifest_digest` call in `deploy/build_release_image.py`, validated `image_id`/`config_sha256` and hoisted `archive_config_for_manifest` before the evidence loop, reused `canonical_sha256`, and unified `EVIDENCE_SPECS`.
-- #803: removed unused `ARCHIVE_SHA256`/`ARCHIVE_SIZE` computation (and extended symlink checks to `$STATUS_DIR` / `${STATUS_DIR}/staging`) in `deploy/menhir-backup-local.sh`; collapsed the duplicated required-secret helpers and replaced legacy `WORKSPACE_ROOT` with `MENHIR_STATE_DIR` in `deploy/Dockerfile`.
+- #803: removed unused `ARCHIVE_SHA256`/`ARCHIVE_SIZE` computation and moved symlink checks (covering `$STATUS_DIR`, `${STATUS_DIR}/staging`, `$ARCHIVE_ROOT`, and `$RECEIPT_ROOT`) ahead of `mkdir -p` in `deploy/menhir-backup-local.sh`; collapsed the duplicated required-secret helpers (including OpenAI/Gemini provider branches) and replaced legacy `WORKSPACE_ROOT` with `MENHIR_STATE_DIR` in `deploy/Dockerfile`.
+
+## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
+
+## 2026-11-24 - Request paths with control characters are refused (#944)
+
+- `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
+  decoded path contains an ASCII control character (U+0000-U+001F, U+007F), in every auth mode. Route
+  patterns end in `$`, which also matches before a trailing newline, so `/mcp-http%0A` was not recognised
+  as protected by the auth gate but still reached the MCP route. The response does not echo the path.
 
 ## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
 
@@ -122,22 +133,3 @@
   `refused` with a reason, separate from `not_found`, and treats a retry of an applied
   supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
   structural.
-
-## 2026-11-22 - Client tool allowlist on resource listings, named REST routes and the explorer (#657, #658)
-
-- `api/mcp_remote.py`, `mcp/contracts.py`: `resources/list` and `resources/templates/list` show a
-  restricted client only what it could read (governing tool, tier, pin). A query-auth caller is
-  listed nothing, since every resource read refuses query auth. Resource reads keep their checks
-  and messages; one helper, `tool_allowed_for_request`, now backs reads, listing and REST.
-- `api/route_tools.py`, `api/routes.py`: each named `/api` route maps to the MCP tool it
-  corresponds to. A client with a tool allowlist (`MENHIR_CLIENT_TOOLS` or a client policy) gets
-  403 on a route whose tool it lacks, and on routes with no tool: the hook capture routes
-  (turn-evidence, episode-admission, tool-events), phase3 run/status/reset and views. Health and
-  ready stay open. An integration that sends a client name listed in `MENHIR_CLIENT_TOOLS` needs
-  that list to include the tools behind the routes it calls (for example `build_context` for
-  `/api/context`).
-- `explorer/app.py`: the explorer refuses any client with a tool allowlist.
-
-## 2026-11-22 - v0.3.13: Graphiti fork save fixes, breaker gaps closed, ranked source memories in build_context
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.13. No dependency changes in this commit.
