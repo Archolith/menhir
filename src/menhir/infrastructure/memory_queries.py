@@ -1240,8 +1240,9 @@ class MemoryQueryRepository:
                    [ (n)-[:ANCHORED_TO]->(st:Entity)
                      WHERE st.structure_role IS NOT NULL | st.structure_path ] AS anchor_paths,
                    [ (epi:Episodic)-[:MENTIONS]->(n) | epi.source ] AS episode_sources,
-                   [ (wa:WorkArtifact)-[about_rel]->(n)
+                   [ (wa)-[about_rel]->(n)
                      WHERE type(about_rel) = $about_type
+                       AND $wa_label IN labels(wa)
                        AND (
                          (coalesce(wa[$wa_ns_key], '') IN ['', 'default']
                           AND coalesce(n.namespace, n.group_id, '') IN ['', 'default'])
@@ -1250,8 +1251,9 @@ class MemoryQueryRepository:
                      | {
                          status: wa[$wa_status_key],
                          artifact_type: wa[$wa_type_key],
-                         superseded_by: head([ (rep:WorkArtifact)-[sup_rel]->(wa)
+                         superseded_by: head([ (rep)-[sup_rel]->(wa)
                                                WHERE type(sup_rel) = $supersedes_type
+                                                 AND $wa_label IN labels(rep)
                                                | rep[$wa_uuid_key] ])
                        } ] AS work_artifacts
         """
@@ -1261,6 +1263,7 @@ class MemoryQueryRepository:
                 "uuids": node_uuids,
                 "supported_by_type": "SUPPORTED_BY",
                 "evidence_kind_key": "kind",
+                "wa_label": "WorkArtifact",
                 "about_type": "ABOUT",
                 "supersedes_type": "SUPERSEDES",
                 "wa_ns_key": "namespace",

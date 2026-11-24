@@ -116,10 +116,13 @@ def test_fetch_candidate_provenance_projects_work_artifacts_dynamically() -> Non
     neo4j = _FakeNeo4j()
     MemoryQueryRepository(neo4j).fetch_candidate_provenance(["u1"])
     assert "AS work_artifacts" in neo4j.last_query
+    assert ":WorkArtifact" not in neo4j.last_query
     assert "[:ABOUT]" not in neo4j.last_query
     assert "[:SUPERSEDES]" not in neo4j.last_query
+    assert "$wa_label IN labels(wa)" in neo4j.last_query
     assert "type(about_rel) = $about_type" in neo4j.last_query
     assert "type(sup_rel) = $supersedes_type" in neo4j.last_query
+    assert neo4j.last_params["wa_label"] == "WorkArtifact"
     assert neo4j.last_params["about_type"] == "ABOUT"
     assert neo4j.last_params["supersedes_type"] == "SUPERSEDES"
 
