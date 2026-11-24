@@ -1,3 +1,9 @@
+## 2026-11-24 - Release bump PRs run stdio-e2e
+
+- `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
+  `tests.yml` runs `stdio-e2e` only on `release/*` pull requests, so the 0.3.13-0.3.15 bump PRs skipped it.
+  `tests/test_bump.py` checks the branch against the prefix in `tests.yml`; the release runbook says so.
+
 ## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
@@ -122,18 +128,3 @@
   `refused` with a reason, separate from `not_found`, and treats a retry of an applied
   supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
   structural.
-
-## 2026-11-22 - Client tool allowlist on resource listings, named REST routes and the explorer (#657, #658)
-
-- `api/mcp_remote.py`, `mcp/contracts.py`: `resources/list` and `resources/templates/list` show a
-  restricted client only what it could read (governing tool, tier, pin). A query-auth caller is
-  listed nothing, since every resource read refuses query auth. Resource reads keep their checks
-  and messages; one helper, `tool_allowed_for_request`, now backs reads, listing and REST.
-- `api/route_tools.py`, `api/routes.py`: each named `/api` route maps to the MCP tool it
-  corresponds to. A client with a tool allowlist (`MENHIR_CLIENT_TOOLS` or a client policy) gets
-  403 on a route whose tool it lacks, and on routes with no tool: the hook capture routes
-  (turn-evidence, episode-admission, tool-events), phase3 run/status/reset and views. Health and
-  ready stay open. An integration that sends a client name listed in `MENHIR_CLIENT_TOOLS` needs
-  that list to include the tools behind the routes it calls (for example `build_context` for
-  `/api/context`).
-- `explorer/app.py`: the explorer refuses any client with a tool allowlist.
