@@ -1239,7 +1239,21 @@ class MemoryQueryRepository:
                      WHERE st.structure_role IS NOT NULL | st.structure_project ] AS anchor_projects,
                    [ (n)-[:ANCHORED_TO]->(st:Entity)
                      WHERE st.structure_role IS NOT NULL | st.structure_path ] AS anchor_paths,
-                   [ (epi:Episodic)-[:MENTIONS]->(n) | epi.source ] AS episode_sources
+                   [ (epi:Episodic)-[:MENTIONS]->(n) | epi.source ] AS episode_sources,
+                   [ (wa:WorkArtifact)-[about_rel]->(n)
+                     WHERE type(about_rel) = $about_type
+                       AND (
+                         (coalesce(wa[$wa_ns_key], '') IN ['', 'default']
+                          AND coalesce(n.namespace, n.group_id, '') IN ['', 'default'])
+                         OR coalesce(wa[$wa_ns_key], '') = coalesce(n.namespace, n.group_id, '')
+                       )
+                     | {
+                         status: wa[$wa_status_key],
+                         artifact_type: wa[$wa_type_key],
+                         superseded_by: head([ (rep:WorkArtifact)-[sup_rel]->(wa)
+                                               WHERE type(sup_rel) = $supersedes_type
+                                               | rep[$wa_uuid_key] ])
+                       } ] AS work_artifacts
         """
         return self.neo4j.execute(
             query,
@@ -1247,6 +1261,12 @@ class MemoryQueryRepository:
                 "uuids": node_uuids,
                 "supported_by_type": "SUPPORTED_BY",
                 "evidence_kind_key": "kind",
+                "about_type": "ABOUT",
+                "supersedes_type": "SUPERSEDES",
+                "wa_ns_key": "namespace",
+                "wa_status_key": "status",
+                "wa_type_key": "artifact_type",
+                "wa_uuid_key": "artifact_uuid",
             },
         )
 

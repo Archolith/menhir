@@ -1868,6 +1868,21 @@ async def _run_recall(
         _t = perf_counter()
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
+        # Propagate :WorkArtifact-projected lifecycle fields (#579) onto CandidateData so
+        # ScoredMemory -> memory_lifecycle_note sees them in recall_memories / context / REST.
+        candidates = [
+            replace(
+                c,
+                artifact_status=c.artifact_status or (metadata_by_uuid.get(c.uuid) or {}).get("artifact_status"),
+                superseded_by=c.superseded_by or (metadata_by_uuid.get(c.uuid) or {}).get("superseded_by"),
+            )
+            for c in candidates
+        ]
+
+    _fc_norm = (file_context or "").strip().replace("\\", "/")
+    while _fc_norm.startswith("./"):
+        _fc_norm = _fc_norm[2:]
+    query_files: tuple[str, ...] = (_fc_norm,) if _fc_norm else ()
 
     # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---
     # Called once here: whether it succeeded decides the floor bypass and the result cap below,
@@ -1949,7 +1964,8 @@ async def _run_recall(
             frontier_kwargs["explain"] = ranking_explain
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, frontier_tuning,
-            query_project=file_context_project, warden_status=guard_status, **frontier_kwargs,
+            query_project=file_context_project, query_files=query_files,
+            warden_status=guard_status, **frontier_kwargs,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -2174,6 +2190,7 @@ async def _run_recall(
                 assertion_shadow = await service._run_assertion_shadow(
                     query, namespace, candidate_inputs, metadata_by_uuid,
                     query_project=file_context_project,
+                    query_files=query_files,
                     tuning=tuning,
                 )
                 record_mcp_event(

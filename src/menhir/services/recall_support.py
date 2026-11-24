@@ -468,6 +468,7 @@ class RecallSupportMixin:
         candidate_inputs: list[dict[str, object]],
         metadata_by_uuid: dict[str, Any],
         query_project: str | None = None,
+        query_files: tuple[str, ...] = (),
         tuning: RetrievalTuningConfig | None = None,
     ) -> AssertionShadowTrace:
         """Observe-only oracle/warden pass over the recall candidate set.
@@ -506,7 +507,7 @@ class RecallSupportMixin:
                 content=str(c.get("content") or c.get("name") or ""),
                 metadata=md,
             ))
-        qctx = QueryContext(text=query, namespace=namespace, project=query_project)
+        qctx = QueryContext(text=query, namespace=namespace, project=query_project, files=query_files)
         pipeline = AssertionPipeline(
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
@@ -610,6 +611,7 @@ class RecallSupportMixin:
         metadata_by_uuid: dict[str, Any],
         tuning: RetrievalTuningConfig,
         query_project: str | None = None,
+        query_files: tuple[str, ...] = (),
         warden_status: WardenExecutionStatus | None = None,
         rerank_results: dict[str, Any] | None = None,
         explain: dict[str, Any] | None = None,
@@ -651,7 +653,7 @@ class RecallSupportMixin:
                     s.retrieval_score_kind,
                 )
                 cmems.append(CandidateMemory(id=s.uuid, content=str(s.content or s.name or ""), metadata=md))
-            qctx = QueryContext(text=query, namespace=namespace, project=query_project)
+            qctx = QueryContext(text=query, namespace=namespace, project=query_project, files=query_files)
             executor = (
                 OracleExecutor(
                     default_oracles(),
@@ -767,7 +769,14 @@ class RecallSupportMixin:
         Feeds both the warden gate and the shadow (they read these metadata keys). Best-effort:
         a fetch failure leaves both absent (warden treats as unanchored; scope stays unknown)
         and never breaks recall."""
+        from menhir.domain.artifact_role import derive_work_artifact_projection
         from menhir.domain.self_reinforcement import evidence_kind_for_source
+
+        def _norm_path(raw: object) -> str:
+            cleaned = str(raw or "").strip().replace("\\", "/")
+            while cleaned.startswith("./"):
+                cleaned = cleaned[2:]
+            return cleaned
 
         try:
             rows = await asyncio.to_thread(
@@ -790,17 +799,43 @@ class RecallSupportMixin:
                 anchor_projects = {
                     str(p) for p in (row.get("anchor_projects") or []) if p
                 }
-                if anchor_projects:
+                anchor_paths = tuple(
+                    sorted(
+                        {
+                            norm
+                            for p in (row.get("anchor_paths") or [])
+                            if (norm := _norm_path(p))
+                        }
+                    )
+                )
+                if anchor_projects or anchor_paths:
                     kinds.add("file")  # anchored to real code == a file anchor
                 for src in row.get("episode_sources") or []:
                     if src is not None:
                         kinds.add(evidence_kind_for_source(str(src)))
+                work_proj = derive_work_artifact_projection(row.get("work_artifacts") or ())
                 meta = metadata_by_uuid.get(uuid)
                 if meta is not None:
                     seen.add(uuid)
                     meta["evidence_kinds"] = tuple(sorted(kinds))
                     if len(anchor_projects) == 1:
                         meta["project"] = next(iter(anchor_projects))
+                    if anchor_paths:
+                        meta["files"] = anchor_paths
+                        existing_anchors = {
+                            norm
+                            for a in (meta.get("anchors") or ())
+                            if (norm := _norm_path(a))
+                        }
+                        meta["anchors"] = tuple(sorted(existing_anchors | set(anchor_paths)))
+                    if not meta.get("artifact_status") and work_proj.get("artifact_status"):
+                        meta["artifact_status"] = work_proj["artifact_status"]
+                    if not meta.get("superseded_by") and work_proj.get("superseded_by"):
+                        meta["superseded_by"] = work_proj["superseded_by"]
+                    if not meta.get("artifact_type") and work_proj.get("artifact_type"):
+                        meta["artifact_type"] = work_proj["artifact_type"]
+                    if work_proj.get("artifact_types"):
+                        meta["artifact_types"] = work_proj["artifact_types"]
             except Exception as exc:
                 if warden_status is not None:
                     warden_status.add_gap("provenance_malformed_row")

@@ -1,8 +1,9 @@
-## 2026-11-25 - Recall ranking strategies: the cross-encoder rerank as an oracle (#659)
+## 2026-11-25 - Recall ranking strategies and live oracle inputs (#659, #579, #566)
 
 - The cross-encoder rerank now runs as `CrossEncoderRerankOracle` (`services/rerank_oracle.py`)
   behind a new batch oracle contract (`BatchRetrievalOracle`); results carry the raw logit in
-  `OracleResult.log_odds`. It runs once per recall, where the rerank ran before.
+  `OracleResult.log_odds`. It runs once per recall, where the rerank ran before. Batch oracle
+  timeouts/exceptions mark `failed=True` so `#571` coverage-gap reporting covers batch oracles too.
 - New `MENHIR_RECALL_RANKING_STRATEGY` (and Recall Lab knob): `reranker_only` (default, unchanged
   behaviour), `oracle_only` (no rerank: rank floor + oracle residual blend) and `oracle_combined`
   (the oracle combiner orders the reranked head, with the logit as an uncapped `rerank` role;
@@ -12,6 +13,17 @@
 - A traced recall reports `trace.ranking`: per result the strategy, rerank logit, role logits,
   weights, contributions, combiner score and warden decision; Recall Lab shows them per row.
 - A non-finite rerank logit now counts as unscored (the item takes the rank floor path).
+- `infrastructure/memory_queries.py`, `domain/artifact_role.py`, `services/recall_support.py`,
+  `services/recall_pipeline.py` (#579, #566): `fetch_candidate_provenance` projects tenant-scoped
+  `:WorkArtifact` `ABOUT` lifecycle and type signals onto recallable `:Entity` candidates (marking
+  `artifact_status="historical"` + `superseded_by` only when every linked WorkArtifact is
+  `SUPERSEDED`, so `TemporalOracle`, `OracleAdmissionWarden`, and `memory_lifecycle_note` surface
+  superseded plans across `recall_memories`, `recall_context_memories`, `build_context`, and REST).
+  `_attach_frontier_metadata` now populates `files` and `anchors` from `anchor_paths` and
+  `QueryContext.files` from `file_context`, activating `StructureOracle` and anchor-based
+  `IntentOracle` role derivation.
+- `api/routes_support.py`, `api/routes.py` (#566 CF-320): REST `RecallRequest` now accepts and
+  forwards `file_context` and `file_context_project` to `backend.recall`.
 
 ## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
 
