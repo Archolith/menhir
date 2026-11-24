@@ -173,7 +173,8 @@ class MemorySettings:
     # lifecycle_actions) answer "what happened just now"; the diagnostic tables are what someone
     # reads investigating a defect weeks later, so a single short window would delete the history
     # needed to correlate a recurring failure. 0 disables pruning for that tier entirely.
-    # `merge_audit` is never time-pruned -- see TelemetryLifecycleStoreMixin._RETENTION_TIERS.
+    # `merge_audit` and `conflict_resolutions` are never time-pruned --
+    # see TelemetryLifecycleStoreMixin._RETENTION_TIERS.
     telemetry_observability_retention_days: int = 30
     telemetry_diagnostic_retention_days: int = 90
 
