@@ -8,6 +8,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -41,6 +42,7 @@ type Receive = Callable
 type Send = Callable
 
 _EXEMPT_PATHS = frozenset({"/api/health", "/api/ready"})
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 _EXEMPT_PATH_PREFIXES = frozenset({"/explorer/static"})
 _ADMIN_PATH_PREFIX = "/api/admin/"
 # The only admin capability an unauthenticated loopback caller may bootstrap.
@@ -453,6 +455,17 @@ class BearerAuthMiddleware:
             return
 
         path: str = scope.get("path", "")
+        # Route regexes end in `$`, which also matches before a trailing newline, so the
+        # router can match a path this gate did not recognise. Refuse control characters.
+        if _CONTROL_CHAR_RE.search(path):
+            await self._send_auth_error(
+                scope,
+                send,
+                status_code=400,
+                detail="Request path contains a control character",
+                code="invalid_path",
+            )
+            return
         is_mcp = _is_mcp_path(path)
         is_api = path.startswith("/api/")
         is_explorer = path == "/explorer" or path.startswith("/explorer/")
