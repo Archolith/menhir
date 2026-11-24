@@ -153,6 +153,7 @@ class OracleAdmissionWarden:
             r.target is OracleTarget.CURRENTNESS and r.polarity is OraclePolarity.CONTRADICT
             for r in packet.results
         )
+        # Kept pending #566/#579 (bitemporal/supersession inputs) and #659.
         if currentness_contradicted and current:
             return WardenVerdict(WardenDecision.REFUSE, self.name, reason="superseded under current intent")
 
@@ -160,6 +161,7 @@ class OracleAdmissionWarden:
             r.target is OracleTarget.CONFLICT and r.polarity is OraclePolarity.CONTRADICT
             for r in packet.results
         )
+        # Kept pending #566/#579/#659 (no default oracle emits OracleTarget.CONFLICT yet).
         if conflict:
             return WardenVerdict(WardenDecision.FLAG, self.name, reason="oracle conflict", label=WardenLabel.CONFLICT)
 

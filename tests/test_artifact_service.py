@@ -1,8 +1,7 @@
-"""Unit tests for the R9-lite ArtifactService facade and read-only MemoryOracleService.
+"""Unit tests for the R9-lite ArtifactService facade.
 
 A fake graph adapter stands in for Neo4j so the invariant enforcement (trust policy on
-capture, fail-closed promote, never-self-supersede) and the oracle ranking are exercised
-without a graph. Live behavior is checked at home per the commit-6 verification doc."""
+capture, fail-closed promote, never-self-supersede) is exercised without a graph."""
 
 from __future__ import annotations
 
@@ -14,7 +13,6 @@ import pytest
 
 from menhir.domain.artifacts import ArtifactSource, ArtifactType, Evidence
 from menhir.services.artifact_service import ArtifactService
-from menhir.services.memory_oracle_service import MemoryOracleService
 
 
 @dataclass
@@ -134,18 +132,3 @@ def test_supersede_refuses_self_and_marks_historical() -> None:
     assert adapter.store["old"]["status"] == "historical"
     # a superseded artifact can no longer be promoted (invariant 7)
     assert _run(svc.promote("old"))["status"] == "refused"
-
-
-@pytest.mark.unit
-def test_oracle_ranks_anchor_above_topic_and_never_writes() -> None:
-    adapter = _FakeAdapter()
-    svc = ArtifactService(graph_adapter=adapter)
-    _run(svc.capture(artifact_id="floor_fail", artifact_type=ArtifactType.FAILURE,
-                     summary="cosine similarity floor dropped facets", source=ArtifactSource.HUMAN,
-                     evidence=_EV, anchors=["scoring_service.py"]))
-    oracle = MemoryOracleService(graph_adapter=adapter)
-    hits = _run(oracle.find(text="tighten the similarity floor", anchors=["scoring_service.py"]))
-    assert hits and hits[0].artifact["artifact_id"] == "floor_fail"
-    assert "anchor" in hits[0].matched_on
-    for forbidden in ("create", "promote", "supersede"):
-        assert not hasattr(oracle, forbidden)

@@ -1,8 +1,10 @@
-## 2026-11-24 - Remove dead dev-only scripts (#789, #792, #793)
+## 2026-11-24 - Remove dead dev scripts, unused recall imports, and unreachable governance code (#789, #792, #793, #644, #660)
 
 - #789: removed the dead doc-token benchmark script under `.agent/tools/` (whose scenario file and `.agent/user/` tree no longer exist) along with its `.agent/README.md` section, `user/` fallback paragraph, and `.agent/file-index.md` entry.
 - #792: removed the superseded M2 functional audit probe under `.agent/audit/` (which printed unconditional `CONFIRMED` lines for fixed security findings).
 - #793: removed the orphaned QuantState prototype script under `.agent/plans/backlog/` (whose companion plan is archived and fold logic is superseded by `domain/fold_algebra.py` and `domain/scalar_state_fold.py`).
+- #644: removed 19 unused imports from `services/recall_pipeline.py` while keeping the test-pinned `GRAPHITI_RRF_DUAL_METHOD_MAX` re-export.
+- #660 (partial, zero-bench-impact slice): removed unreachable `services/memory_oracle_service.py`, `services/windowed_recall.py`, `WeightedOracleCombiner`, and unused `WardenLabel.UNCERTAIN`/`SUSPICIOUS_CHAIN`; documented `#566`/`#579`/`#659` on kept oracle/warden branches and corrected stale default-off comments in `recall_pipeline.py`, `config/settings_model.py`, and `recall_support.py`. Modules still imported by `archolith-bench` (`structure_temporal`, `exhaustion`/`ExhaustionWarden`, `BeliefScorer`) were intentionally kept.
 
 ## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
 

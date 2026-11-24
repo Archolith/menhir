@@ -89,7 +89,9 @@ class SemanticOracle:
 
 
 class StructureOracle:
-    """File/symbol/test overlap — structural relevance independent of wording."""
+    """File/symbol/test overlap — structural relevance independent of wording.
+
+    Kept pending #566/#579 (ingest/recall wiring for file/symbol/test inputs) and #659."""
 
     name = "structure"
     source_family = "structure"
@@ -212,7 +214,8 @@ class EvidenceOracle:
     A non-self anchor (git/test/user/log/...) is strong; agent-only (agent_inference/
     llm_summary) is weak. This oracle is intentionally excluded from ``default_oracles``:
     provenance governs admission/trust through EvidenceAnchorWarden and must not act as
-    query relevance. Missing evidence raises uncertainty (MISSING), never contradiction."""
+    query relevance. Missing evidence raises uncertainty (MISSING), never contradiction.
+    Kept outside default_oracles pending #566/#579/#659."""
 
     name = "evidence"
     source_family = "evidence"

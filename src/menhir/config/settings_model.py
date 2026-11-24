@@ -416,12 +416,11 @@ class MemorySettings:
     # mid-measurement (LongMemEval Mode B isolation). Ingest + recall still work.
     benchmark_mode: bool = False
 
-    # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
-    # point via retrieval_tuning(). Most portions default OFF; enable any per deployment via
-    # MENHIR_FRONTIER_SHADOW / etc. (code defaults match .env.example, audit DOC-05).
-    # Oracle ranking and the intent lens are always on since #172 and have no setting; see
-    # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
-    # #173 (set each to false to opt out).
+    # Frontier retrieval settings, mapped into a RetrievalTuningConfig at the recall entry
+    # point via retrieval_tuning(). Oracle ranking, the intent lens, the Warden gate (with its
+    # contradiction guard), and the source-memory lane are always on since #172/#173/#168 and
+    # have no deploy-level toggle here (per-request knobs remain on RetrievalTuningConfig).
+    # ``frontier_shadow`` defaults OFF (opt-in observe-only trace via MENHIR_FRONTIER_SHADOW).
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
@@ -755,11 +754,11 @@ class MemorySettings:
         assert_bind_safe(self)
 
     def retrieval_tuning(self) -> "RetrievalTuningConfig":
-        """Build the RetrievalTuningConfig for the active frontier portions.
+        """Build the RetrievalTuningConfig from the active recall settings.
 
-        All portions default OFF, so with no MENHIR_FRONTIER_* env set this yields a config
-        whose recall path is byte-for-byte today's ScoringService behavior. ``frontier_shadow``
-        is NOT part of tuning — it drives the trace flag at the recall entry point.
+        Graduated lanes (oracle ranking, intent lens, Warden gate, source-memory lane,
+        cross-encoder rerank) are on by default; ``frontier_shadow`` defaults OFF and enables
+        the observe-only assertion trace when set.
         """
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 

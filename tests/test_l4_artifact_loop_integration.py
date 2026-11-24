@@ -1,7 +1,7 @@
 """End-to-end parity test for the L4 artifact loop, menhir service stack.
 
-This drives the *real* menhir service layer (ArtifactService -> adapter delegates ->
-MemoryOracleService) over a faithful in-memory stand-in for the artifact graph, using the
+This drives the *real* menhir service layer (ArtifactService -> adapter delegates)
+over a faithful in-memory stand-in for the artifact graph, using the
 same corpus as the bench fixture `archolith_bench/fixtures/l4_failure_demo.json`. It proves
 the menhir port and the bench agree on the behavior that matters before the live-graph walk
 (.agent/plans/l4-commit6-live-verification.md):
@@ -9,8 +9,7 @@ the menhir port and the bench agree on the behavior that matters before the live
   - a TRUSTED human Failure surfaces as a fact-eligible artifact (status intact);
   - an LLM artifact is captured CANDIDATE even with evidence (invariant 4);
   - an evidence-less human note is CANDIDATE and un-promotable (invariants 5, 3);
-  - supersession reads HISTORICAL, never deleted (invariant 7);
-  - the oracle ranks the anchored artifacts above the off-anchor incident.
+  - supersession reads HISTORICAL, never deleted (invariant 7).
 
 The in-memory adapter emulates exactly the guards the ArtifactRepository Cypher enforces;
 the live repository is checked separately at home. The bench is the spec — if this diverges
@@ -26,7 +25,6 @@ import pytest
 
 from menhir.domain.artifacts import ArtifactSource, ArtifactType, Evidence
 from menhir.services.artifact_service import ArtifactService
-from menhir.services.memory_oracle_service import MemoryOracleService
 
 
 @dataclass
@@ -131,14 +129,14 @@ async def _seed(svc: ArtifactService) -> None:
     await svc.supersede("old_floor", "floor_fix")  # old decision is superseded by the fix
 
 
-def _graph() -> tuple[ArtifactService, MemoryOracleService, _InMemoryArtifactGraph]:
+def _graph() -> tuple[ArtifactService, _InMemoryArtifactGraph]:
     g = _InMemoryArtifactGraph()
-    return ArtifactService(graph_adapter=g), MemoryOracleService(graph_adapter=g), g
+    return ArtifactService(graph_adapter=g), g
 
 
 @pytest.mark.unit
 def test_capture_assigns_bench_parity_statuses() -> None:
-    svc, _, g = _graph()
+    svc, g = _graph()
     _run(_seed(svc))
     status = {k: v["status"] for k, v in g.nodes.items()}
     assert status["floor_fail"] == "trusted"      # human + evidence (inv. 5)
@@ -151,7 +149,7 @@ def test_capture_assigns_bench_parity_statuses() -> None:
 
 @pytest.mark.unit
 def test_evidence_less_human_note_is_unpromotable() -> None:
-    svc, _, _ = _graph()
+    svc, _ = _graph()
     _run(_seed(svc))
     out = _run(svc.promote("floor_hunch"))
     assert out["status"] == "refused" and out["reason"] == "no_promotable_evidence"  # invariant 3
@@ -160,7 +158,7 @@ def test_evidence_less_human_note_is_unpromotable() -> None:
 @pytest.mark.unit
 def test_llm_agent_inference_only_cannot_be_promoted() -> None:
     # Fix 1: floor_guess is LLM-sourced with only agent_inference evidence.
-    svc, _, _ = _graph()
+    svc, _ = _graph()
     _run(_seed(svc))
     out = _run(svc.promote("floor_guess"))
     assert out["status"] == "refused" and out["reason"] == "no_promotable_evidence"
@@ -169,7 +167,7 @@ def test_llm_agent_inference_only_cannot_be_promoted() -> None:
 @pytest.mark.unit
 def test_superseded_decision_cannot_be_promoted_or_resurrected() -> None:
     # invariant 7: promote refuses, AND a re-capture cannot flip it back to trusted (Fix 2).
-    svc, _, g = _graph()
+    svc, g = _graph()
     _run(_seed(svc))
     assert _run(svc.promote("old_floor"))["status"] == "refused"
     # try to resurrect via re-capture as a trusted human artifact
@@ -183,24 +181,8 @@ def test_superseded_decision_cannot_be_promoted_or_resurrected() -> None:
 @pytest.mark.unit
 def test_source_confidence_tracks_trust_level() -> None:
     # Fix 4: trusted artifacts aren't stored at the neutral 0.5 default.
-    svc, _, g = _graph()
+    svc, g = _graph()
     _run(_seed(svc))
     assert g.nodes["floor_fail"]["source_confidence"] == 0.9   # trusted human
     assert g.nodes["floor_guess"]["source_confidence"] == 0.4  # llm candidate
     assert g.nodes["floor_hunch"]["source_confidence"] == 0.5  # human candidate, no evidence
-
-
-@pytest.mark.unit
-def test_oracle_surfaces_anchored_artifacts_status_intact() -> None:
-    svc, oracle, _ = _graph()
-    _run(_seed(svc))
-    hits = _run(oracle.find(text=_TASK, anchors=_ANCHOR, limit=10))
-    by_id = {h.artifact["artifact_id"]: h for h in hits}
-    # the five scoring_service-anchored artifacts surface; the off-anchor incident does not
-    assert {"floor_fail", "floor_fix", "floor_guess", "old_floor", "floor_hunch"} <= set(by_id)
-    assert "lease_inc" not in by_id
-    # statuses are intact — bucketing fact/hypothesis/stale is the brief's job, not the oracle's
-    assert by_id["floor_fail"].artifact["status"] == "trusted"
-    assert by_id["floor_guess"].artifact["status"] == "candidate"
-    assert by_id["old_floor"].artifact["status"] == "historical"
-    assert "anchor" in by_id["floor_fail"].matched_on

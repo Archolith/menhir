@@ -1,18 +1,14 @@
-"""One-pass oracle combiners (R7) — the menhir port of the killer baseline.
+"""One-pass oracle combiner (R7) — the menhir port of the killer baseline.
 
-Two combiners reduce the per-candidate OracleResults (from the R4 executor over the R6
-oracles) into a ranked list + an OraclePacket:
-
-- WeightedOracleCombiner (ladder E) — one-pass weighted SUM into a single score (the honest
-  naive baseline).
-- LogSpaceOracleCombiner (ladder F) — role-specific log-space logits (relevant/current/
-  historical/conflict/blocked). Contradiction is negative log-evidence D = lambda * q^gamma
-  (not subtraction from a final score); duplicate evidence is down-weighted by source-family
-  independence (1/sqrt(n)); per-family positive contribution is capped; missing evidence
-  raises uncertainty rather than suppressing.
+``LogSpaceOracleCombiner`` (ladder F) reduces per-candidate OracleResults (from the R4
+executor over the R6 oracles) into a ranked list + an OraclePacket using role-specific
+log-space logits (relevant/current/historical/conflict/blocked). Contradiction is negative
+log-evidence D = lambda * q^gamma (not subtraction from a final score); duplicate evidence
+is down-weighted by source-family independence (1/sqrt(n)); per-family positive
+contribution is capped; missing evidence raises uncertainty rather than suppressing.
 
 The math follows docs/research/oracle-amplified-retrieval.md. F is build-first; iterative
-amplification (R11) must beat F to ship and is not here. Both outputs feed the Wardens — this
+amplification (R11) must beat F to ship and is not here. Its output feeds the Wardens — this
 is the Oracle->Warden handoff: the combiner RANKS, the wardens then DECIDE admission.
 """
 
@@ -76,37 +72,6 @@ def _rank_and_fill(raw: dict[str, float], packets: dict[str, OraclePacket]) -> l
     for cid, p in zip(ranked, probs):
         packets[cid].combined_probability = p
     return ranked
-
-
-class WeightedOracleCombiner:
-    """Ladder E: flat one-pass weighted sum of oracle evidence (single score)."""
-
-    name = "weighted"
-
-    def rank(
-        self, query: QueryContext, grouped: dict[str, list[OracleResult]]
-    ) -> tuple[list[str], dict[str, OraclePacket]]:
-        packets: dict[str, OraclePacket] = {}
-        raw: dict[str, float] = {}
-        for cid, results in grouped.items():
-            score = 0.0
-            missing = 0
-            for r in results:
-                alpha = FAMILY_ALPHA.get(r.source_family, 1.0)
-                magnitude = alpha * r.probability * r.confidence * r.directness * r.scope_match
-                if r.polarity == OraclePolarity.SUPPORT:
-                    score += magnitude
-                elif r.polarity == OraclePolarity.CONTRADICT:
-                    score -= magnitude
-                elif r.polarity == OraclePolarity.MISSING:
-                    missing += 1
-            raw[cid] = score
-            packets[cid] = OraclePacket(
-                candidate_id=cid, results=results, role_logits={"score": score},
-                combined_probability=0.0, uncertainty=missing / (len(results) or 1),
-                rationale=[r.note for r in results if r.note],
-            )
-        return _rank_and_fill(raw, packets), packets
 
 
 class LogSpaceOracleCombiner:
@@ -180,6 +145,7 @@ class LogSpaceOracleCombiner:
                     z["relevant"] -= penalty
                     rationale.append(f"-relevant/+blocked {r.oracle} {penalty:.2f}")
             elif r.target == OracleTarget.CONFLICT:
+                # Kept pending #566/#579/#659 (no default oracle emits OracleTarget.CONFLICT yet).
                 if r.polarity == OraclePolarity.CONTRADICT:
                     z["conflict"] += penalty
                     z["current"] -= penalty
