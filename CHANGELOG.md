@@ -1,3 +1,11 @@
+## 2026-11-24 - Conflict suppressions are no longer removed by age pruning (#959)
+
+- `infrastructure/telemetry/lifecycle_store_stats.py`: `conflict_resolutions` is out of the retention
+  tiers. Pruning it at 90 days re-opened conflict pairs that were already resolved and cut short a longer
+  `conflict_cooldown_days`. Rows already pruned are not restored.
+- `config/settings_model.py`: comment only.
+- `docs/your-data.md`: conflict suppressions are not age-pruned and erasure does not reach them.
+
 ## 2026-11-24 - Release bump PRs run stdio-e2e
 
 - `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
@@ -110,21 +118,3 @@
   `auto_resolve_settled_conflict_group`, which re-checks under a group lock. Removal after review
   is refused if a member joined since the verdict. A node joining a group fresh gets a new
   `conflict_created_at`. Review drains the oldest groups first.
-
-## 2026-11-22 - Startup requires every phase-one uniqueness constraint; L4 supersession refuses historical endpoints (#741, #742)
-
-- `infrastructure/schema.py`, `infrastructure/memory_graph_adapter.py`, `core/bootstrap.py`,
-  `core/runtime.py`: startup now requires all ten uniqueness constraints phase one creates, up from
-  four: added `work_artifact_uuid_unique`, `artifact_source_uuid_unique`,
-  `artifact_source_locator_unique`, `artifact_reconcile_cursor_repository_unique`,
-  `metric_uuid_unique` and `turn_evidence_key_unique`. If one cannot be created, writer startup
-  (and candidate-readonly startup) is refused, and the message counts the duplicated values that
-  block each constraint. **Upgrade note:** an install whose graph holds duplicates for any of these
-  refuses to start until they are repaired; installs that already have the constraints are
-  unaffected.
-- `infrastructure/artifact_repository.py`, `services/artifact_service.py`: L4
-  `supersede_artifact` write-locks every node with either id, then refuses when any copy of either
-  id is historical (no b->a after a->b, no overwrite of `superseded_by`). The service reports
-  `refused` with a reason, separate from `not_found`, and treats a retry of an applied
-  supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
-  structural.

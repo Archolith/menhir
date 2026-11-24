@@ -28,6 +28,10 @@ class TelemetryRetentionStatsMixin:
     #: which is the correct deletion axis for them.
     #: The same holds for graph_operations ENTITY_MERGE / ENTITY_UNMERGE snapshots: unmerge needs
     #: them, so they are exempt from age pruning (see prune_operation_snapshots).
+    #:
+    #: `conflict_resolutions` is also ABSENT: it is state, not telemetry. `is_pair_resolved` reads
+    #: it to keep resolved pairs suppressed; age pruning would silently re-open them. Only
+    #: `conflict_cooldown_days` decides whether a suppression still applies.
     _RETENTION_TIERS: dict[str, tuple[str, str]] = {
         # High-volume observability.
         "lifecycle_events": ("recorded_at", "observability"),
@@ -38,7 +42,6 @@ class TelemetryRetentionStatsMixin:
         "failure_events": ("recorded_at", "diagnostic"),
         "recall_receipts": ("created_at", "diagnostic"),
         "recall_query_log": ("created_at", "diagnostic"),
-        "conflict_resolutions": ("resolved_at", "diagnostic"),
         "recall_lab_runs": ("recorded_at", "diagnostic"),
         "extraction_lab_runs": ("recorded_at", "diagnostic"),
     }
