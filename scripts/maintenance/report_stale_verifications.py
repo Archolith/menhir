@@ -43,6 +43,18 @@ def _parse_iso_utc(text: str | None) -> datetime | None:
         return None
 
 
+def _effective_time(receipt: dict) -> datetime | None:
+    """min(verified_at, created_at) as instants (#965); mirrors the server's receipt rule.
+
+    created_at is server-recorded, so a future-dated verified_at counts no later than it was
+    written. Missing/unparseable created_at leaves verified_at; unparseable verified_at -> None."""
+    v_dt = _parse_iso_utc(receipt.get("verified_at"))
+    if v_dt is None:
+        return None
+    c_dt = _parse_iso_utc(receipt.get("created_at"))
+    return min(v_dt, c_dt) if c_dt is not None else v_dt
+
+
 # ---------------------------------------------------------------------------
 # URL resolution
 # ---------------------------------------------------------------------------
@@ -151,7 +163,7 @@ def classify_receipt(receipt: dict, anchor: dict) -> tuple[bool, str | None]:
 
     Returns (is_valid, ignored_reason_or_None).
     A valid receipt must match memory_uuid, project, path, and have
-    verified_at >= dirty_at with parseable timestamps for both.
+    effective time (min of verified_at and created_at) >= dirty_at, parseable on both sides.
     Missing or malformed dirty_at is conservative — we cannot prove
     verified_at >= dirty_at, so the receipt is ignored.
     """
@@ -164,7 +176,7 @@ def classify_receipt(receipt: dict, anchor: dict) -> tuple[bool, str | None]:
     if receipt.get("path") != anchor.get("path"):
         return False, IGNORED_REASON_WRONG_PATH
 
-    v_dt = _parse_iso_utc(receipt.get("verified_at"))
+    v_dt = _effective_time(receipt)
     if v_dt is None:
         return False, IGNORED_REASON_TIMESTAMP_ERROR
 
@@ -177,9 +189,12 @@ def classify_receipt(receipt: dict, anchor: dict) -> tuple[bool, str | None]:
     return True, None
 
 
-def _sort_key(receipt: dict) -> datetime:
-    dt = _parse_iso_utc(receipt.get("verified_at", ""))
-    return dt or datetime.min.replace(tzinfo=timezone.utc)
+def _sort_key(receipt: dict) -> tuple[datetime, datetime]:
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    return (
+        _effective_time(receipt) or floor,
+        _parse_iso_utc(receipt.get("created_at")) or floor,
+    )
 
 
 def _slim_receipt(receipt: dict, *, reason: str | None = None) -> dict:
