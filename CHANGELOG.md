@@ -1,3 +1,9 @@
+## 2026-11-24 - Remove dead dev-only scripts (#789, #792, #793)
+
+- #789: removed the dead doc-token benchmark script under `.agent/tools/` (whose scenario file and `.agent/user/` tree no longer exist) along with its `.agent/README.md` section, `user/` fallback paragraph, and `.agent/file-index.md` entry.
+- #792: removed the superseded M2 functional audit probe under `.agent/audit/` (which printed unconditional `CONFIRMED` lines for fixed security findings).
+- #793: removed the orphaned QuantState prototype script under `.agent/plans/backlog/` (whose companion plan is archived and fold logic is superseded by `domain/fold_algebra.py` and `domain/scalar_state_fold.py`).
+
 ## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.14. No dependency changes in this commit.
@@ -130,7 +136,3 @@
 ## 2026-11-22 - v0.3.13: Graphiti fork save fixes, breaker gaps closed, ranked source memories in build_context
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.13. No dependency changes in this commit.
-
-## 2026-11-22 - Graphiti fork 0.31.2.post4: entity-edge save fixes (Archolith/graphiti #28-#30)
-
-- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post4`, fork commit `d94da8d7`. Pins, docs and release checks updated.

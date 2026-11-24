@@ -65,9 +65,6 @@ verified bug and hardening list. The older `verified-current-findings.md` is sup
 Use `file-index.md` if you need the full doc inventory.
 Use `workflows/feature_planning.md` before any semi-large feature or architectural expansion.
 
-The `user/` folder is human-readable fallback material. Bots should stay in the main `.agent`
-docs unless the core docs are still unclear.
-
 ## Entry Docs
 
 Fast routing:
@@ -93,38 +90,6 @@ Only then open targeted sections from:
 - `data_models.md`
 - `endpoints.md`
 - `memory-design.md`
-
-## Benchmarking Doc Cost
-
-Use the local benchmark when you want to compare the token cost of the core `.agent` path against
-the human-readable `user/` path for the same task.
-
-Example:
-
-```bash
-python .agent/tools/benchmark_doc_tokens.py
-```
-
-Prompt-aware table:
-
-```bash
-python .agent/tools/benchmark_doc_tokens.py --show-prompts
-```
-
-Warm-path comparison:
-
-```bash
-python .agent/tools/benchmark_doc_tokens.py --warm
-```
-
-Preferred mode:
-
-- install `tiktoken` if you want model-oriented counts
-- default encoding is `o200k_base`
-- the benchmark creates and uses a local `.agent/test_tmp/tiktoken` temp directory before initializing `tiktoken`
-- if `tiktoken` is not installed, the tool falls back to a rough `chars / 4` estimate
-- `--warm` excludes the common entry docs so you can compare incremental per-task doc cost
-- scenarios include explicit task prompts so the benchmark reflects real asks, not only scenario ids
 
 ## Structural Code Graph
 
