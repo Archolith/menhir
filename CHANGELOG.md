@@ -1,3 +1,7 @@
+## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
+
 ## 2026-11-24 - Request paths with control characters are refused (#944)
 
 - `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
@@ -133,7 +137,3 @@
   that list to include the tools behind the routes it calls (for example `build_context` for
   `/api/context`).
 - `explorer/app.py`: the explorer refuses any client with a tool allowlist.
-
-## 2026-11-22 - v0.3.13: Graphiti fork save fixes, breaker gaps closed, ranked source memories in build_context
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.13. No dependency changes in this commit.
