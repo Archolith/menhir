@@ -11,11 +11,13 @@ else -- reporting clean results for checks that never ran.
 
 ## Usage
 
-    python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py \
-        src/menhir/api --type security
+Install the stdlib-only package once (from the Menhir checkout):
 
-Or install it (`pip install -e ../../ctharvey/cth.auditprobe`) and use the
-`auditprobe` entry point.
+    pip install -e ../../ctharvey/cth.auditprobe
+
+Then run the `auditprobe` entry point from the Menhir checkout:
+
+    auditprobe src/menhir/api --type security
 
 ## What Menhir keeps
 

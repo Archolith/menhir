@@ -38,11 +38,15 @@ Supporting context (read, do not audit as scope): {{SUPPORTING_PATHS}}
 
 ## Mechanical probe - run this first
 
+Install `cth.auditprobe` once if `auditprobe` is not on `PATH`
+(`pip install -e ../../ctharvey/cth.auditprobe`; see `.agent/audit/PROBE.md`), then run from the
+Menhir checkout:
+
 ```
-python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py {{MODULE_PATH}} --type {{CORRECTNESS_OR_SECURITY}}
+auditprobe {{MODULE_PATH}} --type {{CORRECTNESS_OR_SECURITY}}
 ```
 
-(`--type` accepts `correctness`, `security`, or `architecture`; see `.agent/audit/PROBE.md`.)
+(`--type` accepts `correctness`, `security`, or `architecture`.)
 
 Paste its output verbatim into your Bug-Class Sweep section. Do not summarise
 its numbers; quote them. Where your narrative and the probe disagree, **the

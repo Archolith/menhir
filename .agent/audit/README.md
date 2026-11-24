@@ -86,8 +86,11 @@ reserved for a pass that ran the service and reproduced findings against it.
 ## Running an audit
 
 ```
-# 1. mechanical pass (see PROBE.md; --type accepts correctness, security, or architecture)
-python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py src/menhir/<module> --type correctness
+# 0. install cth.auditprobe once in your environment (see PROBE.md)
+pip install -e ../../ctharvey/cth.auditprobe
+
+# 1. mechanical pass from the Menhir checkout (--type accepts correctness, security, or architecture)
+auditprobe src/menhir/<module> --type correctness
 
 # 2. give a lane the prompt, with probe output attached
 ```

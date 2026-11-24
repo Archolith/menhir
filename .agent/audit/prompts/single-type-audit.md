@@ -44,11 +44,15 @@ pass looks for nothing else.
 
 ## Mechanical probe - run this first
 
+Install `cth.auditprobe` once if `auditprobe` is not on `PATH`
+(`pip install -e ../../ctharvey/cth.auditprobe`; see `.agent/audit/PROBE.md`), then run from the
+Menhir checkout:
+
 ```
-python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py {{MODULE_PATH}} --type {{PLUGIN}}
+auditprobe {{MODULE_PATH}} --type {{PLUGIN}}
 ```
 
-(`--type` accepts `correctness`, `security`, or `architecture`; see `.agent/audit/PROBE.md`.)
+(`--type` accepts `correctness`, `security`, or `architecture`.)
 
 Quote its output verbatim in your Bug-Class Sweep section. Where your narrative
 and the probe disagree, **the probe wins**, and you report the disagreement.

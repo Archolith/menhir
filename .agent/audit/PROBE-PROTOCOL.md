@@ -31,10 +31,11 @@ disagreement is itself reported.
 
 ## Usage
 
-Run the probe from `projects/ctharvey/cth.auditprobe` (see `PROBE.md`, or use the installed `auditprobe` entry point):
+Install `projects/ctharvey/cth.auditprobe` once (`pip install -e ../../ctharvey/cth.auditprobe`;
+see `PROBE.md`), then run the `auditprobe` entry point from the Menhir checkout:
 
 ```
-python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py <module_dir> [--type correctness|security|architecture]
+auditprobe <module_dir> [--type correctness|security|architecture]
 ```
 
 Paste the output verbatim into the report's Bug-Class Sweep section. Do not

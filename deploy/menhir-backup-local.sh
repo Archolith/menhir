@@ -105,9 +105,9 @@ NEO4J_DIGEST="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["
 AGE_RECIPIENT="$(age-keygen -y "$AGE_IDENTITY")"
 case "$AGE_RECIPIENT" in age1*) ;; *) echo "invalid age recipient derived from identity" >&2; exit 1;; esac
 
-mkdir -p "$STATUS_DIR" "$ARCHIVE_ROOT" "$RECEIPT_ROOT" "${STATUS_DIR}/staging"
 [ ! -L "$STATUS_DIR" ] && [ ! -L "${STATUS_DIR}/staging" ] && [ ! -L "$ARCHIVE_ROOT" ] && [ ! -L "$RECEIPT_ROOT" ] \
     || { echo "status, staging, archive, and receipt roots must not be symlinks" >&2; exit 1; }
+mkdir -p "$STATUS_DIR" "$ARCHIVE_ROOT" "$RECEIPT_ROOT" "${STATUS_DIR}/staging"
 chmod 0700 "$ARCHIVE_ROOT" "$RECEIPT_ROOT" "${STATUS_DIR}/staging"
 STAGING_DIR="$(mktemp -d "${STATUS_DIR}/staging/local.XXXXXXXXXX")"
 trap 'rm -rf "$STAGING_DIR"' EXIT

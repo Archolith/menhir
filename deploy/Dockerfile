@@ -157,10 +157,10 @@ if [ "${MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S:-0}" != "0" ]; then
 fi
 require_readable_file "${MENHIR_CLIENT_POLICY_PATH:-/srv/menhir/production/policy/client-policy.json}"
 case "${LLM_CHAT_PROVIDER:-local},${GRAPHITI_LLM_PROVIDER:-local},${GRAPHITI_EMBED_PROVIDER:-}" in
-    *openai*) load_required_secret openai-api-key OPENAI_API_KEY ;;
+    *openai*) load_required_secret "$secrets_dir" "secret" openai-api-key OPENAI_API_KEY ;;
 esac
 case "${LLM_CHAT_PROVIDER:-local},${GRAPHITI_LLM_PROVIDER:-local},${GRAPHITI_EMBED_PROVIDER:-}" in
-    *gemini*) load_required_secret gemini-api-key GEMINI_API_KEY ;;
+    *gemini*) load_required_secret "$secrets_dir" "secret" gemini-api-key GEMINI_API_KEY ;;
 esac
 unset secrets_dir oauth_secrets_dir
 exec "$@"
