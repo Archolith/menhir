@@ -1,3 +1,12 @@
+## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
+
+- `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
+  project's files. An event from an unknown project marks files only when every match belongs to one
+  project. Verification receipts are compared as instants and count no later than their server
+  `created_at`; the receipt list is ordered by `created_at`. Files already marked are not cleared.
+- `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
+- `docs/hook-center-tool-events.md`: describes both rules.
+
 ## 2026-11-24 - Release bump PRs run stdio-e2e
 
 - `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
@@ -110,21 +119,3 @@
   `auto_resolve_settled_conflict_group`, which re-checks under a group lock. Removal after review
   is refused if a member joined since the verdict. A node joining a group fresh gets a new
   `conflict_created_at`. Review drains the oldest groups first.
-
-## 2026-11-22 - Startup requires every phase-one uniqueness constraint; L4 supersession refuses historical endpoints (#741, #742)
-
-- `infrastructure/schema.py`, `infrastructure/memory_graph_adapter.py`, `core/bootstrap.py`,
-  `core/runtime.py`: startup now requires all ten uniqueness constraints phase one creates, up from
-  four: added `work_artifact_uuid_unique`, `artifact_source_uuid_unique`,
-  `artifact_source_locator_unique`, `artifact_reconcile_cursor_repository_unique`,
-  `metric_uuid_unique` and `turn_evidence_key_unique`. If one cannot be created, writer startup
-  (and candidate-readonly startup) is refused, and the message counts the duplicated values that
-  block each constraint. **Upgrade note:** an install whose graph holds duplicates for any of these
-  refuses to start until they are repaired; installs that already have the constraints are
-  unaffected.
-- `infrastructure/artifact_repository.py`, `services/artifact_service.py`: L4
-  `supersede_artifact` write-locks every node with either id, then refuses when any copy of either
-  id is historical (no b->a after a->b, no overwrite of `superseded_by`). The service reports
-  `refused` with a reason, separate from `not_found`, and treats a retry of an applied
-  supersession as success. `graph_text_inventory.py`: the `_artifact_supersede_lock` token is
-  structural.
