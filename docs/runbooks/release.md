@@ -22,6 +22,8 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
    This updates `pyproject.toml`, `uv.lock`, `sbom.json`, the docs that state the current
    version and `CHANGELOG.md`. It writes nothing if any expected line has moved. Check the
    CHANGELOG entry in the PR before merging. Without `--pr`, the edits stay in the working tree.
+   The branch is `release/X.Y.Z`, so `stdio-e2e` runs on the PR (about 13 minutes); on any other
+   branch name it is skipped and the required check still passes.
 3. Start the release image dry run on that commit, unless last night's run already covers it:
 
        gh workflow run release-image-dryrun.yml --repo Archolith/menhir --ref main
