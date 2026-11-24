@@ -1,3 +1,7 @@
+## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
+
 ## 2026-11-24 - Request paths with control characters are refused (#944)
 
 - `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
