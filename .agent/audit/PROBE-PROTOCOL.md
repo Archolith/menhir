@@ -31,8 +31,10 @@ disagreement is itself reported.
 
 ## Usage
 
+Run the probe from `projects/ctharvey/cth.auditprobe` (see `PROBE.md`, or use the installed `auditprobe` entry point):
+
 ```
-python .agent/audit/menhir_audit_probe.py <module_dir> [--type a1|a2]
+python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py <module_dir> [--type correctness|security|architecture]
 ```
 
 Paste the output verbatim into the report's Bug-Class Sweep section. Do not
@@ -52,11 +54,11 @@ Core checks, run for every module and audit type:
 
 Plugins:
 
-- `--type a1` — `CancelledError` escaping `except Exception`; mixed timestamp
+- `--type correctness` — `CancelledError` escaping `except Exception`; mixed timestamp
   formats compared as TEXT; intra-module keyword-argument mismatches
-- `--type a2` — route/tier coverage; request data reaching logs unredacted;
+- `--type security` — route/tier coverage; request data reaching logs unredacted;
   synchronous I/O on an async path, direct and one hop
-- `--type a3` — import cycles repo-wide; blast radius by import in-degree;
+- `--type architecture` — import cycles repo-wide; blast radius by import in-degree;
   responsibility proxy (lines, publics, classes, decorated) per file
 
 ## Reading the output honestly
@@ -84,17 +86,10 @@ State these in the report rather than working around them silently.
 
 ## Trusting the probe
 
-`test_menhir_audit_probe.py` asserts the probe finds nine defects confirmed by
-hand, and that it does not reproduce two false positives found while building it
-(same-named methods on different classes; a dict `.get()` resolved to a store
-method by name). Run it before trusting a report that cites probe output:
-
-```
-python .agent/audit/test_menhir_audit_probe.py
-```
-
-A failure means either the probe regressed or the audited code changed. Both
-need a human decision. Do not update the expectations to match new output.
+The probe's synthetic fixture test suite lives in `projects/ctharvey/cth.auditprobe`
+(see `PROBE.md`). Run its pytest suite from `cth.auditprobe` before trusting a report
+after probe changes; a failure needs a human decision rather than blindly updating
+expectations.
 
 ## After remediation
 

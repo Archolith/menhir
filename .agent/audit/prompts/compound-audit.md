@@ -39,8 +39,10 @@ Supporting context (read, do not audit as scope): {{SUPPORTING_PATHS}}
 ## Mechanical probe - run this first
 
 ```
-python .agent/audit/menhir_audit_probe.py {{MODULE_PATH}} --type {{A1_OR_A2}}
+python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py {{MODULE_PATH}} --type {{CORRECTNESS_OR_SECURITY}}
 ```
+
+(`--type` accepts `correctness`, `security`, or `architecture`; see `.agent/audit/PROBE.md`.)
 
 Paste its output verbatim into your Bug-Class Sweep section. Do not summarise
 its numbers; quote them. Where your narrative and the probe disagree, **the

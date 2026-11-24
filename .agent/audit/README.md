@@ -8,8 +8,7 @@ modify source.
 
 | File | What it is |
 |---|---|
-| `menhir_audit_probe.py` | Canonical mechanical probe. Every lane runs this. |
-| `test_menhir_audit_probe.py` | Ground-truth test for the probe itself. |
+| `PROBE.md` | Location and usage of the canonical mechanical probe (`projects/ctharvey/cth.auditprobe`) and its synthetic test suite. |
 | `PROBE-PROTOCOL.md` | The rule binding report sections to probe checks. |
 | `MODULE-MAP.md` | The 11-module partition, exhaustive and disjoint. |
 | `AUDIT-FIT.md` | Which workspace audit types fit Menhir, and where they do not. |
@@ -87,13 +86,10 @@ reserved for a pass that ran the service and reproduced findings against it.
 ## Running an audit
 
 ```
-# 1. mechanical pass
-python .agent/audit/menhir_audit_probe.py src/menhir/<module> --type a1
+# 1. mechanical pass (see PROBE.md; --type accepts correctness, security, or architecture)
+python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py src/menhir/<module> --type correctness
 
-# 2. confirm the probe itself is sound (do this when it matters)
-python .agent/audit/test_menhir_audit_probe.py
-
-# 3. give a lane the prompt, with probe output attached
+# 2. give a lane the prompt, with probe output attached
 ```
 
 Reports land in the workspace `.agent/reviews/` as

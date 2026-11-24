@@ -45,8 +45,10 @@ pass looks for nothing else.
 ## Mechanical probe - run this first
 
 ```
-python .agent/audit/menhir_audit_probe.py {{MODULE_PATH}} --type {{PLUGIN}}
+python ../../ctharvey/cth.auditprobe/src/auditprobe/probe.py {{MODULE_PATH}} --type {{PLUGIN}}
 ```
+
+(`--type` accepts `correctness`, `security`, or `architecture`; see `.agent/audit/PROBE.md`.)
 
 Quote its output verbatim in your Bug-Class Sweep section. Where your narrative
 and the probe disagree, **the probe wins**, and you report the disagreement.
