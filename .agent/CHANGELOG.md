@@ -4,6 +4,17 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-25 - Record Graphiti prompt_name in LLM usage telemetry (#91)
+
+- `src/menhir/infrastructure/observability.py`: add request-scoped `set_llm_operation_label` /
+  `reset_llm_operation_label` ContextVar helpers and use the active label on `_InstrumentedEndpoint`
+  chat completions (falling back to `"chat.completions.create"` when unset; never applied to
+  embedding calls).
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`: bind `prompt_name` in
+  `MenhirOpenAIGenericClient.generate_response` across attempts and retries, resetting in `finally`,
+  so `llm_usage_events.operation` attributes per-prompt tokens and cache hits directly.
+- Tests: `tests/test_graphiti_prompt_name_telemetry.py`.
+
 ## 2026-11-22 - Agent Smith OAuth clients come from the client policy
 
 - `src/menhir/api/oauth_as_metadata.py`: the hardcoded Agent Smith table (`_AGENT_SMITH_CLIENTS`,
