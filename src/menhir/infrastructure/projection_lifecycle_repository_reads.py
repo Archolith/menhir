@@ -64,7 +64,7 @@ class _ProjectionLifecycleReadsMixin:
         token = _work_token_from_row(row)
         try:
             current_version = int(current_version)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ProjectionLifecycleCorruptionError(
                 "projection work references an invalid definition version"
             ) from exc
@@ -117,7 +117,7 @@ class _ProjectionLifecycleReadsMixin:
                   AND w.generation > coalesce(w.applied_generation,0)
                   AND (w.quarantine_generation IS NULL
                        OR w.quarantine_generation <> w.generation)
-                  AND NOT w.work_key IN $seen_keys
+                  AND (w.work_key IS NULL OR NOT w.work_key IN $seen_keys)
                 OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:w.definition_id})
                 RETURN w.work_key AS work_key,
                        w.definition_id AS definition_id,
@@ -132,7 +132,7 @@ class _ProjectionLifecycleReadsMixin:
                 """,
                 {
                     "definition_id": definition_id,
-                    "seen_keys": seen_keys,
+                    "seen_keys": seen_keys.copy(),
                     "limit": page_size,
                 },
             )
@@ -188,7 +188,11 @@ class _ProjectionLifecycleReadsMixin:
                 WITH w
                 WHERE w.definition_id=$definition_id
                   AND (w.definition_version=$definition_version
-                       OR (w.definition_version IS NULL AND $definition_version IS NULL))
+                       OR (w.definition_version IS NULL AND $definition_version IS NULL)
+                       OR (w.definition_version IS :: FLOAT NOT NULL
+                           AND $definition_version IS :: FLOAT NOT NULL
+                           AND toString(w.definition_version) = 'NaN'
+                           AND toString($definition_version) = 'NaN'))
                   AND w.generation=$generation
                   AND (w.target_json=$target_json
                        OR (w.target_json IS NULL AND $target_json IS NULL))

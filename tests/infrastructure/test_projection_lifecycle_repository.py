@@ -383,11 +383,21 @@ def test_pending_rejects_invalid_definition_filter(definition_id: object) -> Non
 
 
 @pytest.mark.unit
-def test_scoped_pending_quarantines_corrupt_first_page_then_finds_valid_work() -> None:
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("target_json", "{invalid-json", "valid JSON"),
+        ("definition_version", float("inf"), "invalid version/generation"),
+        ("current_definition_version", float("inf"), "invalid definition version"),
+    ],
+)
+def test_scoped_pending_quarantines_corrupt_first_page_then_finds_valid_work(
+    field: str, value: object, reason: str,
+) -> None:
     seed = ProjectionLifecycleRepository(ScriptedNeo4j())
     corrupt = _work_row(seed, _target("bad-1"), generation=2)
     corrupt["current_definition_version"] = 1
-    corrupt["target_json"] = "{invalid-json"
+    corrupt[field] = value
     valid = _work_row(seed, _target("good-1"), generation=2)
     valid["current_definition_version"] = 1
     fake = ScriptedNeo4j(
@@ -408,14 +418,14 @@ def test_scoped_pending_quarantines_corrupt_first_page_then_finds_valid_work() -
 
     assert [token.target.subject_id for token in result] == ["good-1"]
     assert len(fake.executed) == 2
-    assert "AND NOT w.work_key IN $seen_keys" in fake.executed[1][0]
+    assert "(w.work_key IS NULL OR NOT w.work_key IN $seen_keys)" in fake.executed[1][0]
     assert fake.executed[1][1]["seen_keys"] == [corrupt["work_key"]]
     query, params = fake.transaction_history[0].executed[0]
     assert query.index("SET w.coordination_epoch") < query.index("WITH w")
     assert query.index("WITH w") < query.index("w.generation=$generation")
     assert params["work_key"] == corrupt["work_key"]
     assert params["generation"] == 2
-    assert "valid JSON" in params["reason"]
+    assert reason in params["reason"]
 
 
 @pytest.mark.unit
@@ -1035,8 +1045,40 @@ def test_scoped_pending_live_quarantines_full_bad_page_without_starving_valid_wo
 
 
 @pytest.mark.online
+def test_scoped_pending_detects_keyless_work_after_a_full_page(test_neo4j_repo) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    definition = _definition(1)
+    lifecycle.publish_definition(definition, semantic_hash="quarantine-keyless-v1")
+    lifecycle.dirty_targets(
+        definition, [_target(f"keyless-prefix-{i:03d}") for i in range(32)], reason="first_page",
+    )
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState {definition_id:$definition_id})
+        SET w.definition_version=99
+        WITH count(w) AS updated
+        CREATE (:ProjectionWorkState {
+            definition_id:$definition_id, generation:1, dirty_at:datetime() + duration('PT1H')
+        })
+        """,
+        {"definition_id": definition.definition_id},
+    )
+
+    with pytest.raises(ProjectionLifecycleCorruptionError, match="no usable work_key"):
+        lifecycle.pending(definition_id=definition.definition_id, limit=1)
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 32
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("corruption", [
+    {"definition_version": 99},
+    {"definition_version": float("inf")},
+    {"definition_version": float("nan")},
+    {"target_json": "{invalid-json"},
+])
 def test_quarantined_work_reactivates_when_new_generation_is_dirtied(
-    test_neo4j_repo,
+    test_neo4j_repo, corruption: dict[str, Any],
 ) -> None:
     lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
     lifecycle.activate()
@@ -1046,13 +1088,12 @@ def test_quarantined_work_reactivates_when_new_generation_is_dirtied(
         definition, [_target("quarantine-retry")], reason="first",
     )[0]
 
-    # A deliberately corrupted version makes the original generation unsafe.
     test_neo4j_repo.execute(
         """
         MATCH (w:ProjectionWorkState {work_key:$work_key})
-        SET w.definition_version=99
+        SET w += $corruption
         """,
-        {"work_key": original.work_key},
+        {"work_key": original.work_key, "corruption": corruption},
     )
     assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == ()
     assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 1
