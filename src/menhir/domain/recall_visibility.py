@@ -43,10 +43,37 @@ def view_live_provenance_cypher(variable: str = "n") -> str:
     )
 
 
-def memory_retired_cypher(variable: str = "n") -> str:
-    """Projection of the memory-level RETIRED marker (distinct from the View ``retired`` flag)."""
+def memory_retired_cypher(variable: str = "n", *, protection_checked_by_caller: bool = False) -> str:
+    """Single definition of memory-level RETIRED (distinct from the View ``retired`` flag).
 
-    return f"coalesce({variable}.memory_retired, false)"
+    Retired = the stored ``memory_retired`` marker OR, for an ordinary ``:Entity``, the derived
+    rule: at least one ``:Episodic`` mentions it and every mentioning ``:Episodic`` is retired.
+    Derived at read time, so restoring or adding a source needs no write. Derived Views, flagged
+    entities, retention-protected entities and entities with no mentioning episode are never
+    derived-retired. Every visibility/lifecycle read of retired state must use this helper.
+
+    ``protection_checked_by_caller`` drops the flagged/retention terms for a caller whose own
+    predicate already requires them (``mutable_eligibility_cypher``), so they are not stated twice.
+    """
+
+    # Local imports: infrastructure.cypher imports this module at load time.
+    from menhir.domain.retention import destructive_retention_allowed_cypher
+    from menhir.infrastructure.cypher import non_derived_view_cypher
+
+    v = variable
+    ordinary = non_derived_view_cypher(v)
+    protection = "" if protection_checked_by_caller else (
+        f"AND NOT coalesce({v}.user_flagged, false) "
+        f"AND {destructive_retention_allowed_cypher(v)} "
+    )
+    return (
+        f"(coalesce({v}.memory_retired, false) OR ({v}:Entity "
+        f"AND {ordinary} "
+        f"{protection}"
+        f"AND EXISTS {{ MATCH (:Episodic)-[:MENTIONS]->({v}) }} "
+        f"AND NOT EXISTS {{ MATCH (e:Episodic)-[:MENTIONS]->({v}) "
+        f"WHERE NOT coalesce(e.memory_retired, false) }}))"
+    )
 
 
 def default_recall_visibility_cypher(variable: str = "n", *, include_retired: bool = False) -> str:

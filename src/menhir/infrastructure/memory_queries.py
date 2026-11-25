@@ -1556,7 +1556,7 @@ class MemoryQueryRepository:
             {self._MEMORY_BY_UUID}
             {self._EPISODE_PAIR_MATCH}
             WITH n, (n:Entity AND NOT ({non_structural_memory_cypher("n")})) AS structural,
-                 any(x IN nodes WHERE coalesce(x.memory_retired, false)) AS retired
+                 any(x IN nodes WHERE {memory_retired_cypher('x')}) AS retired
             WHERE structural OR retired
             RETURN CASE WHEN structural
                         THEN coalesce(n.structure_role, 'legacy_project_scan') END AS role,
@@ -1572,7 +1572,11 @@ class MemoryQueryRepository:
                 "Flag semantic memories only."
             )
         if guard and guard[0].get("retired"):
-            raise ValueError("Cannot flag a retired memory. Restore it first (restore_memory).")
+            raise ValueError(
+                "Cannot flag a retired memory. Restore it first (restore_memory); an entity hidden "
+                "because every memory mentioning it is retired comes back when one of those is "
+                "restored."
+            )
 
         normalized_scope = (
             normalize_bootstrap_scope(bootstrap_scope)
@@ -1595,7 +1599,7 @@ class MemoryQueryRepository:
             f"""
             MATCH (n)
             WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
-              AND NOT coalesce(n.memory_retired, false)
+              AND NOT {memory_retired_cypher('n')}
             SET n.user_flagged = true,
                 {scope_set}{priority_set}
             RETURN count(n) AS nodes_updated

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from menhir.domain.merge_eligibility import MergeEligibility
 
 from menhir.domain import merge_delta as md
+from menhir.domain.recall_visibility import memory_retired_cypher
 from menhir.domain.retention import same_tenant_cypher, source_retention_protected_cypher
 from menhir.infrastructure.cypher import non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
@@ -180,7 +181,7 @@ class CorrelationRepository:
                    n.freshness AS freshness,
                    n.scope AS scope,
                    coalesce(n.user_flagged, false) AS user_flagged,
-                   coalesce(n.memory_retired, false) AS memory_retired,
+                   {memory_retired_cypher("n")} AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
