@@ -24,6 +24,16 @@
   `IntentOracle` role derivation.
 - `api/routes_support.py`, `api/routes.py` (#566 CF-320): REST `RecallRequest` now accepts and
   forwards `file_context` and `file_context_project` to `backend.recall`.
+- `domain/temporal.py`, `infrastructure/memory_queries.py`, `services/recall_support.py`,
+  `services/retrieval_oracles.py` (#579 Items 2-3, #350-safe): `fetch_candidate_provenance`
+  projects tenant-scoped `RELATES_TO` fact-edge temporal summaries (`fact_temporal`) dynamically
+  onto recallable `:Entity` candidates via `derive_edge_temporal_projection`. Entities with mixed
+  active and expired edges stay current (`#350` Cause 1); entities whose same-tenant fact edges
+  are all belief-expired carry `all_facts_expired=True` (flagged `historical` under current intent
+  and boosted under historical intent, never silently refused); active-edge world-validity bounds
+  (`valid_at`/`invalid_at`) project only when every active edge carries them. `QueryContext.as_of_time`
+  is now populated from `classify_temporal_intent(query).as_of` in both active and shadow frontier
+  passes.
 
 ## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
 

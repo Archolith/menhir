@@ -493,6 +493,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
+        from menhir.domain.temporal_intent import classify_temporal_intent
         from menhir.services.assertion_pipeline import AssertionPipeline
 
         cmems = []
@@ -507,7 +508,14 @@ class RecallSupportMixin:
                 content=str(c.get("content") or c.get("name") or ""),
                 metadata=md,
             ))
-        qctx = QueryContext(text=query, namespace=namespace, project=query_project, files=query_files)
+        as_of_time = classify_temporal_intent(query).as_of
+        qctx = QueryContext(
+            text=query,
+            namespace=namespace,
+            project=query_project,
+            files=query_files,
+            as_of_time=as_of_time,
+        )
         pipeline = AssertionPipeline(
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
@@ -636,6 +644,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
+        from menhir.domain.temporal_intent import classify_temporal_intent
         from menhir.services.assertion_pipeline import AssertionPipeline
         from menhir.services.oracle_executor import OracleExecutor
         from menhir.services.rerank_oracle import RERANK_ORACLE_NAME, PrecomputedBatchOracle
@@ -653,7 +662,14 @@ class RecallSupportMixin:
                     s.retrieval_score_kind,
                 )
                 cmems.append(CandidateMemory(id=s.uuid, content=str(s.content or s.name or ""), metadata=md))
-            qctx = QueryContext(text=query, namespace=namespace, project=query_project, files=query_files)
+            as_of_time = classify_temporal_intent(query).as_of
+            qctx = QueryContext(
+                text=query,
+                namespace=namespace,
+                project=query_project,
+                files=query_files,
+                as_of_time=as_of_time,
+            )
             executor = (
                 OracleExecutor(
                     default_oracles(),
@@ -771,6 +787,7 @@ class RecallSupportMixin:
         and never breaks recall."""
         from menhir.domain.artifact_role import derive_work_artifact_projection
         from menhir.domain.self_reinforcement import evidence_kind_for_source
+        from menhir.domain.temporal import derive_edge_temporal_projection
 
         def _norm_path(raw: object) -> str:
             cleaned = str(raw or "").strip().replace("\\", "/")
@@ -814,6 +831,7 @@ class RecallSupportMixin:
                     if src is not None:
                         kinds.add(evidence_kind_for_source(str(src)))
                 work_proj = derive_work_artifact_projection(row.get("work_artifacts") or ())
+                edge_temporal = derive_edge_temporal_projection(row.get("fact_temporal"))
                 meta = metadata_by_uuid.get(uuid)
                 if meta is not None:
                     seen.add(uuid)
@@ -836,6 +854,12 @@ class RecallSupportMixin:
                         meta["artifact_type"] = work_proj["artifact_type"]
                     if work_proj.get("artifact_types"):
                         meta["artifact_types"] = work_proj["artifact_types"]
+                    if not meta.get("valid_at") and edge_temporal.get("valid_at"):
+                        meta["valid_at"] = edge_temporal["valid_at"]
+                    if not meta.get("invalid_at") and edge_temporal.get("invalid_at"):
+                        meta["invalid_at"] = edge_temporal["invalid_at"]
+                    if edge_temporal.get("all_facts_expired"):
+                        meta["all_facts_expired"] = True
             except Exception as exc:
                 if warden_status is not None:
                     warden_status.add_gap("provenance_malformed_row")

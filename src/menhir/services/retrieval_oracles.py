@@ -176,8 +176,13 @@ class TemporalOracle:
             return OracleResult(oracle=self.name, probability=0.9, confidence=0.9,
                                 polarity=OraclePolarity.CONTRADICT, target=OracleTarget.CURRENTNESS,
                                 directness=directness, source_family=meta, note="not_yet_valid_at_as_of")
-        # Node-level supersession (Entity row only) is flagged historical, not refused.
-        node_superseded = bool(m.get("superseded_by")) or str(m.get("artifact_status") or "").lower() == "historical"
+        # Node-level supersession (Entity row or all same-tenant fact edges belief-expired)
+        # is flagged historical, not refused.
+        node_superseded = (
+            bool(m.get("superseded_by"))
+            or str(m.get("artifact_status") or "").lower() == "historical"
+            or bool(m.get("all_facts_expired"))
+        )
         if (node_superseded and fact.expired_at is None
                 and role not in (TemporalRole.HISTORICAL, TemporalRole.EXPIRED_WORLD)):
             return OracleResult(oracle=self.name, probability=1.0, confidence=0.9,

@@ -1231,6 +1231,22 @@ class MemoryQueryRepository:
             return []
         query = """
             MATCH (n:Entity) WHERE n.uuid IN $uuids
+            WITH n,
+                 [ (n)-[r]-()
+                   WHERE type(r) = $relates_to_type
+                     AND r[$fact_key] IS NOT NULL AND trim(toString(r[$fact_key])) <> ''
+                     AND NOT coalesce(r[$rederive_pending_key], false)
+                     AND (
+                       (coalesce(r.namespace, r.group_id, '') IN ['', 'default']
+                        AND coalesce(n.namespace, n.group_id, '') IN ['', 'default'])
+                       OR coalesce(r.namespace, r.group_id, '') = coalesce(n.namespace, n.group_id, '')
+                     )
+                   | {
+                       valid_at: toString(r[$valid_at_key]),
+                       invalid_at: toString(r[$invalid_at_key]),
+                       expired_at: toString(r[$expired_at_key])
+                     } ] AS _fe
+            WITH n, _fe, [e IN _fe WHERE e.expired_at IS NULL] AS _active_fe
             RETURN n.uuid AS uuid,
                    [ (n)-[supported_by]->(ev:Evidence)
                      WHERE type(supported_by) = $supported_by_type
@@ -1255,12 +1271,35 @@ class MemoryQueryRepository:
                                                WHERE type(sup_rel) = $supersedes_type
                                                  AND $wa_label IN labels(rep)
                                                | rep[$wa_uuid_key] ])
-                       } ] AS work_artifacts
+                       } ] AS work_artifacts,
+                   {
+                     total: size(_fe),
+                     active: size(_active_fe),
+                     expired: size(_fe) - size(_active_fe),
+                     valid_ats: CASE
+                       WHEN size(_active_fe) > 0 AND size(_active_fe) <= 64
+                            AND all(e IN _active_fe WHERE e.valid_at IS NOT NULL)
+                       THEN [e IN _active_fe | e.valid_at]
+                       ELSE []
+                     END,
+                     invalid_ats: CASE
+                       WHEN size(_active_fe) > 0 AND size(_active_fe) <= 64
+                            AND all(e IN _active_fe WHERE e.invalid_at IS NOT NULL)
+                       THEN [e IN _active_fe | e.invalid_at]
+                       ELSE []
+                     END
+                   } AS fact_temporal
         """
         return self.neo4j.execute(
             query,
             params={
                 "uuids": node_uuids,
+                "relates_to_type": "RELATES_TO",
+                "fact_key": "fact",
+                "rederive_pending_key": "rederive_pending",
+                "valid_at_key": "valid_at",
+                "invalid_at_key": "invalid_at",
+                "expired_at_key": "expired_at",
                 "supported_by_type": "SUPPORTED_BY",
                 "evidence_kind_key": "kind",
                 "wa_label": "WorkArtifact",

@@ -23,6 +23,7 @@ Pure functions over ISO-8601 timestamps; no graph access.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -223,3 +224,57 @@ def format_temporal_provenance(fact: FactTemporal, *, as_of: str | None = None) 
     label = ", ".join(parts)
     role = temporal_role(fact, as_of=as_of)
     return f"{label} [{role.value}]"
+
+
+def derive_edge_temporal_projection(
+    fact_temporal: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Conservatively project tenant-scoped RELATES_TO edge temporal state onto an :Entity (#579).
+
+    Respects the #350 per-fact supersession invariants:
+      - No same-namespace fact edges -> empty projection (fall back to node timestamps).
+      - Mixed active + expired edges -> entity stays CURRENT (never marked expired/historical).
+      - All same-namespace fact edges belief-expired (active == 0, expired > 0) ->
+        ``all_facts_expired=True`` (flagged historical by TemporalOracle/Warden, not hard-refused).
+      - Active edges -> project world-time bounds only when EVERY active edge supplies that
+        bound cleanly (``valid_at`` = earliest active start; ``invalid_at`` = latest active end),
+        so ``QueryContext.as_of_time`` never falsely rejects an entity with an open-bounded edge.
+    """
+    if not fact_temporal:
+        return {}
+    total = int(fact_temporal.get("total") or 0)
+    active = int(fact_temporal.get("active") or 0)
+    expired = int(fact_temporal.get("expired") or 0)
+    if total <= 0:
+        return {}
+    if active == 0 and expired > 0:
+        return {"all_facts_expired": True}
+    if active <= 0:
+        return {}
+
+    projected: dict[str, Any] = {}
+    valid_raws = [str(v) for v in (fact_temporal.get("valid_ats") or ()) if v]
+    if len(valid_raws) == active:
+        parsed_valid: list[tuple[datetime, str]] = []
+        for raw in valid_raws:
+            dt = parse_iso8601(raw)
+            if dt is None:
+                parsed_valid = []
+                break
+            parsed_valid.append((dt, raw))
+        if parsed_valid:
+            projected["valid_at"] = min(parsed_valid, key=lambda pair: pair[0])[1]
+
+    invalid_raws = [str(v) for v in (fact_temporal.get("invalid_ats") or ()) if v]
+    if len(invalid_raws) == active:
+        parsed_invalid: list[tuple[datetime, str]] = []
+        for raw in invalid_raws:
+            dt = parse_iso8601(raw)
+            if dt is None:
+                parsed_invalid = []
+                break
+            parsed_invalid.append((dt, raw))
+        if parsed_invalid:
+            projected["invalid_at"] = max(parsed_invalid, key=lambda pair: pair[0])[1]
+
+    return projected
