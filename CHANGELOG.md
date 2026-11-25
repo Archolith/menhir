@@ -1,3 +1,9 @@
+## 2026-11-25 - v0.3.16: merge retention, telemetry, hook ordering and release branch fixes (#939 part 2, #959, #964, #965, #956)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.16. No dependency changes in this commit.
+- Upgrade note: stop the old process before starting this version. A 0.3.15 process that is still
+  running merges by the old rules and can lower retention (#939).
+
 ## 2026-11-24 - A merge or unmerge no longer makes a memory easier to delete (#939, part 2)
 
 - `infrastructure/correlation_queries.py`: a merge gives the survivor the higher live scope and clears its
@@ -78,16 +84,3 @@
   back to its turn. `source_episode_uuid` still reports admitted episodes only.
 - Live tests cover the turn-only View, finalized and non-finalized admitters, a View rebuilt
   after admission, and a legacy turn that must not abort the rebuild.
-
-## 2026-11-22 - Retry a timed-out source-memory embedding (#409)
-
-- Source-memory ingestion retries one embedding timeout before finishing enrichment. A
-  subsequent failure leaves the receipt available for the source-embedding repair job.
-- Regression tests cover a successful second attempt and a repeated timeout.
-- The episode status response reports source-search readiness separately from graph
-  enrichment (`source_search_status`: READY, PENDING, UNKNOWN or UNAVAILABLE). The stored
-  vector is compared with the size the configured embedder produces, so an embedder smaller
-  than 1024 dimensions reads READY; when that size is not known the status is UNKNOWN.
-- A PENDING status carries `source_search_reason`, and the guidance names what changes it:
-  `missing` (the repair job), `missing_in_flight` (the ingest step), `size_mismatch` or
-  `model_mismatch` (a re-embed with `scripts/backfill_episode_embeddings.py`).
