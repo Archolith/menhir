@@ -2879,11 +2879,13 @@ class MemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         return self._consolidation.delete_entities_returning_uuids(
             node_uuids,
             require_scope=require_scope,
             protect_retention=protect_retention,
+            require_expired_ttl=require_expired_ttl,
         )
 
     def newly_unreferenced_evidence(self, node_uuids: list[str]) -> list[str]:

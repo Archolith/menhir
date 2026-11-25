@@ -1418,6 +1418,7 @@ class StubMemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         """Return the uuids ACTUALLY deleted, mirroring the real scope filter.
 

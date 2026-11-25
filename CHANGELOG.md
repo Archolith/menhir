@@ -1,3 +1,15 @@
+## 2026-11-24 - A merge or unmerge no longer makes a memory easier to delete (#939, part 2)
+
+- `infrastructure/correlation_queries.py`: a merge gives the survivor the higher live scope and clears its
+  `ttl_expires`, after locking both nodes so a concurrent promotion is not overwritten. A restored node
+  comes back without its old `ttl_expires`; the survivor's scope is not lowered by an unmerge.
+- `domain/merge_eligibility.py`: only SESSION and PERSISTENT memories merge. CANDIDATE, missing and
+  unknown scopes are refused (`UNMERGEABLE_SCOPE`).
+- `infrastructure/consolidation_queries.py`, `infrastructure/memory_graph_adapter.py`,
+  `services/delete_coordinator.py`: the TTL delete re-checks expiry in the delete statement.
+- `infrastructure/graph_text_inventory.py`: registers the transient lock key.
+- Not retroactive: survivors that already carry a `ttl_expires` keep it.
+
 ## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
 
 - `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
@@ -79,23 +91,3 @@
 - A PENDING status carries `source_search_reason`, and the guidance names what changes it:
   `missing` (the repair job), `missing_in_flight` (the ingest step), `size_mismatch` or
   `model_mismatch` (a re-embed with `scripts/backfill_episode_embeddings.py`).
-
-## 2026-11-22 - Conflicts needing attention appear as an operator warning, like FAILED saves
-
-- `infrastructure/telemetry/operator_warnings_store.py`, `core/backend_runtime_admin_ops.py`,
-  `mcp/formatters.py`, `mcp/tools/ops/acknowledge_warning.py`: a new `conflicts` operator warning.
-  It is raised while any conflict group is confirmed and undecided, or has waited over 24 hours for
-  LLM review. It shows on `add_memory`, `add_memory_and_track` and the session-start tools, and is
-  listed in `get_memory_stats`. `acknowledge_warning(kind="conflicts")` silences it until a
-  conflict is newly confirmed or newly stuck. Like `failed_episodes` it counts every silo and is
-  hidden from namespace-pinned callers.
-- `infrastructure/memory_queries.py`: `fetch_memory_overview` adds `unresolved_conflict_groups`,
-  `stale_pending_conflict_groups` and `latest_conflict_attention_at`, read in the same overview
-  call the FAILED warning already shares.
-- `infrastructure/consolidation_queries.py`: members record `conflict_confirmed_at` when review
-  confirms them or a PROMOTED pair routes them to `unresolved`, and `conflict_pending_since` when
-  they enter review (including a requeue). Both are structural in `graph_text_inventory.py`.
-  The conflict counts in the overview skip protected members, which no conflict tool can list or
-  settle; pending age is measured from `conflict_pending_since`.
-- `mcp/formatters.py`: the `add_memory` warning lines apply the caller's redaction on the client
-  side, like the session-start surface.

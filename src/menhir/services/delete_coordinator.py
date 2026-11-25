@@ -215,10 +215,13 @@ class DeleteCoordinator:
         """Destroy, verify absence, then transition. Runs inside the ownership heartbeat scope."""
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
         try:
+            # Only the TTL sweep re-checks expiry in the statement; ENTITY_DELETE is unchanged.
+            ttl_kwargs = {"require_expired_ttl": True} if kind == "SESSION_TTL_DELETE" else {}
             deleted = self.graph_adapter.delete_entities_returning_uuids(
                 present,
                 require_scope=require_scope,
                 protect_retention=(kind == "SESSION_TTL_DELETE"),
+                **ttl_kwargs,
             )
         except Exception as exc:  # noqa: BLE001
             close_after_failed_mutation(
