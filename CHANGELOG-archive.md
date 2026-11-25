@@ -1,3 +1,15 @@
+## 2026-11-24 - A merge or unmerge no longer makes a memory easier to delete (#939, part 2)
+
+- `infrastructure/correlation_queries.py`: a merge gives the survivor the higher live scope and clears its
+  `ttl_expires`, after locking both nodes so a concurrent promotion is not overwritten. A restored node
+  comes back without its old `ttl_expires`; the survivor's scope is not lowered by an unmerge.
+- `domain/merge_eligibility.py`: only SESSION and PERSISTENT memories merge. CANDIDATE, missing and
+  unknown scopes are refused (`UNMERGEABLE_SCOPE`).
+- `infrastructure/consolidation_queries.py`, `infrastructure/memory_graph_adapter.py`,
+  `services/delete_coordinator.py`: the TTL delete re-checks expiry in the delete statement.
+- `infrastructure/graph_text_inventory.py`: registers the transient lock key.
+- Not retroactive: survivors that already carry a `ttl_expires` keep it.
+
 ## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
 
 - `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
