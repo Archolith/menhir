@@ -8,6 +8,7 @@ The online graph behaviour (nomination guards, read-only property) is in test_re
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -419,8 +420,10 @@ def _cli_app():
 def test_cli_retire_judge_help_exits_zero():
     result = CliRunner().invoke(_cli_app(), ["retire", "judge", "--help"])
     assert result.exit_code == 0
+    # CI forces colour, so rich styles the help text; compare without the escape codes.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     for flag in ("--namespace", "--nominate-only", "--call-budget", "--k", "--out"):
-        assert flag in result.output
+        assert flag in plain
 
 
 def _fake_cli_world(monkeypatch, *, candidates: list[dict[str, Any]], made_chats: list[int],
