@@ -16,6 +16,7 @@ Online: needs the test Neo4j instance (``--run-online``).
 
 from __future__ import annotations
 
+import asyncio
 import uuid as uuidlib
 from typing import Any
 
@@ -964,3 +965,38 @@ def test_derived_retired_entity_is_frozen_for_decay_merge_and_flag_until_its_sou
     assert merge_verdict() == (True, me.ELIGIBLE)
     assert predicate_allows()
     assert adapter.flag_memory(ent, bootstrap_scope="general") is True
+
+
+def test_file_context_recall_leaves_out_a_retired_anchored_memory(env):
+    # File context injects memories ANCHORED_TO the file (#700). They join the ranked candidates,
+    # so ranked admission is what must hide a retired one; restore brings it back.
+    project = f"{env.tag}-proj"
+    env.repo.execute(
+        """
+        CREATE (:Entity {structure_project: $p, structure_role: 'project', structure_path: '',
+                         stack: 'python', test_tag: $t})
+        CREATE (f:Entity {structure_project: $p, structure_role: 'file',
+                          structure_path: 'src/app.py', uuid: $f, test_tag: $t})
+        """,
+        {"p": project, "t": env.tag, "f": f"{env.tag}-file"},
+    )
+    mem = env.entity("anchored")
+    env.repo.execute(
+        "MATCH (m:Entity {uuid: $m}), (f:Entity {uuid: $f}) CREATE (m)-[:ANCHORED_TO]->(f)",
+        {"m": mem, "f": f"{env.tag}-file"},
+    )
+    svc = _svc(env.adapter)
+
+    def recalled() -> set[str]:
+        result = asyncio.run(svc.recall(
+            "unrelated query", file_context="src/app.py", file_context_project=project,
+            namespace=env.ns, update_access=False, include_session=True,
+        ))
+        return {m.uuid for m in result.results}
+
+    assert asyncio.run(svc._resolve_file_context("src/app.py", project)) == [mem]  # premise
+    assert mem in recalled(), "premise: file context surfaces the anchored memory"
+    assert env.retire(mem)["status"] == "retired"
+    assert mem not in recalled()
+    assert env.restore(mem)["status"] == "restored"
+    assert mem in recalled()

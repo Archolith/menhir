@@ -284,6 +284,8 @@ _UUID_MUTATORS = {
     "UnflagMemoryTool": ("unflag_memory.py", "node_uuid"),
     "PromoteMemoryTool": ("promote_memory.py", "node_uuid"),
     "CloseMemoryTool": ("close_memory.py", "uuid"),
+    "RetireMemoryTool": ("retire_memory.py", "node_uuid"),
+    "RestoreMemoryTool": ("restore_memory.py", "node_uuid"),
 }
 
 
@@ -321,6 +323,8 @@ def test_et002_every_uuid_mutator_declares_namespace_and_guards(cls_name: str) -
         ("unflag_memory", "UnflagMemoryTool", {"node_uuid": "u1"}),
         ("promote_memory", "PromoteMemoryTool", {"node_uuid": "u1"}),
         ("close_memory", "CloseMemoryTool", {"uuid": "u1"}),
+        ("retire_memory", "RetireMemoryTool", {"node_uuid": "u1", "reason": "r"}),
+        ("restore_memory", "RestoreMemoryTool", {"node_uuid": "u1"}),
     ],
 )
 async def test_et002_pinned_caller_refused_on_a_foreign_node(
@@ -349,6 +353,14 @@ async def test_et002_pinned_caller_refused_on_a_foreign_node(
         async def complete_temporal(self, uuid):
             mutated.append(uuid)
             return True
+
+        async def retire_memory(self, node_uuid, reason=""):
+            mutated.append(node_uuid)
+            return {"status": "retired", "uuid": node_uuid}
+
+        async def restore_memory(self, node_uuid):
+            mutated.append(node_uuid)
+            return {"status": "restored", "uuid": node_uuid}
 
     tool.get_backend = lambda: _Backend()  # type: ignore[method-assign]
     result = await tool.execute(namespace="tenant-a", **kwargs)
