@@ -1,3 +1,12 @@
+## 2026-11-25 - `menhir retire judge`: a report-only judge that suggests why a memory could be retired
+
+Step 3 of the retire plan. It writes nothing to the graph and retires nothing; it prints or saves a JSON report for the operator to review.
+
+- Nominates, without an LLM, memories that `retire_memory` would accept (both halves of an episode pair checked) and that show a signal: idle with few links, a passed target date, a replaced scalar value, a changed anchored file, or a recognised credential.
+- A memory holding a credential is reported as `must_not_keep` and never sent to a model. Any preview, evidence text or reason that holds a credential is withheld whole, not partly redacted.
+- Each other memory gets k samples (default 3) naming one category and citing evidence by handle; the model never sees uuids. A category needs 2/3 and must cite evidence; `irrelevant` needs every vote and is vetoed for decisions, preferences, incidents and PREFERENCE/IDENTITY memories. Anything else is `keep`.
+- `--call-budget` never spends part of a memory's k; a chat quota exhaustion stops the run. `--nominate-only` makes no LLM call.
+
 ## 2026-11-25 - Resolve file-linked memory without guessing a project (#682)
 
 - Skip ambiguous file references when writing links or adding file-linked recall candidates.
@@ -127,14 +136,3 @@
 - #803: removed unused `ARCHIVE_SHA256`/`ARCHIVE_SIZE` computation and moved symlink checks (covering `$STATUS_DIR`, `${STATUS_DIR}/staging`, `$ARCHIVE_ROOT`, and `$RECEIPT_ROOT`) ahead of `mkdir -p` in `deploy/menhir-backup-local.sh`; collapsed the duplicated required-secret helpers (including OpenAI/Gemini provider branches) and replaced legacy `WORKSPACE_ROOT` with `MENHIR_STATE_DIR` in `deploy/Dockerfile`.
 - Updated the release workflow test to allow a single pre-push registry lookup. Behavioral tests cover candidate verification and registry races.
 
-## 2026-11-24 - A merge or unmerge no longer makes a memory easier to delete (#939, part 2)
-
-- `infrastructure/correlation_queries.py`: a merge gives the survivor the higher live scope and clears its
-  `ttl_expires`, after locking both nodes so a concurrent promotion is not overwritten. A restored node
-  comes back without its old `ttl_expires`; the survivor's scope is not lowered by an unmerge.
-- `domain/merge_eligibility.py`: only SESSION and PERSISTENT memories merge. CANDIDATE, missing and
-  unknown scopes are refused (`UNMERGEABLE_SCOPE`).
-- `infrastructure/consolidation_queries.py`, `infrastructure/memory_graph_adapter.py`,
-  `services/delete_coordinator.py`: the TTL delete re-checks expiry in the delete statement.
-- `infrastructure/graph_text_inventory.py`: registers the transient lock key.
-- Not retroactive: survivors that already carry a `ttl_expires` keep it.
