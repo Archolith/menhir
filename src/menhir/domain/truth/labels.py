@@ -1,8 +1,7 @@
 """Warden label enum — replaces bare string literals across warden.py and formatters.
 
 Previously the warden gate set ``WardenVerdict.label`` as a raw string (``"historical"``,
-``"conflict"``, ``"uncertain"``, ``"suspicious_chain"``).  This enum is the SSOT for
-those labels so they cannot silently drift.
+``"conflict"``).  This enum is the SSOT for those labels so they cannot silently drift.
 
 Because ``WardenLabel`` is ``str, Enum`` every value compares equal to its string:
 ``WardenLabel.CONFLICT == "conflict"`` is ``True``, so consumers that read the label as a
@@ -23,7 +22,5 @@ class WardenLabel(str, Enum):
 
     HISTORICAL        = "historical"         # former belief, not current
     CONFLICT          = "conflict"           # contradicted, under active conflict
-    UNCERTAIN         = "uncertain"          # low belief confidence, use with hedging
-    SUSPICIOUS_CHAIN  = "suspicious_chain"   # meta-memory chain too deep (Guard 3)
     POSSIBLE_CONFLICT = "possible_conflict"  # similarity-flagged, not yet LLM-reviewed (#651)
     UNSETTLED_CONFLICT = "unsettled_conflict"  # confirmed, auto-resolved without a decision (#652)

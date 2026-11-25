@@ -581,9 +581,9 @@ class RecallSupportMixin:
                 "observe-only: results unchanged. created_at feeds Temporal; evidence_kinds "
                 "(SUPPORTED_BY/ANCHORED_TO/episode-source) feeds Evidence; project "
                 "(ANCHORED_TO structure_project vs query file_context_project) + namespace feed "
-                "Scope. Still absent: repo/branch (not modeled), valid_at/expired_at (edge "
-                "bitemporal), artifact_type/anchors (gated L4) -- so Scope is project+namespace "
-                "only and Intent runs partial."
+                "Scope; artifact_type/artifact_status/superseded_by feed Intent/Temporal (#575). "
+                "Still absent: repo/branch (not modeled), valid_at/expired_at (edge bitemporal) "
+                "-- so Scope is project+namespace only."
             ),
         )
 

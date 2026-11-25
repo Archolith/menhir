@@ -628,7 +628,7 @@ def test_new_candidate_uses_full_archive_sha_and_never_moves_the_version_tag(
 ) -> None:
     metadata = _publication_metadata()
     candidate_tag = f"{IMAGE}:candidate-{ARCHIVE_SHA256}"
-    remote_results = iter((None, None, REGISTRY_DIGEST))
+    remote_results = iter((None, REGISTRY_DIGEST))
     tagged: list[list[str]] = []
     pushed: list[str] = []
     verified: list[dict[str, Any]] = []
@@ -649,7 +649,7 @@ def test_candidate_publication_fails_if_registry_tag_changes_during_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raced_digest = "sha256:" + "a" * 64
-    results = iter((None, None, raced_digest))
+    results = iter((None, raced_digest))
     monkeypatch.setattr(MODULE.subprocess, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(MODULE, "remote_manifest_digest", lambda _tag: next(results))
     monkeypatch.setattr(MODULE, "_push_digest", lambda _tag: REGISTRY_DIGEST)
@@ -846,3 +846,156 @@ def test_runtime_image_does_not_require_retired_remote_fence_secret() -> None:
     source = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
     assert "source-fence-token" not in source
     assert "MENHIR_SOURCE_FENCE_TOKEN" not in source
+
+
+def test_verify_validation_bundle_rejects_malformed_image_id_before_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = tmp_path / "release-candidate"
+    args, metadata, identity = _validation_bundle(bundle_dir)
+    metadata["image_id"] = "not-a-digest"
+    metadata_raw = _json_bytes(metadata)
+    (bundle_dir / "release-image-metadata.json").write_bytes(metadata_raw)
+    identity["metadata"]["sha256"] = hashlib.sha256(metadata_raw).hexdigest()
+    identity_raw = _json_bytes(identity)
+    (bundle_dir / "release-image-identity.json").write_bytes(identity_raw)
+    args.expected_identity_sha256 = hashlib.sha256(identity_raw).hexdigest()
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
+    monkeypatch.setattr(
+        MODULE,
+        "archive_config_for_manifest",
+        lambda *_a, **_kw: pytest.fail("archive_config_for_manifest must not run before image_id validation"),
+    )
+    with pytest.raises(MODULE.BuildImageError, match="image ID is missing or malformed"):
+        MODULE.verify_validation_bundle(args, load_image=False)
+
+
+def test_verify_validation_bundle_reads_archive_manifest_config_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args, metadata, _identity = _validation_bundle(tmp_path / "release-candidate")
+    calls: list[tuple[Path, str]] = []
+    real_fn = MODULE.archive_config_for_manifest
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
+    monkeypatch.setattr(
+        MODULE,
+        "inspect_image",
+        lambda _tag, _expected: (IMAGE_ID, metadata["labels"], CONFIG_SHA256),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "archive_config_for_manifest",
+        lambda archive, image_id: calls.append((archive, image_id)) or real_fn(archive, image_id),
+    )
+    MODULE.verify_validation_bundle(args, load_image=False)
+    assert len(calls) == 1
+
+
+def _find_bash() -> str | None:
+    import shutil
+
+    found = shutil.which("bash")
+    if found is None or Path(found).parent.name.lower() != "system32":
+        return found
+    git = shutil.which("git")
+    if git is None:
+        return None
+    for parent in Path(git).resolve().parents[:3]:
+        git_bash = parent / "bin" / "bash.exe"
+        if git_bash.is_file():
+            return str(git_bash)
+    return None
+
+
+def _extract_entrypoint(tmp_path: Path) -> Path:
+    import re
+
+    dockerfile = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    match = re.search(
+        r"COPY <<'EOF' /usr/local/bin/menhir-entrypoint\.sh\n(.*?)\nEOF\n",
+        dockerfile,
+        re.S,
+    )
+    assert match is not None, "menhir-entrypoint.sh heredoc not found in deploy/Dockerfile"
+    script = tmp_path / "menhir-entrypoint.sh"
+    script.write_text(match.group(1), encoding="utf-8", newline="\n")
+    return script
+
+
+@pytest.mark.parametrize(
+    ("provider_env", "secret_file", "secret_var", "secret_val"),
+    [
+        ({}, None, None, None),
+        ({"LLM_CHAT_PROVIDER": "openai"}, "openai-api-key", "OPENAI_API_KEY", "sk-test-openai"),
+        ({"GRAPHITI_LLM_PROVIDER": "openai"}, "openai-api-key", "OPENAI_API_KEY", "sk-test-openai-g"),
+        ({"LLM_CHAT_PROVIDER": "gemini"}, "gemini-api-key", "GEMINI_API_KEY", "gm-test-gemini"),
+        ({"GRAPHITI_EMBED_PROVIDER": "gemini"}, "gemini-api-key", "GEMINI_API_KEY", "gm-test-gemini-e"),
+    ],
+)
+def test_dockerfile_entrypoint_smoke_per_provider(
+    tmp_path: Path,
+    provider_env: dict[str, str],
+    secret_file: str | None,
+    secret_var: str | None,
+    secret_val: str | None,
+) -> None:
+    import os
+
+    bash = _find_bash()
+    if bash is None:
+        pytest.skip("bash is unavailable")
+
+    entrypoint = _extract_entrypoint(tmp_path)
+    secrets_dir = tmp_path / "secrets"
+    oauth_dir = tmp_path / "oauth-secrets"
+    secrets_dir.mkdir()
+    oauth_dir.mkdir()
+    (secrets_dir / "neo4j-password").write_text("neo4j-pass\n", encoding="utf-8")
+    (secrets_dir / "operator-key").write_text("op-key\n", encoding="utf-8")
+    (oauth_dir / "oauth-consent-secret").write_text("consent-sec\n", encoding="utf-8")
+    signing_key = oauth_dir / "oauth_signing_key.json"
+    signing_key.write_text('{"kty":"oct"}\n', encoding="utf-8")
+    policy_file = tmp_path / "client-policy.json"
+    policy_file.write_text("{}\n", encoding="utf-8")
+
+    base_env = {
+        "PATH": os.environ.get("PATH", ""),
+        "MENHIR_SECRETS_DIR": secrets_dir.as_posix(),
+        "MENHIR_OAUTH_SECRETS_DIR": oauth_dir.as_posix(),
+        "MENHIR_OAUTH_SIGNING_KEY_PATH": signing_key.as_posix(),
+        "MENHIR_CLIENT_POLICY_PATH": policy_file.as_posix(),
+        **provider_env,
+    }
+
+    if secret_file is not None and secret_var is not None and secret_val is not None:
+        # Missing required provider secret must fail closed with exit 78 and a clear message.
+        missing = subprocess.run(
+            [bash, entrypoint.as_posix(), "true"],
+            env=base_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert missing.returncode == 78, missing.stderr
+        assert "required secret file is missing or unreadable:" in missing.stderr
+        assert secret_file in missing.stderr
+
+        (secrets_dir / secret_file).write_text(f"{secret_val}\n", encoding="utf-8")
+
+    # With required secrets mounted, entrypoint succeeds and exports the expected env vars.
+    ok = subprocess.run(
+        [
+            bash,
+            entrypoint.as_posix(),
+            bash,
+            "-c",
+            'printf "%s|%s|%s|%s\\n" "$NEO4J_PASSWORD" "$MENHIR_OPERATOR_KEY" "$MENHIR_OAUTH_AS_CONSENT_SECRET" "${OPENAI_API_KEY:-}${GEMINI_API_KEY:-}"',
+        ],
+        env=base_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ok.returncode == 0, ok.stderr
+    expected_provider_val = secret_val or ""
+    assert ok.stdout.strip() == f"neo4j-pass|op-key|consent-sec|{expected_provider_val}"

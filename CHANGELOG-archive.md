@@ -1,3 +1,15 @@
+## 2026-11-24 - Request paths with control characters are refused (#944)
+
+- `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
+  decoded path contains an ASCII control character (U+0000-U+001F, U+007F), in every auth mode. Route
+  patterns end in `$`, which also matches before a trailing newline, so `/mcp-http%0A` was not recognised
+  as protected by the auth gate but still reached the MCP route. The response does not echo the path.
+
+## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.14. No dependency changes in this commit.
+- Upgrade note (#761): Agent Smith OAuth identities (`/oauth/client-metadata/agent-smith.json?client=<key>`) are served only from client-policy entries with a `registration`; the built-in table is gone. A deployment that uses Agent Smith must add those registrations to its policy in the same upgrade.
+
 ## 2026-11-22 - A memory whose enrichment fails stays recallable; extraction and lab fixes (#662, #483, #265)
 
 - #662: the source-memory lane (`search_episode_embeddings`) now returns FAILED episodes; only

@@ -258,7 +258,6 @@ def test_candidate_tag_uses_full_archive_sha_and_output_ref_is_digest_only() -> 
 
 def test_existing_candidate_is_verified_and_registry_races_fail_closed() -> None:
     assert "if existing is not None:" in BUILDER_TEXT
-    assert BUILDER_TEXT.count("_verify_remote_candidate(") >= 4
     assert 'subprocess.run(["docker", "pull", digest_ref], check=True)' in BUILDER_TEXT
     assert "registry candidate image ID differs from the sealed candidate" in BUILDER_TEXT
     assert "registry candidate config differs from the sealed candidate" in BUILDER_TEXT

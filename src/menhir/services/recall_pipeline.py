@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import partial
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from menhir.services.ingest_service import IngestService
+from typing import Any
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
@@ -22,8 +18,7 @@ from menhir.domain.assertion_operations import (
 )
 from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.count_match import match_slot_row
-from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
-from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
@@ -44,43 +39,33 @@ from menhir.domain.recall import (
     ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
-    TemporalFact,
     parse_verifier_evidence,
 )
 from menhir.domain.oracles import OracleResult, QueryContext
 from menhir.domain.retrieval_tuning import (
     RANKER_ORACLE_COMBINED,
     RANKER_ORACLE_ONLY,
-    SOURCE_PRIORS,
     CandidateSource,
     RetrievalTuningConfig,
 )
 from menhir.domain.retrieval_trace_models import (
-    AssertionShadowRow,
-    AssertionShadowTrace,
-    FacetShadowRow,
     FacetShadowTrace,
     RetrievalTrace,
     ScoringTrace,
     ViewReachability,
 )
-from menhir.infrastructure.graphiti_client import GraphitiClient, _circuit_open_cause
+from menhir.infrastructure.graphiti_client import _circuit_open_cause
 from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
 from menhir.services.cross_encoder_rerank import order_by_rerank
 from menhir.services.ranking_explain import build_ranking_rows
 from menhir.services.rerank_oracle import CrossEncoderRerankOracle, logits_of, rerank_candidate
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
-if TYPE_CHECKING:
-    from menhir.core.bootstrap import UnavailableGraphitiClient
-from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
-from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,  # noqa: F401  (re-export pinned by test_cf60_scoring_constants_owned_by_domain)
     MIN_SIMILARITY_THRESHOLD,
-    ScoringService,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,11 +91,8 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
-    _frontier_trace_enabled,
-    _oracle_similarity,
     _query_wants_history,
     _render_scalar_history_content,
     _scalar_history_evidence_days_ago,
@@ -1710,10 +1692,11 @@ async def _run_recall(
             logger.exception(
                 "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
-    # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
-    # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
-    # fact for an explicit current-state query, but only if all six authority gates pass. Failures
-    # never break recall (logged, recall proceeds unchanged). OFF by default -> no behavior change.
+    # --- Step 7: current-state View authority suppression (follows the scalar lane) ---
+    # When enabled (default on whenever the scalar state lane is enabled; #568), a current
+    # scalar_state View may suppress an older PROVENANCE-LINKED graph fact for an explicit
+    # current-state query, only if all six authority gates pass. Failures never break recall
+    # (logged, recall proceeds unchanged).
     if service.scalar_view_authority_enabled and namespace is not None and candidate_inputs:
         _t = perf_counter()
         try:
