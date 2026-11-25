@@ -1,3 +1,19 @@
+## 2026-11-22 - A memory whose enrichment fails stays recallable; extraction and lab fixes (#662, #483, #265)
+
+- #662: the source-memory lane (`search_episode_embeddings`) now returns FAILED episodes; only
+  erase tombstones and episodes with a sealed erase marker are excluded. The embedding repair
+  job lists READY and FAILED episodes (`settled_only`), an oversized episode is embedded before
+  it is parked, and exhausted-lease parking writes no raw-capture copy. Legacy raw captures are
+  hidden from ranked recall and from recent memories. Source-search readiness
+  (`source_search_eligible`) uses the same predicate as recall, and a FAILED receipt no longer
+  uses up a timeline-anchor slot. The FAILED warnings on `add_memory`, the operator warning and
+  `get_memory_stats` now say the text is recallable but has no entities or facts.
+- #483: a combined-extraction response that is not a JSON object raises
+  `CombinedExtractionShapeError`, classified as an output-parse error for manual review, instead
+  of a bare `TypeError`.
+- #265: the extraction lab passes the edge expiry, invalidation and preserved-attribute hooks
+  that ingest uses.
+
 ## 2026-11-22 - A scalar View from a not-yet-admitted turn is recallable (#311)
 
 - `infrastructure/typed_assertion_write_repository.py`, `projection_coverage_repository.py`,
