@@ -513,6 +513,25 @@ def test_supersede_refusal_reports_reason() -> None:
 
 
 @pytest.mark.unit
+def test_supersede_refuses_a_terminal_replacement() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    WorkArtifactRepository(neo4j).supersede_artifact("new", "old")
+
+    assert "NOT new.status IN $terminal" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_supersede_refusal_names_a_terminal_replacement() -> None:
+    repo = WorkArtifactRepository(
+        _StubNeo4j(responses=[[{"applied": 0}], [{"status": "SUPERSEDED"}]])
+    )
+
+    assert repo.supersede_artifact("new", "old") == {
+        "applied": False, "reason": "replacement_terminal",
+    }
+
+
+@pytest.mark.unit
 def test_subject_targets_an_existing_entity_not_a_new_label() -> None:
     neo4j = _StubNeo4j(responses=[[{"linked": 1}]])
     repo = WorkArtifactRepository(neo4j)

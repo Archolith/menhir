@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from graphiti_core.extraction_routing import (
@@ -192,6 +193,13 @@ class CombinedExtractionReceipt:
     #: Anchored-time resolver telemetry (``AnchoredTimeReport``). ``None`` when the resolver is
     #: off, which is the default.
     anchored_time: Any | None = None
+
+
+class CombinedExtractionShapeError(ValueError):
+    """The combined-extraction LLM response was valid JSON but not an object (#483).
+
+    Its type name is in ``enrichment_failures._MANUAL_REVIEW_TYPE_NAMES``, so the failure is
+    classified as a model-output parse error, not a code bug."""
 
 
 _extraction_receipt: ContextVar[CombinedExtractionReceipt | None] = ContextVar(
@@ -1232,6 +1240,9 @@ MENHIR STRUCTURAL CURRENT-MESSAGE AUTHOR ENDPOINT:
   is ambiguous. Omit an uncertain attribution rather than inventing a substitute author entity.
 - Preserve negation. Questions, hypothetical statements, and other speakers' claims are not
   affirmative facts about the author. Relation interpretation is inference, not owner confirmation.
+- Sarcasm and irony are not affirmative facts. When the message itself contradicts the literal
+  claim (`oh sure, I'm a brilliant gardener, every plant I own is dead`), store the meant
+  sense or only the literal events, never the ironic claim.
 - Emit `{endpoint.marker}` only when at least one extracted edge about the current author uses it.
 """
 
@@ -1257,6 +1268,9 @@ MENHIR STRUCTURAL USER ENDPOINT:
 {writer_is_human}- Do not use `{marker}` for application users, customers, accounts, roles, permissions,
   database tables, collections, or for anyone speaking inside quoted or reported speech.
 - Preserve negation. Questions and hypothetical statements are not facts about the human user.
+- Sarcasm and irony are not affirmative facts. When the message itself contradicts the literal
+  claim (`oh sure, I'm a brilliant gardener, every plant I own is dead`), store the meant
+  sense or only the literal events, never the ironic claim.
 - Emit `{marker}` only when at least one extracted edge about the human user uses it.
 """
 
@@ -1769,9 +1783,17 @@ class _PayloadSanitizingLLMClient:
         if (
             response_model is not None
             and getattr(response_model, "__name__", "") == "CombinedExtraction"
-            and isinstance(response, dict)
         ):
-            return _sanitize_combined_payload(response, self._receipt, self._receipt.episode_text)
+            if not isinstance(response, Mapping):
+                # The fork would fail at CombinedExtraction(**response) with a bare TypeError,
+                # which classify_enrichment_failure files as a code bug (#483).
+                raise CombinedExtractionShapeError(
+                    "malformed JSON response: combined extraction expected a JSON object, got "
+                    f"{type(response).__name__}"
+                )
+            return _sanitize_combined_payload(
+                dict(response), self._receipt, self._receipt.episode_text
+            )
         return response
 
 

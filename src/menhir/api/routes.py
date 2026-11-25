@@ -8,7 +8,7 @@ from uuid import uuid4
 from typing import Any
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
@@ -20,6 +20,7 @@ from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
 
+from .route_tools import enforce_route_tool_allowlist
 from .scrub_route import ScrubbingAPIRoute
 from .routes_handlers import (
     backend_invoke_impl,
@@ -92,7 +93,11 @@ from .routes_support import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", route_class=ScrubbingAPIRoute)
+router = APIRouter(
+    prefix="/api",
+    route_class=ScrubbingAPIRoute,
+    dependencies=[Depends(enforce_route_tool_allowlist)],
+)
 _INTERNAL_BACKEND_PREFIX = "/internal/backend"
 
 
@@ -174,6 +179,8 @@ def _log_api_recall_query(body: Any, result: dict[str, Any], resolved_namespace:
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
     recall_kwargs: dict[str, object] = {}
+    if "limit" in body.model_fields_set:
+        recall_kwargs["limit_is_explicit"] = True
     if body.include_warden_status:
         recall_kwargs["include_warden_status"] = True
     if body.trace:
@@ -184,6 +191,10 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     if body.source_memory_sources is not None:
         recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
+    if body.file_context is not None:
+        recall_kwargs["file_context"] = body.file_context
+    if body.file_context_project is not None:
+        recall_kwargs["file_context_project"] = body.file_context_project
     resolved_namespace = _resolve_namespace(request, body.namespace)
     try:
         result = await backend.recall(
@@ -247,6 +258,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             for m in result.get("results", []) or []
         ],
         candidates_evaluated=int(result.get("candidates_evaluated") or 0),
+        note=result.get("note"),
         warden_status=result.get("warden_status") if body.include_warden_status else None,
         warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),
@@ -388,7 +400,12 @@ async def bootstrap_flagged(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, object]:
     """Read scoped pins and issue a reader-local bootstrap receipt."""
-    from menhir.mcp.formatters import _normalize_reader_id, _project_skipped_memory_rows
+    from menhir.mcp.formatters import (
+        _flagged_pin_counts,
+        _normalize_reader_id,
+        _project_skipped_memory_rows,
+        _workspace_pin_fields,
+    )
     from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 
     backend = _get_backend(request)
@@ -417,12 +434,16 @@ async def bootstrap_flagged(
     _remember_flagged_bootstrap_read(
         normalized_reader, version, workspace=workspace, namespace=resolved_namespace
     )
+    workspace_fields = await _workspace_pin_fields(
+        backend, selection_key, workspace=workspace, namespace=resolved_namespace
+    )
     return {
         "reader_id": normalized_reader,
         "bootstrap_selection": selection_key,
         "bootstrap_ready": True,
         "flagged_version": version,
-        "flagged_count": len(rows),
+        **_flagged_pin_counts(version, selection_key, len(rows)),
+        **workspace_fields,
         "items": rows,
     }
 
@@ -997,20 +1018,27 @@ async def delete_namespace(
 
 @router.post("/memory/{uuid}/flag", response_model=FlagResponse)
 async def flag_memory(
-    request: Request, uuid: str, bootstrap_scope: str | None = None
+    request: Request,
+    uuid: str,
+    bootstrap_scope: str | None = None,
+    pin_priority: int | None = Query(default=None, ge=0, le=100),
 ) -> FlagResponse:
     _require_tier("agent")
     backend = _get_backend(request)
-    if bootstrap_scope is None:
-        flagged = await backend.flag_memory(uuid)
-    else:
-        flagged = await backend.flag_memory(uuid, bootstrap_scope=bootstrap_scope)
+    kwargs: dict[str, Any] = {}
+    if bootstrap_scope is not None:
+        kwargs["bootstrap_scope"] = bootstrap_scope
+    if pin_priority is not None:
+        kwargs["pin_priority"] = pin_priority
+    flagged = await backend.flag_memory(uuid, **kwargs)
     fetch_by_uuid = getattr(backend, "fetch_memory_by_uuid", None)
     row = await fetch_by_uuid(uuid) if flagged and fetch_by_uuid is not None else None
     return FlagResponse(
         uuid=uuid,
         flagged=flagged,
         bootstrap_scope=(row or {}).get("bootstrap_scope"),
+        # The rank this call set; null means it left the stored rank unchanged.
+        pin_priority=pin_priority if flagged else None,
     )
 
 

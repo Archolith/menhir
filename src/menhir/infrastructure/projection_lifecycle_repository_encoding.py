@@ -107,9 +107,9 @@ def _work_token_from_row(row: dict[str, Any]) -> ProjectionWorkToken:
     try:
         definition_version = int(row["definition_version"])
         generation = int(row["generation"])
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise ProjectionLifecycleCorruptionError(
-            "persisted projection work is missing version/generation"
+            "persisted projection work has invalid version/generation"
         ) from exc
     target_present = row.get("target_present")
     if not isinstance(target_present, bool):

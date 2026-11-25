@@ -341,7 +341,7 @@ class _StubAdapter:
         return self.subject_candidates
 
     def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                  resolved_only=False):
+                                  resolved_only=False, include_retired=False):
         return self.search_hits[:limit]
 
     def list_scalar_history_views(self, *, subject_uuid, namespace=None):
@@ -491,7 +491,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
 
     class _ModelAdapter(_StubAdapter):
         def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                      model=None, resolved_only=False):
+                                      model=None, resolved_only=False, include_retired=False):
             calls.append({"limit": limit, "namespace": namespace, "model": model})
             return self.search_hits[:limit]
 
@@ -1151,7 +1151,7 @@ def test_timeline_hides_evidence_projection_episodes() -> None:
         query, _params = neo4j.calls[0]
         twin = (
             "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
-            + default_recall_visibility_cypher("q")
+            + default_recall_visibility_cypher("q", include_retired=True)
             + " AND "
             + non_structural_memory_cypher("q")
             + " }"

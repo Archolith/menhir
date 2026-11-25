@@ -96,6 +96,16 @@ class TestExtractFilePaths:
         diff = "diff --git a/a/foo.py b/a/foo.py\n--- a/a/foo.py\n+++ b/a/foo.py"
         assert extract_diff_file_paths(diff) == ["a/foo.py"]
 
+    @pytest.mark.parametrize(("diff", "expected"), [
+        ("diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py", ["./app.py"]),
+        ('diff --git "a/src/my file.py" "b/src/my file.py"', ["src/my file.py"]),
+        ("diff --git a/src/my file.py b/src/my file.py", ["src/my file.py"]),
+        ('+++ "b/src/caf\\303\\251.py"', ["src/café.py"]),
+        ("+++ b/src/my file.py\t", ["src/my file.py"]),
+    ])
+    def test_diff_headers_keep_the_full_repo_relative_path(self, diff, expected):
+        assert extract_diff_file_paths(diff) == expected
+
     @pytest.mark.parametrize(
         "text",
         ["ab/" * 16000, "ab\\" * 16000, "a." * 16000, "x" * 48000],

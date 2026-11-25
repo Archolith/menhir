@@ -324,6 +324,23 @@ def test_pr_needs_a_clean_up_to_date_main(outputs: dict[str, str], match: str) -
         bump.require_clean_main(FakeRun(outputs=outputs))
 
 
+def test_release_pr_branch_runs_stdio_e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The branch must match the prefix the stdio-e2e job runs on, or the job is skipped."""
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    prefixes = re.findall(r"startsWith\(github\.head_ref, '([^']+)'\)", workflow)
+    assert len(prefixes) == 1
+    root = _version_tree(tmp_path)
+    new = _next_patch(bump.current_version(root))
+    branches: list[str] = []
+    monkeypatch.setattr(bump, "REPO", root)
+    monkeypatch.setattr(bump, "require_clean_main", lambda run: None)
+    monkeypatch.setattr(bump, "finish", lambda *args, branch, **kwargs: branches.append(branch))
+
+    assert bump.main(["version", new, "--summary", "x", "--pr", "--date", DATE], run=FakeRun()) == 0
+
+    assert branches == [f"{prefixes[0]}{new}"]
+
+
 def test_cli_reports_a_refusal_without_a_traceback(capsys: pytest.CaptureFixture[str]) -> None:
     code = bump.main(["version", "0.0.1", "--summary", "x"], run=FakeRun())
     assert code == 1

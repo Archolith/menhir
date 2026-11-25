@@ -7,6 +7,7 @@ integration pipeline.
 
 from __future__ import annotations
 
+import codecs
 import logging
 import re
 from itertools import islice, product
@@ -121,14 +122,56 @@ def resolve_file_reference(
 _DIFF_SEPARATOR = "\n\n--- git diff ---\n"
 
 
+_GIT_QUOTED_PATH = re.compile(r'"(?:[^"\\]|\\.)*"')
+_GIT_NEW_PATH_START = re.compile(r' (?="?b/)')
+_GIT_FILE_SUFFIX = re.compile(rf"\.(?:{_FILE_EXTENSIONS})$")
+
+
+def _git_header_path(spelling: str) -> str | None:
+    if spelling.startswith('"'):
+        if not _GIT_QUOTED_PATH.fullmatch(spelling):
+            return None
+        # Git quotes unusual bytes with C-style escapes, including UTF-8 octets.
+        try:
+            spelling = codecs.escape_decode(spelling[1:-1].encode("utf-8"))[0].decode("utf-8")
+        except ValueError:
+            return None
+    if spelling.startswith(("a/", "b/")):
+        spelling = spelling[2:]
+    if not _GIT_FILE_SUFFIX.search(spelling):
+        return None
+    return spelling if "/" in spelling else f"./{spelling}"
+
+
 def extract_diff_file_paths(diff: str) -> list[str]:
-    """Strip Git's a/ and b/ prefixes only in diff file headers."""
+    """Read complete Git header paths, keeping root files distinct from basenames."""
     paths = []
     for line in diff.splitlines():
-        references = extract_file_paths(line)
-        if line.startswith(("diff --git ", "--- ", "+++ ")):
-            references = [p[2:] if p.startswith(("a/", "b/")) else p for p in references]
-        paths.extend(references)
+        if line.startswith(("--- ", "+++ ")):
+            # Git can append a tab after an unquoted path containing spaces.
+            spellings = [line[4:].partition("\t")[0]]
+        elif line.startswith("diff --git "):
+            header = line.removeprefix("diff --git ")
+            quoted = _GIT_QUOTED_PATH.match(header)
+            if quoted and header[quoted.end():].startswith(" "):
+                split = quoted.end()
+            else:
+                separators = [match.start() for match in _GIT_NEW_PATH_START.finditer(header)]
+                if len(separators) > 1:
+                    # A pathname can contain a literal " b/". Identical old and
+                    # new paths are still unambiguous. Otherwise let --- and +++
+                    # supply the names instead of guessing at the separator.
+                    middle = len(header) // 2
+                    if middle not in separators or header[2:middle] != header[middle + 3:]:
+                        continue
+                    split = middle
+                else:
+                    split = separators[0] if separators else len(header)
+            spellings = [header[:split], header[split + 1:]]
+        else:
+            paths.extend(extract_file_paths(line))
+            continue
+        paths.extend(path for spelling in spellings if (path := _git_header_path(spelling)))
     return list(dict.fromkeys(paths))
 
 

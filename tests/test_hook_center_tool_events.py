@@ -552,3 +552,118 @@ def test_smoke_file_change_makes_prior_anchor_stale():
     # now the pre-existing anchor (anchored 2026-07-01) is stale (file changed 2026-07-08).
     stale = repo.stale_anchored_memories(project="menhir")
     assert len(stale) == 1 and stale[0]["memory_uuid"] == "m1" and stale[0]["operation"] == "edit"
+
+
+# ----------------------------------------------------------------------------- #964 project fallback
+
+
+def _seq_fake(*responses):
+    calls = iter(responses)
+    fake = FakeNeo4j()
+    fake.execute = lambda query, params=None: (fake.executed.append((query, params or {})),
+                                               next(calls))[1]
+    return fake
+
+
+@pytest.mark.unit
+def test_known_project_scoped_miss_never_falls_back():
+    fake = _seq_fake([{"matched": 0}], [{"known": True, "matched": 0}])
+    out = ToolEventRepository(fake).record_file_event(
+        path="README.md", operation="edit", project="menhir")
+    assert out["matched"] == 0 and out["marked_dirty"] is False
+    assert out["project_fallback_used"] is False
+
+
+@pytest.mark.unit
+def test_unknown_project_ambiguous_fallback_marks_nothing():
+    fake = _seq_fake([{"matched": 0}], [{"known": False, "matched": 0}])
+    out = ToolEventRepository(fake).record_file_event(
+        path="README.md", operation="edit", project="third")
+    assert out["matched"] == 0 and out["marked_dirty"] is False
+    assert out["project_fallback_used"] is True
+
+
+@pytest.mark.unit
+def test_unknown_project_single_project_fallback_marks():
+    fake = _seq_fake([{"matched": 0}], [{"known": False, "matched": 1}])
+    out = ToolEventRepository(fake).record_file_event(
+        path="src/x.py", operation="edit", project="alias")
+    assert out["matched"] == 1 and out["marked_dirty"] is True
+    assert out["project_fallback_used"] is True
+    assert set(out) == {"accepted", "matched", "marked_dirty", "paths", "project_fallback_used"}
+
+
+@pytest.mark.unit
+def test_fallback_is_one_separate_guarded_statement():
+    fake = _seq_fake([{"matched": 0}], [{"known": False, "matched": 0}])
+    ToolEventRepository(fake).record_file_event(
+        path="a.py", old_path="b.py", operation="rename", project="alias")
+    assert len(fake.executed) == 2
+    scoped, fallback = fake.executed[0][0], fake.executed[1][0]
+    assert "f.structure_project = $project" in scoped
+    assert "MATCH (k:Entity {structure_project: $project}) WHERE k.structure_path IS NOT NULL" in fallback
+    assert "count(DISTINCT coalesce(f.structure_project, ''))" in fallback
+    assert fake.executed[1][1]["paths"] == ["a.py", "b.py"]
+
+
+@pytest.mark.unit
+def test_no_project_stays_path_only_single_query():
+    fake = _seq_fake([{"matched": 0}])
+    out = ToolEventRepository(fake).record_file_event(path="README.md", operation="edit")
+    assert len(fake.executed) == 1
+    assert out["project_fallback_used"] is False
+
+
+def _file(repo_neo4j, project, path):
+    repo_neo4j.execute(
+        "CREATE (:Entity {structure_role: 'file', structure_project: $p, structure_path: $path})",
+        params={"p": project, "path": path},
+    )
+
+
+def _dirty_set(repo_neo4j):
+    rows = repo_neo4j.execute(
+        "MATCH (f:Entity {structure_role: 'file'}) WHERE f.structure_dirty = true "
+        "RETURN f.structure_project AS p, f.structure_path AS path"
+    )
+    return {(r["p"], r["path"]) for r in rows}
+
+
+@pytest.mark.online
+def test_online_unknown_project_does_not_mark_shared_readme(test_neo4j_repo):
+    _file(test_neo4j_repo, "p1", "README.md")
+    _file(test_neo4j_repo, "p2", "README.md")
+    out = ToolEventRepository(test_neo4j_repo).record_file_event(
+        path="README.md", operation="edit", project="third")
+    assert out["matched"] == 0 and out["project_fallback_used"] is True
+    assert _dirty_set(test_neo4j_repo) == set()
+
+
+@pytest.mark.online
+def test_online_known_project_missing_file_does_not_mark_other_project(test_neo4j_repo):
+    _file(test_neo4j_repo, "p1", "src/a.py")
+    _file(test_neo4j_repo, "p2", "src/only_p2.py")
+    out = ToolEventRepository(test_neo4j_repo).record_file_event(
+        path="src/only_p2.py", operation="edit", project="p1")
+    assert out["matched"] == 0 and out["project_fallback_used"] is False
+    assert _dirty_set(test_neo4j_repo) == set()
+
+
+@pytest.mark.online
+def test_online_unknown_project_distinctive_path_in_one_project_marks(test_neo4j_repo):
+    _file(test_neo4j_repo, "p1", "src/distinct.py")
+    _file(test_neo4j_repo, "p2", "README.md")
+    out = ToolEventRepository(test_neo4j_repo).record_file_event(
+        path="src/distinct.py", operation="edit", project="alias")
+    assert out["matched"] == 1 and out["project_fallback_used"] is True
+    assert _dirty_set(test_neo4j_repo) == {("p1", "src/distinct.py")}
+
+
+@pytest.mark.online
+def test_online_rename_across_projects_marks_nothing(test_neo4j_repo):
+    _file(test_neo4j_repo, "p1", "src/old.py")
+    _file(test_neo4j_repo, "p2", "src/new.py")
+    out = ToolEventRepository(test_neo4j_repo).record_file_event(
+        path="src/new.py", old_path="src/old.py", operation="rename", project="alias")
+    assert out["matched"] == 0 and out["project_fallback_used"] is True
+    assert _dirty_set(test_neo4j_repo) == set()

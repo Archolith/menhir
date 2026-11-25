@@ -129,6 +129,51 @@ def test_cf171_merge_audit_is_never_time_pruned(store: McpTelemetryStore) -> Non
     assert _rows(store, "merge_audit") == 1, "recovery material was time-pruned"
 
 
+def _resolve_aged(store: McpTelemetryStore, days_ago: int) -> None:
+    store.record_conflict_resolution(
+        uuid_a="aaa", uuid_b="bbb", status="false_positive",
+        group_id="g1", action="keep_both", reviewed_by="llm",
+    )
+    _seed(
+        store,
+        "UPDATE conflict_resolutions SET resolved_at = datetime('now', ?)",
+        f"-{days_ago} days",
+    )
+
+
+def test_conflict_resolutions_are_never_time_pruned(store: McpTelemetryStore) -> None:
+    """#959: a suppression is state read by is_pair_resolved, not telemetry. Only the cooldown
+    decides whether it still applies; age pruning must not re-open the pair."""
+    assert "conflict_resolutions" not in TelemetryLifecycleStoreMixin._RETENTION_TIERS
+    _resolve_aged(store, 3650)
+    # Control: a diagnostic row IS still pruned in the same call.
+    _seed(
+        store,
+        "INSERT INTO failure_events(recorded_at,operation,error) VALUES(?,?,?)",
+        "2020-01-01T00:00:00", "op", "err",
+    )
+
+    deleted = store.prune_telemetry_tables(observability_days=1, diagnostic_days=1)
+
+    assert deleted.get("failure_events") == 1
+    assert "conflict_resolutions" not in deleted
+    assert _rows(store, "conflict_resolutions") == 1
+    assert store.is_pair_resolved("aaa", "bbb", cooldown_days=0) is True
+
+
+def test_conflict_cooldown_alone_decides_after_prune(store: McpTelemetryStore) -> None:
+    _resolve_aged(store, 60)
+    store.prune_telemetry_tables(observability_days=1, diagnostic_days=1)
+    assert store.is_pair_resolved("aaa", "bbb", cooldown_days=30) is False
+    assert store.is_pair_resolved("aaa", "bbb", cooldown_days=0) is True
+
+
+def test_conflict_long_cooldown_survives_90_day_prune(store: McpTelemetryStore) -> None:
+    _resolve_aged(store, 200)
+    store.prune_telemetry_tables(observability_days=30, diagnostic_days=90)
+    assert store.is_pair_resolved("aaa", "bbb", cooldown_days=365) is True
+
+
 def test_cf171_a_missing_table_does_not_abort_the_sweep(store: McpTelemetryStore) -> None:
     """Four of the nine are created lazily or live in a separate store file. A pruner that raised
     on a missing table would abort mid-sweep and leave the high-volume tables unpruned -- the

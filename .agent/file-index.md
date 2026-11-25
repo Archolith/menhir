@@ -58,7 +58,6 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 
 ## Utilities
 
-- `tools/benchmark_doc_tokens.py`
 - `workflows/run_and_test.md`
 - `workflows/troubleshoot_enrichment_stalls.md`
 - `workflows/scalar_state_measurement.md`

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from menhir.domain.recall import normalize_source_memory_sources
 
 
@@ -51,21 +53,75 @@ class BackendClientOpsMixin:
             params["store_only"] = True
         return await self._request("queue_episode", params)
 
-    async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
-    ) -> bool:
-        return bool(
-            await self._request(
-                "flag_memory",
-                {"node_uuid": node_uuid, "bootstrap_scope": bootstrap_scope},
-            )
+    async def record_turn_evidence(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        declarant: str | None = None,
+        session_id: str | None = None,
+        occurred_at: str | None = None,
+        namespace: str | None = None,
+        source_kind: str = "unknown",
+        source_id: str | None = None,
+        source_client: str | None = None,
+        hook_version: str | None = None,
+        cwd: str | None = None,
+        transcript_path: str | None = None,
+        triage_reason: list[str] | None = None,
+        triage_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        turn_key: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "record_turn_evidence",
+            {
+                "text": text,
+                "role": role,
+                "declarant": declarant,
+                "session_id": session_id,
+                "occurred_at": occurred_at,
+                "namespace": namespace,
+                "source_kind": source_kind,
+                "source_id": source_id,
+                "source_client": source_client,
+                "hook_version": hook_version,
+                "cwd": cwd,
+                "transcript_path": transcript_path,
+                "triage_reason": triage_reason,
+                "triage_version": triage_version,
+                "metadata": metadata,
+                "turn_key": turn_key,
+                "prompt_id": prompt_id,
+            },
         )
+
+    async def flag_memory(
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {"node_uuid": node_uuid, "bootstrap_scope": bootstrap_scope}
+        # Sent only when set, so an unprioritized flag still works against an older server.
+        if pin_priority is not None:
+            payload["pin_priority"] = pin_priority
+        return bool(await self._request("flag_memory", payload))
 
     async def unflag_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("unflag_memory", {"node_uuid": node_uuid}))
 
     async def promote_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("promote_memory", {"node_uuid": node_uuid}))
+
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        return dict(
+            await self._request("retire_memory", {"node_uuid": node_uuid, "reason": reason}) or {}
+        )
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        return dict(await self._request("restore_memory", {"node_uuid": node_uuid}) or {})
 
     async def delete_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("delete_memory", {"node_uuid": node_uuid}))
@@ -94,6 +150,32 @@ class BackendClientOpsMixin:
             },
         )
 
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "fetch_namespace_build_counts",
+            {
+                "namespace": namespace,
+                "submitted_epoch_millis": submitted_epoch_millis,
+                "sections": sections,
+            },
+        )
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return list(
+            await self._request("list_failed_evidence_projections", {"namespace": namespace}) or []
+        )
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return await self._request("promote_namespace_scope", {"namespace": namespace})
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        return await self._request("reset_namespace", {"namespace": namespace, "force": force})
+
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         return bool(
             await self._request(
@@ -107,6 +189,7 @@ class BackendClientOpsMixin:
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         include_invalidated: bool = False,
@@ -133,6 +216,8 @@ class BackendClientOpsMixin:
             "namespace": namespace,
             "trace": trace,
         }
+        if limit_is_explicit:
+            params["limit_is_explicit"] = True
         if include_warden_status:
             params["include_warden_status"] = True
         if source_memory_limit is not None:
@@ -141,7 +226,25 @@ class BackendClientOpsMixin:
             params["counted_verdict_limit"] = int(counted_verdict_limit)
         if source_memory_sources is not None:
             params["source_memory_sources"] = list(normalize_source_memory_sources(source_memory_sources))
-        return await self._request("recall", params)
+        if not limit_is_explicit:
+            return await self._request("recall", params)
+        try:
+            return await self._request("recall", params)
+        except httpx.HTTPStatusError as exc:
+            # A server older than #661 rejects the unknown kwarg with a bare 500. Recall is a
+            # read, so retry once without the flag; a real 500 fails the retry too and raises.
+            if exc.response.status_code != 500:
+                raise
+            params.pop("limit_is_explicit")
+            result = await self._request("recall", params)
+        skew_note = (
+            "The server did not accept an explicit limit and may have capped results; "
+            "it may be older than this client."
+        )
+        if isinstance(result, dict):
+            note = result.get("note")
+            result["note"] = f"{note} | {skew_note}" if note else skew_note
+        return result
 
     async def recall_history(
         self,
@@ -321,6 +424,18 @@ class BackendClientOpsMixin:
                 {"workspace": workspace, "namespace": namespace},
             )
         )
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        counts = await self._request(
+            "fetch_flagged_pin_counts",
+            {"workspace": workspace, "namespace": namespace},
+        )
+        return {str(scope): int(pins) for scope, pins in dict(counts or {}).items()}
 
     async def fetch_memories_by_scope(
         self, scope: str, limit: int = 20, *, namespace: str | None = None

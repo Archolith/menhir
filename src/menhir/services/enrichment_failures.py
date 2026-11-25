@@ -14,6 +14,8 @@ from menhir.infrastructure.openai_rate_limit import (
 _MANUAL_REVIEW_TYPE_NAMES = {
     "jsondecodeerror",
     "validationerror",
+    # graphiti_extraction_policy.CombinedExtractionShapeError: JSON that is not an object (#483).
+    "combinedextractionshapeerror",
 }
 _MANUAL_REVIEW_MARKERS = (
     "jsondecodeerror",

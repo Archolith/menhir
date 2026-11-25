@@ -79,10 +79,42 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    async def record_turn_evidence(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        declarant: str | None = None,
+        session_id: str | None = None,
+        occurred_at: str | None = None,
+        namespace: str | None = None,
+        source_kind: str = "unknown",
+        source_id: str | None = None,
+        source_client: str | None = None,
+        hook_version: str | None = None,
+        cwd: str | None = None,
+        transcript_path: str | None = None,
+        triage_reason: list[str] | None = None,
+        triage_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        turn_key: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Capture one turn as a :TurnEvidence node, as `POST /api/turn-evidence` does (#717).
+
+        Idempotent on turn_key (or prompt_id). Returns {turn_id, created, recorded_at,
+        occurred_at}; pass turn_id to queue_episode(turn_evidence_uuid=...). Empty text or an
+        unknown role raises ValueError.
+        """
+        ...
+
     async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
-        """Mark a memory node as permanently retained."""
+        """Mark a memory node as permanently retained; pin_priority (0-100) orders startup pins."""
         ...
 
     async def unflag_memory(self, node_uuid: str) -> bool:
@@ -91,6 +123,18 @@ class MemoryBackend(Protocol):
 
     async def promote_memory(self, node_uuid: str) -> bool:
         """Promote a PERSISTENT memory to PROMOTED: operator-curated, verified ground truth (SSOT-08)."""
+        ...
+
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        """Hide a memory from default recall (visibility only; reversible with restore_memory).
+
+        Returns ``{"status": "retired" | "already_retired" | "not_found" | "refused", ...}``;
+        a refusal carries ``code`` and ``detail``.
+        """
+        ...
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Undo retire_memory. Returns ``{"status": "restored" | "not_retired" | "not_found"}``."""
         ...
 
     async def delete_memory(self, node_uuid: str) -> bool:
@@ -131,6 +175,40 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Per-namespace build counts: {namespace, state, scalar, integrity}.
+
+        `sections` limits the read to some of "state", "scalar", "integrity" (default all);
+        omitted sections are absent from the result. An unknown section raises ValueError.
+
+        `namespace` is required (blank raises ValueError). `episodes_valid_at_unsubmitted` is
+        None unless submitted_epoch_millis is given. A failed or empty read raises.
+        """
+        ...
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        """FAILED evidence-projection episodes in a namespace: [{uuid, processing_error}], by uuid."""
+        ...
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        """Promote SESSION-scope entities and RELATES_TO edges of one namespace to PERSISTENT.
+
+        Refuses the default/shared namespace. Returns {namespace, entities_promoted, edges_promoted}.
+        """
+        ...
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        """Equivalent of POST /api/phase3/reset: delete_namespace, then purge its turn evidence.
+
+        `force` is passed to delete_namespace (its max_nodes gate). Returns {namespace, nodes_deleted, turn_evidence_deleted}.
+        """
+        ...
+
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         """Re-queue a pending episode for enrichment processing."""
         ...
@@ -145,6 +223,7 @@ class MemoryBackend(Protocol):
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         wait_for_pending: bool = False,
@@ -278,6 +357,15 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
     ) -> str:
         """Get the current version hash of flagged memories."""
+        ...
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        """Count the startup pins a bootstrap read selects, keyed by bootstrap scope."""
         ...
 
     async def fetch_memories_by_scope(

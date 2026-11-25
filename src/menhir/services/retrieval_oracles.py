@@ -89,7 +89,9 @@ class SemanticOracle:
 
 
 class StructureOracle:
-    """File/symbol/test overlap — structural relevance independent of wording."""
+    """File/symbol/test overlap — structural relevance independent of wording.
+
+    Kept pending #566/#579 (ingest/recall wiring for file/symbol/test inputs) and #659."""
 
     name = "structure"
     source_family = "structure"
@@ -163,7 +165,11 @@ class TemporalOracle:
             valid_at=_s(m.get("valid_at")), invalid_at=_s(m.get("invalid_at")),
             created_at=_s(m.get("created_at")), expired_at=expired_at,
         )
-        role = temporal_role(fact, as_of=query.as_of_time)
+        role = temporal_role(
+            fact,
+            as_of=query.as_of_time,
+            check_known_at=not query.as_of_world_only,
+        )
         directness = 1.0 if (fact.valid_at or fact.invalid_at or fact.expired_at or fact.created_at) else 0.5
         intent = query.intent
         meta = self.source_family
@@ -176,8 +182,13 @@ class TemporalOracle:
             return OracleResult(oracle=self.name, probability=0.9, confidence=0.9,
                                 polarity=OraclePolarity.CONTRADICT, target=OracleTarget.CURRENTNESS,
                                 directness=directness, source_family=meta, note="not_yet_valid_at_as_of")
-        # Node-level supersession (Entity row only) is flagged historical, not refused.
-        node_superseded = bool(m.get("superseded_by")) or str(m.get("artifact_status") or "").lower() == "historical"
+        # Node-level supersession (Entity row or all same-tenant fact edges belief-expired)
+        # is flagged historical, not refused.
+        node_superseded = (
+            bool(m.get("superseded_by"))
+            or str(m.get("artifact_status") or "").lower() == "historical"
+            or bool(m.get("all_facts_expired"))
+        )
         if (node_superseded and fact.expired_at is None
                 and role not in (TemporalRole.HISTORICAL, TemporalRole.EXPIRED_WORLD)):
             return OracleResult(oracle=self.name, probability=1.0, confidence=0.9,
@@ -212,7 +223,8 @@ class EvidenceOracle:
     A non-self anchor (git/test/user/log/...) is strong; agent-only (agent_inference/
     llm_summary) is weak. This oracle is intentionally excluded from ``default_oracles``:
     provenance governs admission/trust through EvidenceAnchorWarden and must not act as
-    query relevance. Missing evidence raises uncertainty (MISSING), never contradiction."""
+    query relevance. Missing evidence raises uncertainty (MISSING), never contradiction.
+    Kept outside default_oracles pending #566/#579/#659."""
 
     name = "evidence"
     source_family = "evidence"

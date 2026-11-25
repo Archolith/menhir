@@ -11,7 +11,7 @@ from menhir.domain.session import new_session
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.services.project_ingest import build_project_narrative
 
-from .request_context import get_request_tier
+from .request_context import get_request_session, get_request_tier
 from .tenancy import pinned_namespace, require_own_object
 from .backend_shared import (
     _project_scan_from_dict,
@@ -66,6 +66,109 @@ class RuntimeProviderDataOpsMixin:
         )
         return _to_jsonable(result)
 
+    async def record_turn_evidence(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        declarant: str | None = None,
+        session_id: str | None = None,
+        occurred_at: str | None = None,
+        namespace: str | None = None,
+        source_kind: str = "unknown",
+        source_id: str | None = None,
+        source_client: str | None = None,
+        hook_version: str | None = None,
+        cwd: str | None = None,
+        transcript_path: str | None = None,
+        triage_reason: list[str] | None = None,
+        triage_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        turn_key: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict[str, Any]:
+        # Same adapter call as POST /api/turn-evidence; the repository validates text and role.
+        # Over /api/internal/backend the dispatch forces a pinned client's namespace first.
+        result = await self._off_loop(
+            self.built.graph_adapter.record_turn_evidence,
+            text=(text or "").strip(),
+            role=role,
+            declarant=declarant,
+            session_id=session_id,
+            occurred_at=occurred_at,
+            namespace=namespace,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_client=source_client,
+            hook_version=hook_version,
+            cwd=cwd,
+            transcript_path=transcript_path,
+            triage_reason=triage_reason,
+            triage_version=triage_version,
+            metadata=metadata,
+            turn_key=turn_key,
+            prompt_id=prompt_id,
+        )
+        return _to_jsonable(result)
+
+    @staticmethod
+    def _require_build_namespace(namespace: str | None, op: str) -> str:
+        ns = (namespace or "").strip()
+        if not ns:
+            raise ValueError(f"{op} requires a non-empty namespace")
+        return ns
+
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "fetch_namespace_build_counts")
+        result = await self._off_loop(
+            self.built.graph_adapter.fetch_namespace_build_counts,
+            ns,
+            submitted_epoch_millis,
+            sections,
+        )
+        return _to_jsonable(result)
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        ns = self._require_build_namespace(namespace, "list_failed_evidence_projections")
+        result = await self._off_loop(
+            self.built.graph_adapter.list_failed_evidence_projections, ns
+        )
+        return _to_jsonable(result)
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "promote_namespace_scope")
+        # Same default-silo refusal as delete_namespace.
+        if ns == DEFAULT_NAMESPACE:
+            raise ValueError(f"refusing to promote the default/shared namespace: {namespace!r}.")
+        # The namespace is a mutation target: a pinned caller naming another silo is refused.
+        pin = pinned_namespace()
+        if pin and ns != pin:
+            raise PermissionError(
+                f"Refused: this client is pinned to namespace {pin!r} and cannot promote "
+                f"namespace {ns!r}."
+            )
+        result = await self._off_loop(self.built.graph_adapter.promote_namespace_scope, ns)
+        return _to_jsonable(result)
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        ns = self._require_build_namespace(namespace, "reset_namespace")
+        # Mirrors phase3_reset_impl: delete_namespace (default refusal, pin check, max_nodes gate
+        # unless force), then the :TurnEvidence purge it does not cover.
+        deleted = await self.delete_namespace(namespace=ns, force=force)
+        turn_evidence_deleted = await self._off_loop(
+            self.built.graph_adapter.purge_turn_evidence, ns
+        )
+        return {
+            "namespace": ns,
+            "nodes_deleted": int(deleted.get("deleted", 0) or 0),
+            "turn_evidence_deleted": int(turn_evidence_deleted),
+        }
+
     async def _require_own_memory(self, node_uuid: str) -> None:
         """Refuse a pinned caller that named another silo's memory node.
 
@@ -90,19 +193,19 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def flag_memory(
-        self, node_uuid: str, bootstrap_scope: str | None = None
+        self,
+        node_uuid: str,
+        bootstrap_scope: str | None = None,
+        pin_priority: int | None = None,
     ) -> bool:
         await self._require_own_memory(node_uuid)
-        if bootstrap_scope is None:
-            return bool(
-                await self._off_loop(self.built.graph_adapter.flag_memory, node_uuid)
-            )
+        kwargs: dict[str, Any] = {}
+        if bootstrap_scope is not None:
+            kwargs["bootstrap_scope"] = bootstrap_scope
+        if pin_priority is not None:
+            kwargs["pin_priority"] = pin_priority
         return bool(
-            await self._off_loop(
-                self.built.graph_adapter.flag_memory,
-                node_uuid,
-                bootstrap_scope=bootstrap_scope,
-            )
+            await self._off_loop(self.built.graph_adapter.flag_memory, node_uuid, **kwargs)
         )
 
     async def unflag_memory(self, node_uuid: str) -> bool:
@@ -116,6 +219,22 @@ class RuntimeProviderDataOpsMixin:
         return bool(
             await self._off_loop(self.built.graph_adapter.promote_memory, node_uuid)
         )
+
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        await self._require_own_memory(node_uuid)
+        session = get_request_session()
+        return dict(
+            await self._off_loop(
+                self.built.graph_adapter.retire_memory,
+                node_uuid,
+                reason=reason,
+                retired_by=(session.client_name if session is not None else "") or "",
+            )
+        )
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        await self._require_own_memory(node_uuid)
+        return dict(await self._off_loop(self.built.graph_adapter.restore_memory, node_uuid))
 
     def _erasure(self) -> Any:
         """The erasure saga, built once per provider and cached.
@@ -346,6 +465,7 @@ class RuntimeProviderDataOpsMixin:
         *,
         preset: str = "knowledge",
         limit: int = 10,
+        limit_is_explicit: bool = False,
         include_session: bool = False,
         include_superseded: bool = False,
         wait_for_pending: bool = False,
@@ -370,6 +490,8 @@ class RuntimeProviderDataOpsMixin:
         # Only thread the frontier params when there is config to pass, so the call shape
         # is unchanged (and older recall stubs keep working) when no portion is enabled.
         frontier_kwargs: dict[str, Any] = {}
+        if limit_is_explicit:
+            frontier_kwargs["limit_is_explicit"] = True
         if tuning is not None:
             frontier_kwargs["tuning"] = tuning
         if trace:
@@ -643,6 +765,22 @@ class RuntimeProviderDataOpsMixin:
                 self.built.graph_adapter.fetch_flagged_memory_bootstrap_version, **kwargs
             )
         )
+
+    async def fetch_flagged_pin_counts(
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, int]:
+        kwargs: dict[str, Any] = {}
+        if workspace is not None:
+            kwargs["workspace"] = workspace
+        if namespace is not None:
+            kwargs["namespace"] = namespace
+        counts = await self._off_loop(
+            self.built.graph_adapter.fetch_flagged_pin_counts, **kwargs
+        )
+        return {str(scope): int(pins) for scope, pins in dict(counts).items()}
 
     async def fetch_memories_by_scope(
         self, scope: str, limit: int = 20, *, namespace: str | None = None

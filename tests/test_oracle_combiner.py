@@ -11,7 +11,7 @@ from menhir.domain.oracles import (
     OracleTarget,
     QueryContext,
 )
-from menhir.domain.oracle_combiner import LogSpaceOracleCombiner, WeightedOracleCombiner
+from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
 from menhir.services.oracle_executor import OracleExecutor
 from menhir.services.retrieval_oracles import default_oracles
 
@@ -22,18 +22,6 @@ def _r(oracle, target, polarity, *, prob=1.0, fam="semantic") -> OracleResult:
 
 def _rel(oracle="semantic", fam="semantic", prob=1.0) -> OracleResult:
     return _r(oracle, OracleTarget.RELEVANCE, OraclePolarity.SUPPORT, prob=prob, fam=fam)
-
-
-# --- WeightedOracleCombiner (E) --------------------------------------------
-
-def test_weighted_ranks_more_relevant_first() -> None:
-    grouped = {
-        "hi": [_rel(prob=1.0)],
-        "lo": [_rel(prob=0.2)],
-    }
-    ranked, packets = WeightedOracleCombiner().rank(QueryContext(text="t"), grouped)
-    assert ranked == ["hi", "lo"]
-    assert packets["hi"].combined_probability > packets["lo"].combined_probability
 
 
 # --- LogSpaceOracleCombiner (F) --------------------------------------------

@@ -67,6 +67,8 @@ EXPECTED_TOOL_NAMES = frozenset({
     "mint_client",
     "pause_scheduler",
     "promote_memory",
+    "restore_memory",
+    "retire_memory",
     "query_structure",
     "rate_recall",
     "read_flagged_memories",

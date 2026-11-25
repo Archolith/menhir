@@ -33,6 +33,16 @@ class FakeScorer:
         return [next(v for k, v in self.by_name.items() if p.startswith(k)) for p in passages]
 
 
+class IndexScorer:
+    """Distinct logits by the 'Entry NN' index: lower index scores higher."""
+
+    label = "fake"
+    device = "cpu"
+
+    def score(self, query, passages):
+        return [2.0 - int(p.split()[1][:2]) / 100 for p in passages]
+
+
 def _meta(uuid, name, edges=3):
     return {
         "uuid": uuid, "name": name, "scope": "PERSISTENT", "type": "SEMANTIC",
@@ -242,6 +252,62 @@ async def _recall_capped(client, adapter, *, enabled, cap):
 async def test_max_results_caps_a_reranked_list(stub_graphiti_client, stub_memory_graph_adapter, fake):
     res = await _recall_capped(stub_graphiti_client, stub_memory_graph_adapter, enabled=True, cap=2)
     assert [r.uuid for r in res.results] == ["entity-3", "entity-2"]
+    assert "capped the default result limit at 2" in (res.note or "")
+
+
+@pytest.mark.asyncio
+async def test_no_cap_note_if_there_were_too_few_results_to_cut(
+    stub_graphiti_client, stub_memory_graph_adapter, fake,
+):
+    res = await _recall_capped(stub_graphiti_client, stub_memory_graph_adapter, enabled=True, cap=3)
+    assert len(res.results) == 3
+    assert "capped the default result limit" not in (res.note or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("limit", "count"), [(20, 20), (60, 50)])
+async def test_explicit_limit_bypasses_cap_through_backend_transport(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch, limit, count,
+):
+    from menhir.core.backend_client_ops import BackendClientOpsMixin
+    from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
+
+    # Strict order everywhere (#747): tied scores and wall-clock last_accessed let the
+    # two calls order ties differently, so the top-7 comparison flaked.
+    monkeypatch.setattr(cer, "load_reranker", lambda *_: IndexScorer())
+    candidates = [(f"entity-{idx}", f"Entry {idx:02d}", 0.85 - idx * 0.001) for idx in range(60)]
+    stub_graphiti_client.search_scored_results = candidates
+    fixed_time = datetime(2026, 1, 1, tzinfo=UTC)
+    stub_memory_graph_adapter.candidate_metadata = [
+        {**_meta(uuid, name), "last_accessed": fixed_time} for uuid, name, _ in candidates
+    ]
+    monkeypatch.setattr(stub_memory_graph_adapter, "stale_anchored_memories", lambda **_: [], raising=False)
+    runtime = RuntimeProviderDataOpsMixin()
+    runtime.built = SimpleNamespace(
+        settings=MemorySettings(),
+        recall_service=RecallService(
+            graphiti_client=stub_graphiti_client,
+            graph_adapter=stub_memory_graph_adapter,
+            scoring_service=ScoringService(),
+            rerank_model_dir="m",
+        ),
+    )
+    runtime._effective_session_id = lambda: None
+    client = BackendClientOpsMixin()
+
+    async def dispatch(operation, params):
+        assert operation == "recall"
+        return await runtime.recall(**params)
+
+    client._request = dispatch
+    ordinary = await client.recall(QUERY)
+    widened = await client.recall(QUERY, limit=limit, limit_is_explicit=True)
+
+    assert len(ordinary["results"]) == 7
+    assert len(widened["results"]) == count
+    assert [row["uuid"] for row in widened["results"][:7]] == [row["uuid"] for row in ordinary["results"]]
+    assert "capped the default result limit" not in (widened.get("note") or "")
+    assert ("Recall allows up to 50" in (widened.get("note") or "")) is (limit > 50)
 
 
 @pytest.mark.asyncio
@@ -256,6 +322,7 @@ async def test_max_results_leaves_the_floor_path_alone(
     for enabled in (False, True):
         res = await _recall_capped(stub_graphiti_client, stub_memory_graph_adapter, enabled=enabled, cap=1)
         assert [r.uuid for r in res.results] == ["entity-1", "entity-2"]
+        assert "capped the default result limit" not in (res.note or "")
 
 
 def test_max_results_default_env_and_validation(monkeypatch):

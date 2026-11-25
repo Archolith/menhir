@@ -114,6 +114,7 @@ class SchedulerGraphAdapter(Protocol):
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 
@@ -153,6 +154,9 @@ class LifecycleServiceProtocol(Protocol):
         ...
 
     async def confirm_pending_conflicts(self, *, limit: int, verbose: bool = False, status: str = "pending_llm_review") -> dict[str, Any]:
+        ...
+
+    async def record_conflict_pair(self, uuid: str, other_uuid: str) -> tuple[str, int] | None:
         ...
 
 

@@ -93,3 +93,12 @@ def test_local_backup_wrapper_has_valid_bash_syntax() -> None:
 def test_local_backup_uses_strict_release_validation() -> None:
     # Moved from menhir-deploy's deployment-contract tests, which cannot see this file (deploy#22).
     assert "validate-release" in _source()
+
+
+def test_local_backup_checks_symlinks_before_creating_directories() -> None:
+    source = _source()
+    symlink_guard = source.index('[ ! -L "$STATUS_DIR" ]')
+    mkdir_call = source.index('mkdir -p "$STATUS_DIR"')
+    assert symlink_guard < mkdir_call
+    assert "ARCHIVE_SHA256" not in source
+    assert "ARCHIVE_SIZE" not in source

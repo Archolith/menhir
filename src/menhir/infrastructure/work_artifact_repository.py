@@ -57,6 +57,7 @@ from menhir.domain.work_artifact import (
     REFERENCES_TODO_EDGE,
     SUPERSEDES_EDGE,
     SUPERSESSION_PARAMS,
+    TERMINAL_ANY,
     ArtifactMedium,
     ArtifactSourceSpec,
     ArtifactStatus,
@@ -1335,7 +1336,8 @@ class WorkArtifactRepository:
         refuses the relation so an edge can never imply a status change it did
         not make. Same-type only, and an already-superseded artifact is refused
         rather than re-superseded, so the recorded replacement stays the one
-        that applied.
+        that applied. A terminal replacement is refused too, which keeps
+        SUPERSEDES acyclic (#678); chains must therefore be recorded oldest first.
         """
         now = datetime.now(timezone.utc).isoformat()
         first_uuid, second_uuid = sorted((new_uuid, old_uuid))
@@ -1371,6 +1373,13 @@ class WorkArtifactRepository:
         )
         if rows and int(rows[0].get("applied", 0)) > 0:
             return {"applied": True, "status": ArtifactStatus.SUPERSEDED}
+        # Diagnostic read after the refusal, outside the write; it only names the reason.
+        replacement = self.neo4j.execute(
+            "MATCH (new:WorkArtifact {artifact_uuid: $uuid}) RETURN new.status AS status",
+            {"uuid": new_uuid},
+        )
+        if replacement and replacement[0].get("status") in TERMINAL_ANY:
+            return {"applied": False, "reason": "replacement_terminal"}
         return {
             "applied": False,
             "reason": "type_mismatch_already_terminal_or_namespace_incompatible",

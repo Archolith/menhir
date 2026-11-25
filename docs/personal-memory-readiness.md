@@ -106,14 +106,18 @@ below.
 
 `delete_memory` and the erasure saga remove the memory node and its `:Episodic` twin, the captured
 evidence turns and their projections, the scalar assertions bound to or grounded on the memory,
-and its sidecar rows. They do not remove the `:Entity` nodes or `RELATES_TO` fact edges that
-enrichment extracted from the memory, and an entity summary or fact can restate the erased
-content (#417).
+and its sidecar rows. Since 0.3.9 they also handle the `:Entity` nodes and `RELATES_TO` fact edges
+that enrichment extracted from the memory, by provenance (#423).
 
-Entities are shared: one entity can be supported by many memories, so deleting every entity a
-memory mentions would destroy other memories' knowledge. Until the post-MVP fix removes what only
-the erased memory supports, the way to remove everything is to delete the whole namespace
-(`DELETE /api/namespace/{namespace}`, operator tier).
+Entities are shared: one entity can be supported by many memories. One only the erased memory
+supports is deleted. One other memories also support is kept, its summary and fact text are blanked
+and it is flagged for re-derivation from the remaining sources.
+
+Two limits remain. Data stored before provenance was recorded cannot be matched to the memory, so
+it is left in place and the reply says `erased_incomplete`; the same reply covers other steps that
+could not finish, such as sidecar rows that could not be addressed. And nothing yet checks that a
+model-written paraphrase of the erased memory does not survive in re-derived text. To remove
+everything, delete the whole namespace (`DELETE /api/namespace/{namespace}`, operator tier).
 
 ## Known limitation: source grounding by scalar kind
 

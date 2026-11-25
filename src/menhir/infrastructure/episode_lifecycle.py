@@ -14,7 +14,7 @@ from menhir.domain.namespace import (
     tenant_scope_cypher,
     tenant_scope_params,
 )
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.recall_visibility import default_recall_visibility_cypher, memory_retired_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.secret_scrub import ensure_scrubbed
@@ -651,12 +651,15 @@ class EpisodeLifecycleRepository:
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
         model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
-        of PENDING/ENRICHING ones. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        of PENDING/ENRICHING ones. ``settled_only`` keeps READY and FAILED ones: a FAILED episode
+        is recallable through the source-memory lane too (#662), and terminal failures are never
+        re-run by the retry job. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
         cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
         skips are never re-listed ahead of the rest (audit F1).
 
@@ -664,7 +667,7 @@ class EpisodeLifecycleRepository:
         visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
         'default' are the same silo; None is unscoped), `menhir_queue_episode_cypher` (only
         Menhir's own queue nodes -- never Graphiti's episodes, which the schema migration also
-        stamps with `processing_state`, #215), and the guard that excludes FAILED enrichments -- so
+        stamps with `processing_state`, #215), and the guard that excludes erase tombstones -- so
         the backfill writes embeddings only for episodes the recall lane would ever
         surface. Idempotent by construction: a node gains `content_embedding` and
         drops out of this listing.
@@ -678,16 +681,22 @@ class EpisodeLifecycleRepository:
             "($after_uuid IS NULL OR n.uuid > $after_uuid)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            EPISODE_NOT_ERASED,
+            # Never send erase-sealed text to the embedder (the write would be refused anyway).
+            EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
+            "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            # Maintenance listing: a retired episode still needs its embedding, because
+            # recall_history and timeline query anchoring are vector searches over it.
+            default_recall_visibility_cypher("n", include_retired=True),
         ]
         params: dict[str, Any] = {
             "limit": safe_limit,
             "after_uuid": after_uuid,
             "model": model,
             "ready_only": bool(ready_only),
+            "settled_only": bool(settled_only),
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
@@ -1669,6 +1678,15 @@ class EpisodeLifecycleRepository:
         # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
         # let status readers compute a verbatim-skipped client's effective state
         # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
+        source_eligible = " AND ".join((
+            menhir_queue_episode_cypher("n"),
+            "n.processing_state IS NOT NULL",
+            # Same as the source-memory read: FAILED stays searchable (#662).
+            EPISODE_NOT_ERASED,
+            EPISODE_NOT_MARKED,
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ))
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -1678,6 +1696,9 @@ class EpisodeLifecycleRepository:
                 MEMORY_RETURN_FIELDS,
                 "n.extraction_skipped_for AS extraction_skipped_for",
                 f"{skip_projection_map_cypher('p')} AS skip_projection",
+                f"coalesce(({source_eligible}), false) AS source_search_eligible",
+                "size(n.content_embedding) AS source_embedding_size",
+                "n.content_embedding_model AS source_embedding_model",
             )
             .limit("1")
             .build()
@@ -1703,6 +1724,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.processing_state IN ['PENDING', 'ENRICHING']",
+                f"NOT {memory_retired_cypher('n')}",
                 "($namespace IS NULL OR n.namespace = $namespace)",
                 "((coalesce(n.scope, '') <> '' AND n.scope <> 'SESSION') OR "
                 "($include_session AND ($session_id IS NULL OR coalesce(n.session_id, '') = $session_id)))",

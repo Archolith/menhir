@@ -71,7 +71,9 @@ class _ProjectionLifecycle(Protocol):
         materialize: _ScalarMaterializer,
     ) -> ProjectionFreshnessCertificate: ...
 
-    def pending(self, *, limit: int = 100) -> tuple[ProjectionWorkToken, ...]: ...
+    def pending(
+        self, *, definition_id: str | None = None, limit: int = 100
+    ) -> tuple[ProjectionWorkToken, ...]: ...
 
 
 def _require_token(name: str, value: object) -> str:
@@ -211,9 +213,8 @@ class ScalarProjectionReconciler:
     ) -> tuple[ScalarProjectionReconciliation, ...]:
         """Recover already-dirty scalar generations without incrementing their generation."""
 
-        pending = tuple(
-            token
-            for token in self._lifecycle.pending(limit=limit)
-            if token.definition_id == SCALAR_STATE_PROJECTION.definition_id
+        pending = self._lifecycle.pending(
+            definition_id=SCALAR_STATE_PROJECTION.definition_id,
+            limit=limit,
         )
         return self.commit_tokens(pending, operation_id=operation_id)

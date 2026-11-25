@@ -278,7 +278,10 @@ def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch:
     assert wrapper.client.embedder.config.api_key == "local-key"
     assert wrapper.client.embedder.config.embedding_model == "embed-model"
     assert wrapper.client.embedder.client is observed_client
-    assert isinstance(wrapper.client.cross_encoder, _DummyOpenAIRerankerClient)
+    # #641: Graphiti gets the reranker behind the reranker breaker.
+    assert isinstance(wrapper.client.cross_encoder, graphiti_client_module.BreakerGuardedCrossEncoder)
+    assert wrapper.client.cross_encoder.breaker is wrapper._reranker_breaker
+    assert isinstance(wrapper.client.cross_encoder.inner, _DummyOpenAIRerankerClient)
     assert wrapper.client.cross_encoder.config.base_url == "http://local-llm:1234/v1"
     assert wrapper.client.cross_encoder.config.api_key == "local-key"
     assert wrapper.client.cross_encoder.config.model == "chat-model"

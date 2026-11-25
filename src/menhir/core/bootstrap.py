@@ -272,6 +272,22 @@ def build_memory_services(
     )
 
 
+async def _duplicate_values_suffix(graph_adapter: Any) -> str:
+    """Name the constraints blocked by duplicate values (#742). Diagnostic only: a failure here
+    must never replace the refusal it decorates."""
+    probe = getattr(graph_adapter, "phase_one_constraint_duplicates", None)
+    if probe is None:
+        return ""
+    try:
+        counts = await asyncio.to_thread(probe)
+    except Exception as exc:  # noqa: BLE001 - diagnostic must not mask the refusal
+        return f" Duplicate-value check failed: {type(exc).__name__}."
+    if not counts:
+        return ""
+    detail = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+    return f" Duplicate values block uniqueness constraints (values held by more than one node): {detail}."
+
+
 async def prepare_memory_runtime(
     artifacts: BuildArtifacts,
     *,
@@ -329,6 +345,7 @@ async def prepare_memory_runtime(
         if not schema_ready:
             failure_detail = "; ".join(str(item) for item in bootstrap_result.failures)
             suffix = f" Bootstrap failures: {failure_detail}" if failure_detail else ""
+            suffix += await _duplicate_values_suffix(artifacts.graph_adapter)
             raise RuntimeError(
                 "Phase-one schema remains absent or wrong-shaped after bootstrap; refusing "
                 f"writer startup.{suffix}"

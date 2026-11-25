@@ -55,8 +55,12 @@ class _FakeLifecycle:
             derivation_id=derivation_id,
         )
 
-    def pending(self, *, limit: int = 100):
-        return tuple(self.pending_tokens[:limit])
+    def pending(self, *, definition_id: str | None = None, limit: int = 100):
+        tokens = (
+            token for token in self.pending_tokens
+            if definition_id is None or token.definition_id == definition_id
+        )
+        return tuple(list(tokens)[:limit])
 
 
 class _Materializer:
@@ -134,9 +138,10 @@ def test_drain_pending_ignores_other_projection_definitions() -> None:
         target_present=True,
         reason="other",
     )
-    lifecycle.pending_tokens.append(other)
+    # Foreign work fills the first page, so a post-LIMIT filter would starve scalar.
+    lifecycle.pending_tokens.insert(0, other)
 
-    recovered = reconciler.drain_pending(operation_id="repair-2")
+    recovered = reconciler.drain_pending(operation_id="repair-2", limit=1)
 
     assert [item.token for item in recovered] == [scalar]
     assert lifecycle.pending_tokens == [other]

@@ -692,3 +692,68 @@ class TestEdgeCases:
         receipt["verified_at"] = "2026-07-09T02:00:28Z"
         items = build_report_items([ANCHOR_VALID], {_M1: [receipt]})
         assert items[0]["status"] == "valid_unclear"
+
+
+# ---------------------------------------------------------------------------
+# #965: instants, and a receipt counts no later than the server recorded it
+# ---------------------------------------------------------------------------
+
+
+def _rcpt(outcome, verified_at, created_at=None):
+    r = {"uuid": outcome, "memory_uuid": _M1, "project": "test-project",
+         "path": "src/foo.py", "outcome": outcome, "verified_by": "a",
+         "verified_at": verified_at}
+    if created_at is not None:
+        r["created_at"] = created_at
+    return r
+
+
+def _status(*receipts):
+    items = build_report_items([ANCHOR_VALID], {_M1: list(receipts)})
+    return items[0]["status"], items[0]
+
+
+class TestReceiptEffectiveTime:
+    def test_mixed_offsets_compare_as_instants(self):
+        # 10:00+05:00 = 05:00Z, earlier than 09:00Z although it sorts later as text.
+        status, _ = _status(
+            _rcpt("outdated", "2026-07-09T10:00:00+05:00"),
+            _rcpt("still_valid", "2026-07-09T09:00:00Z"),
+        )
+        assert status == "valid_still_valid"
+
+    def test_fractional_vs_whole_seconds(self):
+        status, _ = _status(
+            _rcpt("still_valid", "2026-07-09T10:00:00Z"),
+            _rcpt("outdated", "2026-07-09T10:00:00.5Z"),
+        )
+        assert status == "valid_outdated"
+
+    def test_future_dated_still_valid_then_real_outdated(self):
+        status, _ = _status(
+            _rcpt("still_valid", "2099-01-01T00:00:00Z", "2026-07-09T02:00:01Z"),
+            _rcpt("outdated", "2026-07-09T02:00:02Z", "2026-07-09T02:00:02Z"),
+        )
+        assert status == "valid_outdated"
+
+    def test_future_dated_receipt_recorded_before_dirty_is_pre_dirty(self):
+        r = _rcpt("still_valid", "2099-01-01T00:00:00Z", "2026-07-08T00:00:00Z")
+        assert classify_receipt(r, ANCHOR_VALID) == (False, IGNORED_REASON_PRE_DIRTY)
+
+    def test_smoke_shape_outdated_wins(self):
+        status, _ = _status(
+            _rcpt("still_valid", "2026-07-09T02:00:28Z", "2026-07-09T01:55:29.5Z"),
+            _rcpt("outdated", "2026-07-09T02:05:28Z", "2026-07-09T01:55:30.5Z"),
+        )
+        assert status == "valid_outdated"
+
+    def test_row_without_created_at_still_works(self):
+        assert classify_receipt(_rcpt("still_valid", "2026-07-09T02:00:28Z"), ANCHOR_VALID) == (True, None)
+
+    def test_unparseable_newest_does_not_hide_older_valid(self):
+        status, item = _status(
+            _rcpt("outdated", "zzz", "2026-07-09T05:00:00Z"),
+            _rcpt("still_valid", "2026-07-09T02:00:28Z", "2026-07-09T02:00:29Z"),
+        )
+        assert status == "valid_still_valid"
+        assert len(item["ignored_receipts"]) == 1

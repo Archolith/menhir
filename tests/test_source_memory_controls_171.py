@@ -143,7 +143,13 @@ def test_a2_unscoped_search_sees_every_silo(test_neo4j_repo: Any) -> None:
 # ---------------------------------------------------------------------------
 
 _HIDE: dict[str, str] = {
-    "failed": "SET n.processing_state = 'FAILED'",
+    # A plain FAILED row is recallable (#662); an erase tombstone is FAILED too, and hidden.
+    "erase_tombstone": (
+        "SET n.processing_state = 'FAILED', n.processing_substage = 'deleted_by_user', "
+        "n.erased_at = datetime()"
+    ),
+    "erased_at": "SET n.erased_at = datetime()",
+    "deleted_by_user_substage": "SET n.processing_substage = 'deleted_by_user'",
     "no_processing_state": "REMOVE n.processing_state",
     "candidate": "SET n.scope = 'CANDIDATE'",
     "gone": "SET n.freshness = 'GONE'",
@@ -170,6 +176,15 @@ def test_a3_hidden_row_is_never_returned(test_neo4j_repo: Any, variant: str) -> 
     graph.execute(f"MATCH (n:Episodic {{uuid: 'hidden'}}) {_HIDE[variant]}")
     assert _uuids(_search(graph, "ns")) == {"control"}
     assert _uuids(_search(graph, None)) == {"control"}
+
+
+def test_a3_failed_enrichment_is_still_returned(test_neo4j_repo: Any) -> None:
+    """#662: a memory whose enrichment failed keeps its text recallable here."""
+    graph = test_neo4j_repo
+    _make(graph, "control", "ns")
+    _make(graph, "failed", "ns")
+    graph.execute("MATCH (n:Episodic {uuid: 'failed'}) SET n.processing_state = 'FAILED'")
+    assert _uuids(_search(graph, "ns")) == {"control", "failed"}
 
 
 def test_a3_production_delete_memory_removes_episode(test_neo4j_repo: Any) -> None:

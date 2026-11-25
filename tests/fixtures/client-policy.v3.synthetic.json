@@ -39,7 +39,7 @@
       }
     }
   },
-  "canonical_digest": "b35a037656f7bb409c928078de39de95e0e020b6e184f1524f2d4eb555e472ab",
+  "canonical_digest": "6e9198d7018d246ecbcec501797f456f09bd1e3106fbfe8fe301eaedfc5eea0e",
   "clients": {
     "example-chatgpt-web": {
       "label": "chatgpt-chat",
@@ -114,6 +114,26 @@
         "menhir:write"
       ]
     },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=agy": {
+      "label": "agent-smith-agy",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "registration": {
+        "client_name": "Agent Smith - Antigravity CLI",
+        "redirect_uris": [
+          "http://127.0.0.1:43694/oauth/callback",
+          "http://localhost:43694/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=antigravity-ide": {
       "label": "agent-smith-antigravity-ide",
       "maximum_tier": "agent",
@@ -121,6 +141,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Antigravity IDE",
+        "redirect_uris": [
+          "http://127.0.0.1:43684/oauth/callback",
+          "http://localhost:43684/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -135,6 +163,14 @@
         "curate",
         "operate"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Claude",
+        "redirect_uris": [
+          "http://127.0.0.1:43681/oauth/callback",
+          "http://localhost:43681/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -148,6 +184,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Cline",
+        "redirect_uris": [
+          "http://127.0.0.1:43691/oauth/callback",
+          "http://localhost:43691/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -162,6 +206,14 @@
         "curate",
         "operate"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Codex",
+        "redirect_uris": [
+          "http://127.0.0.1:43682/oauth/callback",
+          "http://localhost:43682/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -175,6 +227,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Gemini",
+        "redirect_uris": [
+          "http://127.0.0.1:43683/oauth/callback",
+          "http://localhost:43683/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -187,6 +247,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Gemini Config",
+        "redirect_uris": [
+          "http://127.0.0.1:43685/oauth/callback",
+          "http://localhost:43685/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -199,6 +267,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Goose",
+        "redirect_uris": [
+          "http://127.0.0.1:43688/oauth/callback",
+          "http://localhost:43688/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -211,6 +287,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - OpenCode",
+        "redirect_uris": [
+          "http://127.0.0.1:43686/oauth/callback",
+          "http://localhost:43686/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -223,6 +307,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Qwen",
+        "redirect_uris": [
+          "http://127.0.0.1:43687/oauth/callback",
+          "http://localhost:43687/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -237,6 +329,14 @@
         "curate",
         "operate"
       ],
+      "registration": {
+        "client_name": "Agent Smith - Claude (WSL)",
+        "redirect_uris": [
+          "http://127.0.0.1:43692/oauth/callback",
+          "http://localhost:43692/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -250,6 +350,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - OpenCode (WSL)",
+        "redirect_uris": [
+          "http://127.0.0.1:43693/oauth/callback",
+          "http://localhost:43693/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -262,6 +370,14 @@
       "profiles": [
         "core"
       ],
+      "registration": {
+        "client_name": "Agent Smith - ZCode",
+        "redirect_uris": [
+          "http://127.0.0.1:43690/oauth/callback",
+          "http://localhost:43690/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"

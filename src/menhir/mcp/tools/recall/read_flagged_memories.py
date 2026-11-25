@@ -5,8 +5,10 @@ from __future__ import annotations
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import (
-    _compact_memory_item,
+    _flagged_pin_counts,
+    _flagged_pin_item,
     _normalize_reader_id,
+    _workspace_pin_fields,
     session_start_warning_lines,
 )
 from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
@@ -62,8 +64,17 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
         Bots should call this first before requesting broader context.
 
         Args:
+            limit: Max pins to return (default 10, max 50). flagged_total counts
+                matching pins and truncated reports whether any were omitted.
             namespace: Restrict the read to a single namespace. A pinned client
                 has it forced.
+
+        Pin text is returned up to 1,000 characters. summary_truncated marks
+        any shortened text. Pins are ordered by pin_priority (higher first),
+        then this workspace's pins before general ones, then recency. Each item
+        carries pin_scope and pin_priority. With a workspace, workspace_pin_count
+        counts that workspace's own pins (null if it could not be counted), and
+        workspace_notice explains a count of zero.
         """
         backend = self.get_backend()
         normalized_reader_id = _normalize_reader_id(reader_id)
@@ -84,6 +95,9 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
         _remember_flagged_bootstrap_read(
             normalized_reader_id, flagged_version, workspace=ws, namespace=ns
         )
+        workspace_fields = await _workspace_pin_fields(
+            backend, selection_key, workspace=ws, namespace=ns
+        )
         operator_warnings = await session_start_warning_lines(backend)
         return self.render_recall_json(
             {
@@ -91,8 +105,9 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
                 "bootstrap_selection": selection_key,
                 "bootstrap_ready": True,
                 "flagged_version": flagged_version,
-                "flagged_count": len(rows),
-                "items": [_compact_memory_item(row, tag="flagged") for row in rows],
+                **_flagged_pin_counts(flagged_version, selection_key, len(rows)),
+                **workspace_fields,
+                "items": [_flagged_pin_item(row) for row in rows],
                 **({"operator_warnings": operator_warnings} if operator_warnings else {}),
             }
         )

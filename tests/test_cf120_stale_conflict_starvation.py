@@ -38,7 +38,7 @@ class _HonoringAdapter:
         self.resolved = []
 
     def list_conflict_groups(self, *, status=None, limit=25, namespace=None,
-                             created_before=None, oldest_first=False):
+                             created_before=None, oldest_first=False, include_all_members=False):
         candidates = [g for g in self.groups
                       if status is None or g["status"] == status]
         if created_before is not None:
@@ -51,6 +51,10 @@ class _HonoringAdapter:
                                resolution_status="resolved", **kwargs):
         self.resolved.append(conflict_group_id)
         return {"member_uuids": ["m1", "m2"]}
+
+    def auto_resolve_settled_conflict_group(self, group_id):
+        self.resolved.append(group_id)
+        return ["m1", "m2"]
 
 
 class _IgnoringAdapter:
@@ -71,6 +75,10 @@ class _IgnoringAdapter:
         self.resolved.append(conflict_group_id)
         return {"member_uuids": ["m1", "m2"]}
 
+    def auto_resolve_settled_conflict_group(self, group_id):
+        self.resolved.append(group_id)
+        return ["m1", "m2"]
+
 
 class _CapturingAdapter:
     """Fake adapter that records the kwargs the service handed over."""
@@ -90,6 +98,9 @@ class _CapturingAdapter:
 
     def resolve_conflict_group(self, *args, **kwargs):
         return {"member_uuids": []}
+
+    def auto_resolve_settled_conflict_group(self, group_id):
+        return []
 
 
 def _starvation_backlog():

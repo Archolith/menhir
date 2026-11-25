@@ -372,15 +372,15 @@ def test_cf66_fail_exhausted_is_defined_exactly_once_on_the_adapter() -> None:
     assert len(defs) == 1
 
 
-def test_cf66_surviving_definition_creates_raw_captures() -> None:
-    """The bare-delegation duplicate is gone, so the preservation body must be the live one."""
+def test_cf66_exhausted_parking_writes_no_raw_capture() -> None:
+    """#662: a parked episode is recalled through the source-memory lane, so lease-exhaustion
+    parking no longer writes a raw-capture copy (it was never retired on a later success)."""
     import inspect
 
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
     body = inspect.getsource(MemoryGraphAdapter.fail_exhausted_pending_episodes)
-    assert "create_raw_capture_entity" in body
-    assert "fetch_exhausted_pending_episodes" in body
+    assert "create_raw_capture_entity" not in body
 
 
 def test_cf66_exhausted_fetch_is_bounded() -> None:

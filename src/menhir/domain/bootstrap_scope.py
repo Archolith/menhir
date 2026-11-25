@@ -48,6 +48,25 @@ def normalize_bootstrap_scope(value: str | None) -> str | None:
     )
 
 
+PIN_PRIORITY_MIN = 0
+PIN_PRIORITY_MAX = 100
+
+
+def normalize_pin_priority(value: object) -> int | None:
+    """Validate a startup pin priority; ``None`` leaves the stored value unchanged."""
+
+    if value is None:
+        return None
+    # bool is an int subclass; True must not silently become priority 1.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("pin_priority must be an integer")
+    if not PIN_PRIORITY_MIN <= value <= PIN_PRIORITY_MAX:
+        raise ValueError(
+            f"pin_priority must be between {PIN_PRIORITY_MIN} and {PIN_PRIORITY_MAX}"
+        )
+    return value
+
+
 def normalize_bootstrap_scope_for_flag(value: str | None, flagged: bool) -> str | None:
     """Normalize a write-side bootstrap scope AND enforce the pin/flagged pair.
 

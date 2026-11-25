@@ -180,6 +180,11 @@ class TestConfirmSuppression:
             "bridged_edges": 0,
             "member_uuids": ["node-a", "node-b", "node-c"],
         }
+        # #654: review is per member. a leaves (b, c remain), then b leaves and dissolves.
+        adapter.remove_conflict_member.side_effect = [
+            {"removed": True, "dissolved": False, "remaining_uuids": ["node-b", "node-c"]},
+            {"removed": True, "dissolved": True, "remaining_uuids": ["node-c"]},
+        ]
         llm = MagicMock()
         llm.confirm_contradiction = AsyncMock(return_value=False)
         settings = MemorySettings()
@@ -192,17 +197,18 @@ class TestConfirmSuppression:
         return svc
 
     @pytest.mark.asyncio
-    async def test_llm_review_records_reviewed_pair_only(
+    async def test_llm_review_records_every_rejected_pair(
         self, lifecycle_with_llm, store: McpTelemetryStore,
     ) -> None:
         with patch("menhir.services.lifecycle_conflicts.telemetry_store", store):
             result = await lifecycle_with_llm.confirm_pending_conflicts(limit=10)
         assert result["cleared"] == 1
-        # Only the reviewed pair (members[0], members[1]) should be recorded
+        # #654: every member is reviewed, so each pair the LLM rejected is suppressed,
+        # and each pair is asked once.
         assert store.is_pair_resolved("node-a", "node-b") is True
-        # node-c was NOT part of the reviewed pair
-        assert store.is_pair_resolved("node-a", "node-c") is False
-        assert store.is_pair_resolved("node-b", "node-c") is False
+        assert store.is_pair_resolved("node-a", "node-c") is True
+        assert store.is_pair_resolved("node-b", "node-c") is True
+        assert lifecycle_with_llm.llm.confirm_contradiction.await_count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +242,7 @@ class TestAutoResolveSuppression:
             "bridged_edges": 0,
             "member_uuids": ["n1", "n2", "n3"],
         }
+        adapter.auto_resolve_settled_conflict_group.return_value = ["n1", "n2", "n3"]
         settings = MemorySettings()
         svc = LifecycleService(
             graph_adapter=adapter,

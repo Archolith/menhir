@@ -25,6 +25,7 @@ from menhir.domain.timeline import (
 from menhir.services.recall_pipeline import (
     _RECALL_HISTORY_MAX_CHARS,
     _embedding_model_kwargs,
+    embed_refusal_note,
 )
 
 #: Headline cap: whitespace-collapsed content, then a trailing ellipsis.
@@ -110,6 +111,7 @@ def _entry_from_row(
         content=content,
         facts=facts,
         is_anchor=is_anchor,
+        retired=bool(row.get("memory_retired")),
     )
 
 
@@ -370,18 +372,30 @@ async def run_recall_timeline(
             )
     elif mode == "query":
         stripped = str(query).strip()
-        query_vector = await service.graphiti_client.embed_query(stripped)
-        # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
-        # The subject constraint runs inside the search, before its LIMIT.
-        subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
-        hits = await asyncio.to_thread(
-            adapter.search_episode_embeddings, query_vector,
-            limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
-            resolved_only=True, **_embedding_model_kwargs(service), **subject_kwargs,
-        )
-        if not hits:
-            note = _QUERY_NO_HIT_NOTE
+        hits: list[Any] = []
+        try:
+            query_vector = await service.graphiti_client.embed_query(stripped)
+        except Exception as exc:
+            # #642: a degraded answer with the breaker's note, like recall, not an error.
+            note = embed_refusal_note(
+                service.graphiti_client, exc,
+                "a query needs embeddings to find its anchor; use at, around or a window instead",
+            )
+            if note is None:
+                raise
         else:
+            # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
+            # The subject constraint runs inside the search, before its LIMIT.
+            subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
+            hits = await asyncio.to_thread(
+                adapter.search_episode_embeddings, query_vector,
+                limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
+                resolved_only=True, include_retired=True,
+                **_embedding_model_kwargs(service), **subject_kwargs,
+            )
+        if note is None and not hits:
+            note = _QUERY_NO_HIT_NOTE
+        elif hits:
             # Anchor on the best-ranked hit that can anchor: store-only receipts (assistant
             # turns, verbatim-skipped clients) have no timeline position.
             for hit in hits:

@@ -11,6 +11,8 @@ import menhir.domain.retrieval_trace_models as retrieval_trace_models
 from menhir.domain.retrieval_tuning import CandidateSource, RetrievalScoreKind
 from menhir.domain.truth.labels import WardenLabel
 
+MAX_EXPLICIT_RECALL_RESULTS = 50
+
 
 class InvalidQueryPresetError(ValueError):
     """Raised when a caller supplies an unsupported recall preset."""
@@ -287,6 +289,12 @@ class SourceMemory:
 
     Never a ranked candidate: `results` and `candidates_evaluated` are identical with
     the lane on or off. Ordered oldest-first by `reference_time`, then uuid.
+
+    ``rank`` is the entry's relevance position within its section (1 = best match, by
+    cosine; ties keep the lane's search order). Display order stays chronological, so a
+    consumer that must cut the section (``build_context`` under its token budget) keeps the
+    lowest ranks first. ``None`` where no ranking was computed (``recall_history``, payloads
+    from older servers).
     """
 
     uuid: str
@@ -294,6 +302,8 @@ class SourceMemory:
     reference_time: str | None
     cosine: float
     source: str | None
+    rank: int | None = None
+    retired: bool = False
 
 
 MAX_SOURCE_MEMORY_SOURCES = 20

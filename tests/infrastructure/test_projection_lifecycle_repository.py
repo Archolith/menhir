@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -349,6 +350,157 @@ def test_authoritative_target_reconciliation_discovers_removals_without_redirtyi
     assert by_subject["ent-b"].target_present is True
     assert by_subject["ent-b"].generation == 5
     assert by_subject["ent-c"].generation == 1
+
+
+@pytest.mark.unit
+def test_pending_definition_scoping_happens_before_limit() -> None:
+    seed = ProjectionLifecycleRepository(ScriptedNeo4j())
+    row = _work_row(seed, _target("scalar-only"), generation=2)
+    row["current_definition_version"] = 1
+    fake = ScriptedNeo4j(direct=[("MATCH (w:ProjectionWorkState)", [row])])
+
+    pending = ProjectionLifecycleRepository(fake).pending(
+        definition_id="scalar-state", limit=1,
+    )
+
+    assert len(pending) == 1
+    assert pending[0].target.subject_id == "scalar-only"
+    query, params = fake.executed[0]
+    assert "WHERE w.definition_id = $definition_id" in query
+    assert query.index("WHERE w.definition_id = $definition_id") < query.index("LIMIT $limit")
+    assert params["definition_id"] == "scalar-state"
+    assert params["limit"] >= 1
+    assert params["seen_keys"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("definition_id", ["", "  ", 1, False])
+def test_pending_rejects_invalid_definition_filter(definition_id: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        ProjectionLifecycleRepository(ScriptedNeo4j()).pending(
+            definition_id=definition_id,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("target_json", "{invalid-json", "valid JSON"),
+        ("definition_version", float("inf"), "invalid version/generation"),
+        ("current_definition_version", float("inf"), "invalid definition version"),
+    ],
+)
+def test_scoped_pending_quarantines_corrupt_first_page_then_finds_valid_work(
+    field: str, value: object, reason: str,
+) -> None:
+    seed = ProjectionLifecycleRepository(ScriptedNeo4j())
+    corrupt = _work_row(seed, _target("bad-1"), generation=2)
+    corrupt["current_definition_version"] = 1
+    corrupt[field] = value
+    valid = _work_row(seed, _target("good-1"), generation=2)
+    valid["current_definition_version"] = 1
+    fake = ScriptedNeo4j(
+        direct=[
+            ("MATCH (w:ProjectionWorkState)", [corrupt]),
+            ("MATCH (w:ProjectionWorkState)", [valid]),
+        ],
+        transactions=[
+            [("MATCH (w:ProjectionWorkState {work_key:$work_key})", [
+                {"work_key": corrupt["work_key"]},
+            ])],
+        ],
+    )
+
+    result = ProjectionLifecycleRepository(fake).pending(
+        definition_id="scalar-state", limit=1,
+    )
+
+    assert [token.target.subject_id for token in result] == ["good-1"]
+    assert len(fake.executed) == 2
+    assert "(w.work_key IS NULL OR NOT w.work_key IN $seen_keys)" in fake.executed[1][0]
+    assert fake.executed[1][1]["seen_keys"] == [corrupt["work_key"]]
+    query, params = fake.transaction_history[0].executed[0]
+    assert query.index("SET w.coordination_epoch") < query.index("WITH w")
+    assert query.index("WITH w") < query.index("w.generation=$generation")
+    assert params["work_key"] == corrupt["work_key"]
+    assert params["generation"] == 2
+    assert reason in params["reason"]
+
+
+@pytest.mark.unit
+def test_scoped_pending_never_quarantines_newer_generation_after_cas_race() -> None:
+    seed = ProjectionLifecycleRepository(ScriptedNeo4j())
+    corrupt = _work_row(seed, _target("bad-2"), generation=2)
+    corrupt["current_definition_version"] = 3
+    good = _work_row(seed, _target("good-2"), generation=3)
+    good["current_definition_version"] = 1
+    fake = ScriptedNeo4j(
+        direct=[
+            ("MATCH (w:ProjectionWorkState)", [corrupt]),
+            ("MATCH (w:ProjectionWorkState)", [good]),
+        ],
+        transactions=[
+            [("MATCH (w:ProjectionWorkState {work_key:$work_key})", [])],
+        ],
+    )
+
+    result = ProjectionLifecycleRepository(fake).pending(
+        definition_id="scalar-state", limit=1,
+    )
+
+    assert [token.target.subject_id for token in result] == ["good-2"]
+    assert fake.transaction_history[0].executed[0][1]["generation"] == 2
+
+
+@pytest.mark.unit
+def test_scoped_pending_quarantine_count_is_diagnostic_only() -> None:
+    fake = ScriptedNeo4j(direct=[
+        ("MATCH (w:ProjectionWorkState)", [{"quarantined": 4}]),
+    ])
+    lifecycle = ProjectionLifecycleRepository(fake)
+    assert lifecycle.quarantined_pending_count(definition_id="scalar-state") == 4
+    query, params = fake.executed[0]
+    assert "w.quarantine_generation = w.generation" in query
+    assert params["definition_id"] == "scalar-state"
+
+
+@pytest.mark.unit
+def test_commit_refuses_quarantined_generation_before_running_materializer() -> None:
+    seed = ProjectionLifecycleRepository(ScriptedNeo4j())
+    target = _target("quarantined")
+    row = _work_row(seed, target, generation=2, applied_generation=1)
+    row["quarantine_generation"] = 2
+    row["quarantine_definition_version"] = 1
+    fake = ScriptedNeo4j(transactions=[[
+        ("MATCH (d:ProjectionDefinitionState", [{"current_version": 1}]),
+        ("MATCH (w:ProjectionWorkState", [row]),
+    ]])
+    from menhir.domain.projection_lifecycle import ProjectionWorkToken
+
+    token = ProjectionWorkToken(
+        work_key=row["work_key"],
+        definition_id="scalar-state",
+        definition_version=1,
+        target=target,
+        generation=2,
+        target_present=True,
+        reason="assertion_written",
+    )
+    called = False
+
+    def materializer(_tx: Neo4jTransaction, _token: Any) -> str:
+        nonlocal called
+        called = True
+        return "unexpected"
+
+    with pytest.raises(
+        ProjectionLifecycleCorruptionError, match="quarantined projection work",
+    ):
+        ProjectionLifecycleRepository(fake).commit(
+            token, derivation_id="blocked", materialize=materializer,
+        )
+    assert called is False
 
 
 @pytest.mark.unit
@@ -826,6 +978,135 @@ def test_projection_lifecycle_live_stale_worker_cannot_install_view(test_neo4j_r
         "MATCH (n:ProjectionLifecycleTestView) RETURN count(n) AS count"
     )
     assert rows == [{"count": 0}]
+
+
+@pytest.mark.online
+def test_projection_pending_scoped_query_skips_many_older_foreign_jobs(
+    test_neo4j_repo,
+) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    other = replace(
+        _definition(1),
+        definition_id="other-synthetic-projection",
+        output_view_kind="other_synthetic_state",
+    )
+    scalar = _definition(1)
+    lifecycle.publish_definition(other, semantic_hash="other-synthetic-v1")
+    lifecycle.publish_definition(scalar, semantic_hash="scalar-synthetic-v1")
+
+    foreign = [_target(f"foreign-{i:03d}") for i in range(110)]
+    lifecycle.dirty_targets(other, foreign, reason="foreign_jobs")
+    scalar_token = lifecycle.dirty_targets(
+        scalar, [_target("scalar-synthetic")], reason="scalar_job",
+    )[0]
+
+    # The generic first page is full of unrelated older work.
+    assert all(
+        token.definition_id == other.definition_id
+        for token in lifecycle.pending(limit=10)
+    )
+    # The worker must see scalar work even at a one-item limit.
+    assert lifecycle.pending(definition_id=scalar.definition_id, limit=1) == (
+        scalar_token,
+    )
+    assert lifecycle.pending(definition_id=other.definition_id, limit=1)[0].definition_id == (
+        other.definition_id
+    )
+
+
+@pytest.mark.online
+def test_scoped_pending_live_quarantines_full_bad_page_without_starving_valid_work(
+    test_neo4j_repo,
+) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    definition = _definition(1)
+    lifecycle.publish_definition(definition, semantic_hash="quarantine-batch-v1")
+    corrupt = lifecycle.dirty_targets(
+        definition, [_target(f"invalid-{i:03d}") for i in range(36)],
+        reason="first_page",
+    )
+    good = lifecycle.dirty_targets(
+        definition, [_target("last-valid")], reason="later",
+    )[0]
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState)
+        WHERE w.work_key IN $keys
+        SET w.definition_version=99
+        """,
+        {"keys": [token.work_key for token in corrupt]},
+    )
+
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == (good,)
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 36
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == (good,)
+
+
+@pytest.mark.online
+def test_scoped_pending_detects_keyless_work_after_a_full_page(test_neo4j_repo) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    definition = _definition(1)
+    lifecycle.publish_definition(definition, semantic_hash="quarantine-keyless-v1")
+    lifecycle.dirty_targets(
+        definition, [_target(f"keyless-prefix-{i:03d}") for i in range(32)], reason="first_page",
+    )
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState {definition_id:$definition_id})
+        SET w.definition_version=99
+        WITH count(w) AS updated
+        CREATE (:ProjectionWorkState {
+            definition_id:$definition_id, generation:1, dirty_at:datetime() + duration('PT1H')
+        })
+        """,
+        {"definition_id": definition.definition_id},
+    )
+
+    with pytest.raises(ProjectionLifecycleCorruptionError, match="no usable work_key"):
+        lifecycle.pending(definition_id=definition.definition_id, limit=1)
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 32
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("corruption", [
+    {"definition_version": 99},
+    {"definition_version": float("inf")},
+    {"definition_version": float("nan")},
+    {"target_json": "{invalid-json"},
+])
+def test_quarantined_work_reactivates_when_new_generation_is_dirtied(
+    test_neo4j_repo, corruption: dict[str, Any],
+) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    definition = _definition(1)
+    lifecycle.publish_definition(definition, semantic_hash="quarantine-retry-v1")
+    original = lifecycle.dirty_targets(
+        definition, [_target("quarantine-retry")], reason="first",
+    )[0]
+
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState {work_key:$work_key})
+        SET w += $corruption
+        """,
+        {"work_key": original.work_key, "corruption": corruption},
+    )
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == ()
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 1
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == ()
+
+    # A legitimate re-dirty replaces the bad version, increments the generation,
+    # and must not inherit the earlier generation's quarantine.
+    renewed = lifecycle.dirty_targets(
+        definition, [_target("quarantine-retry")], reason="fixed",
+    )[0]
+    assert renewed.generation == original.generation + 1
+    assert lifecycle.quarantined_pending_count(definition_id=definition.definition_id) == 0
+    assert lifecycle.pending(definition_id=definition.definition_id, limit=1) == (renewed,)
 
 
 @pytest.mark.online
