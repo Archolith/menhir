@@ -46,8 +46,8 @@ CONTAINER_CRITERIA = [
     "release_container_exposes_same_fork_version_and_hooks",
 ]
 
-FORK_VERSION = "0.31.2.post4"
-FORK_WHEEL_SHA256 = "b147016b628591069afaf3d255a1215f3f116c6d5dcbfcc068164c966da307a8"
+FORK_VERSION = "0.32.1.post1"
+FORK_WHEEL_SHA256 = "be1d97d804d7f6cca857b5804d511f4cbc49c11a665868b04459c2627e56759f"
 EPISODE_ID = re.compile(r"episode_id:\s*([0-9a-f-]{36})")
 
 # Run by the installed interpreter from the disposable state directory. Compare every

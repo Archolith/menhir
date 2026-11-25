@@ -1,3 +1,8 @@
+## 2026-11-25 - Graphiti fork 0.32.1.post1: sync upstream graphiti v0.32.1 (Archolith/graphiti #35)
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.32.1.post1`, fork commit `3f900b9e`. Pins, docs and release checks updated; no other locked package changed.
+- Upstream adds opt-in concurrent ingestion, which the fork refuses whenever a Menhir hook, `new_episode_uuid` or `publish_fence` is in use, so Menhir's ingest path is unchanged. A record/replay run of the consumer-session acceptance test against 0.31.2.post4 and this version produced the same graph and report.
+
 ## 2026-11-25 - GitHub and GitLab tokens are redacted whole, not just their prefix (GHSA-ppqh-gffg-6j74)
 
 - `domain/secret_scrub.py`: detect-secrets' GitHub and GitLab plugins capture only the token prefix (`ghp`, `glpat`), so `redact()` replaced the prefix and kept the body, in stored memory text and in every output guard built on it (recall, API responses, Explorer, hooks, backend payloads). A `glcbt-` token without its optional part was not found at all. Both plugins are replaced by full-token patterns that accept everything they did, and longer tokens.
@@ -123,10 +128,3 @@ Step 3 of the retire plan. It writes nothing to the graph and retires nothing; i
   unmerge and rebuilds of derived data. A manual `recover_orphans` obeys the switch.
 - `tests/test_auto_mutation_census.py` fails on any new ungated merge or delete path.
 - Upgrade note: set `MENHIR_AUTO_MERGE_MODE=on` and `MENHIR_AUTO_DELETE_MODE=on` to keep the old behavior.
-
-## 2026-11-25 - v0.3.16: merge retention, telemetry, hook ordering and release branch fixes (#939 part 2, #959, #964, #965, #956)
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.16. No dependency changes in this commit.
-- Upgrade note: stop the old process before starting this version. A 0.3.15 process that is still
-  running merges by the old rules and can lower retention (#939).
-
