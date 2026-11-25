@@ -165,15 +165,18 @@ def _isolate_client_restrictions(monkeypatch):
         monkeypatch.setenv(var, "")
 
 
-@pytest.fixture(autouse=True)
-def _auto_mutation_modes_on(monkeypatch):
+@pytest.fixture(autouse=True, scope="session")
+def _auto_mutation_modes_on():
     """Existing tests exercise the merge and delete mechanisms, so run them with both switches on.
 
     The shipped defaults are merge=propose and delete=off. A test of the gate itself overrides
-    these with `monkeypatch.setenv`/`delenv` inside the test.
+    these with `monkeypatch.setenv`/`delenv` inside the test. Session-scoped with its own patcher
+    because a test that calls `monkeypatch.undo()` would undo a function-scoped one.
     """
-    monkeypatch.setenv("MENHIR_AUTO_MERGE_MODE", "on")
-    monkeypatch.setenv("MENHIR_AUTO_DELETE_MODE", "on")
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setenv("MENHIR_AUTO_MERGE_MODE", "on")
+        patcher.setenv("MENHIR_AUTO_DELETE_MODE", "on")
+        yield
 
 
 @pytest.fixture(autouse=True)

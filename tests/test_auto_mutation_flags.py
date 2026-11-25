@@ -552,3 +552,10 @@ def test_erased_uuid_is_not_recorded_and_does_not_lose_the_batch(erased_column):
     amp.record_proposals("merge_proposal", rows)
     got = sorted(r["node_uuid"] for r in store.fetch_pending("merge_proposal", limit=10))
     assert got == ["a", "b"]
+
+
+def test_suite_default_survives_a_monkeypatch_undo(monkeypatch):
+    monkeypatch.setenv("MENHIR_AUTO_MERGE_MODE", "off")
+    monkeypatch.delenv("MENHIR_AUTO_DELETE_MODE")
+    monkeypatch.undo()
+    assert (amp.auto_merge_mode(), amp.auto_delete_mode()) == ("on", "on")
