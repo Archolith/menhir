@@ -774,3 +774,193 @@ def test_retiring_scalar_sources_through_the_tool_leaves_the_view_unchanged(scal
         assert c.adapter.restore_memory(uid)["status"] == "restored", uid
     c.refold_all_paths()
     _assert_unchanged(before, c.snapshot())
+
+
+# ============================================================================ 9. entities follow their sources (step 2b)
+
+def _mention(env, entity: str, episode: str) -> None:
+    """``episode`` MENTIONS ``entity``. Pass the Graphiti twin (the :Episodic that carries MENTIONS
+    in production); retire_memory on the queue node marks it together with that twin."""
+    env.repo.execute(
+        "MATCH (e:Episodic {uuid:$e}), (n:Entity {uuid:$n}) CREATE (e)-[:MENTIONS]->(n)",
+        {"e": episode, "n": entity})
+
+
+def _entity_surfaces(env, ent: str) -> dict[str, bool]:
+    """Every entity read surface that must agree on whether ``ent`` is retired."""
+    adapter, ns = env.adapter, env.ns
+    meta = adapter.fetch_candidate_metadata([ent])[0]
+    return {
+        "recent": ent in _uuids(adapter.fetch_recent_memories(limit=50, namespace=ns)),
+        "by_scope": ent in _uuids(adapter.fetch_memories_by_scope(
+            "PERSISTENT", limit=50, namespace=ns)),
+        "admitted": _memory_admitted(
+            _svc(adapter), meta, include_session=True, session_id=None, namespace=ns),
+        "temporal_facts": ent in {r["node_uuid"] for r in adapter.fetch_temporal_facts([ent])},
+    }
+
+
+def _seed_entity_with_fact(env, label: str = "subject", **props: Any) -> str:
+    ent = env.entity(label, **props)
+    env.fact(ent, env.entity(f"{label}-peer"))
+    return ent
+
+
+def test_single_source_entity_follows_its_episode_through_retire_and_restore(env):
+    ent = _seed_entity_with_fact(env)
+    q, g = env.pair("src")
+    _mention(env, ent, g)
+    visible = {k: True for k in _entity_surfaces(env, ent)}
+    hidden = {k: False for k in visible}
+
+    assert _entity_surfaces(env, ent) == visible, "premise: visible while its source is live"
+    assert env.marker(ent)["retired"] is None
+    edges, props = env.edges(ent), env.props(ent)
+
+    assert env.retire(q)["status"] == "retired"
+    assert _entity_surfaces(env, ent) == hidden
+    assert env.adapter.fetch_candidate_metadata([ent])[0]["memory_retired"] is True
+    assert env.marker(ent)["retired"] is None, "derived, never stored"
+    assert (env.edges(ent), env.props(ent)) == (edges, props)
+
+    assert env.restore(q)["status"] == "restored"
+    assert _entity_surfaces(env, ent) == visible
+    assert env.adapter.fetch_candidate_metadata([ent])[0]["memory_retired"] is False
+
+
+def test_shared_entity_is_hidden_only_while_every_source_is_retired(env):
+    ent = _seed_entity_with_fact(env)
+    q1, g1 = env.pair("src1")
+    q2, g2 = env.pair("src2")
+    _mention(env, ent, g1)
+    _mention(env, ent, g2)
+    visible = {k: True for k in _entity_surfaces(env, ent)}
+    hidden = {k: False for k in visible}
+    assert _entity_surfaces(env, ent) == visible
+
+    assert env.retire(q1)["status"] == "retired"
+    assert _entity_surfaces(env, ent) == visible, "one live source keeps it visible"
+    assert env.retire(q2)["status"] == "retired"
+    assert _entity_surfaces(env, ent) == hidden
+
+    assert env.restore(q2)["status"] == "restored"
+    assert _entity_surfaces(env, ent) == visible, "restoring either source brings it back"
+    assert env.retire(q2)["status"] == "retired"
+    assert _entity_surfaces(env, ent) == hidden
+    assert env.restore(q1)["status"] == "restored"
+    assert _entity_surfaces(env, ent) == visible
+
+
+def test_new_episode_mentioning_a_hidden_entity_makes_it_visible_without_other_writes(env):
+    ent = _seed_entity_with_fact(env)
+    q1, g1 = env.pair("old")
+    _mention(env, ent, g1)
+    assert env.retire(q1)["status"] == "retired"
+    assert not any(_entity_surfaces(env, ent).values())
+
+    _q2, g2 = env.pair("new")
+    _mention(env, ent, g2)
+
+    assert all(_entity_surfaces(env, ent).values())
+    assert env.marker(ent)["retired"] is None
+
+
+def test_flagged_and_retention_protected_entities_stay_visible_when_sources_retire(env):
+    flagged = _seed_entity_with_fact(env, "flagged", user_flagged=True)
+    protected = _seed_entity_with_fact(env, "protected")
+    env.repo.execute(
+        "MATCH (e:Entity {uuid:$e}) "
+        "CREATE (x:Episodic {uuid:$x, group_id:$ns, namespace:$ns, test_tag:$tag, "
+        "user_flagged:true, processing_state:'READY'}) CREATE (x)-[:RETENTION_SOURCE]->(e)",
+        {"e": protected, "x": f"{env.tag}-retention-source", "ns": env.ns, "tag": env.tag})
+    q, g = env.pair("src")
+    for ent in (flagged, protected):
+        _mention(env, ent, g)
+        assert all(_entity_surfaces(env, ent).values()), "premise"
+
+    assert env.retire(q)["status"] == "retired"
+
+    for ent in (flagged, protected):
+        assert all(_entity_surfaces(env, ent).values()), ent
+        assert env.adapter.fetch_candidate_metadata([ent])[0]["memory_retired"] is False
+
+
+def test_entity_without_a_mentioning_episode_is_unaffected_by_other_retires(env):
+    lone = _seed_entity_with_fact(env, "lone")
+    other = _seed_entity_with_fact(env, "other")
+    q, g = env.pair("src")
+    _mention(env, other, g)
+    assert env.retire(q)["status"] == "retired"
+    assert not any(_entity_surfaces(env, other).values())
+
+    assert all(_entity_surfaces(env, lone).values())
+    assert env.adapter.fetch_candidate_metadata([lone])[0]["memory_retired"] is False
+
+
+def test_scalar_view_stays_recall_visible_when_all_its_sources_are_retired(scalar_case):
+    from tests.test_retire_scalar_proof_live import _T1, _visible
+
+    c = scalar_case
+    t1 = c.turn("I have 30 coins")
+    c.absolute(t1, "I have 30 coins", "I have 30 coins", 30, _T1)
+    c.build()
+    (view_uuid,) = [u for u, v in c.snapshot()["views"].items()
+                    if v["props"].get("ss_attribute") == "owned"]
+    assert _visible(c.repo, view_uuid) is True
+
+    for uid in c.episodes:
+        assert c.adapter.retire_memory(uid, reason="cascade", retired_by="test")["status"] == "retired"
+
+    live = c.repo.execute(
+        "MATCH (e:Episodic)-[:MENTIONS]->(v:Entity {uuid:$v}) "
+        "WHERE NOT coalesce(e.memory_retired, false) RETURN count(e) AS c", {"v": view_uuid})
+    assert live[0]["c"] == 0, "premise: no live Episodic mentions the View"
+    assert _visible(c.repo, view_uuid) is True
+    assert c.adapter.fetch_candidate_metadata([view_uuid])[0]["memory_retired"] is False
+    # The plain entities those episodes mention ARE derived-retired, in the same graph.
+    assert c.adapter.fetch_candidate_metadata([c.subject])[0]["memory_retired"] is True
+
+
+def test_derived_retired_entity_is_frozen_for_decay_merge_and_flag_until_its_source_returns(env):
+    old = "n.last_accessed = datetime() - duration({days: 400}), " \
+          "n.created_at = datetime() - duration({days: 400})"
+    ent = env.entity("stale", edge_count=0, sharpness=0.1)
+    partner = env.entity("partner")
+    env.set(ent, old)
+    q, g = env.pair("src")
+    _mention(env, ent, g)
+    adapter = env.adapter
+    correlation = CorrelationRepository(env.repo)
+
+    def decay_candidate() -> bool:
+        rows = adapter.fetch_decay_candidates(
+            "ACTIVE", min_days_since_accessed=30, max_edge_count=5, max_sharpness=None)
+        return ent in {r["uuid"] for r in rows}
+
+    def merge_verdict() -> tuple[bool, str]:
+        v = correlation.evaluate_merge_eligibility(partner, ent)
+        return v.allowed, v.reason_code
+
+    def predicate_allows() -> bool:
+        rows = env.repo.execute(
+            "MATCH (survivor:Entity {uuid:$s}), (absorbed:Entity {uuid:$a}) "
+            f"WHERE {me.mutable_eligibility_cypher()} RETURN count(*) AS c",
+            {"s": partner, "a": ent, **me.MUTABLE_PREDICATE_PARAMS})
+        return int(rows[0]["c"]) == 1
+
+    assert decay_candidate() and merge_verdict() == (True, me.ELIGIBLE) and predicate_allows()
+
+    assert env.retire(q)["status"] == "retired"
+    assert env.marker(ent)["retired"] is None
+    assert not decay_candidate()
+    assert merge_verdict() == (False, me.MEMORY_RETIRED)
+    assert not predicate_allows()
+    with pytest.raises(ValueError, match="retired"):
+        adapter.flag_memory(ent, bootstrap_scope="general")
+    assert env.props(ent).get("user_flagged") is not True
+
+    assert env.restore(q)["status"] == "restored"
+    assert decay_candidate()
+    assert merge_verdict() == (True, me.ELIGIBLE)
+    assert predicate_allows()
+    assert adapter.flag_memory(ent, bootstrap_scope="general") is True

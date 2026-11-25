@@ -4,6 +4,22 @@
   Use indexed roots for absolute paths and cap new link pairs per enrichment pass.
 - Parse full Git diff paths, including quoted names and root files. Use the same path resolver for file-context ranking.
 
+## 2026-11-25 - An entity whose every source memory is retired is retired too
+
+- `domain/recall_visibility.py`: `memory_retired_cypher` is the single definition of retired: the
+  stored `memory_retired` marker, or, for an ordinary `:Entity`, at least one `:Episodic` mentions it
+  and every one that does is retired. It is derived at read time, so restoring a source or a new
+  memory mentioning the entity brings it back with no extra write. Views, flagged and
+  retention-protected entities, and entities no episode mentions are never retired this way, so
+  retiring sources still never hides a scalar View.
+- `cypher.py` (ranked admission), `consolidation_queries.py` (decay, compression, TTL),
+  `merge_eligibility.py` and `correlation_queries.py` (merge veto), `tool_event_repository.py`
+  (stale anchors) and `flag_memory` read retired state only through the helper.
+  `tests/test_memory_retired_reads.py` fails on any other raw read.
+- `tests/test_memory_retire_live.py`: single-source and shared entities, a new mention un-hiding an
+  entity, flagged and retention-protected entities staying visible, a scalar View staying visible,
+  and decay, merge and flag refusing a derived-retired entity until a source is restored.
+
 ## 2026-11-25 - Keep corrupt projection work from blocking other targets (#403)
 
 - Projection workers read only their own definition's dirty work. They quarantine corrupt generations while continuing to scan, and report unreadable work keys.
@@ -122,12 +138,3 @@
   `services/delete_coordinator.py`: the TTL delete re-checks expiry in the delete statement.
 - `infrastructure/graph_text_inventory.py`: registers the transient lock key.
 - Not retroactive: survivors that already carry a `ttl_expires` keep it.
-
-## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
-
-- `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
-  project's files. An event from an unknown project marks files only when every match belongs to one
-  project. Verification receipts are compared as instants and count no later than their server
-  `created_at`; the receipt list is ordered by `created_at`. Files already marked are not cleared.
-- `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
-- `docs/hook-center-tool-events.md`: describes both rules.

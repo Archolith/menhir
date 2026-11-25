@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from menhir.domain.namespace import normalize_namespace
+from menhir.domain.recall_visibility import memory_retired_cypher
 from menhir.domain.retention import source_retention_protected_cypher
 
 
@@ -125,7 +126,7 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
             f"toUpper(trim(coalesce({var}.scope, ''))) IN $mergeable_scopes",
             f"coalesce({var}.user_flagged, false) = false",
-            f"NOT coalesce({var}.memory_retired, false)",
+            f"NOT {memory_retired_cypher(var, protection_checked_by_caller=True)}",
             f"NOT {source_retention_protected_cypher(var)}",
             f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
         ])

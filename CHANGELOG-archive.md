@@ -1,3 +1,12 @@
+## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
+
+- `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
+  project's files. An event from an unknown project marks files only when every match belongs to one
+  project. Verification receipts are compared as instants and count no later than their server
+  `created_at`; the receipt list is ordered by `created_at`. Files already marked are not cleared.
+- `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
+- `docs/hook-center-tool-events.md`: describes both rules.
+
 ## 2026-11-24 - Conflict suppressions are no longer removed by age pruning (#959)
 
 - `infrastructure/telemetry/lifecycle_store_stats.py`: `conflict_resolutions` is out of the retention
