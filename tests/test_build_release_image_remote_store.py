@@ -163,7 +163,7 @@ def test_publish_candidate_hands_the_archive_to_every_remote_verification(
 ) -> None:
     archive = tmp_path / "release-image.tar"
     metadata = {"image_tag": IMAGE_TAG, "image_archive_sha256": ARCHIVE_SHA256}
-    results = iter((None, None, REGISTRY_DIGEST))
+    results = iter((None, REGISTRY_DIGEST))
     seen: list[dict[str, Any]] = []
     monkeypatch.setattr(MODULE.subprocess, "run", lambda *_a, **_k: None)
     monkeypatch.setattr(MODULE, "remote_manifest_digest", lambda _tag: next(results))

@@ -43,8 +43,11 @@ def test_source_memory_search_selects_only_queue_nodes(namespace: str | None) ->
     )
     query, _params = neo4j.calls[0]
     assert menhir_queue_episode_cypher("n") in query
-    # The FAILED exclusion and the processing_state guard stay.
-    assert "n.processing_state <> 'FAILED'" in query
+    # The processing_state guard stays; FAILED episodes are recallable (#662) but erase
+    # tombstones are not.
+    assert "n.processing_state IS NOT NULL" in query
+    assert "n['erased_at'] IS NULL" in query
+    assert "n.processing_state <> 'FAILED'" not in query
 
 
 @pytest.mark.parametrize("namespace", [None, "default", "tenant-a"])

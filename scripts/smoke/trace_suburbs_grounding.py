@@ -294,8 +294,10 @@ async def run_trial(trial_num: int, total: int) -> TrialResult:
 
     captured_invalidation: list[dict] = []
 
+    # #265: forward every extra argument (edge_expiry_hook, edge_invalidation_hook,
+    # preserved_attributes, clients=...), so the anchored-time hooks reach the real resolver.
     async def _instrumented_resolve_edge(
-        llm_client, extracted_edge, related_edges, existing_edges, episode, edge_type_candidates=None,
+        llm_client, extracted_edge, related_edges, existing_edges, episode, *args, **kwargs,
     ):
         # Only trace edges whose fact mentions suburbs or chicago
         fact_lower = (extracted_edge.fact or "").lower()
@@ -343,7 +345,7 @@ async def run_trial(trial_num: int, total: int) -> TrialResult:
             try:
                 resolved, invalidated, duplicates = await _orig_resolve_edge(
                     llm_client, extracted_edge, related_edges, existing_edges,
-                    episode, edge_type_candidates,
+                    episode, *args, **kwargs,
                 )
             finally:
                 llm_client.generate_response = _orig_gen
@@ -361,7 +363,7 @@ async def run_trial(trial_num: int, total: int) -> TrialResult:
         else:
             return await _orig_resolve_edge(
                 llm_client, extracted_edge, related_edges, existing_edges,
-                episode, edge_type_candidates,
+                episode, *args, **kwargs,
             )
 
     _eo_mod.resolve_extracted_edge = _instrumented_resolve_edge

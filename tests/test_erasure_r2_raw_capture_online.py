@@ -34,32 +34,28 @@ def _raw_captures(repo: Any, q: str) -> int:
     )[0]["c"]
 
 
-def test_cf327_erase_between_fetch_and_capture_leaves_no_entity(
+def test_cf327_exhausted_sweep_copies_no_content(
     test_neo4j_repo, tmp_path, monkeypatch
 ) -> None:
-    """The sweep fetched Q's content, then Q was erased, then the sweep's MERGE runs. Nothing may
-    be created. Fails if ``create_raw_capture_entity`` stops running under ``execute_copy_fenced``
-    (or stops requiring the episode to exist and not be a tombstone)."""
+    """#662: the exhausted-lease sweep no longer reads an episode's content or writes a
+    raw-capture copy, so an erase racing the sweep has no copy to miss. Fails if the sweep
+    starts copying content again without the CF-327 fence."""
     repo = test_neo4j_repo
     ns, canary = f"r2-327-{_u()}", new_canary("CF327")
     q = _seed_exhausted(repo, ns, canary)
     adapter, coord, db = _adapter_and_coordinator(repo, tmp_path)
     episodes = adapter._episodes
-    real_fetch = episodes.fetch_exhausted_pending_episodes
-    erased: list[dict[str, Any]] = []
 
-    def fetch_then_erase(**kwargs: Any) -> list[dict[str, Any]]:
-        rows = [r for r in real_fetch(**kwargs) if r["episode_uuid"] == q]
-        assert rows and rows[0]["content"] == canary, rows
-        erased.append(coord.erase_memory(q))
-        return rows
+    def no_content_fetch(**kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("the sweep must not read episode content")
 
-    monkeypatch.setattr(episodes, "fetch_exhausted_pending_episodes", fetch_then_erase)
+    monkeypatch.setattr(episodes, "fetch_exhausted_pending_episodes", no_content_fetch)
 
     adapter.fail_exhausted_pending_episodes(max_attempts=3)
 
-    assert erased and erased[0]["reason"] in {"erased", "erased_incomplete"}, erased
     assert _raw_captures(repo, q) == 0
+    erased = coord.erase_memory(q)
+    assert erased["reason"] in {"erased", "erased_incomplete"}, erased
     assert all_hits(repo, db, canary) == []
 
 

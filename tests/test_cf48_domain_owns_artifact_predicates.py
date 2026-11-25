@@ -129,6 +129,7 @@ def test_the_supersession_predicate_checks_known_states_before_moving_status() -
         "              AND new.status IN $valid_statuses_by_type[new.artifact_type]\n"
         "              AND old.status IN $valid_statuses_by_type[old.artifact_type]\n"
         "              AND NOT old.status IN $terminal\n"
+        "              AND NOT new.status IN $terminal\n"
         "              AND old.namespace IN [new.namespace, $default_ns]"
     )
 

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from menhir.infrastructure.circuit_breaker import provider_unavailable_reason
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
 from menhir.services.scheduler_lease import (
     SchedulerLeaseStore,
@@ -879,16 +880,23 @@ class MaintenanceScheduler:
         except Exception as exc:
             success = False
             result = {"error": str(exc)}
-            logger.exception("Maintenance scheduler job %s failed", operation)
+            unavailable = provider_unavailable_reason(exc)
+            if unavailable is not None:
+                # #743: a billing refusal or an open breaker, already reported by the breaker.
+                # The job stopped and runs again next interval: no traceback, retryable.
+                result["provider_unavailable"] = unavailable
+                logger.warning("Maintenance scheduler job %s stopped: %s", operation, unavailable)
+            else:
+                logger.exception("Maintenance scheduler job %s failed", operation)
             record_failure_event(
                 operation=operation,
                 failure_stage="scheduler_exception",
-                classification="scheduler_error",
-                retryable=False,
+                classification="provider_unavailable" if unavailable else "scheduler_error",
+                retryable=unavailable is not None,
                 queue_depth=self.ingest_service.get_queue_depth(),
                 error_type=type(exc).__name__,
                 error=str(exc),
-                traceback_text="".join(
+                traceback_text="" if unavailable else "".join(
                     traceback.format_exception(type(exc), exc, exc.__traceback__)
                 ),
             )

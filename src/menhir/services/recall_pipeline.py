@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import partial
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from menhir.services.ingest_service import IngestService
+from typing import Any
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
@@ -22,8 +18,7 @@ from menhir.domain.assertion_operations import (
 )
 from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.count_match import match_slot_row
-from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
-from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
@@ -44,38 +39,33 @@ from menhir.domain.recall import (
     ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
-    TemporalFact,
     parse_verifier_evidence,
 )
+from menhir.domain.oracles import OracleResult, QueryContext
 from menhir.domain.retrieval_tuning import (
-    SOURCE_PRIORS,
+    RANKER_ORACLE_COMBINED,
+    RANKER_ORACLE_ONLY,
     CandidateSource,
     RetrievalTuningConfig,
 )
 from menhir.domain.retrieval_trace_models import (
-    AssertionShadowRow,
-    AssertionShadowTrace,
-    FacetShadowRow,
     FacetShadowTrace,
     RetrievalTrace,
     ScoringTrace,
     ViewReachability,
 )
-from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.infrastructure.graphiti_client import _circuit_open_cause
 from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
-from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
+from menhir.services.cross_encoder_rerank import order_by_rerank
+from menhir.services.ranking_explain import build_ranking_rows
+from menhir.services.rerank_oracle import CrossEncoderRerankOracle, logits_of, rerank_candidate
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
-if TYPE_CHECKING:
-    from menhir.core.bootstrap import UnavailableGraphitiClient
-from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
-from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,  # noqa: F401  (re-export pinned by test_cf60_scoring_constants_owned_by_domain)
     MIN_SIMILARITY_THRESHOLD,
-    ScoringService,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,11 +91,8 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
-    _frontier_trace_enabled,
-    _oracle_similarity,
     _query_wants_history,
     _render_scalar_history_content,
     _scalar_history_evidence_days_ago,
@@ -199,7 +186,25 @@ def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
     return view.get("recall_eligible") is True
 
 
-def embed_breaker_note(graphiti_client: Any) -> str | None:
+def embed_refusal_note(graphiti_client: Any, exc: BaseException, consequence: str) -> str | None:
+    """The breaker note when ``exc`` is the embed breaker stopping a call, else None (#642).
+
+    Covers a refusal and the provider error that tripped the breaker; None while it is closed,
+    so an ordinary embed failure still raises.
+    """
+    classify = getattr(graphiti_client, "_embed_unavailable", None)
+    try:
+        stopped = classify(exc) if callable(classify) else None
+    except Exception:
+        stopped = None
+    if stopped is None and _circuit_open_cause(exc) is None:
+        return None
+    return embed_breaker_note(graphiti_client, consequence=consequence)
+
+
+def embed_breaker_note(
+    graphiti_client: Any, *, consequence: str = "results are keyword-only"
+) -> str | None:
     """Say why semantic matching is off when the embed breaker is not closed (#632).
 
     Reads the breaker snapshot once per recall; None when closed or unreadable.
@@ -223,7 +228,7 @@ def embed_breaker_note(graphiti_client: Any) -> str | None:
         when = "probe due now"
     else:
         when = f"next probe in {max(1, math.ceil(remaining / 60))}m"
-    return f"semantic search off: {cause} ({when}); results are keyword-only"
+    return f"semantic search off: {cause} ({when}); {consequence}"
 
 
 async def _build_source_memories(
@@ -289,9 +294,19 @@ async def _build_source_memories(
                 cosine=float(row.get("cosine") or 0.0),
                 source=row.get("source") or None,
             ))
+        # Rank by relevance before the chronological display sort, so consumers that must
+        # cut the section (build_context's budget) keep the best matches. The sort is stable,
+        # so equal cosines keep the lane's order (search order, or spread's pick order).
+        by_relevance = sorted(range(len(section)), key=lambda i: -section[i].cosine)
+        for rank, i in enumerate(by_relevance, start=1):
+            section[i] = replace(section[i], rank=rank)
         section.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
         return tuple(section), None, int((perf_counter() - started) * 1000)
     except Exception as exc:
+        if _circuit_open_cause(exc) is not None:
+            # Expected while the embed breaker refuses, and recall already carries its note.
+            logger.info("Source-memory lane skipped: embedding unavailable (%s)", exc)
+            return None, "Source-memory lane unavailable", int((perf_counter() - started) * 1000)
         logger.error(
             "Source-memory lane unavailable: %s: %s",
             exc.__class__.__name__,
@@ -334,6 +349,10 @@ def _memory_admitted(
     # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
     if meta.get("structure_role") is not None:
         return False
+    # A raw-capture copy of a failed episode (written before #662) duplicates the episode, which
+    # the source-memory lane now returns, and was never retired when the episode later succeeded.
+    if meta.get("raw_capture") is True:
+        return False
     scope = str(meta.get("scope") or NodeScope.SESSION)
     freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
     # CANDIDATE is the human-review tier: never recalled until approved
@@ -342,6 +361,9 @@ def _memory_admitted(
     if scope == NodeScope.CANDIDATE:
         return False
     if freshness == FreshnessState.GONE:
+        return False
+    # Operator-retired memory (retire_memory) is hidden from ranked recall; Views never carry it.
+    if not bool(meta.get("is_view")) and bool(meta.get("memory_retired")):
         return False
     if not service._session_scope_admitted(
         scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
@@ -433,12 +455,22 @@ async def run_recall_history(
     if not stripped:
         raise ValueError("recall_history requires a non-empty query")
     effective_limit = max(1, min(50, int(limit)))
-    query_vector = await service.graphiti_client.embed_query(stripped)
+    try:
+        query_vector = await service.graphiti_client.embed_query(stripped)
+    except Exception as exc:
+        note = embed_refusal_note(
+            service.graphiti_client, exc, "recall_history needs embeddings, so nothing was searched"
+        )
+        if note is None:
+            raise
+        return RecallHistoryResult(query=stripped, memories=(), note=note)
     rows = await asyncio.to_thread(
         service.graph_adapter.search_episode_embeddings,
         query_vector,
         limit=effective_limit,
         namespace=namespace,
+        # History is a historical surface: retired memories stay, labelled.
+        include_retired=True,
         **_embedding_model_kwargs(service),
     )
     memories: list[SourceMemory] = []
@@ -456,6 +488,7 @@ async def run_recall_history(
             reference_time=row.get("reference_time") or None,
             cosine=float(row.get("cosine") or 0.0),
             source=row.get("source") or None,
+            retired=bool(row.get("memory_retired")),
         ))
     memories.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
     return RecallHistoryResult(
@@ -1503,10 +1536,14 @@ async def _run_recall(
                     details={"observations_added": obs_added,
                              "authority_annotations": auth_added,
                              "intent": _intent.value, "query": query[:120]})
-        except Exception:
-            logger.exception(
-                "observation injection failed query=%r; leaving recall unchanged", query[:60]
-            )
+        except Exception as exc:
+            if _circuit_open_cause(exc) is not None:
+                # #642: expected while the embed breaker refuses; recall already carries its note.
+                logger.info("observation injection skipped: embedding unavailable (%s)", exc)
+            else:
+                logger.exception(
+                    "observation injection failed query=%r; leaving recall unchanged", query[:60]
+                )
         _t_phases["observation_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Scalar history advisory lane (flag-gated) ---
@@ -1661,10 +1698,11 @@ async def _run_recall(
             logger.exception(
                 "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
-    # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
-    # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
-    # fact for an explicit current-state query, but only if all six authority gates pass. Failures
-    # never break recall (logged, recall proceeds unchanged). OFF by default -> no behavior change.
+    # --- Step 7: current-state View authority suppression (follows the scalar lane) ---
+    # When enabled (default on whenever the scalar state lane is enabled; #568), a current
+    # scalar_state View may suppress an older PROVENANCE-LINKED graph fact for an explicit
+    # current-state query, only if all six authority gates pass. Failures never break recall
+    # (logged, recall proceeds unchanged).
     if service.scalar_view_authority_enabled and namespace is not None and candidate_inputs:
         _t = perf_counter()
         try:
@@ -1804,12 +1842,19 @@ async def _run_recall(
         )
 
     # --- Frontier provenance: derive evidence_kinds + project for the oracle/warden path ---
-    # Only when a frontier portion will read it (active gate/ranking or the shadow pass),
+    # Only when a frontier portion will read it (active gate/ranking, oracle_combined, or shadow),
     # so the old path issues no extra query. Merged into metadata_by_uuid so both
     # _apply_frontier and the shadow see it.
+    will_rerank = (
+        tuning.ranking_strategy != RANKER_ORACLE_ONLY
+        and tuning.enable_cross_encoder_rerank
+        and bool(candidates)
+        and bool(getattr(service, "rerank_model_dir", ""))
+    )
     frontier_active = (
         tuning.enable_oracle_ranking
         or tuning.enable_warden_gate
+        or (tuning.ranking_strategy == RANKER_ORACLE_COMBINED and will_rerank)
         or (trace and tuning.enable_assertion_shadow)
     )
     # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
@@ -1819,19 +1864,50 @@ async def _run_recall(
         _t = perf_counter()
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
+        # Propagate :WorkArtifact-projected lifecycle fields (#579) onto CandidateData so
+        # ScoredMemory -> memory_lifecycle_note sees them in recall_memories / context / REST.
+        candidates = [
+            replace(
+                c,
+                artifact_status=c.artifact_status or (metadata_by_uuid.get(c.uuid) or {}).get("artifact_status"),
+                superseded_by=c.superseded_by or (metadata_by_uuid.get(c.uuid) or {}).get("superseded_by"),
+            )
+            for c in candidates
+        ]
 
-    # --- Cross-encoder rerank (default on): replaces the RRF floor when it runs ---
+    _fc_norm = await service._normalize_file_context_path(file_context) if file_context else ""
+    query_files: tuple[str, ...] = (_fc_norm,) if _fc_norm else ()
+
+    # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---
+    # Called once here: whether it succeeded decides the floor bypass and the result cap below,
+    # and oracle_combined hands the same results to the combiner (no second inference).
     rerank: dict[str, float] | None = None
+    rerank_results: dict[str, OracleResult] | None = None
     rerank_note: str | None = None
     # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).
-    if tuning.enable_cross_encoder_rerank and candidates and getattr(service, "rerank_model_dir", ""):
+    if will_rerank:
         _t = perf_counter()
-        rerank, rerank_note = await rerank_scores(
-            query, candidates, metadata_by_uuid, top_n=tuning.rerank_top_n,
+        rerank_oracle = CrossEncoderRerankOracle(
             model_dir=getattr(service, "rerank_model_dir", ""),
             device=getattr(service, "rerank_device", "auto"),
+            top_n=tuning.rerank_top_n,
         )
+        rerank_results, rerank_note = await rerank_oracle.score_batch(
+            QueryContext(text=query),
+            [
+                rerank_candidate(
+                    c.uuid, getattr(c, "name", None),
+                    (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
+                )
+                for c in candidates
+            ],
+        )
+        if rerank_results is not None:
+            rerank = logits_of(rerank_results)
         _t_phases["rerank"] = int((perf_counter() - _t) * 1000)
+    # The strategy that actually ordered this recall: without rerank logits every strategy
+    # runs as oracle_only (floor + residual blend), as it did before strategies existed.
+    effective_strategy = tuning.ranking_strategy if rerank is not None else RANKER_ORACLE_ONLY
 
     # --- Phase 2: score + rank ---
     _t = perf_counter()
@@ -1864,13 +1940,22 @@ async def _run_recall(
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
     # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
-    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate):
+    combined = effective_strategy == RANKER_ORACLE_COMBINED
+    ranking_explain: dict[str, Any] | None = {} if trace else None
+    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or combined):
         _t = perf_counter()
-        # A reranked order is final: wardens still gate it, the oracle blend does not reorder it.
+        # reranker_only: the reranked order is final; wardens gate it, the oracle blend does not
+        # reorder it. oracle_combined: the combiner orders it (no residual blend); wardens gate.
         frontier_tuning = replace(tuning, enable_oracle_ranking=False) if rerank is not None else tuning
+        frontier_kwargs: dict[str, Any] = {}
+        if combined:
+            frontier_kwargs["rerank_results"] = rerank_results
+        if ranking_explain is not None:
+            frontier_kwargs["explain"] = ranking_explain
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, frontier_tuning,
-            query_project=file_context_project, warden_status=guard_status,
+            query_project=file_context_project, query_files=query_files,
+            warden_status=guard_status, **frontier_kwargs,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -2095,6 +2180,7 @@ async def _run_recall(
                 assertion_shadow = await service._run_assertion_shadow(
                     query, namespace, candidate_inputs, metadata_by_uuid,
                     query_project=file_context_project,
+                    query_files=query_files,
                     tuning=tuning,
                 )
                 record_mcp_event(
@@ -2214,6 +2300,10 @@ async def _run_recall(
             facet_shadow=facet_shadow,
             facet_active=facet_active_trace,
             rank_shadow_warning=rank_shadow_warning,
+            ranking=build_ranking_rows(
+                top_results, effective_strategy, rerank or {}, ranking_explain or {},
+                tuning.oracle_role_weights,
+            ),
         )
 
     return RecallResult(

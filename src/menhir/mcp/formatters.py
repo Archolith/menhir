@@ -615,6 +615,27 @@ def _episode_status_guidance(*, state: str | None, timed_out: bool) -> str:
     )
 
 
+#: What changes a PENDING source-search status, by reason (#409). The enrichment wait tracks
+#: graph work only; none of these is fixed by waiting on it.
+_SOURCE_SEARCH_GUIDANCE = {
+    "missing": (
+        "No source embedding yet. The embedding repair job retries it within minutes; check "
+        "this same receipt again later."
+    ),
+    "missing_in_flight": (
+        "No source embedding yet; the ingest step embeds it before this memory finishes."
+    ),
+    "size_mismatch": (
+        "The stored source embedding has a different size than the current embedder, so source "
+        "search cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+    "model_mismatch": (
+        "The stored source embedding was made by a different embedding model, so source search "
+        "cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+}
+
+
 def _format_episode_status(
     *,
     episode_uuid: str,
@@ -645,6 +666,7 @@ def _format_episode_status(
             f"enriched_episode_uuid: {row.get('resolved_episode_uuid') or '(pending)'}",
             f"timed_out: {timed_out}",
             f"updates: {len(history)}",
+            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
         ]
     )
     lines.append(
@@ -652,6 +674,10 @@ def _format_episode_status(
             state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
         )
     )
+    if row.get("source_search_status") == "PENDING":
+        reason = str(row.get("source_search_reason") or "missing")
+        lines.append(f"source_search_reason: {reason}")
+        lines.append(f"source_search_guidance: {_SOURCE_SEARCH_GUIDANCE.get(reason, _SOURCE_SEARCH_GUIDANCE['missing'])}")
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):
@@ -692,13 +718,13 @@ _stuck_count_cache: tuple[float, int] | None = None
 async def _standing_unrecallable_count(backend: object) -> int:
     """Return how many episodes are currently FAILED, hence holding content with no entities.
 
-    Recall searches `:Entity`, so a FAILED episode's text is in the graph but unreachable --
-    and `add_memory` has already told its caller the write succeeded. Surfacing the count in
+    A FAILED episode's text is found only by the source-memory lane (#662): it has no entities
+    or facts -- and `add_memory` has already told its caller the write succeeded. Surfacing the count in
     the write's own response is the only signal that reaches EVERY client (Claude, Codex,
     opencode, Qwen); a host hook would only cover whichever harness installs it.
 
     Counts all FAILED, not just the never-retried ones: from the caller's side "waiting for a
-    retry" and "parked forever" are the same state -- not recallable right now. The
+    retry" and "parked forever" are the same state -- no entities or facts right now. The
     terminal/manual_review split is an operator concern and lives in the queue-health warning.
 
     Best-effort by construction: a failure to count must never fail the write.
@@ -812,6 +838,31 @@ def _operator_warning_line(entry: Any) -> str | None:
             f"WARNING: {summary}. Enrichment cannot progress until provider "
             "credits are added; stop waiting on queued episodes."
         )
+    elif kind == "conflicts":
+        try:
+            confirmed = max(0, int(entry.get("unresolved_groups") or 0))
+            stale = max(0, int(entry.get("stale_pending_groups") or 0))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if confirmed <= 0 and stale <= 0:
+            return None
+        # A group can hold both a confirmed member and a stuck one, so the two counts are
+        # worded per group and not summed.
+        parts = []
+        if confirmed:
+            parts.append(
+                f"{confirmed} conflict group{'' if confirmed == 1 else 's'} "
+                f"{'has' if confirmed == 1 else 'have'} a confirmed contradiction nobody has "
+                "decided (see review_inbox or list_conflicts)"
+            )
+        if stale:
+            parts.append(
+                f"{stale} conflict group{'' if stale == 1 else 's'} "
+                f"{'has' if stale == 1 else 'have'} a possible contradiction waiting over 24h "
+                "for LLM review (run_llm_conflict_review retries it)"
+            )
+        text = f"WARNING: {'; '.join(parts)}. Recall marks or withholds these memories until then."
+
     elif kind != "failed_episodes":
         # A kind from a newer serve: its own summary.
         return f"WARNING: {summary}." if summary else None
@@ -824,8 +875,8 @@ def _operator_warning_line(entry: Any) -> str | None:
             return None
         text = (
             f"WARNING: {unrecallable} earlier "
-            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
-            f"-- the text is stored but has no entities, so recall cannot return it. "
+            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED -- the text is "
+            f"stored and source-memory recall can return it, but it has no entities or facts. "
             f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
         )
     # No "how to silence this" text: these lines reach models at every tier, and silencing a
@@ -898,7 +949,7 @@ async def _queue_summary(backend: object) -> str:
         entries = (
             await _legacy_operator_warnings(backend)
             if _benchmark_mode()
-            else await _unacked_operator_warnings(backend)
+            else _caller_visible_warnings(await _unacked_operator_warnings(backend))
         )
         lines = [line for line in map(_operator_warning_line, entries) if line]
     except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed

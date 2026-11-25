@@ -362,7 +362,8 @@ def main(argv: list[str] | None = None, *, run: Runner = run_command) -> int:
             require_clean_main(run)
         if args.command == "version":
             edits = version_edits(REPO, args.new, summary=args.summary, date=date)
-            branch, title = f"chore/release-{args.new}", f"chore: release {args.new}"
+            # tests.yml runs stdio-e2e only on release/* pull requests.
+            branch, title = f"release/{args.new}", f"chore: release {args.new}"
             body = f"Version bump for {args.new}: {args.summary}"
         else:
             release = fetch_fork_release(args.new)

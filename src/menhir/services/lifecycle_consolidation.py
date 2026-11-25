@@ -26,6 +26,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services import auto_mutation_policy as amp
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,26 @@ class LifecycleConsolidationMixin:
             )
         return len(deleted)
 
+    async def _cleanup_orphan_episodes(self, session_id: str | None) -> int:
+        """Orphan-episode sweep behind MENHIR_AUTO_DELETE_MODE: off -> 0, propose -> record, on -> delete."""
+        mode = amp.auto_delete_mode()
+        if mode == "on":
+            return await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        if mode == "propose":
+            try:
+                uuids = await asyncio.to_thread(
+                    self.graph_adapter.fetch_orphan_episode_uuids, session_id
+                )
+            except Exception:  # noqa: BLE001 -- a proposal read must never abort consolidation
+                logger.warning("could not read orphan episodes to propose", exc_info=True)
+                return 0
+            await asyncio.to_thread(amp.record_proposals, amp.DELETE_PROPOSAL, [
+                (u, None, amp.proposal_context(amp.AUTO_DELETE_PROPOSED, "orphan_episode_cleanup"))
+                for u in uuids
+            ])
+            logger.info("auto delete: proposed %d orphan episode(s), none deleted", len(uuids))
+        return 0
+
     def _delete_coordinator(self):
         """The journaled delete saga, built lazily on the default telemetry sidecar.
 
@@ -184,7 +205,7 @@ class LifecycleConsolidationMixin:
             # No promotion candidates, but demoted nodes may still have expired — run the
             # TTL-expiry sweep (promotion cannot rescue anything here, so ordering is moot).
             deleted = await self._expire_demoted_session_nodes(session_id)
-            orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+            orphans = await self._cleanup_orphan_episodes(session_id)
             return ConsolidationResult(
                 promoted=0,
                 deleted=deleted,
@@ -282,7 +303,7 @@ class LifecycleConsolidationMixin:
             logger.info("Skipped %d PENDING/ENRICHING episodes (not yet enriched)", skipped_pending)
 
         # Phase 5: Cleanup orphan episodes
-        orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        orphans = await self._cleanup_orphan_episodes(session_id)
 
         return ConsolidationResult(
             promoted=promoted,
@@ -343,6 +364,57 @@ class LifecycleConsolidationMixin:
 
         return CorrelationService(self.graph_adapter, self.graphiti_client, llm=self.llm)
 
+    async def record_conflict_pair(
+        self, uuid: str, other_uuid: str,
+    ) -> tuple[str, int] | None:
+        """Queue one classified conflict pair, shared by consolidation and enrichment (#655).
+
+        Returns ``None`` when the pair was reviewed and suppressed within the cooldown,
+        else ``set_conflict``'s ``(group_id, updated)``. Callers have already searched
+        within the node's namespace, so the pair is same-silo.
+        """
+        # Skip pairs that were already reviewed and suppressed
+        try:
+            if await asyncio.to_thread(
+                telemetry_store.is_pair_resolved,
+                uuid, other_uuid,
+                cooldown_days=self.settings.conflict_cooldown_days,
+            ):
+                return None
+        except Exception:
+            logger.debug("Suppression check failed for %s <-> %s", uuid, other_uuid, exc_info=True)
+
+        # SSOT-08: a claim conflicting with a PROMOTED node is not an
+        # ordinary two-sided disagreement to be auto-adjudicated by the
+        # symmetric LLM conflict-review voter (confirm_pending_conflicts
+        # defaults to status='pending_llm_review') -- the PROMOTED side is
+        # ground truth by definition. Route it straight to 'unresolved'
+        # (an existing, already-meaningful conflict-pipeline status: LLM
+        # confirmed genuine contradiction) so it surfaces for manual
+        # operator review instead of being silently voted on.
+        initial_status = "pending_llm_review"
+        try:
+            pair_metadata = await asyncio.to_thread(
+                self.graph_adapter.fetch_entity_merge_metadata, [uuid, other_uuid],
+            )
+            if any(str(m.get("scope") or "") == "PROMOTED" for m in pair_metadata):
+                initial_status = "unresolved"
+        except Exception:
+            logger.debug(
+                "PROMOTED-scope lookup failed for %s <-> %s; defaulting to pending_llm_review",
+                uuid, other_uuid, exc_info=True,
+            )
+
+        # High similarity — flag as a conflict (status depends on whether
+        # either side is PROMOTED, see above).
+        new_group_id = str(uuid4())
+        canonical_group_id, updated = await asyncio.to_thread(
+            self.graph_adapter.set_conflict,
+            uuid, other_uuid, new_group_id,
+            initial_status=initial_status,
+        )
+        return canonical_group_id, updated
+
     async def _check_contradictions_batch(
         self,
         candidates: list[dict[str, Any]],
@@ -364,7 +436,9 @@ class LifecycleConsolidationMixin:
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
         judge after deterministic vetoes. Merge only on unanimous yes; non-unanimous or
-        judge-unavailable → conflict (fail-safe: never merge without confirmation).
+        judge-unavailable → conflict (fail-safe: never merge without confirmation). A confirmed
+        duplicate is still not merged unless MENHIR_AUTO_MERGE_MODE is "on"; classify_pair then
+        returns ``none`` with a reason and the node's scan ends without a conflict.
         """
         correlation_service = self._build_correlation_service()
         conflicts = 0
@@ -414,46 +488,11 @@ class LifecycleConsolidationMixin:
                 # final_action == "conflict" (native conflict-range score, or a
                 # merge proposal blocked by veto/judge falling through to conflict)
 
-                # Skip pairs that were already reviewed and suppressed
-                try:
-                    if await asyncio.to_thread(
-                        telemetry_store.is_pair_resolved,
-                        uuid, other_uuid,
-                        cooldown_days=self.settings.conflict_cooldown_days,
-                    ):
-                        continue
-                except Exception:
-                    logger.debug("Suppression check failed for %s <-> %s", uuid, other_uuid, exc_info=True)
-
-                # SSOT-08: a claim conflicting with a PROMOTED node is not an
-                # ordinary two-sided disagreement to be auto-adjudicated by the
-                # symmetric LLM conflict-review voter (confirm_pending_conflicts
-                # defaults to status='pending_llm_review') -- the PROMOTED side is
-                # ground truth by definition. Route it straight to 'unresolved'
-                # (an existing, already-meaningful conflict-pipeline status: LLM
-                # confirmed genuine contradiction) so it surfaces for manual
-                # operator review instead of being silently voted on.
-                initial_status = "pending_llm_review"
-                try:
-                    pair_metadata = await asyncio.to_thread(
-                        self.graph_adapter.fetch_entity_merge_metadata, [uuid, other_uuid],
-                    )
-                    if any(str(m.get("scope") or "") == "PROMOTED" for m in pair_metadata):
-                        initial_status = "unresolved"
-                except Exception:
-                    logger.debug(
-                        "PROMOTED-scope lookup failed for %s <-> %s; defaulting to pending_llm_review",
-                        uuid, other_uuid, exc_info=True,
-                    )
-
-                # High similarity — flag as a conflict (status depends on whether
-                # either side is PROMOTED, see above).
-                new_group_id = str(uuid4())
-                canonical_group_id, updated = await asyncio.to_thread(
-                    self.graph_adapter.set_conflict,
-                    uuid, other_uuid, new_group_id,
-                    initial_status=initial_status,
-                )
+                recorded = await self.record_conflict_pair(uuid, other_uuid)
+                if recorded is None:
+                    # Already reviewed and suppressed: keep checking remaining pairs.
+                    continue
+                canonical_group_id, updated = recorded
                 if updated > 0:
                     conflicts += 1
                     logger.info(

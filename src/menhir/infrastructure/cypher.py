@@ -392,6 +392,8 @@ ENTITY_METADATA_FIELDS = (
     "n.edge_count AS edge_count",
     "n.sharpness AS sharpness",
     "n.freshness AS freshness",
+    # Legacy raw-capture copies of failed episodes are not recalled (#662); the episode is.
+    "coalesce(n['raw_capture'], false) AS raw_capture",
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
     # SESSION visibility is caller-relative. The recall boundary needs this owner stamp
@@ -413,6 +415,8 @@ ENTITY_METADATA_FIELDS = (
     "n['scalar_basis'] AS scalar_basis",
     "n['sh_op_counts'] AS sh_op_counts",
     "coalesce(n.retired, false) AS retired",
+    # Memory-level RETIRED marker (retire_memory); distinct from the View `retired` flag above.
+    "coalesce(n.memory_retired, false) AS memory_retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
     "CASE WHEN NOT coalesce(n.is_view, false) THEN true "

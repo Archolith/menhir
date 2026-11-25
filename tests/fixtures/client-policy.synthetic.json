@@ -39,7 +39,7 @@
       }
     }
   },
-  "canonical_digest": "1e0713184cff90569676511ff520efa09c57d351eee741218adba877ff924fae",
+  "canonical_digest": "c39a0cf100c4e69d7c20bcbaf857748f9a3faccfdb7d1a86df00fefc0e1e838c",
   "clients": {
     "example-chatgpt-web": {
       "allowed_tools": [
@@ -97,7 +97,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -186,7 +188,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -282,7 +286,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -358,7 +364,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -382,6 +390,97 @@
         "menhir:read",
         "menhir:write",
         "menhir:admin"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=agy": {
+      "allowed_tools": [
+        "add_memory",
+        "add_todo",
+        "build_context",
+        "close_stale_todos",
+        "close_todo",
+        "get_beacon_evidence",
+        "get_scalar_view_items",
+        "get_todo",
+        "list_todos",
+        "query_structure",
+        "read_flagged_memories",
+        "recall_context_memories",
+        "recall_history",
+        "recall_memories",
+        "recall_timeline"
+      ],
+      "denied_tools": [
+        "acknowledge_warning",
+        "add_candidate",
+        "add_memory_and_track",
+        "audit_artifact_corpus",
+        "close_memory",
+        "delete_memories",
+        "delete_memory",
+        "delete_namespace",
+        "flag_memory",
+        "force_reenrich",
+        "force_release_enrichment_lease",
+        "force_scheduler_takeover",
+        "get_artifact",
+        "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
+        "get_episode_trace",
+        "get_memory_stats",
+        "get_provenance",
+        "ingest_document",
+        "ingest_project",
+        "link_artifacts",
+        "link_memory_to_todo",
+        "list_artifact_questions",
+        "list_artifacts",
+        "list_candidates",
+        "list_clients",
+        "list_conflicts",
+        "list_enrichment_queue",
+        "list_namespace_memories",
+        "mint_client",
+        "pause_scheduler",
+        "promote_memory",
+        "rate_recall",
+        "recover_orphans",
+        "relocate_artifact_source",
+        "reopen_todo",
+        "repair_stale_enrichment",
+        "requeue_conflicts_for_llm_review",
+        "resolve_conflict",
+        "resolve_todo",
+        "restore_memory",
+        "resume_scheduler",
+        "retire_memory",
+        "review_candidate",
+        "review_inbox",
+        "revoke_client",
+        "run_llm_conflict_review",
+        "scan_for_conflicts",
+        "supersede_artifact",
+        "supersede_todo",
+        "transition_artifact",
+        "unflag_memory",
+        "view_entropy",
+        "watch_enrichment"
+      ],
+      "label": "agent-smith-agy",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Antigravity CLI",
+        "redirect_uris": [
+          "http://127.0.0.1:43694/oauth/callback",
+          "http://localhost:43694/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
       ]
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=antigravity-ide": {
@@ -444,7 +543,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -460,6 +561,14 @@
       "label": "agent-smith-antigravity-ide",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Antigravity IDE",
+        "redirect_uris": [
+          "http://127.0.0.1:43684/oauth/callback",
+          "http://localhost:43684/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -521,7 +630,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -541,6 +652,14 @@
       "label": "agent-smith-claude",
       "maximum_tier": "operator",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Claude",
+        "redirect_uris": [
+          "http://127.0.0.1:43681/oauth/callback",
+          "http://localhost:43681/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -607,7 +726,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -623,6 +744,14 @@
       "label": "agent-smith-cline",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Cline",
+        "redirect_uris": [
+          "http://127.0.0.1:43691/oauth/callback",
+          "http://localhost:43691/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -684,7 +813,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -704,6 +835,14 @@
       "label": "agent-smith-codex",
       "maximum_tier": "operator",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Codex",
+        "redirect_uris": [
+          "http://127.0.0.1:43682/oauth/callback",
+          "http://localhost:43682/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -770,7 +909,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -786,6 +927,14 @@
       "label": "agent-smith-gemini",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Gemini",
+        "redirect_uris": [
+          "http://127.0.0.1:43683/oauth/callback",
+          "http://localhost:43683/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -851,7 +1000,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -867,6 +1018,14 @@
       "label": "agent-smith-gemini-config",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Gemini Config",
+        "redirect_uris": [
+          "http://127.0.0.1:43685/oauth/callback",
+          "http://localhost:43685/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -932,7 +1091,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -948,6 +1109,14 @@
       "label": "agent-smith-goose",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Goose",
+        "redirect_uris": [
+          "http://127.0.0.1:43688/oauth/callback",
+          "http://localhost:43688/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -1013,7 +1182,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -1029,6 +1200,14 @@
       "label": "agent-smith-opencode",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - OpenCode",
+        "redirect_uris": [
+          "http://127.0.0.1:43686/oauth/callback",
+          "http://localhost:43686/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -1094,7 +1273,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -1110,6 +1291,14 @@
       "label": "agent-smith-qwen",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Qwen",
+        "redirect_uris": [
+          "http://127.0.0.1:43687/oauth/callback",
+          "http://localhost:43687/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -1171,7 +1360,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "run_llm_conflict_review",
@@ -1191,6 +1382,14 @@
       "label": "agent-smith-wsl-claude",
       "maximum_tier": "operator",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - Claude (WSL)",
+        "redirect_uris": [
+          "http://127.0.0.1:43692/oauth/callback",
+          "http://localhost:43692/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write",
@@ -1257,7 +1456,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -1273,6 +1474,14 @@
       "label": "agent-smith-wsl-opencode",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - OpenCode (WSL)",
+        "redirect_uris": [
+          "http://127.0.0.1:43693/oauth/callback",
+          "http://localhost:43693/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"
@@ -1338,7 +1547,9 @@
         "requeue_conflicts_for_llm_review",
         "resolve_conflict",
         "resolve_todo",
+        "restore_memory",
         "resume_scheduler",
+        "retire_memory",
         "review_candidate",
         "review_inbox",
         "revoke_client",
@@ -1354,6 +1565,14 @@
       "label": "agent-smith-zcode",
       "maximum_tier": "agent",
       "namespace": "",
+      "registration": {
+        "client_name": "Agent Smith - ZCode",
+        "redirect_uris": [
+          "http://127.0.0.1:43690/oauth/callback",
+          "http://localhost:43690/oauth/callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"

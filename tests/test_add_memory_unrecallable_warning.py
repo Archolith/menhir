@@ -57,7 +57,7 @@ async def test_queue_summary_warns_when_writes_are_being_dropped() -> None:
     summary = await _queue_summary(_Backend(failed_count=196))
 
     assert "queue_depth=" in summary            # existing snapshot preserved
-    assert "WARNING: 196 earlier memories are FAILED and NOT recallable" in summary
+    assert "WARNING: 196 earlier memories are FAILED -- the text is stored and source-memory recall" in summary
     assert "get_enrichment_status" in summary   # names the way to check this write
 
 

@@ -26,6 +26,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services import auto_mutation_policy as amp
 
 logger = logging.getLogger(__name__)
 
@@ -361,14 +362,29 @@ class LifecycleDecayMixin:
                 self.graph_adapter.mark_decay_candidates_selected,
                 [str(row["uuid"]) for row in delete_candidates],
             )
+        proposed_deletes: list[tuple[str, str | None, str]] = []
         for candidate in delete_candidates:
             candidate["last_accessed_days_ago"] = days_ago(candidate.get("last_accessed"))
             if self.should_delete(candidate):
                 del_uuid = str(candidate.get("uuid") or "")
+                # Automatic deletion is gated by MENHIR_AUTO_DELETE_MODE: only "on" deletes.
+                delete_mode = amp.auto_delete_mode()
+                if delete_mode != "on":
+                    if delete_mode == "propose" and del_uuid:
+                        proposed_deletes.append((
+                            del_uuid, None,
+                            amp.proposal_context(
+                                amp.AUTO_DELETE_PROPOSED, "decay_sweep",
+                                edge_count=candidate.get("edge_count"),
+                                sharpness=candidate.get("sharpness"),
+                            ),
+                        ))
+                    continue
                 outcome = await asyncio.to_thread(self.graph_adapter.bridge_and_delete, del_uuid)
                 deleted += int(outcome.get("deleted", 0))
                 edges_bridged += int(outcome.get("edges_bridged", 0))
                 if outcome.get("deleted"):
+                    await asyncio.to_thread(amp.complete_proposals, amp.DELETE_PROPOSAL, [del_uuid])
                     record_lifecycle_action(
                         action="gone",
                         node_uuid=del_uuid,
@@ -377,6 +393,10 @@ class LifecycleDecayMixin:
                         after_freshness="gone",
                         llm_used=False,
                     )
+
+        if proposed_deletes:
+            await asyncio.to_thread(amp.record_proposals, amp.DELETE_PROPOSAL, proposed_deletes)
+            logger.info("auto delete: decay proposed %d node(s), none deleted", len(proposed_deletes))
 
         # Degree-zero orphan cleanup was REMOVED (2026-07-13). It inferred physical-deletion
         # eligibility from node isolation alone -- bypassing freshness, memory type, age,

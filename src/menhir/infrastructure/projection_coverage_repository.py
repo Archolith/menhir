@@ -67,7 +67,7 @@ class ProjectionCoverageRepository:
                    a.stated_span AS stated_span,
                    toString(a.valid_at) AS valid_at, toString(a.learned_at) AS learned_at,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
-                        ELSE coalesce(admitted_episode_uuids[0], '') END AS episode_uuid,
+                        ELSE coalesce(admitted_episode_uuids[0], CASE WHEN coalesce(te.evidence_finalized, false) AND NOT coalesce(te.evidence_quarantined, false) THEN te.turn_id END, '') END AS episode_uuid,
                    CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
                         ELSE coalesce(admitted_episode_uuids[0], '') END AS source_episode_uuid,
                    CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END AS turn_id,

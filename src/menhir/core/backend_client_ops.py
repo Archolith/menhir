@@ -115,6 +115,14 @@ class BackendClientOpsMixin:
     async def promote_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("promote_memory", {"node_uuid": node_uuid}))
 
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        return dict(
+            await self._request("retire_memory", {"node_uuid": node_uuid, "reason": reason}) or {}
+        )
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        return dict(await self._request("restore_memory", {"node_uuid": node_uuid}) or {})
+
     async def delete_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("delete_memory", {"node_uuid": node_uuid}))
 
@@ -141,6 +149,32 @@ class BackendClientOpsMixin:
                 "dry_run": dry_run,
             },
         )
+
+    async def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "fetch_namespace_build_counts",
+            {
+                "namespace": namespace,
+                "submitted_epoch_millis": submitted_epoch_millis,
+                "sections": sections,
+            },
+        )
+
+    async def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return list(
+            await self._request("list_failed_evidence_projections", {"namespace": namespace}) or []
+        )
+
+    async def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return await self._request("promote_namespace_scope", {"namespace": namespace})
+
+    async def reset_namespace(self, namespace: str, *, force: bool = False) -> dict[str, Any]:
+        return await self._request("reset_namespace", {"namespace": namespace, "force": force})
 
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         return bool(

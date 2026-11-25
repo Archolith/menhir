@@ -275,6 +275,12 @@ mcp:
   mcp.tool.promote_memory:
     owner: endpoints.md
     meaning: Promote a PERSISTENT memory to PROMOTED ground truth
+  mcp.tool.retire_memory:
+    owner: endpoints.md
+    meaning: Hide a memory from default recall without changing anything else
+  mcp.tool.restore_memory:
+    owner: endpoints.md
+    meaning: Restore a retired memory to its prior visibility
   mcp.tool.close_memory:
     owner: endpoints.md
     meaning: Mark a TEMPORAL memory as completed

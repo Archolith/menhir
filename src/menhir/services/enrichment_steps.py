@@ -343,29 +343,10 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
         ctx.graphiti_episode_max_estimated_tokens,
     )
     if preflight_rejection is not None:
-        # PART 2: Create raw-capture for terminal breakage (preflight oversize rejection).
-        # This is best-effort — capture failure must not break the failure handling itself.
-        try:
-            episode_content = compose_episode_body(ctx.claimed)
-            if episode_content.strip():
-                # Short name: first ~60 chars of content
-                capture_name = episode_content[:60].replace("\n", " ").strip()
-                await asyncio.to_thread(
-                    ctx.graph_adapter.create_raw_capture_entity,
-                    episode_uuid=ctx.episode_uuid,
-                    name=capture_name,
-                    content=episode_content,
-                    namespace=str(ctx.claimed.get("namespace") or "default"),
-                    session_id=str(ctx.claimed.get("session_id") or ""),
-                    user_id=str(ctx.claimed.get("user_id") or ""),
-                    source=str(ctx.claimed.get("source") or "claude-code"),
-                )
-        except Exception as e:
-            logger.warning(
-                "Failed to create raw-capture for oversized episode %s: %s",
-                ctx.episode_uuid,
-                e,
-            )
+        # An oversized episode is parked before the main path embeds it. Embed it here (the
+        # embed truncates and never raises), so the source-memory lane can still recall its
+        # text (#662). No raw-capture copy: it was never retired if the episode later succeeded.
+        await embed_episode_content(ctx)
 
         failed = ctx.graph_adapter.mark_episode_failed(
             ctx.episode_uuid,
@@ -735,9 +716,9 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
     Runs unless the context turns ``source_memories_enabled`` off. Skips evidence
     projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
     and episodes that already carry an embedding, so the step is idempotent across
-    retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
-    ANY exception or timeout is logged at WARNING and swallowed: this lane must never
-    fail, delay-retry, or requeue enrichment.
+    retries. Each embedder attempt uses the 10s backoff-aware deadline. Retry one
+    timeout locally so a transient stall does not leave a READY receipt unsearchable.
+    Final failures are logged and swallowed without requeuing graph enrichment.
     """
     if not getattr(ctx, "source_memories_enabled", True):
         return
@@ -757,10 +738,17 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         content = prepare_memory_text(str(claimed.get("content") or ""), policy=non_refusing_policy())[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
         if not content.strip():
             return
-        embedding = await await_with_backoff_aware_timeout(
-            ctx.graphiti_client.embed_query(content),
-            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
-        )
+        try:
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.info("Retrying timed-out source-memory embedding episode_id=%s", ctx.episode_uuid)
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
         if not embedding:
             return
         model = _episode_embedder_model_name(ctx.graphiti_client)
@@ -1298,8 +1286,8 @@ async def stamp_and_finalize(
     # Best-effort semantic correlation check (Step 8)
     # After nodes are committed, check if they correlate with existing entities.
     # Correlations create RELATES_TO edges (0.7–0.85 sim) or trigger merge (>0.95 sim).
-    # Conflict-range pairs (0.85–0.95) are returned for the lifecycle service to flag.
-    correlation_conflicts = 0
+    # Conflict-range pairs (0.85–0.95) are queued for LLM review below (#655).
+    conflict_pairs: list[tuple[str, str]] = []
     _fence_check(ctx)
     try:
         from menhir.services.correlation_service import CorrelationService
@@ -1322,7 +1310,16 @@ async def stamp_and_finalize(
             corr_result = await correlation_service.check_correlation(
                 node.uuid, node_query, namespace=namespace,
             )
-            correlation_conflicts += corr_result.conflicts
+            # One conflict per node is queued; later pairs are fallbacks for a pair that is
+            # suppressed or cannot be written.
+            # A node absorbed by a merge is gone; its conflict pairs are moot.
+            results = corr_result.results or []
+            if not any(r.action == "merged" for r in results):
+                conflict_pairs.extend(
+                    (str(r.source_uuid), str(r.target_uuid))
+                    for r in results
+                    if r.action == "conflict" and r.target_uuid and r.target_uuid != node.uuid
+                )
             if corr_result.related > 0 or corr_result.merged > 0:
                 logger.info(
                     "Correlation check: node=%s related=%d merged=%d conflicts=%d",
@@ -1330,6 +1327,30 @@ async def stamp_and_finalize(
                 )
     except Exception:
         logger.warning("Correlation check failed (best-effort)", exc_info=True)
+    # #655: persist conflicts found at write time instead of waiting for consolidation.
+    # The fence check sits outside the try, like the steps above, so FenceLost still
+    # reaches the worker.
+    if conflict_pairs and ctx.lifecycle_service is not None:
+        flagged: set[str] = set()
+        for source_uuid, target_uuid in conflict_pairs:
+            if source_uuid in flagged:
+                continue
+            _fence_check(ctx)
+            try:
+                recorded = await ctx.lifecycle_service.record_conflict_pair(source_uuid, target_uuid)
+            except Exception:
+                logger.warning(
+                    "Conflict queue write failed for %s <-> %s (best-effort)",
+                    source_uuid, target_uuid, exc_info=True,
+                )
+                continue
+            # updated == 0: one side is gone or protected, so nothing was written.
+            if recorded is not None and recorded[1] > 0:
+                flagged.add(source_uuid)
+                logger.info(
+                    "Enrichment conflict queued: %s <-> %s (group=%s)",
+                    source_uuid, target_uuid, recorded[0],
+                )
     if ctx.lifecycle_service is not None:
         _fence_check(ctx)
         entity_uuids = [node.uuid for node in extracted_nodes]

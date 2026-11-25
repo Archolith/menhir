@@ -20,6 +20,7 @@ from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
+from menhir.infrastructure.memory_queries import STALE_PENDING_CONFLICT_SECONDS
 from menhir.infrastructure.telemetry import record_failure_event
 from menhir.services.enrichment_failures import (
     classify_enrichment_failure,
@@ -103,6 +104,9 @@ async def recover_stale_leases(
 #: are done being handled automatically -- no scheduler pass will ever pick them up again.
 _NEVER_RETRIED_CLASSIFICATIONS = ("terminal", "manual_review")
 
+#: A conflict group pending LLM review for longer than this triggers a queue-health WARNING (#651).
+_PENDING_CONFLICT_WARN_S = STALE_PENDING_CONFLICT_SECONDS
+
 
 async def observe_queue_health(
     ingest_service: SchedulerIngestService,
@@ -130,7 +134,22 @@ async def observe_queue_health(
         "pending_count": overview.get("pending_count"),
         "enriching_count": overview.get("enriching_count"),
         "failed_count": overview.get("failed_count"),
+        "pending_conflict_groups": overview.get("pending_conflict_groups"),
+        "oldest_pending_conflict_at": overview.get("oldest_pending_conflict_at"),
     }
+
+    oldest_pending_at = _parse_timestamp(overview.get("oldest_pending_conflict_at"))
+    if oldest_pending_at is not None:
+        pending_age = datetime.now(timezone.utc) - oldest_pending_at
+        if pending_age.total_seconds() > _PENDING_CONFLICT_WARN_S:
+            logger.warning(
+                "STALE PENDING CONFLICTS: %s conflict group(s) are still pending LLM review; "
+                "the oldest since %s (%.1f hours). Their members are served flagged "
+                "'possible_conflict' until the LLM review confirms or clears them.",
+                overview.get("pending_conflict_groups"),
+                overview.get("oldest_pending_conflict_at"),
+                pending_age.total_seconds() / 3600,
+            )
 
     try:
         signatures = await asyncio.to_thread(
@@ -226,9 +245,9 @@ async def review_unresolved_conflicts(
 ) -> dict[str, object]:
     """Re-evaluate unresolved conflict groups through the LLM reviewer.
 
-    Groups that the LLM clears as false positives are resolved as keep_both.
-    Groups that the LLM confirms as genuine contradictions stay unresolved
-    for manual attention. This prevents the unresolved queue from growing
+    Each unresolved member is re-checked against its group (#654). A member whose
+    every pair the LLM rejects leaves the group as false_positive; confirmed members
+    stay unresolved for manual attention. This prevents the unresolved queue from growing
     indefinitely with pairs that are merely similar but not contradictory.
     """
     counts = await lifecycle_service.confirm_pending_conflicts(

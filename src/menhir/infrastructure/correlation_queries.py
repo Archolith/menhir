@@ -180,6 +180,7 @@ class CorrelationRepository:
                    n.freshness AS freshness,
                    n.scope AS scope,
                    coalesce(n.user_flagged, false) AS user_flagged,
+                   coalesce(n.memory_retired, false) AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
@@ -207,6 +208,7 @@ class CorrelationRepository:
                     str(r["conflict_status"]) if r.get("conflict_status") is not None else None
                 ),
                 source_retention_protected=bool(r.get("source_retention_protected", False)),
+                memory_retired=bool(r.get("memory_retired", False)),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))
@@ -307,7 +309,10 @@ class CorrelationRepository:
         What it does:
           * recreate the absorbed node with its EXACT labels and typed properties;
           * recreate every incident relationship instance (both directions, with properties);
-          * restore the survivor's merge-owned property delta to its pre-merge values;
+          * restore the survivor's merge-owned property delta to its pre-merge values (content and
+            provenance only; the survivor's scope and TTL are left as they are, so retention only
+            ever rises across a merge/unmerge cycle);
+          * clear ``ttl_expires`` on the restored node (the snapshot value may be expired);
           * delete only the bridges this merge created (``bridged_from = absorbed``);
           * delete only the MENTIONS this merge rebound onto the survivor;
           * remove this absorption from the survivor's lineage SUBTRACTIVELY, so absorptions made by
@@ -327,7 +332,9 @@ class CorrelationRepository:
             SET a = $absorbed_properties,
                 a.restored_from_merge = $survivor,
                 a.restored_by_op = $operation_id,
-                a.restored_at = datetime()
+                a.restored_at = datetime(),
+                // The snapshot TTL may already be past; a restored node must not be sweepable.
+                a.ttl_expires = null
             WITH s, a
             CALL {
                 WITH a
@@ -533,6 +540,8 @@ class CorrelationRepository:
         1. Keep the richer summary/content (>20% longer = substantially more context).
         2. Union the source provenance (concatenate distinct values).
         3. Bump confidence (multiple independent observations = stronger signal).
+        3b. Survivor takes the higher live scope (SESSION < PERSISTENT) and its TTL is cleared, so a
+            merge never makes content easier to delete. Only SESSION/PERSISTENT pairs may merge.
         4. Bridge absorbed node's edges to the survivor.
         5. Part 3: Snapshot the absorbed node before deletion (audit trail for unmerge).
         6. Delete the absorbed node.
@@ -699,6 +708,11 @@ class CorrelationRepository:
             """
             MATCH (survivor:Entity {uuid: $survivor_uuid})
             MATCH (absorbed:Entity {uuid: $absorbed_uuid})
+            // Lock both nodes before reading them: promotion takes no journal lock, and a scope read
+            // before its commit would be written back over it.
+            SET survivor._merge_lock = true, absorbed._merge_lock = true
+            REMOVE survivor._merge_lock, absorbed._merge_lock
+            WITH survivor, absorbed
             // Defense in depth (plan Phase 3): repeat the MUTABLE material predicates inside the
             // mutation. The preflight above already gated the pair, but another writer could change
             // freshness/scope/flag/conflict/namespace in the window before this statement runs.
@@ -735,7 +749,13 @@ class CorrelationRepository:
                    AND all(u IN live_fact_uuids WHERE u IN $expected_fact_uuids)
                    AND all(u IN $expected_fact_uuids WHERE u IN live_fact_uuids))
             // Pick richer text — prefer the longer content when >20% difference
+            // Retention never drops through a merge: the survivor takes the higher LIVE scope of the
+            // pair (SESSION < PERSISTENT; the WHERE above admits only those two), computed here before
+            // either node changes. Same trim/upper normalization as the predicate; canonical value out.
             WITH survivor, absorbed, known_rel_ids,
+                toUpper(trim(survivor.scope)) = 'PERSISTENT'
+                    OR toUpper(trim(absorbed.scope)) = 'PERSISTENT' AS merged_persistent,
+                toUpper(trim(survivor.scope)) <> 'PERSISTENT' AS survivor_rises,
                 CASE
                     WHEN size(coalesce(absorbed.summary, absorbed.content, '')) >
                          size(coalesce(survivor.summary, survivor.content, '')) * 1.2
@@ -743,7 +763,14 @@ class CorrelationRepository:
                     ELSE survivor
                 END AS richer
             // Update survivor properties + append the Python-serialized audit entry
-            SET survivor.summary = coalesce(richer.summary, richer.content, survivor.summary),
+            SET survivor.scope = CASE WHEN merged_persistent THEN 'PERSISTENT' ELSE 'SESSION' END,
+                survivor.ttl_expires = null,
+                survivor.promoted_at = CASE
+                    WHEN merged_persistent AND survivor_rises
+                    THEN coalesce(survivor.promoted_at, datetime())
+                    ELSE survivor.promoted_at
+                END,
+                survivor.summary = coalesce(richer.summary, richer.content, survivor.summary),
                 survivor.content = CASE
                     WHEN size(coalesce(absorbed.content, '')) >
                          size(coalesce(survivor.content, '')) * 1.2

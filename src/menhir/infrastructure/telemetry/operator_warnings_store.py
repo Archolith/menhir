@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 KIND_PROVIDER_AUTH = "provider_auth"
 KIND_PROVIDER_BILLING = "provider_billing"
 KIND_FAILED_EPISODES = "failed_episodes"
-WARNING_KINDS = (KIND_PROVIDER_AUTH, KIND_PROVIDER_BILLING, KIND_FAILED_EPISODES)
+KIND_CONFLICTS = "conflicts"
+WARNING_KINDS = (KIND_PROVIDER_AUTH, KIND_PROVIDER_BILLING, KIND_FAILED_EPISODES, KIND_CONFLICTS)
+#: Kinds counted across every silo: a namespace-pinned caller does not see them.
+_DEPLOYMENT_WIDE_KINDS = (KIND_FAILED_EPISODES, KIND_CONFLICTS)
 SUBJECT_GLOBAL = "global"
 
 _FRACTION = re.compile(r"(\.\d{6})\d+")
@@ -220,7 +223,8 @@ def redact_operator_warnings_for_caller(
 ) -> list[dict[str, Any]]:
     """Drop what this caller may not see (#488 F5).
 
-    A namespace-pinned caller gets no ``failed_episodes``: that count spans every silo.
+    A namespace-pinned caller gets no ``failed_episodes`` or ``conflicts``: those counts span
+    every silo.
     Provider warnings stay -- they are deployment-wide process state. Below operator tier the
     acknowledging identity is withheld and ``acked`` stays. An unbound tier is an in-process
     call outside any request (every HTTP and stdio request binds one) and sees everything.
@@ -228,7 +232,7 @@ def redact_operator_warnings_for_caller(
 
     out: list[dict[str, Any]] = []
     for warning in warnings:
-        if pinned and warning.get("kind") == KIND_FAILED_EPISODES:
+        if pinned and warning.get("kind") in _DEPLOYMENT_WIDE_KINDS:
             continue
         if tier and tier != "operator":
             warning = {**warning, "acked_by": None, "acked_at": None}
@@ -243,15 +247,26 @@ def build_operator_warnings(
     quota_exhaustion: Any = None,
     failed_count: int = 0,
     latest_failed_at: str | None = None,
+    unresolved_conflict_groups: int = 0,
+    stale_pending_conflict_groups: int = 0,
+    latest_conflict_attention_at: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Merge durable active rows with the in-memory singletons and the live FAILED count.
+    """Merge durable active rows with the in-memory singletons and the live graph counts.
 
     A singleton with no row (no sink registered) counts as unacked. ``failed_episodes`` is
-    acked only while nothing newer than the ack watermark has entered FAILED.
+    acked only while nothing newer than the ack watermark has entered FAILED; ``conflicts``
+    only while no conflict has been confirmed, or gone stale in review, since the watermark.
     """
 
     by_key = {(r["kind"], r["subject"]): r for r in rows if r.get("state") == "active"}
     out: list[dict[str, Any]] = []
+
+    def _acked_since(row: dict[str, Any] | None, newest_at: str | None) -> bool:
+        if not (row and row.get("acked_at")):
+            return False
+        watermark = parse_iso_utc(row.get("ack_watermark"))
+        newest = parse_iso_utc(newest_at)
+        return watermark is not None and (newest is None or newest <= watermark)
 
     def _entry(kind: str, subject: str, row: dict[str, Any] | None, summary: str, **extra: Any) -> dict[str, Any]:
         row = row or {}
@@ -294,20 +309,35 @@ def build_operator_warnings(
 
     if failed_count > 0:
         row = by_key.get((KIND_FAILED_EPISODES, SUBJECT_GLOBAL))
-        acked = bool(row and row.get("acked_at"))
-        if acked:
-            watermark = parse_iso_utc(row.get("ack_watermark"))
-            newest = parse_iso_utc(latest_failed_at)
-            if watermark is None or (newest is not None and newest > watermark):
-                acked = False
+        acked = _acked_since(row, latest_failed_at)
         entry = _entry(
             KIND_FAILED_EPISODES,
             SUBJECT_GLOBAL,
             row,
-            f"{failed_count} FAILED episode(s) are stored but not recallable",
+            f"{failed_count} FAILED episode(s) are stored with no entities or facts",
             count=int(failed_count),
             latest_failed_at=latest_failed_at,
         )
         entry["acked"] = acked
+        out.append(entry)
+
+    confirmed, stale = int(unresolved_conflict_groups or 0), int(stale_pending_conflict_groups or 0)
+    if confirmed > 0 or stale > 0:
+        row = by_key.get((KIND_CONFLICTS, SUBJECT_GLOBAL))
+        parts = []
+        if confirmed:
+            parts.append(f"{confirmed} confirmed conflict group(s) await a decision")
+        if stale:
+            parts.append(f"{stale} conflict group(s) have been pending LLM review for over 24h")
+        entry = _entry(
+            KIND_CONFLICTS,
+            SUBJECT_GLOBAL,
+            row,
+            "; ".join(parts),
+            unresolved_groups=confirmed,
+            stale_pending_groups=stale,
+            latest_conflict_attention_at=latest_conflict_attention_at,
+        )
+        entry["acked"] = _acked_since(row, latest_conflict_attention_at)
         out.append(entry)
     return out

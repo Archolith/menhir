@@ -40,6 +40,13 @@ Compact mode drops per-item breakdowns and asks for at most 5 source memories, n
 deployment default. An explicit `source_memory_limit` keeps its count and only the 1000-character cut
 applies. Cut entries end in "…" and carry `truncated: true`. Pass `compact=false` to get the full form.
 
+Source memories are listed oldest first, and each carries a `rank` (1 = closest match to the query); `rank`
+is null where no ranking was computed, such as `recall_history`. `build_context` (`POST /api/context`)
+packs the ranked memories first, then adds source memories best rank first while they fit the remaining
+`max_tokens` budget, skipping any that do not fit; the ones admitted are shown oldest first. With the
+default budget of 2000 tokens the ranked memories usually leave little room, so pass a larger `max_tokens`
+(up to 10000) when the raw sources matter.
+
 ## Write discipline
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.

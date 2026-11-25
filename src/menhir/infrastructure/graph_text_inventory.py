@@ -79,14 +79,20 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "bootstrap_scope", "entity_role", "is_self", "is_structural", "identity_source",
         "category", "type", "status", "medium", "role", "declarant", "directness", "retired",
         "retired_reason", "superseded", "pending_review", "enabled",
+        # Memory retire state (retire_memory): a flag, timestamps and the client name. The
+        # operator's free-text ``memory_retired_reason`` is text and is NOT here.
+        "memory_retired", "memory_retired_at", "memory_restored_at", "memory_retired_by",
         # Erasure and rederive state (uuids, epochs, flags).
         "rederive_pending", "rederive_reason", "rederive_flagged_at", "created_epoch",
         "erasure_scrubbed_epoch", "raw_capture", "raw_capture_for", "absorbed_from",
         "merged_from", "merge_irreversible",
         # Write-lock tokens: a boolean set and removed in the same statement (#431), never stored.
-        "_candidate_review_lock",
+        "_candidate_review_lock", "_artifact_supersede_lock", "_conflict_group_lock",
+        "_merge_lock",
         # Conflict and supersession links (uuids and enums).
-        "conflict_group_id", "conflict_status", "conflict_created_at", "supersedes",
+        "conflict_group_id", "conflict_status", "conflict_created_at", "conflict_confirmed_at",
+        "conflict_pending_since",
+        "supersedes",
         "superseded_by", "resolution_status", "resolution_reason",
         # Code-structure graph (paths, symbols, commits: repository metadata, not memory).
         "structure_project_id", "structure_project", "structure_role", "structure_path",

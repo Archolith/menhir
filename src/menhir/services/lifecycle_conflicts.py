@@ -63,7 +63,9 @@ class LifecycleConflictMixin:
         CorrelationService.classify_pair):
         - 0.70–0.85: RELATES_TO edge (correlation, not conflict)
         - 0.85–0.95: pending_llm_review (a band real two-lane RRF scores never land in)
-        - >=0.95: judge-gated merge, else pending_llm_review
+        - >=0.95: judge-gated merge, else pending_llm_review. The merge itself runs only when
+          MENHIR_AUTO_MERGE_MODE is "on"; otherwise the confirmed pair is left alone (the
+          scan treats it as a dropped pair, not a conflict)
         Conflict and merge candidates can first be dropped by the similarity
         floor or the shared-episode veto.
 
@@ -116,52 +118,82 @@ class LifecycleConflictMixin:
         self, *, limit: int = 20, verbose: bool = False, status: str = "pending_llm_review",
         namespace: str | None = None,
     ) -> dict:
-        """Run LLM confirmation on similarity-flagged conflicts.
+        """Run LLM confirmation on similarity-flagged conflicts, one member at a time (#654).
 
-        Fetches groups with the given status (default: 'pending_llm_review'),
-        calls the LLM to decide if each pair genuinely contradicts, then either
-        promotes to 'unresolved' (surfaced to the user) or clears as
-        'false_positive'.
+        Selects up to ``limit`` groups that have a member in ``status`` and fetches every
+        member of each. Each member in ``status`` is compared with the group's other members
+        until one pair is confirmed:
 
-        When called with status='unresolved', the LLM re-evaluates groups
-        that are already in the unresolved queue. Confirmed contradictions
-        stay unresolved; non-contradictions are resolved as keep_both with
-        status 'false_positive'.
+        - a confirmed pair moves the member to ``unresolved`` (already-unresolved members
+          stay put);
+        - when every pair is rejected the member leaves the group as ``false_positive`` and
+          each rejected pair is suppressed. A group left with one member is dissolved;
+        - an LLM failure leaves the member in ``status`` for the next run.
 
-        Single-member spurious groups are cleared immediately without an LLM call.
-        Groups where the LLM call fails are left in their current status for retry.
+        Pair verdicts are cached within a run, so a two-member group costs one LLM call and
+        ``limit`` also caps the number of LLM calls. Members are written with
+        compare-and-set, so a member resolved or reviewed concurrently is left alone.
 
-        Returns a dict with counts: confirmed, cleared, skipped_no_llm, errors.
-        When verbose=True also includes a 'details' list with per-group results.
+        Returns counts of groups: ``confirmed`` (a member confirmed), ``cleared`` (a member
+        removed), ``errors`` (a member left unreviewed), plus ``skipped_no_llm``. A group of
+        three can count as both confirmed and cleared. ``verbose=True`` adds per-member
+        ``details``.
         """
         if self.llm is None:
             return {"confirmed": 0, "cleared": 0, "skipped_no_llm": 1, "errors": 0}
 
-        # The namespace filter is applied at group SELECTION, which is what bounds every
-        # mutation below: `resolve_conflict_group` acts by conflict_group_id on the whole
-        # group, so the only way to keep this loop inside one silo is to never hand it a
-        # group from another. Groups are namespace-homogeneous by construction (see
-        # `list_conflict_groups`), so a selected group's members are the caller's own.
+        # The namespace filter is applied at group SELECTION and again on every per-member
+        # write, so this loop never reads or mutates another silo's members.
         groups = await asyncio.to_thread(
             self.graph_adapter.list_conflict_groups,
             status=status,
             limit=limit,
             namespace=namespace,
+            include_all_members=True,
+            # Oldest first: with enrichment adding pairs (#655), newest-first would starve
+            # the oldest pending groups indefinitely.
+            oldest_first=True,
         )
         confirmed = cleared = errors = 0
         details: list[dict] = []
+        verdicts: dict[frozenset[str], bool | None] = {}
+        calls_left = max(1, int(limit))
+        stop = False
+
+        async def _verdict(a: dict, b: dict, group_id: str) -> tuple[bool | None, bool]:
+            """Return (verdict, was_called). None means the LLM gave no answer."""
+            nonlocal calls_left
+            key = frozenset((str(a.get("uuid") or ""), str(b.get("uuid") or "")))
+            if key in verdicts:
+                return verdicts[key], False
+            calls_left -= 1
+            try:
+                result = await self.llm.confirm_contradiction(
+                    name_a=str(a.get("name") or ""),
+                    content_a=str(a.get("content") or ""),
+                    name_b=str(b.get("name") or ""),
+                    content_b=str(b.get("content") or ""),
+                )
+            except Exception:  # LLM call may fail for many reasons; log and leave pending
+                logger.warning("LLM contradiction check failed for group=%s", group_id, exc_info=True)
+                result = None
+            verdicts[key] = None if result is None else bool(result)
+            return verdicts[key], True
 
         for group in groups:
+            if stop:
+                break
             group_id = str(group.get("group_id") or "")
             if not group_id:
                 continue
-            members = list(group.get("members") or [])
+            members = [m for m in (group.get("members") or []) if str(m.get("uuid") or "")]
 
             if len(members) < 2:
                 # Spurious single-member group — clear without LLM call
                 await asyncio.to_thread(
                     self.graph_adapter.resolve_conflict_group,
                     group_id, action="keep_both", resolution_status="false_positive",
+                    namespace=namespace,
                 )
                 cleared += 1
                 logger.info("Cleared single-member spurious conflict group=%s", group_id)
@@ -175,85 +207,118 @@ class LifecycleConflictMixin:
                     })
                 continue
 
-            a, b = members[0], members[1]
-            name_a = str(a.get("name") or "")
-            name_b = str(b.get("name") or "")
-            try:
-                is_conflict = await self.llm.confirm_contradiction(
-                    name_a=name_a,
-                    content_a=str(a.get("content") or ""),
-                    name_b=name_b,
-                    content_b=str(b.get("content") or ""),
-                )
-            except Exception:  # LLM call may fail for many reasons; log and skip
-                logger.warning("LLM contradiction check failed for group=%s", group_id, exc_info=True)
-                errors += 1
-                if verbose:
-                    details.append({
-                        "group_id": group_id,
-                        "result": "error",
-                        "node_a": name_a,
-                        "node_b": name_b,
-                    })
-                continue
-
-            if is_conflict is None:
-                # LLM failed or ambiguous — leave pending for retry
-                errors += 1
-                if verbose:
-                    details.append({
-                        "group_id": group_id,
-                        "result": "error",
-                        "reason": "llm_no_response",
-                        "node_a": name_a,
-                        "node_b": name_b,
-                    })
-                # CF-262 F5: under a standing chat quota every remaining group fails the same way;
-                # stop and leave them pending. A later successful chat call clears the record.
-                quota = last_provider_quota_exhaustion()
-                if quota is not None and quota.kind == "chat":
-                    logger.error(
-                        "Conflict review stopped: provider quota exhausted (%s); remaining groups "
-                        "stay pending", quota.summary(),
-                    )
+            group_confirmed = group_cleared = group_error = False
+            removed: set[str] = set()
+            for member in members:
+                if str(member.get("status") or "") != status:
+                    continue
+                uuid = str(member["uuid"])
+                if calls_left <= 0 and any(
+                    frozenset((uuid, str(o["uuid"]))) not in verdicts
+                    for o in members
+                    if str(o["uuid"]) != uuid and str(o["uuid"]) not in removed
+                ):
+                    # Out of budget: the remaining members wait for the next run, untouched.
+                    stop = True
                     break
-                continue
+                rejected: list[dict] = []
+                partner: dict | None = None
+                unanswered = False
+                for other in members:
+                    other_uuid = str(other["uuid"])
+                    if other_uuid == uuid or other_uuid in removed:
+                        continue
+                    verdict, called = await _verdict(member, other, group_id)
+                    if verdict is None:
+                        unanswered = True
+                        # CF-262 F5: under a standing chat quota every remaining pair fails the
+                        # same way; stop and leave them pending. A later successful chat call
+                        # clears the record.
+                        quota = last_provider_quota_exhaustion() if called else None
+                        if quota is not None and quota.kind == "chat":
+                            logger.error(
+                                "Conflict review stopped: provider quota exhausted (%s); remaining "
+                                "groups stay pending", quota.summary(),
+                            )
+                            stop = True
+                            break
+                        continue
+                    if verdict:
+                        partner = other
+                        break
+                    rejected.append(other)
 
-            if is_conflict:
-                await asyncio.to_thread(self.graph_adapter.set_conflict_group_status, group_id, "unresolved")
-                confirmed += 1
-                logger.info("LLM confirmed conflict group=%s (%r vs %r)", group_id, name_a, name_b)
-                if verbose:
-                    details.append({
-                        "group_id": group_id,
-                        "result": "confirmed",
-                        "node_a": name_a,
-                        "node_b": name_b,
-                        "snippet_a": (a.get("content") or "")[:120],
-                        "snippet_b": (b.get("content") or "")[:120],
-                    })
-            else:
-                await asyncio.to_thread(
-                    self.graph_adapter.resolve_conflict_group,
-                    group_id, action="keep_both", resolution_status="false_positive",
-                )
-                # Record suppression for the reviewed pair only
-                self._record_suppression(
-                    str(a.get("uuid", "")), str(b.get("uuid", "")),
-                    status="false_positive", group_id=group_id,
-                    action="keep_both", reviewed_by="llm",
-                )
-                cleared += 1
-                logger.info("LLM cleared false positive group=%s (%r vs %r)", group_id, name_a, name_b)
-                if verbose:
-                    details.append({
-                        "group_id": group_id,
-                        "result": "cleared",
-                        "node_a": name_a,
-                        "node_b": name_b,
-                        "snippet_a": (a.get("content") or "")[:120],
-                        "snippet_b": (b.get("content") or "")[:120],
-                    })
+                if partner is not None:
+                    if status != "unresolved":
+                        applied = await asyncio.to_thread(
+                            self.graph_adapter.set_conflict_member_status,
+                            group_id, uuid,
+                            from_status=status, to_status="unresolved", namespace=namespace,
+                        )
+                        if not applied:
+                            # Moved by a concurrent review or resolution; theirs stands.
+                            continue
+                    group_confirmed = True
+                    logger.info(
+                        "LLM confirmed conflict group=%s member=%s (%r vs %r)",
+                        group_id, uuid, member.get("name"), partner.get("name"),
+                    )
+                    if verbose:
+                        details.append({
+                            "group_id": group_id,
+                            "result": "confirmed",
+                            "node_a": member.get("name"),
+                            "node_b": partner.get("name"),
+                            "snippet_a": (member.get("content") or "")[:120],
+                            "snippet_b": (partner.get("content") or "")[:120],
+                        })
+                elif unanswered:
+                    # A member is removed only when every pair was rejected; a missing
+                    # verdict leaves it in place.
+                    group_error = True
+                    if verbose:
+                        details.append({
+                            "group_id": group_id,
+                            "result": "error",
+                            "reason": "llm_no_response",
+                            "node_a": member.get("name"),
+                            "node_b": None,
+                        })
+                elif rejected:
+                    outcome = await asyncio.to_thread(
+                        self.graph_adapter.remove_conflict_member,
+                        group_id, uuid,
+                        from_status=status, resolution_status="false_positive",
+                        namespace=namespace,
+                        reviewed_uuids=[str(o["uuid"]) for o in rejected] + sorted(removed),
+                    )
+                    if not outcome.get("removed"):
+                        continue
+                    removed.add(uuid)
+                    group_cleared = True
+                    # Suppress only the pairs the LLM actually rejected.
+                    for other in rejected:
+                        self._record_suppression(
+                            uuid, str(other["uuid"]),
+                            status="false_positive", group_id=group_id,
+                            action="keep_both", reviewed_by="llm",
+                        )
+                    logger.info("LLM cleared false-positive member=%s group=%s", uuid, group_id)
+                    if verbose:
+                        details.append({
+                            "group_id": group_id,
+                            "result": "cleared",
+                            "node_a": member.get("name"),
+                            "node_b": None,
+                        })
+                    if outcome.get("dissolved"):
+                        break
+                if stop:
+                    break
+
+            confirmed += int(group_confirmed)
+            cleared += int(group_cleared)
+            errors += int(group_error)
 
         result: dict = {"confirmed": confirmed, "cleared": cleared, "skipped_no_llm": 0, "errors": errors}
         if verbose:
@@ -269,15 +334,17 @@ class LifecycleConflictMixin:
         """Auto-resolve conflict groups older than max_age_days using keep_both.
 
         Groups that have gone unresolved past the age threshold are unlikely to
-        get manual attention. Resolving them as keep_both acknowledges both nodes
-        as distinct valid facts and clears the conflict so they no longer appear
-        in the unresolved queue.
+        get manual attention. They leave the unresolved queue with status
+        ``auto-resolved``, which recall still flags as ``unsettled_conflict`` (#652):
+        the contradiction was confirmed and never decided, so readers keep seeing it.
 
         Returns the count of groups resolved.
         """
         groups = self.graph_adapter.list_conflict_groups(
             status="unresolved",
             limit=limit,
+            # Every member, so a group still holding a pending member can be skipped.
+            include_all_members=True,
             # Ask for the OLDEST unresolved groups and push the age cutoff into the
             # database (CF-120). The newest-first default would return only fresh groups
             # that the filter below drops, so the stale backlog the job exists to drain
@@ -311,13 +378,16 @@ class LifecycleConflictMixin:
             group_id = str(group.get("group_id") or "")
             if not group_id:
                 continue
-            result = self.graph_adapter.resolve_conflict_group(
-                group_id,
-                action="keep_both",
-                resolution_status="auto-resolved",
-            )
+            # A pending member was never reviewed: auto-resolving it would label it a confirmed
+            # contradiction and suppress its pairs. Wait until review settles the group. The
+            # repository repeats this check under a lock.
+            if any(str(m.get("status") or "unresolved") != "unresolved"
+                   for m in (group.get("members") or [])):
+                continue
+            member_uuids = self.graph_adapter.auto_resolve_settled_conflict_group(group_id)
+            if not member_uuids:
+                continue
             # Blanket age-based resolution — suppress all pairs
-            member_uuids = result.get("member_uuids", [])
             for i, uuid_a in enumerate(member_uuids):
                 for uuid_b in member_uuids[i + 1:]:
                     self._record_suppression(

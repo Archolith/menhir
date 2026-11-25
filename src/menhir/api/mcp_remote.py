@@ -5,11 +5,13 @@ from __future__ import annotations
 from functools import lru_cache
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Resource as MCPResource
+from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import Tool as MCPTool
 from starlette.types import ASGIApp
 
 from menhir.mcp import instructions as _instructions_module
-from menhir.mcp.contracts import _tier_allows
+from menhir.mcp.contracts import _tier_allows, resource_listed_for_request
 from menhir.mcp.instructions import SERVER_INSTRUCTIONS
 from menhir.mcp.resources import register_memory_resources
 from menhir.core.request_context import get_request_tool_allowlist
@@ -39,6 +41,20 @@ def _required_tier_by_name() -> dict[str, str]:
 def production_tool_catalog() -> frozenset[str]:
     """Return the canonical MCP tool names for immutable production policy validation."""
     return frozenset(_required_tier_by_name())
+
+
+@lru_cache(maxsize=1)
+def _resource_type_by_uri() -> dict[str, type]:
+    """Map resource URI (or URI template) -> its resource class."""
+    from menhir.mcp.resources import RESOURCE_TYPES
+
+    return {resource_type.uri: resource_type for resource_type in RESOURCE_TYPES}
+
+
+def _listed(uri: str) -> bool:
+    resource_type = _resource_type_by_uri().get(uri)
+    # An entry with no matching class is dropped: fail closed.
+    return resource_type is not None and resource_listed_for_request(resource_type)
 
 
 def _stamp_server_version(server: FastMCP) -> None:
@@ -91,6 +107,15 @@ class TierFilteredFastMCP(FastMCP):
         # Unknown tools default to "agent", matching the invocation gate — an
         # unmapped tool is hidden from readonly rather than leaked.
         return [t for t in tools if _tier_allows(tier, required.get(t.name, "agent"))]
+
+    async def list_resources(self) -> list[MCPResource]:
+        """Advertise only the resources this caller could read (same gates as the read)."""
+        resources = await super().list_resources()
+        return [r for r in resources if _listed(str(r.uri))]
+
+    async def list_resource_templates(self) -> list[MCPResourceTemplate]:
+        templates = await super().list_resource_templates()
+        return [t for t in templates if _listed(t.uriTemplate)]
 
 
 def create_remote_tool_only_mcp() -> FastMCP:

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from graphiti_core import Graphiti
+    from graphiti_core.cross_encoder.client import CrossEncoderClient
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     from graphiti_core.driver.neo4j_driver import Neo4jDriver
     from graphiti_core.embedder.client import EmbedderClient
@@ -28,6 +29,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     Graphiti = Any  # type: ignore[assignment]
     EmbedderClient = object  # type: ignore[assignment,misc]
+    CrossEncoderClient = object  # type: ignore[assignment,misc]
     OpenAIRerankerClient = None  # type: ignore[assignment]
     Neo4jDriver = None  # type: ignore[assignment]
     OpenAIEmbedder = None  # type: ignore[assignment]
@@ -45,13 +47,13 @@ except ImportError as exc:
             raise
         raise ImportError(
             f"graphiti_core is broken or incomplete ({exc}). Menhir requires "
-            "archolith-graphiti-core==0.31.2.post3, which shares the graphiti_core package with "
+            "archolith-graphiti-core==0.31.2.post4, which shares the graphiti_core package with "
             "upstream graphiti-core. Use a fresh virtual environment or uninstall both "
             "graphiti-core distributions before reinstalling Menhir (see docs/post-install.md)."
         ) from exc
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.31.2.post3; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post4; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -65,8 +67,14 @@ from menhir.infrastructure.circuit_breaker import (  # noqa: E402
     CircuitBreaker,
     CircuitOpenError,
     breaker_origin,
+    circuit_open_cause,
     tag_breaker_origin,
 )
+from menhir.infrastructure.providers import DEFAULT_REQUEST_TIMEOUT_S  # noqa: E402
+
+#: How long an embed refused for "probe in flight" waits for that probe's outcome (#640): the
+#: probe is one embed request, which the provider client already bounds by this timeout.
+EMBED_PROBE_WAIT_S = DEFAULT_REQUEST_TIMEOUT_S
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
 from menhir.infrastructure.graphiti_edge_invalidation import (  # noqa: E402
@@ -197,7 +205,7 @@ def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
             "import package and may have replaced or shadowed archolith-graphiti-core, or the "
             "fork predates the publish fence. Fix: reinstall the fork in a clean virtual "
             "environment (uninstall graphiti-core and archolith-graphiti-core, then install "
-            "archolith-graphiti-core==0.31.2.post3)."
+            "archolith-graphiti-core==0.31.2.post4)."
         )
 
 
@@ -280,10 +288,10 @@ class BreakerGuardedEmbedder(EmbedderClient):  # type: ignore[misc,valid-type]
             raise AttributeError(name)
         return getattr(self.inner, name)
 
-    async def _guarded(self, fn: Any) -> Any:
+    async def _guarded(self, fn: Any, *, wait_for_probe_s: float = 0.0) -> Any:
         if self.breaker is None:
             return await fn()
-        return await self.breaker.call(fn)
+        return await self.breaker.call(fn, wait_for_probe_s=wait_for_probe_s)
 
     def _cached(self, texts: Any) -> list[list[float]] | None:
         """All vectors from the cache, cut to the embedder's dimension, or None on any miss."""
@@ -309,20 +317,60 @@ class BreakerGuardedEmbedder(EmbedderClient):  # type: ignore[misc,valid-type]
         cached = self._cached(input_data_list)
         if cached is not None:
             return cached
-        return await self._guarded(lambda: self.inner.create_batch(input_data_list))
+        # add_episode embeds two batches at once: one may be the half-open probe, and the other
+        # waits for its outcome rather than failing the episode after its LLM spend (#640).
+        # Batches come only from ingest; recall and search embed through create(), which keeps
+        # refusing at once so they fall back to keyword search without waiting.
+        return await self._guarded(
+            lambda: self.inner.create_batch(input_data_list), wait_for_probe_s=EMBED_PROBE_WAIT_S
+        )
 
 
-def _circuit_open_cause(exc: BaseException) -> CircuitOpenError | None:
-    """Return the CircuitOpenError behind `exc`, if a breaker refused the call (#630)."""
+def sync_client_breakers(
+    graphiti_client: Any, settings: MemorySettings | None
+) -> tuple[CircuitBreaker | None, CircuitBreaker | None]:
+    """``(chat, embed)`` breakers for the sync clients (make_sync_chat, make_view_embedder) (#639).
 
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        if isinstance(current, CircuitOpenError):
-            return current
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return None
+    Each is the Graphiti breaker for the same endpoint, or None when the endpoints differ or
+    there is no Graphiti client (degraded startup, test doubles).
+    """
+    breaker_for = getattr(graphiti_client, "breaker_for", None)
+    if settings is None or not callable(breaker_for):
+        return None, None
+    from menhir.infrastructure.providers import ProviderConfig
+
+    try:
+        chat = breaker_for("llm", ProviderConfig.for_chat(settings).base_url)
+        embed = breaker_for("embed", ProviderConfig.for_graphiti_embedder(settings).base_url)
+    except Exception:
+        logger.warning("sync client breakers unavailable", exc_info=True)
+        return None, None
+    return chat, embed
+
+
+class BreakerGuardedCrossEncoder(CrossEncoderClient):  # type: ignore[misc,valid-type]
+    """The cross-encoder Graphiti is handed: every rank call goes through the reranker breaker.
+
+    Without it the reranker breaker was never called and its snapshot always read closed (#641).
+    Bound by GraphitiClient.__post_init__; until then calls pass straight through.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.breaker: CircuitBreaker | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "inner":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
+    async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
+        if self.breaker is None:
+            return await self.inner.rank(query, passages)
+        return await self.breaker.call(lambda: self.inner.rank(query, passages))
+
+
+_circuit_open_cause = circuit_open_cause
 
 
 @dataclass
@@ -353,6 +401,32 @@ class GraphitiClient:
         guarded = getattr(self.client, "embedder", None)
         if isinstance(guarded, BreakerGuardedEmbedder):
             guarded.breaker = self._embed_breaker
+        guarded_rerank = getattr(self.client, "cross_encoder", None)
+        if isinstance(guarded_rerank, BreakerGuardedCrossEncoder):
+            guarded_rerank.breaker = self._reranker_breaker
+
+    @property
+    def llm_breaker(self) -> CircuitBreaker:
+        """The breaker for the Graphiti LLM provider at ``llm_base_url``."""
+        return self._llm_breaker
+
+    @property
+    def embed_breaker(self) -> CircuitBreaker:
+        """The breaker for the Graphiti embed provider at ``embed_base_url``."""
+        return self._embed_breaker
+
+    def breaker_for(self, kind: str, base_url: str) -> CircuitBreaker | None:
+        """The ``llm`` or ``embed`` breaker when it guards ``base_url``, else None (#639).
+
+        A client for another endpoint must not be stopped, or trip, by this provider's breaker.
+        """
+        breaker, own_url = {
+            "llm": (self._llm_breaker, self.llm_base_url),
+            "embed": (self._embed_breaker, self.embed_base_url),
+        }[kind]
+        if (base_url or "").strip().rstrip("/") != (own_url or "").strip().rstrip("/"):
+            return None
+        return breaker
 
     def _referenced_clients(self) -> list[Any]:
         """Clients still held by live llm/embed/reranker refs, for close-safety checks."""
@@ -600,7 +674,9 @@ class GraphitiClient:
                 graph_driver=graph_driver,
                 llm_client=llm_client,
                 embedder=BreakerGuardedEmbedder(embedder, cache=_embed_cache),
-                cross_encoder=cross_encoder,
+                cross_encoder=(
+                    BreakerGuardedCrossEncoder(cross_encoder) if cross_encoder is not None else None
+                ),
                 single_episode_extraction_hook=MenhirExtractionHook(
                     anchored_time=anchored_time,
                     anchored_time_expiry=anchored_time_expiry,

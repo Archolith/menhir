@@ -146,6 +146,7 @@ class RecallTimelineTool(BaseJsonTool):
                     "uuid": e.get("uuid"),
                     "source": e.get("source"),
                     **({"is_anchor": True} if e.get("is_anchor") else {}),
+                    **({"retired": True} if e.get("retired") else {}),
                     **(
                         {
                             "facts": [

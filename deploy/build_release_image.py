@@ -359,12 +359,20 @@ def validate_vulnerability_scan(
         "format": "grype-json",
         "scanner_version": version,
         "source_image_id": source_image_id,
-        "database_sha256": hashlib.sha256(json.dumps(
-            database, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
-        ).encode("ascii")).hexdigest(),
+        "database_sha256": canonical_sha256(database),
         "severity_counts": counts,
         "policy": {"maximum_allowed_severity": "High", "passed": True},
     }
+
+
+EVIDENCE_SPECS = {
+    "sbom": (EVIDENCE_FILES["sbom"], "syft", validate_sbom),
+    "vulnerability_scan": (
+        EVIDENCE_FILES["vulnerability_scan"],
+        "grype",
+        validate_vulnerability_scan,
+    ),
+}
 
 
 def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
@@ -430,15 +438,12 @@ def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str
                       image_id: str, syft_image: str,
                       grype_image: str) -> dict[str, Any]:
     result: dict[str, Any] = {"required": True}
-    specifications = (
-        ("sbom", "syft", syft_image, validate_sbom),
-        ("vulnerability_scan", "grype", grype_image, validate_vulnerability_scan),
-    )
+    scanner_images = {"syft": syft_image, "grype": grype_image}
     candidate_config = archive_config_for_manifest(archive, image_id)
-    for kind, scanner, scanner_image, validator in specifications:
+    for kind, (artifact_path, scanner, validator) in EVIDENCE_SPECS.items():
+        scanner_image = scanner_images[scanner]
         raw = _run_scanner(scanner=scanner, image=scanner_image, archive=archive)
         summary = validator(raw, image_id, candidate_config)
-        artifact_path = EVIDENCE_FILES[kind]
         result[kind] = {
             "artifact_path": artifact_path,
             "sha256": _write_evidence(artifact_root / artifact_path, raw),
@@ -761,6 +766,13 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         if actual != expected:
             raise BuildImageError(f"{field} does not match publication inputs")
 
+    expected_image_id = _require_sha256(metadata.get("image_id"), "image ID", prefixed=True)
+    expected_config = _require_sha256(metadata.get("config_sha256"), "config SHA-256")
+    if identity.get("image_id") != expected_image_id:
+        raise BuildImageError("validation metadata and identity disagree on image ID")
+    if identity.get("config_sha256") != expected_config:
+        raise BuildImageError("validation metadata and identity disagree on image config")
+
     evidence = metadata.get("evidence")
     identity_evidence = identity.get("evidence")
     if not isinstance(evidence, dict) or not isinstance(identity_evidence, dict):
@@ -771,11 +783,12 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         raise BuildImageError("identity manifest contains unexpected evidence fields")
     if evidence.get("required") is not True:
         raise BuildImageError("validation did not mark release evidence as mandatory")
-    validators = {
-        "sbom": ("syft", validate_sbom),
-        "vulnerability_scan": ("grype", validate_vulnerability_scan),
+    candidate_config = archive_config_for_manifest(archive, expected_image_id)
+    expected_subject = {
+        "image_id": expected_image_id,
+        "image_archive_sha256": expected_archive,
     }
-    for kind, artifact_path in EVIDENCE_FILES.items():
+    for kind, (artifact_path, scanner, validator) in EVIDENCE_SPECS.items():
         entry = evidence.get(kind)
         identity_digest = identity_evidence.get(kind)
         if not isinstance(entry, dict) or entry.get("artifact_path") != artifact_path:
@@ -787,18 +800,10 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         evidence_raw = _read_bytes(evidence_file, f"{kind} evidence")
         if sha256_bytes(evidence_raw) != digest:
             raise BuildImageError(f"downloaded {kind} evidence digest does not match identity")
-        scanner, validator = validators[kind]
         _validate_scanner_image(entry.get("scanner_image"), scanner)
-        expected_subject = {
-            "image_id": metadata.get("image_id"),
-            "image_archive_sha256": expected_archive,
-        }
         if entry.get("subject") != expected_subject:
             raise BuildImageError(f"{kind} evidence names the wrong candidate subject")
-        validation = validator(
-            evidence_raw, expected_subject["image_id"],
-            archive_config_for_manifest(archive, str(expected_subject["image_id"])),
-        )
+        validation = validator(evidence_raw, expected_image_id, candidate_config)
         if entry.get("validation") != validation:
             raise BuildImageError(f"{kind} parsed validation does not match its report")
 
@@ -820,12 +825,6 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     if load_image:
         subprocess.run(["docker", "image", "load", "--input", str(archive)], check=True)
     image_id, actual_labels, config_sha256 = inspect_image(image_tag, expected_labels)
-    expected_image_id = _require_sha256(metadata.get("image_id"), "image ID", prefixed=True)
-    expected_config = _require_sha256(metadata.get("config_sha256"), "config SHA-256")
-    if identity.get("image_id") != expected_image_id:
-        raise BuildImageError("validation metadata and identity disagree on image ID")
-    if identity.get("config_sha256") != expected_config:
-        raise BuildImageError("validation metadata and identity disagree on image config")
     # The classic image store reports the config digest as the image ID and renders the
     # config with its legacy empty fields, which is what validation recorded. The containerd
     # store (Docker 29 default) reports the manifest digest and renders the config as stored.
@@ -902,13 +901,6 @@ def publish_candidate(
         raise BuildImageError("release image tag is malformed")
     candidate_tag = f"{repository}:candidate-{metadata['image_archive_sha256']}"
     subprocess.run(["docker", "image", "tag", image_tag, candidate_tag], check=True)
-    existing = remote_manifest_digest(candidate_tag)
-    if existing is not None:
-        _verify_remote_candidate(
-            repository=repository, digest=existing, metadata=metadata, **archive_kwargs,
-        )
-        return existing, True, candidate_tag
-
     existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
         _verify_remote_candidate(

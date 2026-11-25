@@ -178,6 +178,12 @@ COPIERS: tuple[CopierEntry, ...] = (
     ),
     # ------------------------------------------------------------------ exempt: erase path
     CopierEntry(
+        _I + "memory_queries", "MemoryQueryRepository.retire_memory",
+        "operator-supplied retire reason (memory_retired_reason)", Gate.G_Q,
+        "probe and write refuse a node or episode-pair member with an erase marker, erased_at or "
+        "deleted_by_user (marker_absent_cypher); erasure scrubs the reason as Entity text",
+    ),
+    CopierEntry(
         _I + "memory_queries", "<module>",
         "scrub statement constants (blank fact/summary)", Gate.EXEMPT,
         "erase path: the entity and edge scrub writes blanks and sets rederive_pending",

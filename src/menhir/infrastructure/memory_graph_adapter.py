@@ -122,6 +122,9 @@ class MemoryGraphAdapter:
         self._views = ViewRepository(self.neo4j)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
+        from menhir.infrastructure.build_report_queries import BuildReportQueries
+
+        self._build_report = BuildReportQueries(self.neo4j)
         from menhir.infrastructure.tool_event_repository import ToolEventRepository
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
@@ -195,6 +198,26 @@ class MemoryGraphAdapter:
             actual_constraints.get(name) == expected
             for name, expected in required_constraints.items()
         )
+
+    def phase_one_constraint_duplicates(self) -> dict[str, int]:
+        """Per required uniqueness constraint, how many values are held by more than one node.
+
+        Diagnostic for a refused startup (#742): a CREATE CONSTRAINT over duplicate values fails,
+        so the count tells the operator what to repair. Only nonzero counts are returned.
+        """
+        counts: dict[str, int] = {}
+        for name, _type, _entity, labels, properties in PHASE_ONE_REQUIRED_CONSTRAINTS:
+            label = ":".join(f"`{item}`" for item in labels)
+            present = " AND ".join(f"n.`{prop}` IS NOT NULL" for prop in properties)
+            keys = ", ".join(f"n.`{prop}` AS k{idx}" for idx, prop in enumerate(properties))
+            rows = self.neo4j.execute(
+                f"MATCH (n:{label}) WHERE {present} "
+                f"WITH {keys}, count(*) AS n WHERE n > 1 RETURN count(*) AS duplicates"
+            )
+            value = int(rows[0].get("duplicates", 0)) if rows else 0
+            if value:
+                counts[name] = value
+        return counts
 
     def scalar_state_schema_ready(self) -> bool:
         """Return True when the ScalarStateView typed-assertion DDL is online. Feature-scoped: a
@@ -492,10 +515,12 @@ class MemoryGraphAdapter:
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
-            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only
+            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only,
+            settled_only=settled_only,
         )
 
     def create_evidence_projection(
@@ -685,52 +710,11 @@ class MemoryGraphAdapter:
         return self._episodes.mark_raw_capture_superseded(episode_uuid)
 
     def fail_exhausted_pending_episodes(self, *, max_attempts: int) -> int:
-        """Mark exhausted PENDING episodes as FAILED, with raw-capture creation for each.
+        """Mark exhausted PENDING episodes as FAILED.
 
-        PART 2: Creates raw-capture entities for exhausted episodes with content before
-        marking them as failed, so terminal breakage preserves the episode text for recall.
-
-        This body was dead until 2026-08-19: a second, bare-delegation definition of the same
-        method later in the class shadowed it, so an exhausted episode was marked FAILED with
-        no raw capture and its text never reached recall (recall searches ``:Entity``; the
-        surviving ``:Episodic`` node is not one). Restoring it also switches its cost back on,
-        which is why ``fetch_exhausted_pending_episodes`` is now bounded by a LIMIT and
-        ``raw_capture_for`` is indexed -- the per-episode MERGE below is a label scan without it.
+        No raw-capture copy is written (#662): a FAILED episode stays recallable through the
+        source-memory lane, and the repair job embeds it if the ingest step never did.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Fetch episodes that will be marked as exhausted
-        exhausted_episodes = self._episodes.fetch_exhausted_pending_episodes(
-            max_attempts=max_attempts
-        )
-
-        # Create raw-captures for episodes with content (best-effort, don't block failure)
-        for row in exhausted_episodes:
-            content = str(row.get("content") or "").strip()
-            if content:  # Only create capture if there's content
-                try:
-                    episode_uuid = row.get("episode_uuid")
-                    capture_name = content[:60].replace("\n", " ").strip()
-                    self.create_raw_capture_entity(
-                        episode_uuid=episode_uuid,
-                        name=capture_name,
-                        content=content,
-                        namespace=row.get("namespace") or "default",
-                        session_id=row.get("session_id") or "",
-                        user_id=row.get("user_id") or "",
-                        source=row.get("source") or "claude-code",
-                        read_epoch=int(row.get("fence_epoch") or 0),
-                    )
-                except Exception as e:
-                    logger.debug(
-                        "Failed to create raw-capture for exhausted episode %s: %s",
-                        row.get("episode_uuid"),
-                        e,
-                    )
-
-        # Now mark all exhausted episodes as failed
         return self._episodes.fail_exhausted_pending_episodes(max_attempts=max_attempts)
 
     def fetch_episode_processing(self, episode_uuid: str) -> dict[str, Any] | None:
@@ -992,6 +976,16 @@ class MemoryGraphAdapter:
         """Promote a PERSISTENT memory to PROMOTED (operator-curated ground truth, SSOT-08)."""
         return self._memory_queries.promote_memory(node_uuid)
 
+    def retire_memory(
+        self, node_uuid: str, *, reason: str = "", retired_by: str = ""
+    ) -> dict[str, Any]:
+        """Hide a memory from default recall (visibility only); see MemoryQueryRepository."""
+        return self._memory_queries.retire_memory(node_uuid, reason=reason, retired_by=retired_by)
+
+    def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Undo retire_memory: the memory returns to its prior visibility."""
+        return self._memory_queries.restore_memory(node_uuid)
+
     def delete_memory(self, node_uuid: str) -> bool:
         """Delete a memory/observation, cascade its assertions, and repair scalar projections."""
         return bool(self.delete_memory_detailed(node_uuid)["touched"])
@@ -1043,11 +1037,13 @@ class MemoryGraphAdapter:
         subject_uuid: str | None = None,
         resolved_only: bool = False,
         sources: Sequence[str] | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
             query_vector, limit=limit, namespace=namespace, model=model,
             subject_uuid=subject_uuid, resolved_only=resolved_only, sources=sources,
+            include_retired=include_retired,
         )
 
     def timeline_page(
@@ -1356,6 +1352,28 @@ class MemoryGraphAdapter:
     def set_conflict_group_status(self, group_id: str, status: str) -> int:
         return self._consolidation.set_conflict_group_status(group_id, status)
 
+    def set_conflict_member_status(
+        self, group_id: str, node_uuid: str, *, from_status: str, to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        return self._consolidation.set_conflict_member_status(
+            group_id, node_uuid, from_status=from_status, to_status=to_status, namespace=namespace
+        )
+
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        return self._consolidation.auto_resolve_settled_conflict_group(group_id)
+
+    def remove_conflict_member(
+        self, group_id: str, node_uuid: str, *, from_status: str,
+        resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.remove_conflict_member(
+            group_id, node_uuid, from_status=from_status,
+            resolution_status=resolution_status, namespace=namespace,
+            reviewed_uuids=reviewed_uuids,
+        )
+
     def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "unresolved", limit: int = 200,
         namespace: str | None = None,
@@ -1496,6 +1514,9 @@ class MemoryGraphAdapter:
     def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
         return self._episodes.cleanup_orphan_episodes(session_id, dry_run=dry_run)
 
+    def fetch_orphan_episode_uuids(self, session_id: str | None = None) -> list[str]:
+        return self._episodes.fetch_orphan_episode_uuids(session_id)
+
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         return self._consolidation.increment_edge_weight(edge_uuid)
 
@@ -1517,6 +1538,7 @@ class MemoryGraphAdapter:
         namespace: str | None = None,
         created_before: datetime | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_groups(
             status=status,
@@ -1524,6 +1546,7 @@ class MemoryGraphAdapter:
             namespace=namespace,
             created_before=created_before,
             oldest_first=oldest_first,
+            include_all_members=include_all_members,
         )
 
     def list_conflict_pairs(
@@ -2107,6 +2130,22 @@ class MemoryGraphAdapter:
 
     def count_turn_evidence(self, namespace: str) -> int:
         return self._turn_evidence.count_namespace(namespace)
+
+    def fetch_namespace_build_counts(
+        self,
+        namespace: str,
+        submitted_epoch_millis: list[int] | None = None,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._build_report.namespace_build_counts(
+            namespace, submitted_epoch_millis, sections
+        )
+
+    def list_failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
+        return self._build_report.failed_evidence_projections(namespace)
+
+    def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
+        return self._build_report.promote_namespace_scope(namespace)
 
     def purge_turn_evidence(self, namespace: str) -> int:
         """Delete `:TurnEvidence` for a namespace (not covered by group_id-keyed delete_namespace)."""
@@ -2855,11 +2894,13 @@ class MemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         return self._consolidation.delete_entities_returning_uuids(
             node_uuids,
             require_scope=require_scope,
             protect_retention=protect_retention,
+            require_expired_ttl=require_expired_ttl,
         )
 
     def newly_unreferenced_evidence(self, node_uuids: list[str]) -> list[str]:

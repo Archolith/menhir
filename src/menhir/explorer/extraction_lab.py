@@ -48,7 +48,45 @@ from menhir.explorer.extraction_lab_scoring import (  # noqa: F401
     _text_matches,
 )
 
+from menhir.explorer.recall_lab import _redact_error_text
+from menhir.privacy import MASK
+
 logger = logging.getLogger(__name__)
+
+# String values under these keys carry no memory content: row/arm ids, timestamps, the arm
+# label, and tuning identifiers that are configuration (prompt variant, model name, namespace
+# id). Everything else is free text (current_message, episode text, gold lists, mention and
+# proposition text, known entities, retrieved_context, unknown future keys) and is masked.
+# Non-string scalars (scores, counts, flags, None) never carry text and pass through.
+_EXTRACTION_SAFE_STRING_KEYS: frozenset[str] = frozenset({
+    "id", "recorded_at", "created_at", "label", "prompt_variant", "model", "source_namespace",
+})
+
+
+def _redact_extraction_value(value: object, key: str | None) -> object:
+    if isinstance(value, dict):
+        return {k: _redact_extraction_value(v, k) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_extraction_value(v, key) for v in value]
+    if isinstance(value, str):
+        if key == "error":
+            return _redact_error_text(value)
+        if key in _EXTRACTION_SAFE_STRING_KEYS or not value.strip():
+            return value
+        return MASK
+    return value
+
+
+def redact_extraction_lab_history_row(row: dict, *, reveal: bool) -> dict:
+    """Read-time redaction for a saved Extraction Lab run (list row or detail row).
+
+    Storage keeps the raw text; this masks it for a viewer without ``reveal``. Key-allowlist
+    style like Recall Lab: only ``_EXTRACTION_SAFE_STRING_KEYS`` strings survive, arm ``error``
+    text is reduced to the exception class name, and unknown keys are masked (fail closed).
+    """
+    if reveal or not isinstance(row, dict):
+        return row
+    return _redact_extraction_value(row, None)  # type: ignore[return-value]
 
 #: The prompt patch is process-global, so the patched window is a critical section:
 #: two concurrent lab requests would otherwise run arms under each other's prompts
@@ -77,8 +115,11 @@ async def _run_extraction_arm(
             extract_nodes,
             resolve_extracted_nodes,
         )
+        from graphiti_core.edge_expiry import edge_expiry_kwargs
+        from graphiti_core.edge_invalidation import edge_invalidation_kwargs
         from graphiti_core.utils.maintenance.edge_operations import (
             extract_edges,
+            preserved_attributes_kwargs,
             resolve_extracted_edges,
         )
         from graphiti_core.utils.bulk_utils import resolve_edge_pointers
@@ -202,8 +243,16 @@ async def _run_extraction_arm(
 
         # Step 4: resolve_extracted_edges
         edges = resolve_edge_pointers(extracted_edges, uuid_map)
+        # #265: pass the production Graphiti's hooks the way add_episode does, so anchored-time
+        # expiry and preserved attributes behave here as they do at ingest.
+        graphiti = graphiti_client.client
         resolved_edges, invalidated_edges, new_edges = await resolve_extracted_edges(
             clients, edges, current_episode, resolved_nodes, {}, edge_type_map,
+            **edge_expiry_kwargs(getattr(graphiti, "edge_expiry_hook", None)),
+            **edge_invalidation_kwargs(getattr(graphiti, "edge_invalidation_hook", None)),
+            **preserved_attributes_kwargs(
+                getattr(graphiti, "preserved_edge_attributes", frozenset())
+            ),
         )
 
         # Serialize results
