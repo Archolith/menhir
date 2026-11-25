@@ -107,6 +107,13 @@ def _parse_secret_policy(raw: str) -> str:
     return value
 
 
+def _parse_auto_mutation_mode(env_name: str, raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value not in ("off", "propose", "on"):
+        raise ValueError(f"{env_name} must be 'off', 'propose' or 'on'")
+    return value
+
+
 @dataclass(frozen=True)
 class MemorySettings:
     """Runtime settings used by menhir."""
@@ -525,6 +532,13 @@ class MemorySettings:
     # act taken after a clean preflight. In live mode a failed preflight or a not-write-ready run
     # is FATAL to startup: an instance that cannot clear its backlog must admit no writers.
     saga_reconcile_startup_mode: str = "observe"
+
+    # Automatic mutation switches (off | propose | on), independent of each other. Merging two
+    # memories and deleting a memory on policy (TTL expiry, decay, orphan episodes) run only when
+    # "on"; "propose" records a pending action instead and "off" does nothing. Operator-requested
+    # erasure, unmerge and derived-data rebuilds are not covered. Read per process, restart to change.
+    auto_merge_mode: str = "propose"
+    auto_delete_mode: str = "off"
 
     # OAuth resource server + embedded authorization server
     oauth_enabled: bool = False
@@ -1039,6 +1053,12 @@ class MemorySettings:
                 "MENHIR_SAGA_RECONCILE_STARTUP_MODE",
                 default=cls.saga_reconcile_startup_mode,
             ).strip().lower(),
+            auto_merge_mode=_parse_auto_mutation_mode(
+                "MENHIR_AUTO_MERGE_MODE", _getenv("MENHIR_AUTO_MERGE_MODE", default=cls.auto_merge_mode)
+            ),
+            auto_delete_mode=_parse_auto_mutation_mode(
+                "MENHIR_AUTO_DELETE_MODE", _getenv("MENHIR_AUTO_DELETE_MODE", default=cls.auto_delete_mode)
+            ),
             oauth_enabled=parse_bool_env(_getenv("MENHIR_OAUTH_ENABLED", default=str(cls.oauth_enabled))),
             oauth_public_base_url=_getenv("MENHIR_PUBLIC_BASE_URL", default=cls.oauth_public_base_url).rstrip("/"),
             oauth_resource=_getenv("MENHIR_OAUTH_RESOURCE", "MENHIR_MCP_RESOURCE", default=cls.oauth_resource).strip(),

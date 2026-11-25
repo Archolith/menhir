@@ -63,7 +63,9 @@ class LifecycleConflictMixin:
         CorrelationService.classify_pair):
         - 0.70–0.85: RELATES_TO edge (correlation, not conflict)
         - 0.85–0.95: pending_llm_review (a band real two-lane RRF scores never land in)
-        - >=0.95: judge-gated merge, else pending_llm_review
+        - >=0.95: judge-gated merge, else pending_llm_review. The merge itself runs only when
+          MENHIR_AUTO_MERGE_MODE is "on"; otherwise the confirmed pair is left alone (the
+          scan treats it as a dropped pair, not a conflict)
         Conflict and merge candidates can first be dropped by the similarity
         floor or the shared-episode veto.
 

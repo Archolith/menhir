@@ -31,6 +31,8 @@ from typing import Any, TYPE_CHECKING
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.telemetry import record_mcp_event
 
+from menhir.services import auto_mutation_policy as amp
+
 # Facade re-exports: thresholds and result types live in correlation_service_types;
 # the search-driven check methods live on CorrelationChecksMixin.
 from menhir.services.correlation_service_checks import CorrelationChecksMixin
@@ -159,6 +161,11 @@ class CorrelationService(CorrelationChecksMixin):
         "none" | "related" | "conflict" | "merged". ``none`` with details means the pair was
         dropped by the floor or the veto; a caller that stops at a match must stop there too, or a
         drop reaches hits it would not have classified.
+
+        ``none`` with ``{"reason": "AUTO_MERGE_OFF" | "AUTO_MERGE_PROPOSED"}`` means the vetoes and
+        judge confirmed a duplicate but MENHIR_AUTO_MERGE_MODE is not "on", so nothing was merged
+        (propose records a pending proposal). It is not a conflict: a confirmed duplicate is not a
+        contradiction, and a judge "no" still returns ``conflict`` in every mode.
         """
         similarity = rrf_score  # downstream names/telemetry keys stay `similarity` (unchanged)
         action = self._route(similarity)
@@ -223,6 +230,10 @@ class CorrelationService(CorrelationChecksMixin):
                                 target_uuid, source_uuid, merge_result.get("op_id"), exc,
                             )
                     return "merged", merge_result
+                if merge_result.get("reason") in (
+                    amp.AUTO_MERGE_OFF, amp.AUTO_MERGE_PROPOSED
+                ):
+                    return "none", {"reason": merge_result["reason"]}
                 logger.info(
                     "Correlation: merge %s <- %s abstained at the saga gate: %s",
                     target_uuid, source_uuid, merge_result.get("reason"),
@@ -568,7 +579,10 @@ class CorrelationService(CorrelationChecksMixin):
                     "absorbed_uuid": absorbed_uuid,
                 },
                 result={
-                    "final_action": "merged",
+                    # Telemetry only; MergeCoordinator owns the gate.
+                    "final_action": (
+                        "merged" if amp.auto_merge_mode() == "on" else "merge_declined"
+                    ),
                     "vetoes_fired": [],
                     "judge_votes": judge_votes,
                     "unanimous": True,

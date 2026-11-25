@@ -29,6 +29,7 @@ than experiments and are not listed.
 | Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
 | Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |
 | Recall audit | `personal_memory_recall_audit_enabled` / `MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED` | opt-in diagnostics | — |
+| Automatic deletion (TTL sweep, decay, orphan episodes) | `auto_delete_mode` / `MENHIR_AUTO_DELETE_MODE` | `off`; `propose` records `delete_proposal` rows; `on` deletes | — |
 
 ## Removed 2026-10-28 and 2026-10-29 (#399)
 

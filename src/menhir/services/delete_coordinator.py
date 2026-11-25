@@ -29,6 +29,7 @@ from typing import Any
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services import auto_mutation_policy as amp
 from menhir.services.merge_coordinator import _canonical
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_writer_outcomes import (
@@ -98,11 +99,27 @@ class DeleteCoordinator:
         The scope filter stays on the mutation (a node promoted in the race window must survive), but
         the audit is now taken from the mutation's RETURN, so a target that escaped deletion is
         recorded as ``skipped``, never as deleted.
+
+        Gated by MENHIR_AUTO_DELETE_MODE. "off" deletes nothing and reads nothing; "propose"
+        records a pending proposal per expired node and deletes nothing; "on" deletes. NOTE: "on"
+        has NO LLM approval yet -- expiry alone authorizes the delete. An explicit ``dry_run=True``
+        keeps its normal dry-run result in every mode.
         """
+        mode = amp.auto_delete_mode()
+        if mode == "off" and not dry_run:
+            return {"deleted": [], "skipped": [], "reason": amp.AUTO_DELETE_OFF}
         expired = self.graph_adapter.fetch_ttl_expired_session_uuids(session_id)
         targets = [str(r.get("uuid")) for r in (expired or []) if r.get("uuid")]
         if not targets:
             return {"deleted": [], "skipped": [], "reason": NOTHING_TO_DELETE}
+        if mode == "propose" and not dry_run:
+            amp.record_proposals(amp.DELETE_PROPOSAL, [
+                (t, None, amp.proposal_context(amp.AUTO_DELETE_PROPOSED, "demote_ttl_expiry"))
+                for t in targets
+            ])
+            logger.info("auto delete: proposed %d TTL-expired node(s), none deleted", len(targets))
+            return {"deleted": [], "skipped": [], "would_delete": targets,
+                    "reason": amp.AUTO_DELETE_PROPOSED}
         return self._run(
             kind="SESSION_TTL_DELETE",
             targets=targets,
@@ -251,6 +268,7 @@ class DeleteCoordinator:
             self.journal, op_id, owner_token=owner_token, after_graph_work=bool(deleted),
             observed=f"delete verified absent: {deleted}",
         )
+        amp.complete_proposals(amp.DELETE_PROPOSAL, deleted)
         result: dict[str, Any] = {
             "op_id": op_id,
             "deleted": deleted,

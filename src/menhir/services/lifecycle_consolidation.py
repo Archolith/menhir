@@ -26,6 +26,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services import auto_mutation_policy as amp
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,26 @@ class LifecycleConsolidationMixin:
             )
         return len(deleted)
 
+    async def _cleanup_orphan_episodes(self, session_id: str | None) -> int:
+        """Orphan-episode sweep behind MENHIR_AUTO_DELETE_MODE: off -> 0, propose -> record, on -> delete."""
+        mode = amp.auto_delete_mode()
+        if mode == "on":
+            return await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        if mode == "propose":
+            try:
+                uuids = await asyncio.to_thread(
+                    self.graph_adapter.fetch_orphan_episode_uuids, session_id
+                )
+            except Exception:  # noqa: BLE001 -- a proposal read must never abort consolidation
+                logger.warning("could not read orphan episodes to propose", exc_info=True)
+                return 0
+            await asyncio.to_thread(amp.record_proposals, amp.DELETE_PROPOSAL, [
+                (u, None, amp.proposal_context(amp.AUTO_DELETE_PROPOSED, "orphan_episode_cleanup"))
+                for u in uuids
+            ])
+            logger.info("auto delete: proposed %d orphan episode(s), none deleted", len(uuids))
+        return 0
+
     def _delete_coordinator(self):
         """The journaled delete saga, built lazily on the default telemetry sidecar.
 
@@ -184,7 +205,7 @@ class LifecycleConsolidationMixin:
             # No promotion candidates, but demoted nodes may still have expired — run the
             # TTL-expiry sweep (promotion cannot rescue anything here, so ordering is moot).
             deleted = await self._expire_demoted_session_nodes(session_id)
-            orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+            orphans = await self._cleanup_orphan_episodes(session_id)
             return ConsolidationResult(
                 promoted=0,
                 deleted=deleted,
@@ -282,7 +303,7 @@ class LifecycleConsolidationMixin:
             logger.info("Skipped %d PENDING/ENRICHING episodes (not yet enriched)", skipped_pending)
 
         # Phase 5: Cleanup orphan episodes
-        orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        orphans = await self._cleanup_orphan_episodes(session_id)
 
         return ConsolidationResult(
             promoted=promoted,
@@ -415,7 +436,9 @@ class LifecycleConsolidationMixin:
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
         judge after deterministic vetoes. Merge only on unanimous yes; non-unanimous or
-        judge-unavailable → conflict (fail-safe: never merge without confirmation).
+        judge-unavailable → conflict (fail-safe: never merge without confirmation). A confirmed
+        duplicate is still not merged unless MENHIR_AUTO_MERGE_MODE is "on"; classify_pair then
+        returns ``none`` with a reason and the node's scan ends without a conflict.
         """
         correlation_service = self._build_correlation_service()
         conflicts = 0
