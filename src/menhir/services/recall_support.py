@@ -139,6 +139,43 @@ class RecallSupportMixin:
                 success=False,
             )
 
+    async def _normalize_file_context_path(self, file_path: str) -> str:
+        """Normalize a caller ``file_context`` path to repo-relative forward-slash form.
+
+        Reuses ``normalize_to_repo_relative`` with known project roots for absolute paths
+        so ``StructureOracle`` overlaps cleanly against repo-relative ``ANCHORED_TO`` paths.
+        """
+        from menhir.infrastructure.structural_anchoring import normalize_to_repo_relative
+
+        cleaned = file_path.strip()
+        if not cleaned:
+            return ""
+        is_abs = (
+            cleaned.startswith(("/", "\\"))
+            or (len(cleaned) >= 2 and cleaned[1] == ":")
+        )
+        known_roots: list[str] = []
+        if is_abs:
+            list_projects = getattr(self.graph_adapter, "list_structure_projects", None)
+            if callable(list_projects):
+                try:
+                    projects = await asyncio.to_thread(list_projects)
+                    known_roots = [
+                        str(p.get("root_path") or "")
+                        for p in (projects or ())
+                        if isinstance(p, dict) and p.get("root_path")
+                    ]
+                except Exception:
+                    logger.debug(
+                        "Failed to list structure projects while normalizing file_context=%r",
+                        file_path,
+                        exc_info=True,
+                    )
+        normalized = normalize_to_repo_relative(cleaned, known_roots or None)
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized
+
     async def _resolve_file_context(
         self,
         file_path: str,
@@ -468,6 +505,7 @@ class RecallSupportMixin:
         candidate_inputs: list[dict[str, object]],
         metadata_by_uuid: dict[str, Any],
         query_project: str | None = None,
+        query_files: tuple[str, ...] = (),
         tuning: RetrievalTuningConfig | None = None,
     ) -> AssertionShadowTrace:
         """Observe-only oracle/warden pass over the recall candidate set.
@@ -492,6 +530,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
+        from menhir.domain.temporal_intent import classify_temporal_intent, is_belief_time_query
         from menhir.services.assertion_pipeline import AssertionPipeline
 
         cmems = []
@@ -506,7 +545,15 @@ class RecallSupportMixin:
                 content=str(c.get("content") or c.get("name") or ""),
                 metadata=md,
             ))
-        qctx = QueryContext(text=query, namespace=namespace, project=query_project)
+        as_of_time = classify_temporal_intent(query).as_of
+        qctx = QueryContext(
+            text=query,
+            namespace=namespace,
+            project=query_project,
+            files=query_files,
+            as_of_time=as_of_time,
+            as_of_world_only=bool(as_of_time) and not is_belief_time_query(query),
+        )
         pipeline = AssertionPipeline(
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
@@ -610,9 +657,17 @@ class RecallSupportMixin:
         metadata_by_uuid: dict[str, Any],
         tuning: RetrievalTuningConfig,
         query_project: str | None = None,
+        query_files: tuple[str, ...] = (),
         warden_status: WardenExecutionStatus | None = None,
+        rerank_results: dict[str, Any] | None = None,
+        explain: dict[str, Any] | None = None,
     ) -> tuple[list[ScoredMemory], str | None]:
         """Apply the ACTIVE frontier portions to the post-floor survivors.
+
+        ``rerank_results`` (oracle_combined): the rerank oracle's results for this recall. They
+        join the combiner as a precomputed batch oracle and the combiner's rank becomes the
+        order: rerank-scored candidates first, then the rest, no residual blend. ``explain``, when
+        given, receives the combiner packets and warden decisions for the trace.
 
         Replaces the ScoringService order with the oracle combiner order
         (``enable_oracle_ranking``) and/or applies the warden gate
@@ -627,8 +682,13 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
+        from menhir.domain.temporal_intent import classify_temporal_intent, is_belief_time_query
         from menhir.services.assertion_pipeline import AssertionPipeline
+        from menhir.services.oracle_executor import OracleExecutor
+        from menhir.services.rerank_oracle import RERANK_ORACLE_NAME, PrecomputedBatchOracle
+        from menhir.services.retrieval_oracles import default_oracles
 
+        combined = rerank_results is not None
         try:
             cmems = []
             for s in scored:
@@ -640,12 +700,31 @@ class RecallSupportMixin:
                     s.retrieval_score_kind,
                 )
                 cmems.append(CandidateMemory(id=s.uuid, content=str(s.content or s.name or ""), metadata=md))
-            qctx = QueryContext(text=query, namespace=namespace, project=query_project)
+            as_of_time = classify_temporal_intent(query).as_of
+            qctx = QueryContext(
+                text=query,
+                namespace=namespace,
+                project=query_project,
+                files=query_files,
+                as_of_time=as_of_time,
+                as_of_world_only=bool(as_of_time) and not is_belief_time_query(query),
+            )
+            executor = (
+                OracleExecutor(
+                    default_oracles(),
+                    batch_oracles=[PrecomputedBatchOracle(RERANK_ORACLE_NAME, rerank_results)],
+                )
+                if combined else None
+            )
             pipeline = AssertionPipeline(
-                LogSpaceOracleCombiner(), auto_intent=tuning.enable_intent_lens,
+                LogSpaceOracleCombiner(tuning.oracle_role_weights), executor=executor,
+                auto_intent=tuning.enable_intent_lens,
                 contradiction_interrupt=tuning.enable_contradiction_interrupt,
             )
             outcome = await pipeline.run(qctx, cmems)
+            if explain is not None:
+                explain["packets"] = outcome.packets
+                explain["decisions"] = {r.candidate_id: r for r in outcome.ranked}
 
             if _frontier_trace_enabled():
                 import collections
@@ -659,7 +738,22 @@ class RecallSupportMixin:
                 )
 
             result = scored
-            if tuning.enable_oracle_ranking:
+            if combined:
+                # Head (rerank-scored) before tail whatever the weights; combiner rank inside each.
+                rank_of = {r.candidate_id: r.rank for r in outcome.ranked}
+                incoming = {s.uuid: i for i, s in enumerate(scored)}
+                scored_ids = {
+                    cid for cid, r in rerank_results.items() if getattr(r, "log_odds", None) is not None
+                }
+                result = sorted(
+                    scored,
+                    key=lambda s: (
+                        s.uuid not in scored_ids,
+                        rank_of.get(s.uuid, len(rank_of)),
+                        incoming[s.uuid],
+                    ),
+                )
+            elif tuning.enable_oracle_ranking:
                 rank_of = {r.candidate_id: r.rank for r in outcome.ranked}
                 result = _blend_oracle_order(
                     result,
@@ -676,7 +770,8 @@ class RecallSupportMixin:
                 ]
             portions = [
                 p for p, on in (
-                    ("oracle_ranking", tuning.enable_oracle_ranking),
+                    ("oracle_combined", combined),
+                    ("oracle_ranking", tuning.enable_oracle_ranking and not combined),
                     ("warden_gate", tuning.enable_warden_gate),
                     ("intent_lens", tuning.enable_intent_lens),
                 ) if on
@@ -729,7 +824,15 @@ class RecallSupportMixin:
         Feeds both the warden gate and the shadow (they read these metadata keys). Best-effort:
         a fetch failure leaves both absent (warden treats as unanchored; scope stays unknown)
         and never breaks recall."""
+        from menhir.domain.artifact_role import derive_work_artifact_projection
         from menhir.domain.self_reinforcement import evidence_kind_for_source
+        from menhir.domain.temporal import derive_edge_temporal_projection
+
+        def _norm_path(raw: object) -> str:
+            cleaned = str(raw or "").strip().replace("\\", "/")
+            while cleaned.startswith("./"):
+                cleaned = cleaned[2:]
+            return cleaned
 
         try:
             rows = await asyncio.to_thread(
@@ -752,17 +855,50 @@ class RecallSupportMixin:
                 anchor_projects = {
                     str(p) for p in (row.get("anchor_projects") or []) if p
                 }
-                if anchor_projects:
+                anchor_paths = tuple(
+                    sorted(
+                        {
+                            norm
+                            for p in (row.get("anchor_paths") or [])
+                            if (norm := _norm_path(p))
+                        }
+                    )
+                )
+                if anchor_projects or anchor_paths:
                     kinds.add("file")  # anchored to real code == a file anchor
                 for src in row.get("episode_sources") or []:
                     if src is not None:
                         kinds.add(evidence_kind_for_source(str(src)))
+                work_proj = derive_work_artifact_projection(row.get("work_artifacts") or ())
+                edge_temporal = derive_edge_temporal_projection(row.get("fact_temporal"))
                 meta = metadata_by_uuid.get(uuid)
                 if meta is not None:
                     seen.add(uuid)
                     meta["evidence_kinds"] = tuple(sorted(kinds))
                     if len(anchor_projects) == 1:
                         meta["project"] = next(iter(anchor_projects))
+                    if anchor_paths:
+                        meta["files"] = anchor_paths
+                        existing_anchors = {
+                            norm
+                            for a in (meta.get("anchors") or ())
+                            if (norm := _norm_path(a))
+                        }
+                        meta["anchors"] = tuple(sorted(existing_anchors | set(anchor_paths)))
+                    if not meta.get("artifact_status") and work_proj.get("artifact_status"):
+                        meta["artifact_status"] = work_proj["artifact_status"]
+                    if not meta.get("superseded_by") and work_proj.get("superseded_by"):
+                        meta["superseded_by"] = work_proj["superseded_by"]
+                    if not meta.get("artifact_type") and work_proj.get("artifact_type"):
+                        meta["artifact_type"] = work_proj["artifact_type"]
+                    if work_proj.get("artifact_types"):
+                        meta["artifact_types"] = work_proj["artifact_types"]
+                    if not meta.get("valid_at") and edge_temporal.get("valid_at"):
+                        meta["valid_at"] = edge_temporal["valid_at"]
+                    if not meta.get("invalid_at") and edge_temporal.get("invalid_at"):
+                        meta["invalid_at"] = edge_temporal["invalid_at"]
+                    if edge_temporal.get("all_facts_expired"):
+                        meta["all_facts_expired"] = True
             except Exception as exc:
                 if warden_status is not None:
                     warden_status.add_gap("provenance_malformed_row")

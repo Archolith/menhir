@@ -71,6 +71,22 @@ def _compile_cue(cue: str) -> re.Pattern[str]:
 # "as of <date>" / "on <date>" world-time cue.
 _AS_OF_RE = re.compile(r"\b(?:as of|on|at)\s+(\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
 
+# Explicit belief-time cues ("what did we/menhir know/believe at/as of <date>").
+_BELIEF_TIME_CUES: tuple[str, ...] = (
+    "what did we believe", "what did i believe", "what did menhir believe",
+    "what did we know", "what did i know", "what did menhir know",
+    "did we believe", "did we know", "did menhir know",
+    "believed as of", "known as of", "knew as of",
+    "believed on", "known on", "knew on",
+    "believed at", "known at", "knew at",
+)
+
+
+def is_belief_time_query(text: str) -> bool:
+    """True when a query explicitly asks what Menhir/the user knew or believed at a point in time."""
+    lowered = text.lower()
+    return any(_compile_cue(cue).search(lowered) for cue in _BELIEF_TIME_CUES)
+
 
 @dataclass(frozen=True)
 class TemporalIntent:

@@ -1,3 +1,40 @@
+## 2026-11-25 - Recall ranking strategies and live oracle inputs (#659, #579, #566)
+
+- The cross-encoder rerank now runs as `CrossEncoderRerankOracle` (`services/rerank_oracle.py`)
+  behind a new batch oracle contract (`BatchRetrievalOracle`); results carry the raw logit in
+  `OracleResult.log_odds`. It runs once per recall, where the rerank ran before. Batch oracle
+  timeouts/exceptions mark `failed=True` so `#571` coverage-gap reporting covers batch oracles too.
+- New `MENHIR_RECALL_RANKING_STRATEGY` (and Recall Lab knob): `reranker_only` (default, unchanged
+  behaviour), `oracle_only` (no rerank: rank floor + oracle residual blend) and `oracle_combined`
+  (the oracle combiner orders the reranked head, with the logit as an uncapped `rerank` role;
+  candidates past the rerank top N follow the head). Wardens gate every strategy. Without a rerank
+  model every strategy runs as `oracle_only`.
+- Combiner role weights (`oracle_weight_<role>`, Recall Lab only, default 1.0 = previous scores).
+- A traced recall reports `trace.ranking`: per result the strategy, rerank logit, role logits,
+  weights, contributions, combiner score and warden decision; Recall Lab shows them per row.
+- A non-finite rerank logit now counts as unscored (the item takes the rank floor path).
+- `infrastructure/memory_queries.py`, `domain/artifact_role.py`, `services/recall_support.py`,
+  `services/recall_pipeline.py` (#579, #566): `fetch_candidate_provenance` projects tenant-scoped
+  `:WorkArtifact` `ABOUT` lifecycle and type signals onto recallable `:Entity` candidates (marking
+  `artifact_status="historical"` + `superseded_by` only when every linked WorkArtifact is
+  `SUPERSEDED`, so `TemporalOracle`, `OracleAdmissionWarden`, and `memory_lifecycle_note` surface
+  superseded plans across `recall_memories`, `recall_context_memories`, `build_context`, and REST).
+  `_attach_frontier_metadata` now populates `files` and `anchors` from `anchor_paths` and
+  `QueryContext.files` from `file_context`, activating `StructureOracle` and anchor-based
+  `IntentOracle` role derivation.
+- `api/routes_support.py`, `api/routes.py` (#566 CF-320): REST `RecallRequest` now accepts and
+  forwards `file_context` and `file_context_project` to `backend.recall`.
+- `domain/temporal.py`, `infrastructure/memory_queries.py`, `services/recall_support.py`,
+  `services/retrieval_oracles.py` (#579 Items 2-3, #350-safe): `fetch_candidate_provenance`
+  projects tenant-scoped `RELATES_TO` fact-edge temporal summaries (`fact_temporal`) dynamically
+  onto recallable `:Entity` candidates via `derive_edge_temporal_projection`. Entities with mixed
+  active and expired edges stay current (`#350` Cause 1); entities whose same-tenant fact edges
+  are all belief-expired carry `all_facts_expired=True` (flagged `historical` under current intent
+  and boosted under historical intent, never silently refused); active-edge world-validity bounds
+  (`valid_at`/`invalid_at`) project only when every active edge carries them. `QueryContext.as_of_time`
+  is now populated from `classify_temporal_intent(query).as_of` in both active and shadow frontier
+  passes.
+
 ## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.

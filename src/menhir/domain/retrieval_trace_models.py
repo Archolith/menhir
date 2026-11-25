@@ -138,6 +138,29 @@ class ViewReachability:
 
 
 @dataclass(frozen=True)
+class RankingExplainRow:
+    """Why one returned result sits where it does, under the strategy that ordered the recall.
+
+    ``contributions`` are the signed weighted role terms; they sum to ``ranking_score``. Oracle
+    fields are empty when the frontier did not run for this recall.
+    """
+
+    candidate_id: str
+    rank: int                                 # 1-based position in the returned results
+    strategy: str                             # reranker_only | oracle_only | oracle_combined
+    rerank_logit: float | None = None         # cross-encoder logit; None past rerank_top_n
+    role_logits: dict[str, float] = field(default_factory=dict)
+    weights: dict[str, float] = field(default_factory=dict)
+    contributions: dict[str, float] = field(default_factory=dict)
+    ranking_score: float | None = None        # the combiner's score (orders oracle_combined)
+    combiner_rank: int | None = None          # 0-based combiner rank over the frontier input
+    decision: str | None = None               # warden decision: admit | flag | attenuate | refuse
+    reason: str = ""
+    label: WardenLabel | None = None
+    rationale: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class RetrievalTrace:
     """Inline observability record for a single recall call."""
 
@@ -158,6 +181,8 @@ class RetrievalTrace:
     # that target one).
     view_reachability: ViewReachability | None = None
     rank_shadow_warning: str | None = None
+    # Per returned result: rerank logit, oracle role logits, weights and warden decision.
+    ranking: list[RankingExplainRow] | None = None
 
 
 @dataclass
@@ -178,6 +203,7 @@ __all__ = [
     "CandidateTrace",
     "FacetShadowRow",
     "FacetShadowTrace",
+    "RankingExplainRow",
     "RelevanceBreakdown",
     "RetrievalTrace",
     "ScoringTrace",

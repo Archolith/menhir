@@ -191,6 +191,10 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     if body.source_memory_sources is not None:
         recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
+    if body.file_context is not None:
+        recall_kwargs["file_context"] = body.file_context
+    if body.file_context_project is not None:
+        recall_kwargs["file_context_project"] = body.file_context_project
     resolved_namespace = _resolve_namespace(request, body.namespace)
     try:
         result = await backend.recall(

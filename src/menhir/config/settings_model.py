@@ -448,6 +448,7 @@ class MemorySettings:
     recall_rerank_top_n: int = 50  # 1..200
     recall_rerank_max_results: int = 7  # 1..200; cap when rerank ran and no caller limit was specified
     recall_rerank_threads: int = 0  # 0..256; 0 = auto (capped at the cgroup CPU quota)
+    recall_ranking_strategy: str = "reranker_only"  # reranker_only | oracle_only | oracle_combined
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -789,6 +790,7 @@ class MemorySettings:
             enable_cross_encoder_rerank=self.recall_rerank_enabled,
             rerank_top_n=self.recall_rerank_top_n,
             rerank_max_results=self.recall_rerank_max_results,
+            ranking_strategy=self.recall_ranking_strategy,
         )
 
     @classmethod
@@ -972,6 +974,7 @@ class MemorySettings:
             recall_rerank_auto_download=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", default=str(cls.recall_rerank_auto_download))),
             recall_rerank_cache_dir=_getenv("MENHIR_RECALL_RERANK_CACHE_DIR", default=cls.recall_rerank_cache_dir).strip(),
             recall_rerank_device=_getenv("MENHIR_RECALL_RERANK_DEVICE", default=cls.recall_rerank_device).strip().lower(),
+            recall_ranking_strategy=_getenv("MENHIR_RECALL_RANKING_STRATEGY", default=cls.recall_ranking_strategy).strip().lower(),
             recall_rerank_top_n=_parse_int(
                 _getenv("MENHIR_RECALL_RERANK_TOP_N", default=str(cls.recall_rerank_top_n)),
                 env_var="MENHIR_RECALL_RERANK_TOP_N",

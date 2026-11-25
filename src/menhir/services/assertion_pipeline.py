@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, replace
 
 from menhir.domain.belief import QueryIntent
 from menhir.domain.intent_affinity import task_intents_to_lens
-from menhir.domain.oracles import CandidateMemory, QueryContext
+from menhir.domain.oracles import CandidateMemory, OraclePacket, QueryContext
 from menhir.domain.query_intent import classify_intent
 from menhir.domain.scope import MemoryScope
 from menhir.domain.truth.labels import WardenLabel
@@ -65,6 +65,8 @@ class AssertionOutcome:
     flagged: list[AdmissionResult] = field(default_factory=list)    # shown, labeled
     refused: list[AdmissionResult] = field(default_factory=list)    # kept out
     oracle_failures: int = 0  # candidates with at least one failed oracle result
+    # The combiner's per-candidate packets, for explain output.
+    packets: dict[str, OraclePacket] = field(default_factory=dict)
 
     @property
     def ranked(self) -> list[AdmissionResult]:
@@ -122,6 +124,7 @@ class AssertionPipeline:
 
         outcome = AssertionOutcome(
             oracle_failures=sum(1 for rs in grouped.values() if any(r.failed for r in rs)),
+            packets=packets,
         )
         q_scope = MemoryScope(repo=query.repo, project=query.project, branch=query.branch, namespace=query.namespace)
         for rank, cid in enumerate(ranked_ids):

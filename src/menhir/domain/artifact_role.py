@@ -12,7 +12,7 @@ Ported from archolith-bench `archolith_bench/intent/roles.py`.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Mapping
+from typing import Mapping, Sequence
 
 
 class ContentRole(str, Enum):
@@ -87,6 +87,11 @@ def derive_content_role(metadata: Mapping[str, object]) -> set[ContentRole]:
     if at in _ARTIFACT_TYPE:
         roles.add(_ARTIFACT_TYPE[at])
 
+    for extra_type in metadata.get("artifact_types", ()) or ():
+        et = str(extra_type).strip().lower()
+        if et in _ARTIFACT_TYPE:
+            roles.add(_ARTIFACT_TYPE[et])
+
     anchors = tuple(metadata.get("anchors", ()) or ())
     roles |= _anchor_roles(anchors)
 
@@ -97,3 +102,58 @@ def derive_content_role(metadata: Mapping[str, object]) -> set[ContentRole]:
     if not roles:
         roles.add(ContentRole.REFERENCE)
     return roles
+
+
+def derive_work_artifact_projection(
+    work_artifacts: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Project :WorkArtifact lifecycle/role signals onto a linked :Entity (#579).
+
+    Conservative by design:
+      - ``artifact_status='historical'`` and ``superseded_by`` are projected ONLY when
+        every linked :WorkArtifact for the entity is superseded. A live concept entity
+        linked to both an old superseded plan and its active replacement stays current.
+      - ``artifact_type`` / ``artifact_types`` prefer active linked artifacts when mixed,
+        falling back to superseded ones when all linked artifacts are superseded.
+    """
+    active: list[Mapping[str, object]] = []
+    superseded: list[Mapping[str, object]] = []
+    for raw in work_artifacts:
+        if not isinstance(raw, Mapping):
+            continue
+        status = str(raw.get("status") or "").strip().upper()
+        sup_by = str(raw.get("superseded_by") or "").strip()
+        art_type = str(raw.get("artifact_type") or "").strip().lower()
+        if not status and not sup_by and not art_type:
+            continue
+        if status == "SUPERSEDED" or sup_by:
+            superseded.append(raw)
+        else:
+            active.append(raw)
+
+    projected: dict[str, object] = {}
+    if superseded and not active:
+        projected["artifact_status"] = "historical"
+        replacements = sorted(
+            {
+                str(r.get("superseded_by") or "").strip()
+                for r in superseded
+                if str(r.get("superseded_by") or "").strip()
+            }
+        )
+        if replacements:
+            projected["superseded_by"] = replacements[0]
+
+    preferred = active if active else superseded
+    known_types = sorted(
+        {
+            str(r.get("artifact_type") or "").strip().lower()
+            for r in preferred
+            if str(r.get("artifact_type") or "").strip().lower() in _ARTIFACT_TYPE
+        }
+    )
+    if len(known_types) == 1:
+        projected["artifact_type"] = known_types[0]
+    elif len(known_types) > 1:
+        projected["artifact_types"] = tuple(known_types)
+    return projected
