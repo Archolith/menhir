@@ -14,7 +14,7 @@ from menhir.domain.namespace import (
     tenant_scope_cypher,
     tenant_scope_params,
 )
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.recall_visibility import default_recall_visibility_cypher, memory_retired_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.secret_scrub import ensure_scrubbed
@@ -687,7 +687,9 @@ class EpisodeLifecycleRepository:
             "($ready_only = false OR n.processing_state = 'READY')",
             "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            # Maintenance listing: a retired episode still needs its embedding, because
+            # recall_history and timeline query anchoring are vector searches over it.
+            default_recall_visibility_cypher("n", include_retired=True),
         ]
         params: dict[str, Any] = {
             "limit": safe_limit,
@@ -1722,6 +1724,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.processing_state IN ['PENDING', 'ENRICHING']",
+                f"NOT {memory_retired_cypher('n')}",
                 "($namespace IS NULL OR n.namespace = $namespace)",
                 "((coalesce(n.scope, '') <> '' AND n.scope <> 'SESSION') OR "
                 "($include_session AND ($session_id IS NULL OR coalesce(n.session_id, '') = $session_id)))",

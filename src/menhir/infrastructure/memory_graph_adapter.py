@@ -976,6 +976,16 @@ class MemoryGraphAdapter:
         """Promote a PERSISTENT memory to PROMOTED (operator-curated ground truth, SSOT-08)."""
         return self._memory_queries.promote_memory(node_uuid)
 
+    def retire_memory(
+        self, node_uuid: str, *, reason: str = "", retired_by: str = ""
+    ) -> dict[str, Any]:
+        """Hide a memory from default recall (visibility only); see MemoryQueryRepository."""
+        return self._memory_queries.retire_memory(node_uuid, reason=reason, retired_by=retired_by)
+
+    def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Undo retire_memory: the memory returns to its prior visibility."""
+        return self._memory_queries.restore_memory(node_uuid)
+
     def delete_memory(self, node_uuid: str) -> bool:
         """Delete a memory/observation, cascade its assertions, and repair scalar projections."""
         return bool(self.delete_memory_detailed(node_uuid)["touched"])
@@ -1027,11 +1037,13 @@ class MemoryGraphAdapter:
         subject_uuid: str | None = None,
         resolved_only: bool = False,
         sources: Sequence[str] | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
             query_vector, limit=limit, namespace=namespace, model=model,
             subject_uuid=subject_uuid, resolved_only=resolved_only, sources=sources,
+            include_retired=include_retired,
         )
 
     def timeline_page(

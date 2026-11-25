@@ -43,7 +43,13 @@ def view_live_provenance_cypher(variable: str = "n") -> str:
     )
 
 
-def default_recall_visibility_cypher(variable: str = "n") -> str:
+def memory_retired_cypher(variable: str = "n") -> str:
+    """Projection of the memory-level RETIRED marker (distinct from the View ``retired`` flag)."""
+
+    return f"coalesce({variable}.memory_retired, false)"
+
+
+def default_recall_visibility_cypher(variable: str = "n", *, include_retired: bool = False) -> str:
     """Return the fail-closed predicate used by generic recall/listing surfaces.
 
     Ordinary memories remain visible unless they are candidates or gone. A materialized View has a
@@ -51,13 +57,20 @@ def default_recall_visibility_cypher(variable: str = "n") -> str:
     audience and its durable contributor receipt must exactly equal its incoming ``MENTIONS``
     relationship set. OPERATOR Views remain available to explicit inspection paths.
 
+    Memories carrying the ``memory_retired`` marker are hidden unless ``include_retired`` is set
+    (historical surfaces: history, timeline). The bare ``retired`` View flag is never used for it.
+
     Explicit UUID inspection deliberately does not use this predicate; historical and invalid rows
     must remain inspectable by operator/provenance tooling even though they cannot enter context.
     """
 
+    retired_clause = (
+        "" if include_retired else f"AND NOT {memory_retired_cypher(variable)} "
+    )
     return (
         f"coalesce({variable}.scope, 'PERSISTENT') <> 'CANDIDATE' "
         f"AND coalesce({variable}.freshness, 'ACTIVE') <> 'GONE' "
+        f"{retired_clause}"
         f"AND (NOT coalesce({variable}.is_view, false) OR ("
         f"{variable}.view_class = 'FACT' "
         f"AND {variable}.view_audience = 'RECALL' "

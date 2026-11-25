@@ -115,6 +115,14 @@ class BackendClientOpsMixin:
     async def promote_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("promote_memory", {"node_uuid": node_uuid}))
 
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        return dict(
+            await self._request("retire_memory", {"node_uuid": node_uuid, "reason": reason}) or {}
+        )
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        return dict(await self._request("restore_memory", {"node_uuid": node_uuid}) or {})
+
     async def delete_memory(self, node_uuid: str) -> bool:
         return bool(await self._request("delete_memory", {"node_uuid": node_uuid}))
 

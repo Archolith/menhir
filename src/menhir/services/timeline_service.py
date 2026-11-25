@@ -111,6 +111,7 @@ def _entry_from_row(
         content=content,
         facts=facts,
         is_anchor=is_anchor,
+        retired=bool(row.get("memory_retired")),
     )
 
 
@@ -389,7 +390,8 @@ async def run_recall_timeline(
             hits = await asyncio.to_thread(
                 adapter.search_episode_embeddings, query_vector,
                 limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
-                resolved_only=True, **_embedding_model_kwargs(service), **subject_kwargs,
+                resolved_only=True, include_retired=True,
+                **_embedding_model_kwargs(service), **subject_kwargs,
             )
         if note is None and not hits:
             note = _QUERY_NO_HIT_NOTE

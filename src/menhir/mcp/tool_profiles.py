@@ -55,6 +55,8 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "flag_memory": (CURATE, 1),
     "unflag_memory": (CURATE, 1),
     "promote_memory": (CURATE, 1),
+    "retire_memory": (CURATE, 1),
+    "restore_memory": (CURATE, 1),
     "close_memory": (CURATE, 1),
     "delete_memory": (CURATE, 1),
     "delete_memories": (CURATE, 3),

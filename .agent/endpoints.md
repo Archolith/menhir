@@ -621,6 +621,27 @@ ordinary symmetric conflict.
   results.
 - Idempotent: promoting an already-promoted memory succeeds.
 
+### `retire_memory`
+Concept id: `mcp.tool.retire_memory`
+Required tier: `operator`
+
+Hide a memory from default recall without changing anything else. Visibility only: edges,
+typed assertions, scalar Views, counts, history and erasure reach are untouched. `recall_history`
+and `recall_timeline` still list it, labelled `retired: true`; decay, TTL deletion and merging skip
+it. Refused (distinct codes) for Views, CANDIDATE memories, PENDING/ENRICHING episodes, and
+flagged or retention-protected memories.
+- **`node_uuid`** (str): UUID of the memory to retire.
+- **`reason`** (str, optional): Why it is retired.
+- Idempotent: retiring a retired memory succeeds and keeps its first `retired_at`.
+
+### `restore_memory`
+Concept id: `mcp.tool.restore_memory`
+Required tier: `operator`
+
+Undo `retire_memory`: the memory returns to exactly its prior visibility.
+- **`node_uuid`** (str): UUID of the memory to restore.
+- Idempotent: restoring a memory that is not retired returns `not_retired`.
+
 ### `delete_memory`
 Concept id: `mcp.tool.delete_memory`
 

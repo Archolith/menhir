@@ -21,6 +21,7 @@ Hard vetoes:
   - PROMOTED scope (operator-curated ground truth is merge-immune)
   - any scope other than SESSION or PERSISTENT (CANDIDATE, null, blank, unknown)
   - user_flagged (user-protected)
+  - memory_retired (frozen by retire_memory until restored)
   - a protected conflict state (pending_llm_review / unresolved)
 """
 
@@ -46,6 +47,7 @@ UNMERGEABLE_SCOPE = "UNMERGEABLE_SCOPE"
 USER_FLAGGED = "USER_FLAGGED"
 SOURCE_RETENTION_PROTECTED = "SOURCE_RETENTION_PROTECTED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
+MEMORY_RETIRED = "MEMORY_RETIRED"
 
 #: Freshness values that hard-veto a merge. Retained because the reason code and its telemetry
 #: are named for them, and because the veto message reports which value offended.
@@ -123,6 +125,7 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
             f"toUpper(trim(coalesce({var}.scope, ''))) IN $mergeable_scopes",
             f"coalesce({var}.user_flagged, false) = false",
+            f"NOT coalesce({var}.memory_retired, false)",
             f"NOT {source_retention_protected_cypher(var)}",
             f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
         ])
@@ -150,6 +153,7 @@ class NodeSignals:
     user_flagged: bool
     conflict_status: str | None
     source_retention_protected: bool = False
+    memory_retired: bool = False
 
 
 @dataclass(frozen=True)
@@ -219,6 +223,11 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     flagged = [n.uuid for n in (survivor, absorbed) if n.user_flagged]
     if flagged:
         return _veto(USER_FLAGGED, flagged=flagged)
+
+    # 7b. A retired memory is frozen: it neither survives nor is absorbed until restored.
+    retired = [n.uuid for n in (survivor, absorbed) if n.memory_retired]
+    if retired:
+        return _veto(MEMORY_RETIRED, retired=retired)
 
     # 8. A currently flagged source episode protects every entity it produced.
     source_protected = [

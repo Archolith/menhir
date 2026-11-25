@@ -362,6 +362,9 @@ def _memory_admitted(
         return False
     if freshness == FreshnessState.GONE:
         return False
+    # Operator-retired memory (retire_memory) is hidden from ranked recall; Views never carry it.
+    if not bool(meta.get("is_view")) and bool(meta.get("memory_retired")):
+        return False
     if not service._session_scope_admitted(
         scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
     ):
@@ -466,6 +469,8 @@ async def run_recall_history(
         query_vector,
         limit=effective_limit,
         namespace=namespace,
+        # History is a historical surface: retired memories stay, labelled.
+        include_retired=True,
         **_embedding_model_kwargs(service),
     )
     memories: list[SourceMemory] = []
@@ -483,6 +488,7 @@ async def run_recall_history(
             reference_time=row.get("reference_time") or None,
             cosine=float(row.get("cosine") or 0.0),
             source=row.get("source") or None,
+            retired=bool(row.get("memory_retired")),
         ))
     memories.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
     return RecallHistoryResult(

@@ -303,6 +303,7 @@ class SourceMemory:
     cosine: float
     source: str | None
     rank: int | None = None
+    retired: bool = False
 
 
 MAX_SOURCE_MEMORY_SOURCES = 20

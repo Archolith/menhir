@@ -53,7 +53,8 @@ def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
 
     return (
         f"{automatic_lifecycle_protection_cypher(variable)} "
-        f"AND {destructive_retention_allowed_cypher(variable)}"
+        f"AND {destructive_retention_allowed_cypher(variable)} "
+        f"AND NOT coalesce({variable}.memory_retired, false)"
     )
 
 

@@ -180,6 +180,7 @@ class CorrelationRepository:
                    n.freshness AS freshness,
                    n.scope AS scope,
                    coalesce(n.user_flagged, false) AS user_flagged,
+                   coalesce(n.memory_retired, false) AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
@@ -207,6 +208,7 @@ class CorrelationRepository:
                     str(r["conflict_status"]) if r.get("conflict_status") is not None else None
                 ),
                 source_retention_protected=bool(r.get("source_retention_protected", False)),
+                memory_retired=bool(r.get("memory_retired", False)),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))
