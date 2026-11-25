@@ -191,6 +191,8 @@ class _ProjectionLifecycleWritesMixin:
         ]
         if not payloads:
             return ()
+        # The caller's canonical target hashes to the same work key. Only a quarantined
+        # generation may replace stored target JSON, so ordinary writes still check identity.
         rows = tx.execute(
             """
             UNWIND $targets AS row
@@ -200,7 +202,12 @@ class _ProjectionLifecycleWritesMixin:
                             w.generation=0,
                             w.applied_generation=0,
                             w.created_at=datetime()
-            SET w.definition_version=$definition_version,
+            SET w.target_json=CASE
+                    WHEN w.definition_id=$definition_id AND w.quarantine_generation=w.generation
+                    THEN row.target_json
+                    ELSE w.target_json
+                END,
+                w.definition_version=$definition_version,
                 w.generation=coalesce(w.generation,0)+1,
                 w.target_present=$target_present,
                 w.reason=$reason,

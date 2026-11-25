@@ -1,3 +1,8 @@
+## 2026-11-25 - Keep corrupt projection work from blocking other targets (#403)
+
+- Projection workers read only their own definition's dirty work. They quarantine corrupt generations while continuing to scan, and report unreadable work keys.
+- Re-dirtying a quarantined target can restore its canonical target JSON and schedule a fresh generation.
+
 ## 2026-11-25 - Memories can be retired and restored; retired memories leave default recall but stay in history
 
 - `mcp/tools/ingest/retire_memory.py`, `restore_memory.py` (operator tier): retiring is a visibility change
@@ -128,13 +133,3 @@
   `conflict_cooldown_days`. Rows already pruned are not restored.
 - `config/settings_model.py`: comment only.
 - `docs/your-data.md`: conflict suppressions are not age-pruned and erasure does not reach them.
-
-## 2026-11-24 - Release bump PRs run stdio-e2e
-
-- `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
-  `tests.yml` runs `stdio-e2e` only on `release/*` pull requests, so the 0.3.13-0.3.15 bump PRs skipped it.
-  `tests/test_bump.py` checks the branch against the prefix in `tests.yml`; the release runbook says so.
-
-## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.

@@ -1,3 +1,13 @@
+## 2026-11-24 - Release bump PRs run stdio-e2e
+
+- `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.
+  `tests.yml` runs `stdio-e2e` only on `release/*` pull requests, so the 0.3.13-0.3.15 bump PRs skipped it.
+  `tests/test_bump.py` checks the branch against the prefix in `tests.yml`; the release runbook says so.
+
+## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
+
 ## 2026-11-24 - Request paths with control characters are refused (#944)
 
 - `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
