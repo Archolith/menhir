@@ -327,6 +327,8 @@ class SourceMemoryResponse(BaseModel):
     source: str | None = None
     # Relevance position within the section (1 = best); the list itself is oldest first.
     rank: int | None = None
+    # Set only on historical surfaces, for a memory retired via retire_memory.
+    retired: bool = False
 
 
 class RecallResponse(BaseModel):
@@ -793,6 +795,8 @@ _BACKEND_METHODS = {
     "flag_memory",
     "unflag_memory",
     "promote_memory",
+    "retire_memory",
+    "restore_memory",
     "delete_memory",
     "erase_memory",
     "delete_namespace",
@@ -902,6 +906,7 @@ _OP_TIER_OPERATOR = {
     "scheduler_force_takeover", "scheduler_pause", "scheduler_resume",
     "promote_candidate", "reject_candidate", "approve_candidate",
     "promote_memory",
+    "retire_memory", "restore_memory",
     "acknowledge_operator_warning",
     # CF-257 phase 0. Raised from agent tier. This op writes a structure payload the CALLER
     # produced, and judges it using a `root_path` the same caller supplied -- so the server

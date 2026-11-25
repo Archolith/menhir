@@ -44,6 +44,7 @@ class TimelineEntry:
     content: str | None
     facts: tuple[TimelineFact, ...]
     is_anchor: bool
+    retired: bool = False
 
 
 @dataclass(frozen=True)

@@ -285,6 +285,7 @@ class ToolEventRepository:
             MATCH (sem:Entity)-[a:ANCHORED_TO]->(f:Entity {{structure_role: 'file'}})
             WHERE f.structure_dirty = true
                   AND a.created_at IS NOT NULL AND f.dirty_at > a.created_at
+                  AND NOT coalesce(sem.memory_retired, false)
                   AND ($project IS NULL OR f.structure_project = $project)
                   AND {tenant_scope_cypher("sem")}
             RETURN sem.uuid AS memory_uuid, sem.name AS name,

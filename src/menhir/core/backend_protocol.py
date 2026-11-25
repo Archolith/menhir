@@ -125,6 +125,18 @@ class MemoryBackend(Protocol):
         """Promote a PERSISTENT memory to PROMOTED: operator-curated, verified ground truth (SSOT-08)."""
         ...
 
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        """Hide a memory from default recall (visibility only; reversible with restore_memory).
+
+        Returns ``{"status": "retired" | "already_retired" | "not_found" | "refused", ...}``;
+        a refusal carries ``code`` and ``detail``.
+        """
+        ...
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Undo retire_memory. Returns ``{"status": "restored" | "not_retired" | "not_found"}``."""
+        ...
+
     async def delete_memory(self, node_uuid: str) -> bool:
         """Erase a memory by UUID. True if anything was erased.
 

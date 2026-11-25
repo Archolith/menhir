@@ -31,7 +31,8 @@ from menhir.domain.namespace import (
     tenant_scope_params,
     tenant_scope_prefilter_cypher,
 )
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.recall_visibility import default_recall_visibility_cypher, memory_retired_cypher
+from menhir.domain.retention import destructive_retention_allowed_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.recall import adjacency_edge_pattern
@@ -704,8 +705,13 @@ class MemoryQueryRepository:
         subject_uuid: str | None = None,
         resolved_only: bool = False,
         sources: Sequence[str] | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
+
+        ``include_retired`` admits memories carrying the ``memory_retired`` marker (historical
+        lookups: recall_history, recall_timeline); the default source lane hides them. Each row
+        carries ``memory_retired`` so historical callers can label it.
 
         With ``resolved_only``, only receipts whose resolved Graphiti episode can anchor a timeline
         are searched (store-only receipts and hidden/FAILED/foreign episodes have no position).
@@ -743,7 +749,7 @@ class MemoryQueryRepository:
             EPISODE_NOT_ERASED,
             EPISODE_NOT_MARKED,
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            default_recall_visibility_cypher("n", include_retired=include_retired),
         ]
         params: dict[str, Any] = {
             "query_vector": query_vector,
@@ -782,7 +788,7 @@ class MemoryQueryRepository:
                     "g.valid_at IS NOT NULL",
                     "coalesce(g.processing_state, '') <> 'FAILED'",
                     non_structural_memory_cypher("g"),
-                    default_recall_visibility_cypher("g"),
+                    default_recall_visibility_cypher("g", include_retired=include_retired),
                     tenant_scope_cypher("g"),
                 ])
                 + " }"
@@ -799,6 +805,11 @@ class MemoryQueryRepository:
             RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
                    n.session_id AS session_id,
                    toString(coalesce(n.reference_time, n.created_at)) AS reference_time,
+                   (coalesce(n.memory_retired, false) OR EXISTS {
+                       MATCH (rt:Episodic)
+                       WHERE rt.uuid = n.resolved_episode_uuid
+                         AND coalesce(rt.memory_retired, false)
+                   }) AS memory_retired,
                    cosine
             ORDER BY cosine DESC, n.uuid
             LIMIT $limit
@@ -870,14 +881,15 @@ class MemoryQueryRepository:
             "n.valid_at IS NOT NULL",
             "coalesce(n.processing_state, '') <> 'FAILED'",
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            # Timelines are historical: retired memories stay, labelled (memory_retired).
+            default_recall_visibility_cypher("n", include_retired=True),
             # The memory still exists: a visible Menhir queue node resolves to this episode. Deleting
             # or erasing a memory by its receipt (queue-node) uuid removes that twin, so the timeline
             # stops showing the raw text even though Graphiti's episode survives (audit Q1 / #119).
             # `episodic_resolved_episode_uuid_idx` backs the lookup. Evidence projections carry their
             # flag on the queue node only, so the twin must also be non-structural (ADR 0001).
             "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
-            + default_recall_visibility_cypher("q") + " AND " + non_structural_memory_cypher("q") + " }",
+            + default_recall_visibility_cypher("q", include_retired=True) + " AND " + non_structural_memory_cypher("q") + " }",
         ]
         params.update(tenant_scope_params(namespace))
         if namespace_spellings(namespace) is not None:
@@ -895,7 +907,10 @@ class MemoryQueryRepository:
     _TIMELINE_RETURN = (
         "n.uuid AS uuid, toString(n.valid_at) AS valid_at, "
         "toString(n.created_at) AS created_at, n.content AS content, "
-        "n.session_id AS session_id, n.source AS source"
+        "n.session_id AS session_id, n.source AS source, "
+        "(coalesce(n.memory_retired, false) OR EXISTS { MATCH (rq:Episodic) "
+        "WHERE rq.resolved_episode_uuid = n.uuid AND coalesce(rq.memory_retired, false) }) "
+        "AS memory_retired"
     )
 
     def timeline_page(
@@ -1002,7 +1017,7 @@ class MemoryQueryRepository:
             "a.uuid = $anchor_uuid",
             menhir_queue_episode_cypher("a"),
             "coalesce(a.processing_state, '') <> 'FAILED'",
-            default_recall_visibility_cypher("a"),
+            default_recall_visibility_cypher("a", include_retired=True),
             tenant_scope_cypher("a"),
         ])
         where.append("n.uuid = target_uuid")
@@ -1066,7 +1081,7 @@ class MemoryQueryRepository:
         where = [
             "(n.uuid = $subject OR (n.name IS NOT NULL AND toLower(n.name) = toLower($subject)))",
             non_derived_view_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            default_recall_visibility_cypher("n", include_retired=True),
         ]
         params: dict[str, Any] = {"subject": str(subject).strip(), "limit": 5}
         params.update(tenant_scope_params(namespace))
@@ -1187,7 +1202,10 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
+            .where(
+                f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING} "
+                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')}"
+            )
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -1209,7 +1227,10 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
+            .where(
+                f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING} "
+                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')}"
+            )
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -1523,21 +1544,31 @@ class MemoryQueryRepository:
         """
 
         normalized_priority = normalize_pin_priority(pin_priority)
-        # Check if the target is a structural entity before flagging.
-        struct_check = self.neo4j.execute(
+        # Guard query: a structural entity, or a retired memory (either half of an episode pair),
+        # cannot be flagged. Retire refuses flagged memories, so flag must refuse retired ones or
+        # flag-after-retire yields a hidden pin. Rows come back only when a guard fires.
+        guard = self.neo4j.execute(
             f"""
-            MATCH (n:Entity {{uuid: $node_uuid}})
-            WHERE NOT ({non_structural_memory_cypher("n")})
-            RETURN coalesce(n.structure_role, 'legacy_project_scan') AS role LIMIT 1
+            {self._MEMORY_BY_UUID}
+            {self._EPISODE_PAIR_MATCH}
+            WITH n, (n:Entity AND NOT ({non_structural_memory_cypher("n")})) AS structural,
+                 any(x IN nodes WHERE coalesce(x.memory_retired, false)) AS retired
+            WHERE structural OR retired
+            RETURN CASE WHEN structural
+                        THEN coalesce(n.structure_role, 'legacy_project_scan') END AS role,
+                   retired
+            LIMIT 1
             """,
             params={"node_uuid": node_uuid},
         )
-        if struct_check:
-            role = struct_check[0].get("role", "unknown")
+        if guard and guard[0].get("role"):
+            role = guard[0].get("role", "unknown")
             raise ValueError(
                 f"Cannot flag structural graph node (role={role}). "
                 "Flag semantic memories only."
             )
+        if guard and guard[0].get("retired"):
+            raise ValueError("Cannot flag a retired memory. Restore it first (restore_memory).")
 
         normalized_scope = (
             normalize_bootstrap_scope(bootstrap_scope)
@@ -1560,6 +1591,7 @@ class MemoryQueryRepository:
             f"""
             MATCH (n)
             WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
+              AND NOT coalesce(n.memory_retired, false)
             SET n.user_flagged = true,
                 {scope_set}{priority_set}
             RETURN count(n) AS nodes_updated
@@ -1618,6 +1650,137 @@ class MemoryQueryRepository:
             params={"node_uuid": node_uuid},
         )
         return bool(rows and int(rows[0].get("nodes_updated", 0)) > 0)
+
+    # --- Retire / restore (visibility only) ----------------------------------
+
+    #: Label-anchored lookup by uuid (an unlabelled `MATCH (n)` would scan every node).
+    _MEMORY_BY_UUID = (
+        "CALL { MATCH (x:Entity {uuid: $node_uuid}) RETURN x "
+        "UNION MATCH (x:Episodic {uuid: $node_uuid}) RETURN x } "
+        "WITH x AS n "
+    )
+    #: The resolved-twin pair of an episode (queue node <-> Graphiti episode), both directions,
+    #: as two index-backed matches (an OR between them would defeat both indexes).
+    _EPISODE_PAIR_MATCH = (
+        "OPTIONAL MATCH (pa:Episodic {uuid: n.resolved_episode_uuid}) "
+        "WHERE n:Episodic AND pa.uuid <> n.uuid "
+        "OPTIONAL MATCH (pb:Episodic) "
+        "WHERE n:Episodic AND pb.resolved_episode_uuid = n.uuid AND pb.uuid <> n.uuid "
+        "WITH n, pa, collect(pb) AS pbs "
+        "WITH n, [n] + CASE WHEN pa IS NULL THEN [] ELSE [pa] END + pbs AS nodes "
+    )
+
+    def retire_memory(
+        self, node_uuid: str, *, reason: str = "", retired_by: str = ""
+    ) -> dict[str, Any]:
+        """Hide a memory from default recall without touching anything else (retire_memory).
+
+        Sets ``memory_retired`` (and at/reason/by) on the node and, for an episode, on its
+        queue-node/resolved-twin pair. It never touches edges, assertions, Views, counts or
+        history. Returns ``{"status": "retired" | "already_retired", "uuid", "retired_at"}``,
+        ``{"status": "not_found"}``, or ``{"status": "refused", "code", "detail"}`` where code is
+        one of ``structural``, ``is_view``, ``candidate_scope``, ``episode_in_flight``,
+        ``user_flagged``, ``retention_protected`` (or ``changed`` if the node moved between the
+        check and the write). Idempotent: a retired memory keeps its first ``retired_at``.
+        """
+        probe = self.neo4j.execute(
+            f"""
+            {self._MEMORY_BY_UUID}
+            {self._EPISODE_PAIR_MATCH}
+            RETURN n.uuid AS uuid,
+                   NOT ({non_structural_memory_cypher("n")}) AS structural,
+                   (coalesce(n.is_view, false) OR n.view_kind IS NOT NULL) AS is_view,
+                   coalesce(n.scope, 'PERSISTENT') AS scope,
+                   (n:Episodic AND coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING'])
+                       AS in_flight,
+                   any(x IN nodes WHERE coalesce(x.user_flagged, false)) AS user_flagged,
+                   ({destructive_retention_allowed_cypher("n")}) AS retention_allowed,
+                   all(x IN nodes WHERE coalesce(x.memory_retired, false)) AS already_retired,
+                   toString(n.memory_retired_at) AS retired_at
+            LIMIT 1
+            """,
+            params={"node_uuid": node_uuid},
+        )
+        if not probe:
+            return {"status": "not_found", "uuid": node_uuid}
+        row = probe[0]
+        refusal = None
+        if row.get("structural"):
+            refusal = ("structural", "a structural graph node is not a semantic memory")
+        elif row.get("is_view"):
+            refusal = ("is_view", "a View is derived state and cannot be retired")
+        elif str(row.get("scope") or "") == "CANDIDATE":
+            refusal = ("candidate_scope", "a CANDIDATE memory is not recallable; review it instead")
+        elif row.get("in_flight"):
+            refusal = ("episode_in_flight", "the episode is still PENDING/ENRICHING")
+        elif row.get("user_flagged"):
+            refusal = ("user_flagged", "the memory is flagged; unflag it first")
+        elif not row.get("retention_allowed"):
+            refusal = (
+                "retention_protected",
+                "the memory is retention-protected; unflag its source first",
+            )
+        if refusal is not None:
+            return {"status": "refused", "uuid": node_uuid, "code": refusal[0], "detail": refusal[1]}
+        rows = self.neo4j.execute(
+            f"""
+            {self._MEMORY_BY_UUID}
+            WHERE {non_structural_memory_cypher("n")}
+              AND NOT coalesce(n.is_view, false) AND n.view_kind IS NULL
+              AND coalesce(n.scope, 'PERSISTENT') <> 'CANDIDATE'
+              AND (NOT n:Episodic OR NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING'])
+              AND {destructive_retention_allowed_cypher("n")}
+            {self._EPISODE_PAIR_MATCH}
+            WITH n, nodes
+            WHERE none(x IN nodes WHERE coalesce(x.user_flagged, false))
+            WITH n, nodes,
+                 all(x IN nodes WHERE coalesce(x.memory_retired, false)) AS already,
+                 [x IN nodes WHERE NOT coalesce(x.memory_retired, false)] AS to_mark
+            FOREACH (x IN to_mark |
+                SET x.memory_retired = true,
+                    x.memory_retired_at = datetime(),
+                    x.memory_retired_reason = $reason,
+                    x.memory_retired_by = $retired_by)
+            RETURN n.uuid AS uuid, already, toString(n.memory_retired_at) AS retired_at
+            LIMIT 1
+            """,
+            params={"node_uuid": node_uuid, "reason": reason, "retired_by": retired_by},
+        )
+        if not rows:
+            return {"status": "refused", "uuid": node_uuid, "code": "changed",
+                    "detail": "the memory changed state while retiring; retry"}
+        return {
+            "status": "already_retired" if rows[0].get("already") else "retired",
+            "uuid": node_uuid,
+            "retired_at": rows[0].get("retired_at"),
+        }
+
+    def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Undo ``retire_memory``: clear the marker on the node (and its episode twin pair).
+
+        Keeps ``memory_retired_at`` as history, stamps ``memory_restored_at`` and removes the
+        reason/by. Returns ``{"status": "restored" | "not_retired" | "not_found", "uuid"}``.
+        """
+        rows = self.neo4j.execute(
+            f"""
+            {self._MEMORY_BY_UUID}
+            {self._EPISODE_PAIR_MATCH}
+            WITH n, [x IN nodes WHERE coalesce(x.memory_retired, false)] AS retired_nodes
+            FOREACH (x IN retired_nodes |
+                SET x.memory_retired = false,
+                    x.memory_restored_at = datetime()
+                REMOVE x.memory_retired_reason, x.memory_retired_by)
+            RETURN n.uuid AS uuid, size(retired_nodes) > 0 AS was_retired
+            LIMIT 1
+            """,
+            params={"node_uuid": node_uuid},
+        )
+        if not rows:
+            return {"status": "not_found", "uuid": node_uuid}
+        return {
+            "status": "restored" if rows[0].get("was_retired") else "not_retired",
+            "uuid": node_uuid,
+        }
 
     # CF-330: the scrub removes these too. Literal lists, so every call site gets them.
     _EDGE_ANCHORED_TIME_PROPS = "[" + ", ".join(f'"{p}"' for p in PRESERVED_EDGE_ATTRIBUTES) + "]"

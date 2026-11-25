@@ -1,3 +1,21 @@
+## 2026-11-25 - Memories can be retired and restored; retired memories leave default recall but stay in history
+
+- `mcp/tools/ingest/retire_memory.py`, `restore_memory.py` (operator tier): retiring is a visibility change
+  only. It sets `memory_retired` (with `_at`, `_reason`, `_by`) on an `:Entity` or `:Episodic`, and on both
+  halves of an episode pair; it never changes edges, typed assertions, scalar Views, counts or history.
+  Restore clears it. Both are idempotent. Retire refuses Views, CANDIDATE memories, episodes still being
+  processed, structural nodes, and flagged or retention-protected memories; `flag_memory` now refuses a
+  retired memory, so a memory is never both flagged and retired.
+- `domain/recall_visibility.py`: `default_recall_visibility_cypher(include_retired=False)`. Default recall,
+  pins, listings, the source-memory lane, ranked admission (`_memory_admitted`), pending fallback, facts
+  touching a retired memory and stale-anchor labels hide retired memories. `recall_history`,
+  `recall_timeline` and the embedding backfill include them; history and timeline results carry
+  `retired: true`. `tests/test_memory_retire_census.py` fails on any unclassified call site.
+- `consolidation_queries.py`, `merge_eligibility.py`: decay, compression, TTL deletion and merging skip a
+  retired memory (`MEMORY_RETIRED` veto). Operator erasure and delete still reach it.
+- `tests/test_memory_retire_live.py`: round trip, refusals, every hidden and historical surface, the
+  lifecycle freeze, erasure, and retiring a scalar View's sources through the tool.
+
 ## 2026-11-25 - Recall ranking strategies and live oracle inputs (#659, #579, #566)
 
 - The cross-encoder rerank now runs as `CrossEncoderRerankOracle` (`services/rerank_oracle.py`)
@@ -108,15 +126,3 @@
 ## 2026-11-24 - v0.3.15: request paths with control characters are refused (#944)
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.15. No dependency changes in this commit.
-
-## 2026-11-24 - Request paths with control characters are refused (#944)
-
-- `api/auth.py`: `BearerAuthMiddleware` answers 400 `invalid_path` to any HTTP or WebSocket request whose
-  decoded path contains an ASCII control character (U+0000-U+001F, U+007F), in every auth mode. Route
-  patterns end in `$`, which also matches before a trailing newline, so `/mcp-http%0A` was not recognised
-  as protected by the auth gate but still reached the MCP route. The response does not echo the path.
-
-## 2026-11-23 - v0.3.14: Agent Smith OAuth clients come from the client policy; conflict lifecycle and recall fixes
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.14. No dependency changes in this commit.
-- Upgrade note (#761): Agent Smith OAuth identities (`/oauth/client-metadata/agent-smith.json?client=<key>`) are served only from client-policy entries with a `registration`; the built-in table is gone. A deployment that uses Agent Smith must add those registrations to its policy in the same upgrade.

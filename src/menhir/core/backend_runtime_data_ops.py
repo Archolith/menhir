@@ -11,7 +11,7 @@ from menhir.domain.session import new_session
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.services.project_ingest import build_project_narrative
 
-from .request_context import get_request_tier
+from .request_context import get_request_session, get_request_tier
 from .tenancy import pinned_namespace, require_own_object
 from .backend_shared import (
     _project_scan_from_dict,
@@ -219,6 +219,22 @@ class RuntimeProviderDataOpsMixin:
         return bool(
             await self._off_loop(self.built.graph_adapter.promote_memory, node_uuid)
         )
+
+    async def retire_memory(self, node_uuid: str, reason: str = "") -> dict[str, Any]:
+        await self._require_own_memory(node_uuid)
+        session = get_request_session()
+        return dict(
+            await self._off_loop(
+                self.built.graph_adapter.retire_memory,
+                node_uuid,
+                reason=reason,
+                retired_by=(session.client_name if session is not None else "") or "",
+            )
+        )
+
+    async def restore_memory(self, node_uuid: str) -> dict[str, Any]:
+        await self._require_own_memory(node_uuid)
+        return dict(await self._off_loop(self.built.graph_adapter.restore_memory, node_uuid))
 
     def _erasure(self) -> Any:
         """The erasure saga, built once per provider and cached.

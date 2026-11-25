@@ -612,6 +612,7 @@ class StubMemoryGraphAdapter:
         *,
         limit: int = 10,
         namespace: str | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, object]]:
         self.episode_embedding_calls.append(
             {"query_vector": query_vector, "limit": limit, "namespace": namespace}
