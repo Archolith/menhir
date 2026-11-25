@@ -1,3 +1,9 @@
+## 2026-11-25 - GitHub and GitLab tokens are redacted whole, not just their prefix (GHSA-ppqh-gffg-6j74)
+
+- `domain/secret_scrub.py`: detect-secrets' GitHub and GitLab plugins capture only the token prefix (`ghp`, `glpat`), so `redact()` replaced the prefix and kept the body, in stored memory text and in every output guard built on it (recall, API responses, Explorer, hooks, backend payloads). A `glcbt-` token without its optional part was not found at all. Both plugins are replaced by full-token patterns that accept everything they did, and longer tokens.
+- `tests/domain/test_secret_scrub_full_token.py`: each format is redacted whole; a census fails if an enabled plugin with a capture group has not been reviewed.
+- Memories stored before this fix keep the token body until re-scrubbed or erased. `menhir secrets scan` counts them.
+
 ## 2026-11-25 - `menhir retire judge`: a report-only judge that suggests why a memory could be retired
 
 Step 3 of the retire plan. It writes nothing to the graph and retires nothing; it prints or saves a JSON report for the operator to review.
@@ -123,16 +129,4 @@ Step 3 of the retire plan. It writes nothing to the graph and retires nothing; i
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.16. No dependency changes in this commit.
 - Upgrade note: stop the old process before starting this version. A 0.3.15 process that is still
   running merges by the old rules and can lower retention (#939).
-
-## 2026-11-24 - Remove dead dev scripts, unused recall imports, unreachable governance code, and deploy script duplication (#789, #792, #793, #794, #644, #660, #802, #803)
-
-- #789: removed the dead doc-token benchmark script under `.agent/tools/` (whose scenario file and `.agent/user/` tree no longer exist) along with its `.agent/README.md` section, `user/` fallback paragraph, and `.agent/file-index.md` entry.
-- #792: removed the superseded M2 functional audit probe under `.agent/audit/` (which printed unconditional `CONFIRMED` lines for fixed security findings).
-- #793: removed the orphaned QuantState prototype script under `.agent/plans/backlog/` (whose companion plan is archived and fold logic is superseded by `domain/fold_algebra.py` and `domain/scalar_state_fold.py`).
-- #794: updated `.agent/audit/` docs and prompt templates to document installing `cth.auditprobe` and running the `auditprobe` entry point with its supported `--type` values (`correctness`, `security`, `architecture`).
-- #644: removed 19 unused imports from `services/recall_pipeline.py` while keeping the test-pinned `GRAPHITI_RRF_DUAL_METHOD_MAX` re-export.
-- #660 (partial, zero-bench-impact slice): removed unreachable `services/memory_oracle_service.py`, `services/windowed_recall.py`, `WeightedOracleCombiner`, and unused `WardenLabel.UNCERTAIN`/`SUSPICIOUS_CHAIN`; documented `#566`/`#579`/`#659` on kept oracle/warden branches and corrected stale default-off comments in `recall_pipeline.py`, `config/settings_model.py`, and `recall_support.py`. Modules still imported by `archolith-bench` (`structure_temporal`, `exhaustion`/`ExhaustionWarden`, `BeliefScorer`) were intentionally kept.
-- #802: removed the duplicate `remote_manifest_digest` call in `deploy/build_release_image.py`, validated `image_id`/`config_sha256` and hoisted `archive_config_for_manifest` before the evidence loop, reused `canonical_sha256`, and unified `EVIDENCE_SPECS`.
-- #803: removed unused `ARCHIVE_SHA256`/`ARCHIVE_SIZE` computation and moved symlink checks (covering `$STATUS_DIR`, `${STATUS_DIR}/staging`, `$ARCHIVE_ROOT`, and `$RECEIPT_ROOT`) ahead of `mkdir -p` in `deploy/menhir-backup-local.sh`; collapsed the duplicated required-secret helpers (including OpenAI/Gemini provider branches) and replaced legacy `WORKSPACE_ROOT` with `MENHIR_STATE_DIR` in `deploy/Dockerfile`.
-- Updated the release workflow test to allow a single pre-push registry lookup. Behavioral tests cover candidate verification and registry races.
 

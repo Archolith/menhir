@@ -1,3 +1,15 @@
+## 2026-11-24 - Remove dead dev scripts, unused recall imports, unreachable governance code, and deploy script duplication (#789, #792, #793, #794, #644, #660, #802, #803)
+
+- #789: removed the dead doc-token benchmark script under `.agent/tools/` (whose scenario file and `.agent/user/` tree no longer exist) along with its `.agent/README.md` section, `user/` fallback paragraph, and `.agent/file-index.md` entry.
+- #792: removed the superseded M2 functional audit probe under `.agent/audit/` (which printed unconditional `CONFIRMED` lines for fixed security findings).
+- #793: removed the orphaned QuantState prototype script under `.agent/plans/backlog/` (whose companion plan is archived and fold logic is superseded by `domain/fold_algebra.py` and `domain/scalar_state_fold.py`).
+- #794: updated `.agent/audit/` docs and prompt templates to document installing `cth.auditprobe` and running the `auditprobe` entry point with its supported `--type` values (`correctness`, `security`, `architecture`).
+- #644: removed 19 unused imports from `services/recall_pipeline.py` while keeping the test-pinned `GRAPHITI_RRF_DUAL_METHOD_MAX` re-export.
+- #660 (partial, zero-bench-impact slice): removed unreachable `services/memory_oracle_service.py`, `services/windowed_recall.py`, `WeightedOracleCombiner`, and unused `WardenLabel.UNCERTAIN`/`SUSPICIOUS_CHAIN`; documented `#566`/`#579`/`#659` on kept oracle/warden branches and corrected stale default-off comments in `recall_pipeline.py`, `config/settings_model.py`, and `recall_support.py`. Modules still imported by `archolith-bench` (`structure_temporal`, `exhaustion`/`ExhaustionWarden`, `BeliefScorer`) were intentionally kept.
+- #802: removed the duplicate `remote_manifest_digest` call in `deploy/build_release_image.py`, validated `image_id`/`config_sha256` and hoisted `archive_config_for_manifest` before the evidence loop, reused `canonical_sha256`, and unified `EVIDENCE_SPECS`.
+- #803: removed unused `ARCHIVE_SHA256`/`ARCHIVE_SIZE` computation and moved symlink checks (covering `$STATUS_DIR`, `${STATUS_DIR}/staging`, `$ARCHIVE_ROOT`, and `$RECEIPT_ROOT`) ahead of `mkdir -p` in `deploy/menhir-backup-local.sh`; collapsed the duplicated required-secret helpers (including OpenAI/Gemini provider branches) and replaced legacy `WORKSPACE_ROOT` with `MENHIR_STATE_DIR` in `deploy/Dockerfile`.
+- Updated the release workflow test to allow a single pre-push registry lookup. Behavioral tests cover candidate verification and registry races.
+
 ## 2026-11-24 - A merge or unmerge no longer makes a memory easier to delete (#939, part 2)
 
 - `infrastructure/correlation_queries.py`: a merge gives the survivor the higher live scope and clears its
