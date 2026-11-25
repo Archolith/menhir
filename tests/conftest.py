@@ -165,6 +165,20 @@ def _isolate_client_restrictions(monkeypatch):
         monkeypatch.setenv(var, "")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _auto_mutation_modes_on():
+    """Existing tests exercise the merge and delete mechanisms, so run them with both switches on.
+
+    The shipped defaults are merge=propose and delete=off. A test of the gate itself overrides
+    these with `monkeypatch.setenv`/`delenv` inside the test. Session-scoped with its own patcher
+    because a test that calls `monkeypatch.undo()` would undo a function-scoped one.
+    """
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setenv("MENHIR_AUTO_MERGE_MODE", "on")
+        patcher.setenv("MENHIR_AUTO_DELETE_MODE", "on")
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_operator_warning_cache():
     """The FAILED-count snapshot for operator warnings is process-wide; no test may inherit it."""
@@ -1418,6 +1432,7 @@ class StubMemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         """Return the uuids ACTUALLY deleted, mirroring the real scope filter.
 

@@ -824,7 +824,8 @@ non-Entity peers included). A snapshot over `MAX_SNAPSHOT_BYTES` (8 MiB) abstain
 ### Merge-owned survivor delta (`domain/merge_delta.py`)
 
 An exact unmerge reverses what the merge wrote to the SURVIVOR, so
-`MERGE_OWNED_SURVIVOR_PROPERTIES` must list every property the merge's SET clause touches:
+`MERGE_OWNED_SURVIVOR_PROPERTIES` must list every content and provenance property the merge's SET
+clause touches (retention -- `scope`, `ttl_expires`, `promoted_at` -- is never lowered by an unmerge):
 `summary`, `content`, `source`, `source_confidence`, `sources`, `corroboration`. Three surfaces have
 to agree on that set or exact unmerge silently stops working:
 

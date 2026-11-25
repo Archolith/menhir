@@ -75,8 +75,8 @@ def merge_fixture(live_repo):
     }
     live_repo.execute(
         """
-        CREATE (s:Entity {uuid: $survivor, name: 'survivor node', test_tag: $tag})
-        CREATE (a:Entity {uuid: $absorbed, name: 'absorbed node', test_tag: $tag})
+        CREATE (s:Entity {uuid: $survivor, name: 'survivor node', scope: 'PERSISTENT', test_tag: $tag})
+        CREATE (a:Entity {uuid: $absorbed, name: 'absorbed node', scope: 'PERSISTENT', test_tag: $tag})
         CREATE (p:Entity {uuid: $peer, name: 'peer node', test_tag: $tag})
         CREATE (eps:Episodic {uuid: $ep_survivor, name: 'survivor episode', test_tag: $tag})
         CREATE (epa:Episodic {uuid: $ep_absorbed, name: 'absorbed episode', test_tag: $tag})
@@ -156,9 +156,9 @@ def chain_fixture(live_repo):
     ids = {"a": f"{tag}-A", "b": f"{tag}-B", "c": f"{tag}-C"}
     live_repo.execute(
         """
-        CREATE (a:Entity {uuid: $a, name: 'chain A', test_tag: $tag})
-        CREATE (b:Entity {uuid: $b, name: 'chain B', test_tag: $tag})
-        CREATE (c:Entity {uuid: $c, name: 'chain C', test_tag: $tag})
+        CREATE (a:Entity {uuid: $a, name: 'chain A', scope: 'PERSISTENT', test_tag: $tag})
+        CREATE (b:Entity {uuid: $b, name: 'chain B', scope: 'PERSISTENT', test_tag: $tag})
+        CREATE (c:Entity {uuid: $c, name: 'chain C', scope: 'PERSISTENT', test_tag: $tag})
         """,
         params={**ids, "tag": tag},
     )

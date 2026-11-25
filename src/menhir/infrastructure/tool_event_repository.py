@@ -22,7 +22,7 @@ The "stale" signal (the whole point): a memory `(sem)-[a:ANCHORED_TO]->(f:file)`
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 
@@ -39,6 +39,20 @@ def _parse_iso_utc(text: str) -> datetime | None:
         return dt
     except (ValueError, TypeError):
         return None
+
+
+def receipt_effective_time(row: dict[str, Any]) -> datetime | None:
+    """The instant a receipt counts from: min(verified_at, created_at), compared as instants.
+
+    `created_at` is stamped by the server, so a future-dated `verified_at` counts no later than
+    the time the receipt was recorded (#965). A missing/unparseable `created_at` leaves `verified_at`; an unparseable
+    `verified_at` returns None (receipt skipped). Text order is never used."""
+    v_dt = _parse_iso_utc(str(row.get("verified_at") or ""))
+    if v_dt is None:
+        return None
+    c_dt = _parse_iso_utc(str(row.get("created_at") or ""))
+    return min(v_dt, c_dt) if c_dt is not None else v_dt
+
 
 #: file operations a v0 file_changed event may carry. rename also touches `old_path`.
 FILE_OPERATIONS = ("write", "edit", "delete", "rename", "create")
@@ -99,6 +113,59 @@ class ToolEventRepository:
         )
         return int(rows[0]["matched"]) if rows else 0
 
+    def _mark_dirty_for_unknown_project(
+        self,
+        paths: list[str],
+        project: str,
+        op: str,
+        after_hash: str | None,
+        mtime: str | None,
+        source_client: str | None,
+    ) -> tuple[bool, int]:
+        """Path-only fallback for a `project` the graph has no entities for (#964).
+
+        One statement, always one row. `known` = some entity carries this structure_project; then
+        nothing is marked (the scoped query already had its say). Otherwise the matching file
+        nodes are collected and marked only when they all belong to ONE project, so a renamed or
+        worktree directory still resolves without marking README.md in every project. For a
+        rename the union of both paths is judged together. Returns `(known, matched)`."""
+        rows = self._neo4j.execute(
+            """
+            // structure_path IS NOT NULL lets the (project, path) index serve this; without it: label scan
+            WITH EXISTS {
+                MATCH (k:Entity {structure_project: $project}) WHERE k.structure_path IS NOT NULL
+            } AS known
+            CALL {
+                WITH known
+                MATCH (f:Entity {structure_role: 'file'})
+                WHERE NOT known AND f.structure_path IN $paths
+                RETURN collect(f) AS files,
+                       count(DISTINCT coalesce(f.structure_project, '')) AS nproj
+            }
+            FOREACH (f IN CASE WHEN nproj = 1 THEN files ELSE [] END |
+                SET f.structure_dirty = true,
+                    f.dirty_at = datetime(),
+                    f.last_event_op = $op,
+                    f.last_event_after_hash = $after_hash,
+                    f.last_event_mtime = $mtime,
+                    f.last_event_source_client = $source_client
+            )
+            RETURN known, CASE WHEN nproj = 1 THEN size(files) ELSE 0 END AS matched
+            """,
+            params={
+                "paths": paths,
+                "project": project,
+                "op": op,
+                "after_hash": after_hash,
+                "mtime": mtime,
+                "source_client": source_client,
+            },
+        )
+        if not rows:
+            return False, 0
+        row = rows[0]
+        return bool(row.get("known")), int(row.get("matched") or 0)
+
     def record_file_event(
         self,
         *,
@@ -111,13 +178,17 @@ class ToolEventRepository:
         source_client: str | None = None,
     ) -> dict[str, Any]:
         """Mark the affected file `:Entity` node(s) dirty. Returns
-        `{accepted, matched, marked_dirty, paths}`. `matched` = how many existing file nodes were
-        found; a file not in the structure graph yet -> accepted, matched 0 (no error). NO content is
-        stored — only the optional `after_hash`/`mtime` provenance. When `project` is given the match
-        is scoped to that structure_project; else it matches the relative `path` across projects
-        (conservative: over-marks rather than misses). If a project-scoped match finds nothing, a
-        path-only fallback is tried automatically so a mismatched structure_project is not a silent
-        miss."""
+        `{accepted, matched, marked_dirty, paths, project_fallback_used}`. `matched` = how many
+        existing file nodes were found; a file not in the structure graph yet -> accepted, matched
+        0 (no error). NO content is stored -- only the optional `after_hash`/`mtime` provenance.
+
+        With `project` given the match is scoped to that structure_project. An event naming an
+        indexed project never marks another project's files. If the scoped match finds nothing and
+        the project is UNKNOWN to the graph, a path-only fallback marks the files only when every
+        match belongs to ONE project (worktree / renamed-directory aliases keep working).
+        Residual: an unknown project whose path exists in exactly one indexed project still marks
+        that file. `project_fallback_used` is True whenever that fallback was eligible, even if it
+        matched nothing. With `project=None` the match is path-only across projects."""
         text = (path or "").strip()
         if not text:
             raise ValueError("record_file_event requires a non-empty path")
@@ -128,8 +199,10 @@ class ToolEventRepository:
         matched = self._match_and_mark_dirty(paths, project, op, after_hash, mtime, source_client)
         fallback_used = False
         if matched == 0 and project is not None:
-            matched = self._match_and_mark_dirty(paths, None, op, after_hash, mtime, source_client)
-            fallback_used = True
+            known, matched = self._mark_dirty_for_unknown_project(
+                paths, project, op, after_hash, mtime, source_client
+            )
+            fallback_used = not known
         return {
             "accepted": True,
             "matched": matched,
@@ -361,6 +434,9 @@ class ToolEventRepository:
         receipts -- including operator-written `notes` -- at `readonly` tier. `namespace` is
         therefore mandatory and is a tenant BOUNDARY, not another optional filter: the caller's
         filters narrow within it and can never widen past it.
+
+        Newest first by the SERVER-recorded `created_at`, not the caller-supplied `verified_at`
+        text, so a bad or future `verified_at` cannot game or misorder what `limit` keeps (#965).
         """
         tenant = (namespace or "").strip()
         if not tenant:
@@ -402,7 +478,7 @@ class ToolEventRepository:
                    v[$current_file_hash_key] AS current_file_hash,
                    v[$notes_key] AS notes, v[$verified_at_key] AS verified_at,
                    toString(v[$created_at_key]) AS created_at
-            ORDER BY v[$verified_at_key] DESC
+            ORDER BY v[$created_at_key] DESC, v[$uuid_key] DESC
             LIMIT $limit
             """,
             params=params,
@@ -419,7 +495,13 @@ class ToolEventRepository:
         For each stale anchor spec in ``stale_anchors`` (each must contain
         ``memory_uuid``, ``path``, and ``dirty_at``), return the most recent
         ``StaleAnchorVerification`` where ``v.memory_uuid = memory_uuid``
-        AND ``v.path = path`` AND ``verified_at >= dirty_at``.
+        AND ``v.path = path`` AND its effective time >= dirty_at.
+
+        Effective time is ``min(verified_at, created_at)`` as instants (see
+        `receipt_effective_time`): a future-dated ``verified_at`` counts no later than the server
+        recorded it, and unparseable receipts are skipped without hiding a valid older one. The
+        latest receipt per (memory_uuid, path) wins first, then the post-dirty test applies.
+        Rows keep their stored ``verified_at``.
 
         A verification receipt only applies when it matches both the memory
         AND the file path — a ``still_valid`` receipt for ``src/a.py`` cannot
@@ -441,8 +523,9 @@ class ToolEventRepository:
                    v[$outcome_key] AS outcome, v[$verified_by_key] AS verified_by,
                    v[$basis_key] AS basis, v[$verified_at_key] AS verified_at,
                    v[$current_file_hash_key] AS current_file_hash,
-                   v[$notes_key] AS notes
-            ORDER BY v[$verified_at_key] DESC
+                   v[$notes_key] AS notes,
+                   toString(v[$created_at_key]) AS created_at
+            ORDER BY v[$created_at_key] DESC, v[$uuid_key] DESC
             """,
             params={
                 "memory_uuids": memory_uuids,
@@ -454,18 +537,25 @@ class ToolEventRepository:
                 "verified_at_key": "verified_at",
                 "current_file_hash_key": "current_file_hash",
                 "notes_key": "notes",
+                "created_at_key": "created_at",
+                "uuid_key": "uuid",
             },
         )
-        # Build a map from (memory_uuid, path) → latest receipt
-        latest: dict[tuple[str, str], dict[str, Any]] = {}
+        # Latest per (memory_uuid, path) by (effective time, created_at); ties keep query order.
+        latest: dict[tuple[str, str], tuple[tuple[datetime, datetime], dict[str, Any]]] = {}
+        floor = datetime.min.replace(tzinfo=timezone.utc)
         for r in rows:
             row = dict(r)
             muid = str(row.get("memory_uuid") or "")
             vpath = str(row.get("path") or "")
+            eff = receipt_effective_time(row)
+            if not muid or not vpath or eff is None:
+                continue
+            created = _parse_iso_utc(str(row.get("created_at") or "")) or floor
+            rank = (eff, created)
             key = (muid, vpath)
-            if not muid or not vpath or key in latest:
-                continue  # already have the latest (sorted DESC)
-            latest[key] = row
+            if key not in latest or rank > latest[key][0]:
+                latest[key] = (rank, row)
 
         # Match each stale anchor spec against verified receipts
         result: dict[tuple[str, str], dict[str, Any]] = {}
@@ -476,21 +566,14 @@ class ToolEventRepository:
             if not muid or not spath:
                 continue
             key = (muid, spath)
-            row = latest.get(key)
-            if row is None:
+            hit = latest.get(key)
+            if hit is None:
                 continue
-            verified_at = str(row.get("verified_at") or "")
-            # Skip if we cannot compare timestamps conservatively
-            if not verified_at or not dirty_at:
-                continue
-            # Parse both timestamps for safe comparison
-            try:
-                v_dt = _parse_iso_utc(verified_at)
-                d_dt = _parse_iso_utc(dirty_at)
-            except Exception:
-                continue  # unparseable → skip (conservative)
-            if v_dt is None or d_dt is None:
-                continue
+            row = hit[1]
+            d_dt = _parse_iso_utc(dirty_at)
+            if d_dt is None:
+                continue  # cannot compare -> skip (conservative)
+            v_dt = hit[0][0]
             if v_dt < d_dt:
                 continue  # pre-dirty verification is not reassuring
             result[key] = row

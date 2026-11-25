@@ -192,6 +192,8 @@ class RecallRequest(BaseModel):
     preset: str = "knowledge"
     limit: int = Field(default=10, ge=1, le=MAX_EXPLICIT_RECALL_RESULTS)
     namespace: str | None = None
+    file_context: str | None = None
+    file_context_project: str | None = None
     # Whether to include SESSION-scoped (not-yet-promoted-to-PERSISTENT) memories.
     # True, matching every MCP recall tool. It was False here for historical reasons, which
     # made the most basic first-run check -- write one memory, read it back over REST --

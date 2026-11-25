@@ -68,6 +68,10 @@ def replay_survivor_merge(
         source_confidence = min of both nodes' EFFECTIVE authority (derive_merged_provenance)
         corroboration     = number of distinct writer FAMILIES (corroboration_for)
 
+    The merge also sets survivor ``scope`` (the higher of the pair), clears ``ttl_expires`` and may
+    set ``promoted_at``. These are retention fields, deliberately NOT replayed, NOT in
+    ``MERGE_OWNED_SURVIVOR_PROPERTIES`` and NOT restored: unmerge never lowers them.
+
     Provenance is DERIVED here, never accumulated. The previous rule comma-appended `source` and
     added 0.1 to `source_confidence` per merge, which made trust a function of how many duplicates a
     node absorbed: four absorptions walked a `claude-code` entity (0.7) to 1.0, the tier reserved for

@@ -96,4 +96,5 @@ def test_recall_trace_annotation_and_serialized_shape_are_preserved() -> None:
         "facet_active": None,
         "view_reachability": None,
         "rank_shadow_warning": None,
+        "ranking": None,
     }

@@ -1502,6 +1502,9 @@ class MemoryGraphAdapter:
     def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
         return self._episodes.cleanup_orphan_episodes(session_id, dry_run=dry_run)
 
+    def fetch_orphan_episode_uuids(self, session_id: str | None = None) -> list[str]:
+        return self._episodes.fetch_orphan_episode_uuids(session_id)
+
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         return self._consolidation.increment_edge_weight(edge_uuid)
 
@@ -2879,11 +2882,13 @@ class MemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         return self._consolidation.delete_entities_returning_uuids(
             node_uuids,
             require_scope=require_scope,
             protect_retention=protect_retention,
+            require_expired_ttl=require_expired_ttl,
         )
 
     def newly_unreferenced_evidence(self, node_uuids: list[str]) -> list[str]:

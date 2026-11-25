@@ -159,7 +159,7 @@ def test_ttl_sweep_audits_what_happened_not_what_was_intended(coord, live_repo, 
     real_delete = coord.graph_adapter.delete_entities_returning_uuids
 
     def promote_then_delete(
-        node_uuids, *, require_scope=None, protect_retention=False
+        node_uuids, *, require_scope=None, protect_retention=False, require_expired_ttl=False
     ):
         live_repo.execute(
             "MATCH (n:Entity {uuid:$u}) SET n.scope = 'PERSISTENT'", params={"u": nodes["other"]}
@@ -168,6 +168,7 @@ def test_ttl_sweep_audits_what_happened_not_what_was_intended(coord, live_repo, 
             node_uuids,
             require_scope=require_scope,
             protect_retention=protect_retention,
+            require_expired_ttl=require_expired_ttl,
         )
 
     coord.graph_adapter.delete_entities_returning_uuids = promote_then_delete  # type: ignore[method-assign]

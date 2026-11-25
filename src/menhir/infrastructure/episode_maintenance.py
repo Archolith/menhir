@@ -291,6 +291,32 @@ class EpisodeMaintenanceRepository:
         rows = self.neo4j.execute(query, params=params)
         return int(rows[0].get("pending", 0)) if rows else 0
 
+    def _orphan_episode_query(self, session_id: str | None) -> tuple[Cypher, dict[str, Any]]:
+        """The one predicate for orphan-episode eligibility, shared by the sweep and its preview."""
+        params: dict[str, Any] = {}
+        if session_id is not None:
+            params["session_id"] = session_id
+        query_builder = (
+            Cypher()
+            .match("(n:Episodic)")
+            .where(
+                "n.scope = 'SESSION'",
+                "n.processing_state = 'READY'",
+                "coalesce(n.user_flagged, false) = false",
+                "NOT EXISTS { MATCH (n)-[]-(e:Entity) }",
+                "coalesce(trim(n.content), '') = ''",
+                f"n.created_at < datetime() - duration({{days: {_ORPHAN_EPISODE_MIN_AGE_DAYS}}})",
+            )
+            .where_if(session_id is not None, "n.session_id = $session_id")
+        )
+        return query_builder, params
+
+    def fetch_orphan_episode_uuids(self, session_id: str | None = None) -> list[str]:
+        """Read-only: uuids ``cleanup_orphan_episodes`` would delete now (same predicate)."""
+        query_builder, params = self._orphan_episode_query(session_id)
+        rows = self.neo4j.execute(query_builder.return_raw("n.uuid AS uuid").build(), params=params)
+        return [str(r["uuid"]) for r in rows or [] if r.get("uuid")]
+
     def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
         """Delete SESSION episodes that are edgeless, empty, and old, from the daily job.
 
@@ -318,22 +344,7 @@ class EpisodeMaintenanceRepository:
         """
         import logging
 
-        params: dict[str, Any] = {}
-        if session_id is not None:
-            params["session_id"] = session_id
-        query_builder = (
-            Cypher()
-            .match("(n:Episodic)")
-            .where(
-                "n.scope = 'SESSION'",
-                "n.processing_state = 'READY'",
-                "coalesce(n.user_flagged, false) = false",
-                "NOT EXISTS { MATCH (n)-[]-(e:Entity) }",
-                "coalesce(trim(n.content), '') = ''",
-                f"n.created_at < datetime() - duration({{days: {_ORPHAN_EPISODE_MIN_AGE_DAYS}}})",
-            )
-            .where_if(session_id is not None, "n.session_id = $session_id")
-        )
+        query_builder, params = self._orphan_episode_query(session_id)
         if dry_run:
             query = query_builder.return_raw("count(n) AS eligible").build()
             rows = self.neo4j.execute(query, params=params)

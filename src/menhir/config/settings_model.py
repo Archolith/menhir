@@ -107,6 +107,13 @@ def _parse_secret_policy(raw: str) -> str:
     return value
 
 
+def _parse_auto_mutation_mode(env_name: str, raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value not in ("off", "propose", "on"):
+        raise ValueError(f"{env_name} must be 'off', 'propose' or 'on'")
+    return value
+
+
 @dataclass(frozen=True)
 class MemorySettings:
     """Runtime settings used by menhir."""
@@ -173,7 +180,8 @@ class MemorySettings:
     # lifecycle_actions) answer "what happened just now"; the diagnostic tables are what someone
     # reads investigating a defect weeks later, so a single short window would delete the history
     # needed to correlate a recurring failure. 0 disables pruning for that tier entirely.
-    # `merge_audit` is never time-pruned -- see TelemetryLifecycleStoreMixin._RETENTION_TIERS.
+    # `merge_audit` and `conflict_resolutions` are never time-pruned --
+    # see TelemetryLifecycleStoreMixin._RETENTION_TIERS.
     telemetry_observability_retention_days: int = 30
     telemetry_diagnostic_retention_days: int = 90
 
@@ -439,6 +447,7 @@ class MemorySettings:
     recall_rerank_top_n: int = 50  # 1..200
     recall_rerank_max_results: int = 7  # 1..200; cap when rerank ran and no caller limit was specified
     recall_rerank_threads: int = 0  # 0..256; 0 = auto (capped at the cgroup CPU quota)
+    recall_ranking_strategy: str = "reranker_only"  # reranker_only | oracle_only | oracle_combined
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -523,6 +532,13 @@ class MemorySettings:
     # act taken after a clean preflight. In live mode a failed preflight or a not-write-ready run
     # is FATAL to startup: an instance that cannot clear its backlog must admit no writers.
     saga_reconcile_startup_mode: str = "observe"
+
+    # Automatic mutation switches (off | propose | on), independent of each other. Merging two
+    # memories and deleting a memory on policy (TTL expiry, decay, orphan episodes) run only when
+    # "on"; "propose" records a pending action instead and "off" does nothing. Operator-requested
+    # erasure, unmerge and derived-data rebuilds are not covered. Read per process, restart to change.
+    auto_merge_mode: str = "propose"
+    auto_delete_mode: str = "off"
 
     # OAuth resource server + embedded authorization server
     oauth_enabled: bool = False
@@ -773,6 +789,7 @@ class MemorySettings:
             enable_cross_encoder_rerank=self.recall_rerank_enabled,
             rerank_top_n=self.recall_rerank_top_n,
             rerank_max_results=self.recall_rerank_max_results,
+            ranking_strategy=self.recall_ranking_strategy,
         )
 
     @classmethod
@@ -956,6 +973,7 @@ class MemorySettings:
             recall_rerank_auto_download=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", default=str(cls.recall_rerank_auto_download))),
             recall_rerank_cache_dir=_getenv("MENHIR_RECALL_RERANK_CACHE_DIR", default=cls.recall_rerank_cache_dir).strip(),
             recall_rerank_device=_getenv("MENHIR_RECALL_RERANK_DEVICE", default=cls.recall_rerank_device).strip().lower(),
+            recall_ranking_strategy=_getenv("MENHIR_RECALL_RANKING_STRATEGY", default=cls.recall_ranking_strategy).strip().lower(),
             recall_rerank_top_n=_parse_int(
                 _getenv("MENHIR_RECALL_RERANK_TOP_N", default=str(cls.recall_rerank_top_n)),
                 env_var="MENHIR_RECALL_RERANK_TOP_N",
@@ -1037,6 +1055,12 @@ class MemorySettings:
                 "MENHIR_SAGA_RECONCILE_STARTUP_MODE",
                 default=cls.saga_reconcile_startup_mode,
             ).strip().lower(),
+            auto_merge_mode=_parse_auto_mutation_mode(
+                "MENHIR_AUTO_MERGE_MODE", _getenv("MENHIR_AUTO_MERGE_MODE", default=cls.auto_merge_mode)
+            ),
+            auto_delete_mode=_parse_auto_mutation_mode(
+                "MENHIR_AUTO_DELETE_MODE", _getenv("MENHIR_AUTO_DELETE_MODE", default=cls.auto_delete_mode)
+            ),
             oauth_enabled=parse_bool_env(_getenv("MENHIR_OAUTH_ENABLED", default=str(cls.oauth_enabled))),
             oauth_public_base_url=_getenv("MENHIR_PUBLIC_BASE_URL", default=cls.oauth_public_base_url).rstrip("/"),
             oauth_resource=_getenv("MENHIR_OAUTH_RESOURCE", "MENHIR_MCP_RESOURCE", default=cls.oauth_resource).strip(),

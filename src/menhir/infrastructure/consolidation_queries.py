@@ -553,8 +553,12 @@ class ConsolidationRepository:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         """DETACH DELETE the given Entity nodes and return the uuids ACTUALLY deleted (plan Phase 6).
+
+        ``require_expired_ttl`` (TTL sweep only) re-checks ``ttl_expires < datetime()`` on the live
+        node inside this statement, so a merge that cleared the TTL after selection spares it.
 
         The existing `delete_session_nodes` returns only a COUNT, so a caller could never tell WHICH
         of its targets died -- and because the scope filter silently skips a node that was promoted in
@@ -565,6 +569,8 @@ class ConsolidationRepository:
         if not node_uuids:
             return []
         scope_clause = "AND n.scope = $scope" if require_scope else ""
+        if require_expired_ttl:
+            scope_clause += " AND n.ttl_expires IS NOT NULL AND n.ttl_expires < datetime()"
         params: dict[str, Any] = {"uuids": node_uuids}
         if require_scope:
             params["scope"] = require_scope
