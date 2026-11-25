@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -349,6 +350,35 @@ def test_authoritative_target_reconciliation_discovers_removals_without_redirtyi
     assert by_subject["ent-b"].target_present is True
     assert by_subject["ent-b"].generation == 5
     assert by_subject["ent-c"].generation == 1
+
+
+@pytest.mark.unit
+def test_pending_definition_scoping_happens_before_limit() -> None:
+    seed = ProjectionLifecycleRepository(ScriptedNeo4j())
+    row = _work_row(seed, _target("scalar-only"), generation=2)
+    row["current_definition_version"] = 1
+    fake = ScriptedNeo4j(direct=[("MATCH (w:ProjectionWorkState)", [row])])
+
+    pending = ProjectionLifecycleRepository(fake).pending(
+        definition_id="scalar-state", limit=1,
+    )
+
+    assert len(pending) == 1
+    assert pending[0].target.subject_id == "scalar-only"
+    query, params = fake.executed[0]
+    assert "AND w.definition_id = $definition_id" in query
+    assert query.index("AND w.definition_id = $definition_id") < query.index("LIMIT $limit")
+    assert params["definition_id"] == "scalar-state"
+    assert params["limit"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("definition_id", ["", "  ", 1, False])
+def test_pending_rejects_invalid_definition_filter(definition_id: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        ProjectionLifecycleRepository(ScriptedNeo4j()).pending(
+            definition_id=definition_id,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.unit
@@ -826,6 +856,41 @@ def test_projection_lifecycle_live_stale_worker_cannot_install_view(test_neo4j_r
         "MATCH (n:ProjectionLifecycleTestView) RETURN count(n) AS count"
     )
     assert rows == [{"count": 0}]
+
+
+@pytest.mark.online
+def test_projection_pending_scoped_query_skips_many_older_foreign_jobs(
+    test_neo4j_repo,
+) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    other = replace(
+        _definition(1),
+        definition_id="other-synthetic-projection",
+        output_view_kind="other_synthetic_state",
+    )
+    scalar = _definition(1)
+    lifecycle.publish_definition(other, semantic_hash="other-synthetic-v1")
+    lifecycle.publish_definition(scalar, semantic_hash="scalar-synthetic-v1")
+
+    foreign = [_target(f"foreign-{i:03d}") for i in range(110)]
+    lifecycle.dirty_targets(other, foreign, reason="foreign_jobs")
+    scalar_token = lifecycle.dirty_targets(
+        scalar, [_target("scalar-synthetic")], reason="scalar_job",
+    )[0]
+
+    # The generic first page is full of unrelated older work.
+    assert all(
+        token.definition_id == other.definition_id
+        for token in lifecycle.pending(limit=10)
+    )
+    # The worker must see scalar work even at a one-item limit.
+    assert lifecycle.pending(definition_id=scalar.definition_id, limit=1) == (
+        scalar_token,
+    )
+    assert lifecycle.pending(definition_id=other.definition_id, limit=1)[0].definition_id == (
+        other.definition_id
+    )
 
 
 @pytest.mark.online
