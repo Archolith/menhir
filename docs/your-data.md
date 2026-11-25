@@ -20,7 +20,7 @@ lists every store, how long it is kept, and how to remove it. Erasure is incompl
 
 | Store | What it holds | Where | Kept for | How to remove |
 |---|---|---|---|---|
-| Memories | Raw memory text (up to 48,000 chars), optional `diff` (up to 50,000 chars), source, session and user ids, namespace, embedding. The Graphiti twin episode carries the same body and diff. | Neo4j `:Episodic` | Indefinitely. A daily job can replace a body with a summary; demoted SESSION memories are deleted after 14 days. | `delete_memory` |
+| Memories | Raw memory text (up to 48,000 chars), optional `diff` (up to 50,000 chars), source, session and user ids, namespace, embedding. The Graphiti twin episode carries the same body and diff. | Neo4j `:Episodic` | Indefinitely. A daily job can replace a body with a summary; demoted SESSION memories are deleted after 14 days. A merge keeps the higher scope of the two memories and clears the survivor's expiry date; an unmerge does not bring an expiry date back. | `delete_memory` |
 | Entities and facts | LLM-extracted entity names and summaries, fact text, embeddings | Neo4j `:Entity`, `RELATES_TO` | Indefinitely | `delete_memory` on the entity uuid removes one entity and its edges. Nothing removes a single fact edge. |
 | Views | Scalar, history, timeline and counter values built from memories | Neo4j `:Entity` with `view_kind` | Indefinitely | `delete_memory` on the view uuid |
 | Typed assertions | Typed claims extracted from turns and memories | Neo4j `:TypedAssertion` and related heads | Indefinitely | Removed with their memory by `delete_memory`, and by `delete_namespace` |

@@ -21,6 +21,10 @@ Invariant 9 is the spine: an unmerge may restore only when the current graph mat
 merge's expected after-state. Newer or conflicting state is PRESERVED and routed to NEEDS_REVIEW --
 we never overwrite something a human or a later job changed. A missing peer is likewise a refusal,
 never a fabrication: the default is all-or-nothing.
+
+Exact means content, provenance and links. Retention is not reversed: a merge may have raised the
+survivor's scope and cleared its TTL, and the restore leaves both as they are (the survivor may have
+been promoted since). The restored node's ``ttl_expires`` is cleared, so retention only ever rises.
 """
 
 from __future__ import annotations

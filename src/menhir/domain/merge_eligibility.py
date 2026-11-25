@@ -19,6 +19,7 @@ Hard vetoes:
   - namespace mismatch (never merge identities across silos)
   - COMPRESSED or GONE freshness (must be rehydrated through the lifecycle path first)
   - PROMOTED scope (operator-curated ground truth is merge-immune)
+  - any scope other than SESSION or PERSISTENT (CANDIDATE, null, blank, unknown)
   - user_flagged (user-protected)
   - a protected conflict state (pending_llm_review / unresolved)
 """
@@ -41,6 +42,7 @@ INELIGIBLE_ROLE = "INELIGIBLE_ROLE"
 NAMESPACE_MISMATCH = "NAMESPACE_MISMATCH"
 NON_ACTIVE_FRESHNESS = "NON_ACTIVE_FRESHNESS"
 PROMOTED_SCOPE = "PROMOTED_SCOPE"
+UNMERGEABLE_SCOPE = "UNMERGEABLE_SCOPE"
 USER_FLAGGED = "USER_FLAGGED"
 SOURCE_RETENTION_PROTECTED = "SOURCE_RETENTION_PROTECTED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
@@ -55,6 +57,9 @@ _VETOED_FRESHNESS = frozenset({"COMPRESSED", "GONE"})
 #: closed. Today the two forms describe the same set: `FreshnessState` is exactly
 #: {ACTIVE, COMPRESSED, GONE}.
 _MERGEABLE_FRESHNESS = frozenset({"ACTIVE", ""})
+#: The only scopes a merge may touch (trim/upper-normalized). Anything else -- CANDIDATE, null,
+#: blank, unknown -- is refused, so the merge's "higher scope wins" rank only ever sees these two.
+_MERGEABLE_SCOPES = frozenset({"SESSION", "PERSISTENT"})
 #: conflict_status values that mark a node as under active review (see domain.models.ConflictStatus).
 _PROTECTED_CONFLICT_STATES = frozenset({"pending_llm_review", "unresolved"})
 
@@ -62,6 +67,7 @@ _PROTECTED_CONFLICT_STATES = frozenset({"pending_llm_review", "unresolved"})
 #: Parameter names the emitted mutation predicate binds. The repository must supply these.
 MUTABLE_PREDICATE_PARAMS: dict[str, Any] = {
     "mergeable_freshness": sorted(_MERGEABLE_FRESHNESS),
+    "mergeable_scopes": sorted(_MERGEABLE_SCOPES),
     "protected_conflict_states": sorted(_PROTECTED_CONFLICT_STATES),
 }
 
@@ -115,6 +121,7 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
             f"{var}.self_tier IS NULL",
             f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
+            f"toUpper(trim(coalesce({var}.scope, ''))) IN $mergeable_scopes",
             f"coalesce({var}.user_flagged, false) = false",
             f"NOT {source_retention_protected_cypher(var)}",
             f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
@@ -227,5 +234,14 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     ]
     if conflicted:
         return _veto(PROTECTED_CONFLICT, conflicted=conflicted)
+
+    # 10. Only SESSION or PERSISTENT may merge: the survivor takes the higher of the two, which is
+    #     undefined for CANDIDATE, null, blank or unknown scope. Same normalization as the Cypher.
+    bad_scope = [
+        (n.uuid, n.scope) for n in (survivor, absorbed)
+        if str(n.scope or "").strip().upper() not in _MERGEABLE_SCOPES
+    ]
+    if bad_scope:
+        return _veto(UNMERGEABLE_SCOPE, offenders=bad_scope)
 
     return MergeEligibility(allowed=True, reason_code=ELIGIBLE)
