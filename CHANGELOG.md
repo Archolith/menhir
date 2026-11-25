@@ -1,3 +1,9 @@
+## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.
+- Upgrade note: by default automatic merges become proposals and automatic deletion stops. Stop the old
+  process before starting this version; 0.3.16 ignores the new switches.
+
 ## 2026-11-25 - Automatic merges and deletions each have an off switch (`MENHIR_AUTO_MERGE_MODE`, `MENHIR_AUTO_DELETE_MODE`)
 
 - `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: two modes, `off | propose | on`.
@@ -77,19 +83,3 @@
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.14. No dependency changes in this commit.
 - Upgrade note (#761): Agent Smith OAuth identities (`/oauth/client-metadata/agent-smith.json?client=<key>`) are served only from client-policy entries with a `registration`; the built-in table is gone. A deployment that uses Agent Smith must add those registrations to its policy in the same upgrade.
-
-## 2026-11-22 - A memory whose enrichment fails stays recallable; extraction and lab fixes (#662, #483, #265)
-
-- #662: the source-memory lane (`search_episode_embeddings`) now returns FAILED episodes; only
-  erase tombstones and episodes with a sealed erase marker are excluded. The embedding repair
-  job lists READY and FAILED episodes (`settled_only`), an oversized episode is embedded before
-  it is parked, and exhausted-lease parking writes no raw-capture copy. Legacy raw captures are
-  hidden from ranked recall and from recent memories. Source-search readiness
-  (`source_search_eligible`) uses the same predicate as recall, and a FAILED receipt no longer
-  uses up a timeline-anchor slot. The FAILED warnings on `add_memory`, the operator warning and
-  `get_memory_stats` now say the text is recallable but has no entities or facts.
-- #483: a combined-extraction response that is not a JSON object raises
-  `CombinedExtractionShapeError`, classified as an output-parse error for manual review, instead
-  of a bare `TypeError`.
-- #265: the extraction lab passes the edge expiry, invalidation and preserved-attribute hooks
-  that ingest uses.
