@@ -59,6 +59,7 @@ from menhir.infrastructure.cypher import (
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
+from menhir.infrastructure.erasure_fence import marker_absent_cypher
 from menhir.infrastructure.graph_text_inventory import (
     ABSORBED_BLOCK_SEPARATOR,
     ENTITY_STRUCTURAL_PROPERTIES,
@@ -751,6 +752,13 @@ class MemoryQueryRepository:
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n", include_retired=include_retired),
         ]
+        # The twin lookup labels history rows only; the default lane hides retired rows already and
+        # must read memory nodes through the vector index alone (#574 index-only plan).
+        retired_label = (
+            "(coalesce(n.memory_retired, false) OR EXISTS { MATCH (rt:Episodic) "
+            "WHERE rt.uuid = n.resolved_episode_uuid AND coalesce(rt.memory_retired, false) })"
+            if include_retired else "coalesce(n.memory_retired, false)"
+        )
         params: dict[str, Any] = {
             "query_vector": query_vector,
             "limit": safe_limit,
@@ -799,17 +807,13 @@ class MemoryQueryRepository:
         if namespace_spellings(namespace) is not None:
             where.insert(0, tenant_scope_prefilter_cypher("n"))
         where.append(tenant_scope_cypher("n"))
-        tail = """
+        tail = f"""
             WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
             WHERE cosine IS NOT NULL
             RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
                    n.session_id AS session_id,
                    toString(coalesce(n.reference_time, n.created_at)) AS reference_time,
-                   (coalesce(n.memory_retired, false) OR EXISTS {
-                       MATCH (rt:Episodic)
-                       WHERE rt.uuid = n.resolved_episode_uuid
-                         AND coalesce(rt.memory_retired, false)
-                   }) AS memory_retired,
+                   {retired_label} AS memory_retired,
                    cosine
             ORDER BY cosine DESC, n.uuid
             LIMIT $limit
@@ -1683,18 +1687,31 @@ class MemoryQueryRepository:
         ``user_flagged``, ``retention_protected`` (or ``changed`` if the node moved between the
         check and the write). Idempotent: a retired memory keeps its first ``retired_at``.
         """
+        # G-q: refuse any node of the pair with an erase marker, erased_at or deleted_by_user, in
+        # the probe and again in the write, so retire never writes its reason onto erased text.
+        not_erased_x = (
+            "(x['erased_at'] IS NULL "
+            "AND coalesce(x.processing_substage, '') <> 'deleted_by_user' "
+            f"AND {marker_absent_cypher('x')})"
+        )
+        # The write marks every node of an episode pair, so every guard is checked on every node.
+        in_flight_x = (
+            "(x:Episodic AND coalesce(x.processing_state, '') IN ['PENDING', 'ENRICHING'])"
+        )
         probe = self.neo4j.execute(
             f"""
             {self._MEMORY_BY_UUID}
             {self._EPISODE_PAIR_MATCH}
             RETURN n.uuid AS uuid,
-                   NOT ({non_structural_memory_cypher("n")}) AS structural,
-                   (coalesce(n.is_view, false) OR n.view_kind IS NOT NULL) AS is_view,
-                   coalesce(n.scope, 'PERSISTENT') AS scope,
-                   (n:Episodic AND coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING'])
-                       AS in_flight,
+                   any(x IN nodes WHERE NOT ({non_structural_memory_cypher("x")})) AS structural,
+                   any(x IN nodes WHERE NOT ({non_derived_view_cypher("x")})) AS is_view,
+                   any(x IN nodes WHERE NOT {not_erased_x}) AS erased,
+                   any(x IN nodes WHERE coalesce(x.scope, 'PERSISTENT') = 'CANDIDATE')
+                       AS candidate,
+                   any(x IN nodes WHERE {in_flight_x}) AS in_flight,
                    any(x IN nodes WHERE coalesce(x.user_flagged, false)) AS user_flagged,
-                   ({destructive_retention_allowed_cypher("n")}) AS retention_allowed,
+                   all(x IN nodes WHERE {destructive_retention_allowed_cypher("x")})
+                       AS retention_allowed,
                    all(x IN nodes WHERE coalesce(x.memory_retired, false)) AS already_retired,
                    toString(n.memory_retired_at) AS retired_at
             LIMIT 1
@@ -1705,11 +1722,13 @@ class MemoryQueryRepository:
             return {"status": "not_found", "uuid": node_uuid}
         row = probe[0]
         refusal = None
-        if row.get("structural"):
+        if row.get("erased"):
+            refusal = ("erased", "the memory is erased or being erased")
+        elif row.get("structural"):
             refusal = ("structural", "a structural graph node is not a semantic memory")
         elif row.get("is_view"):
             refusal = ("is_view", "a View is derived state and cannot be retired")
-        elif str(row.get("scope") or "") == "CANDIDATE":
+        elif row.get("candidate"):
             refusal = ("candidate_scope", "a CANDIDATE memory is not recallable; review it instead")
         elif row.get("in_flight"):
             refusal = ("episode_in_flight", "the episode is still PENDING/ENRICHING")
@@ -1725,14 +1744,15 @@ class MemoryQueryRepository:
         rows = self.neo4j.execute(
             f"""
             {self._MEMORY_BY_UUID}
-            WHERE {non_structural_memory_cypher("n")}
-              AND NOT coalesce(n.is_view, false) AND n.view_kind IS NULL
-              AND coalesce(n.scope, 'PERSISTENT') <> 'CANDIDATE'
-              AND (NOT n:Episodic OR NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING'])
-              AND {destructive_retention_allowed_cypher("n")}
             {self._EPISODE_PAIR_MATCH}
             WITH n, nodes
-            WHERE none(x IN nodes WHERE coalesce(x.user_flagged, false))
+            WHERE all(x IN nodes WHERE {non_structural_memory_cypher("x")})
+              AND all(x IN nodes WHERE {non_derived_view_cypher("x")})
+              AND all(x IN nodes WHERE {not_erased_x})
+              AND none(x IN nodes WHERE coalesce(x.scope, 'PERSISTENT') = 'CANDIDATE')
+              AND none(x IN nodes WHERE {in_flight_x})
+              AND none(x IN nodes WHERE coalesce(x.user_flagged, false))
+              AND all(x IN nodes WHERE {destructive_retention_allowed_cypher("x")})
             WITH n, nodes,
                  all(x IN nodes WHERE coalesce(x.memory_retired, false)) AS already,
                  [x IN nodes WHERE NOT coalesce(x.memory_retired, false)] AS to_mark

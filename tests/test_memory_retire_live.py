@@ -295,9 +295,44 @@ def _c_structural(env):
     return env.entity("struct", structure_role="file"), "structural"
 
 
+def _c_queue_erased(env):
+    q, _g = env.pair("erq", queue={"erased_at": "2026-11-01T00:00:00Z"})
+    return q, "erased"
+
+
+def _c_twin_erase_marker(env):
+    # An erase in progress: the marker on the twin alone must stop a retire through the queue node.
+    q, g = env.pair("erm")
+    env.repo.execute("CREATE (:ErasureMarker {subject_uuid: $g, test_tag: $tag})",
+                     {"g": g, "tag": env.tag})
+    return q, "erased"
+
+
+def _c_deleted_by_user(env):
+    return env.pair("dbu", queue={"processing_substage": "deleted_by_user"})[0], "erased"
+
+
+def _c_queue_enriching_via_twin(env):
+    # The write marks both halves, so the queue node's state must stop a retire by the twin uuid.
+    _q, g = env.pair("qen", state="ENRICHING")
+    return g, "episode_in_flight"
+
+
+def _c_twin_pending_via_queue(env):
+    q, _g = env.pair("tpe", twin={"processing_state": "PENDING"})
+    return q, "episode_in_flight"
+
+
+def _c_twin_candidate_via_queue(env):
+    q, _g = env.pair("tca", twin={"scope": "CANDIDATE"})
+    return q, "candidate_scope"
+
+
 @pytest.mark.parametrize("build", [
     _c_view, _c_candidate, _c_pending, _c_enriching, _c_flagged, _c_twin_flagged_via_queue,
-    _c_twin_flagged_via_twin, _c_retention_source, _c_structural,
+    _c_twin_flagged_via_twin, _c_retention_source, _c_structural, _c_queue_erased,
+    _c_twin_erase_marker, _c_deleted_by_user, _c_queue_enriching_via_twin,
+    _c_twin_pending_via_queue, _c_twin_candidate_via_queue,
 ], ids=lambda f: f.__name__.removeprefix("_c_"))
 def test_retire_refusals_carry_a_code_and_write_nothing(env, build):
     uid, code = build(env)
@@ -313,6 +348,42 @@ def test_retire_refusals_carry_a_code_and_write_nothing(env, build):
     assert env.marker(uid)["retired"] is None and env.marker(uid)["at"] is None
     # Restore of something never retired is a no-op, not an error.
     assert env.restore(uid)["status"] == "not_retired"
+
+
+class _AfterFirstCall:
+    """Repository proxy that runs ``side_effect`` once, right after the first query (the probe)."""
+
+    def __init__(self, repo: Any, side_effect: Any) -> None:
+        self._repo, self._side_effect, self._calls = repo, side_effect, 0
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        out = self._repo.execute(*args, **kwargs)
+        self._calls += 1
+        if self._calls == 1:
+            self._side_effect()
+        return out
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repo, name)
+
+
+@pytest.mark.parametrize("change", ["queue_enriching", "twin_flagged", "twin_erase_marker"])
+def test_pair_change_between_probe_and_write_is_refused_by_the_write(env, change):
+    # The probe passes; the pair then changes before the write. The write's own guards must refuse
+    # (code "changed") and mark neither half.
+    q, g = env.pair(f"race-{change}")
+    effects = {
+        "queue_enriching": lambda: env.set(q, "n.processing_state = 'ENRICHING'"),
+        "twin_flagged": lambda: env.set(g, "n.user_flagged = true"),
+        "twin_erase_marker": lambda: env.repo.execute(
+            "CREATE (:ErasureMarker {subject_uuid: $g, test_tag: $tag})", {"g": g, "tag": env.tag}),
+    }
+    racing = MemoryGraphAdapter(neo4j=_AfterFirstCall(env.repo, effects[change]))
+
+    result = racing.retire_memory(g, reason="race", retired_by="tester")
+
+    assert result["status"] == "refused" and result["code"] == "changed", result
+    assert env.marked_count() == 0
 
 
 def test_retire_unknown_uuid_is_not_found(env):
