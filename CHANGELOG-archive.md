@@ -1,3 +1,11 @@
+## 2026-11-24 - Conflict suppressions are no longer removed by age pruning (#959)
+
+- `infrastructure/telemetry/lifecycle_store_stats.py`: `conflict_resolutions` is out of the retention
+  tiers. Pruning it at 90 days re-opened conflict pairs that were already resolved and cut short a longer
+  `conflict_cooldown_days`. Rows already pruned are not restored.
+- `config/settings_model.py`: comment only.
+- `docs/your-data.md`: conflict suppressions are not age-pruned and erasure does not reach them.
+
 ## 2026-11-24 - Release bump PRs run stdio-e2e
 
 - `scripts/bump.py version --pr` opens the PR from `release/X.Y.Z` instead of `chore/release-X.Y.Z`.

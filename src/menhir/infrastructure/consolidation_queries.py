@@ -15,6 +15,7 @@ from typing import Any
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall import adjacency_edge_pattern
+from menhir.domain.recall_visibility import memory_retired_cypher
 from menhir.domain.retention import destructive_retention_allowed_cypher
 from menhir.infrastructure.cypher import (
     Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
@@ -54,7 +55,7 @@ def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
     return (
         f"{automatic_lifecycle_protection_cypher(variable)} "
         f"AND {destructive_retention_allowed_cypher(variable)} "
-        f"AND NOT coalesce({variable}.memory_retired, false)"
+        f"AND NOT {memory_retired_cypher(variable)}"
     )
 
 
