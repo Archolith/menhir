@@ -1,3 +1,19 @@
+## 2026-11-25 - An entity whose every source memory is retired is retired too
+
+- `domain/recall_visibility.py`: `memory_retired_cypher` is the single definition of retired: the
+  stored `memory_retired` marker, or, for an ordinary `:Entity`, at least one `:Episodic` mentions it
+  and every one that does is retired. It is derived at read time, so restoring a source or a new
+  memory mentioning the entity brings it back with no extra write. Views, flagged and
+  retention-protected entities, and entities no episode mentions are never retired this way, so
+  retiring sources still never hides a scalar View.
+- `cypher.py` (ranked admission), `consolidation_queries.py` (decay, compression, TTL),
+  `merge_eligibility.py` and `correlation_queries.py` (merge veto), `tool_event_repository.py`
+  (stale anchors) and `flag_memory` read retired state only through the helper.
+  `tests/test_memory_retired_reads.py` fails on any other raw read.
+- `tests/test_memory_retire_live.py`: single-source and shared entities, a new mention un-hiding an
+  entity, flagged and retention-protected entities staying visible, a scalar View staying visible,
+  and decay, merge and flag refusing a derived-retired entity until a source is restored.
+
 ## 2026-11-25 - Keep corrupt projection work from blocking other targets (#403)
 
 - Projection workers read only their own definition's dirty work. They quarantine corrupt generations while continuing to scan, and report unreadable work keys.
@@ -125,11 +141,3 @@
   `created_at`; the receipt list is ordered by `created_at`. Files already marked are not cleared.
 - `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
 - `docs/hook-center-tool-events.md`: describes both rules.
-
-## 2026-11-24 - Conflict suppressions are no longer removed by age pruning (#959)
-
-- `infrastructure/telemetry/lifecycle_store_stats.py`: `conflict_resolutions` is out of the retention
-  tiers. Pruning it at 90 days re-opened conflict pairs that were already resolved and cut short a longer
-  `conflict_cooldown_days`. Rows already pruned are not restored.
-- `config/settings_model.py`: comment only.
-- `docs/your-data.md`: conflict suppressions are not age-pruned and erasure does not reach them.
