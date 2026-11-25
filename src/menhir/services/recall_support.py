@@ -139,6 +139,43 @@ class RecallSupportMixin:
                 success=False,
             )
 
+    async def _normalize_file_context_path(self, file_path: str) -> str:
+        """Normalize a caller ``file_context`` path to repo-relative forward-slash form.
+
+        Reuses ``normalize_to_repo_relative`` with known project roots for absolute paths
+        so ``StructureOracle`` overlaps cleanly against repo-relative ``ANCHORED_TO`` paths.
+        """
+        from menhir.infrastructure.structural_anchoring import normalize_to_repo_relative
+
+        cleaned = file_path.strip()
+        if not cleaned:
+            return ""
+        is_abs = (
+            cleaned.startswith(("/", "\\"))
+            or (len(cleaned) >= 2 and cleaned[1] == ":")
+        )
+        known_roots: list[str] = []
+        if is_abs:
+            list_projects = getattr(self.graph_adapter, "list_structure_projects", None)
+            if callable(list_projects):
+                try:
+                    projects = await asyncio.to_thread(list_projects)
+                    known_roots = [
+                        str(p.get("root_path") or "")
+                        for p in (projects or ())
+                        if isinstance(p, dict) and p.get("root_path")
+                    ]
+                except Exception:
+                    logger.debug(
+                        "Failed to list structure projects while normalizing file_context=%r",
+                        file_path,
+                        exc_info=True,
+                    )
+        normalized = normalize_to_repo_relative(cleaned, known_roots or None)
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized
+
     async def _resolve_file_context(
         self,
         file_path: str,
@@ -493,7 +530,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
-        from menhir.domain.temporal_intent import classify_temporal_intent
+        from menhir.domain.temporal_intent import classify_temporal_intent, is_belief_time_query
         from menhir.services.assertion_pipeline import AssertionPipeline
 
         cmems = []
@@ -515,6 +552,7 @@ class RecallSupportMixin:
             project=query_project,
             files=query_files,
             as_of_time=as_of_time,
+            as_of_world_only=bool(as_of_time) and not is_belief_time_query(query),
         )
         pipeline = AssertionPipeline(
             LogSpaceOracleCombiner(),
@@ -644,7 +682,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
-        from menhir.domain.temporal_intent import classify_temporal_intent
+        from menhir.domain.temporal_intent import classify_temporal_intent, is_belief_time_query
         from menhir.services.assertion_pipeline import AssertionPipeline
         from menhir.services.oracle_executor import OracleExecutor
         from menhir.services.rerank_oracle import RERANK_ORACLE_NAME, PrecomputedBatchOracle
@@ -669,6 +707,7 @@ class RecallSupportMixin:
                 project=query_project,
                 files=query_files,
                 as_of_time=as_of_time,
+                as_of_world_only=bool(as_of_time) and not is_belief_time_query(query),
             )
             executor = (
                 OracleExecutor(

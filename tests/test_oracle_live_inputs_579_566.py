@@ -575,3 +575,165 @@ async def test_recall_extracts_as_of_time_and_enforces_edge_world_validity(
         tuning=RetrievalTuningConfig(enable_warden_gate=True),
     )
     assert [r.uuid for r in result.results] == ["e-valid"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_world_time_as_of_admits_fact_learned_later_while_belief_time_refuses(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    # Fact was valid in the world Dec 2025 -> Mar 2026, but Menhir only learned it in Feb 2026.
+    learned_feb = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    stub_graphiti_client.search_scored_results = [("e-late", "Dec-Mar Port", 0.85)]
+    stub_memory_graph_adapter.candidate_metadata = [
+        _row("e-late", "Dec-Mar Port", "Port was 8080 from Dec through Mar.", created_at=learned_feb),
+    ]
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {
+            "uuid": "e-late",
+            "evidence_node_kinds": [],
+            "anchor_projects": [],
+            "anchor_paths": [],
+            "episode_sources": ["agent"],
+            "work_artifacts": [],
+            "fact_temporal": {
+                "total": 1, "active": 1, "expired": 0,
+                "valid_ats": ["2025-12-01T00:00:00Z"],
+                "invalid_ats": ["2026-03-01T00:00:00Z"],
+            },
+        },
+    ]
+    svc = RecallService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=stub_memory_graph_adapter,
+        scoring_service=ScoringService(),
+    )
+    # World-time "as of 2026-01-15": fact was valid on Jan 15 -> must NOT be dropped for Feb created_at.
+    res_world = await svc.recall(
+        "what was the deploy port as of 2026-01-15",
+        tuning=RetrievalTuningConfig(enable_warden_gate=True),
+    )
+    assert [r.uuid for r in res_world.results] == ["e-late"]
+
+    # Belief-time "what did we believe ... as of 2026-01-15": learned in Feb -> refused as NOT_YET_KNOWN.
+    res_belief = await svc.recall(
+        "what did we believe about the deploy port as of 2026-01-15",
+        tuning=RetrievalTuningConfig(enable_warden_gate=True),
+    )
+    assert res_belief.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_oracle_combined_loads_provenance_even_when_other_frontier_flags_disabled(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch
+) -> None:
+    from menhir.services import rerank_oracle as ro_mod
+
+    async def _fake_rerank_scores(query, candidates, metadata_by_uuid, **kwargs):
+        return {"e-old": 2.0, "e-new": 1.8}, None
+
+    monkeypatch.setattr(ro_mod, "rerank_scores", _fake_rerank_scores)
+
+    stub_graphiti_client.search_scored_results = [
+        ("e-old", "Old Deploy Plan", 0.85),
+        ("e-new", "New Deploy Plan", 0.85),
+    ]
+    stub_memory_graph_adapter.candidate_metadata = [
+        _row("e-old", "Old Deploy Plan", "Deploy on legacy port 8000."),
+        _row("e-new", "New Deploy Plan", "Deploy on current port 8100."),
+    ]
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {
+            "uuid": "e-old",
+            "evidence_node_kinds": [],
+            "anchor_projects": [],
+            "anchor_paths": [],
+            "episode_sources": ["agent"],
+            "work_artifacts": [
+                {"status": "SUPERSEDED", "artifact_type": "plan", "superseded_by": "wa-new"}
+            ],
+        },
+        {
+            "uuid": "e-new",
+            "evidence_node_kinds": [],
+            "anchor_projects": [],
+            "anchor_paths": [],
+            "episode_sources": ["agent"],
+            "work_artifacts": [
+                {"status": "APPROVED", "artifact_type": "plan", "superseded_by": None}
+            ],
+        },
+    ]
+    svc = RecallService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=stub_memory_graph_adapter,
+        scoring_service=ScoringService(),
+        rerank_model_dir="fake-model-dir",
+    )
+    res = await svc.recall(
+        "what is the deploy port",
+        tuning=RetrievalTuningConfig(
+            enable_cross_encoder_rerank=True,
+            enable_oracle_ranking=False,
+            enable_warden_gate=False,
+            enable_assertion_shadow=False,
+            ranking_strategy=RANKER_ORACLE_COMBINED,
+        ),
+    )
+    assert [r.uuid for r in res.results] == ["e-new", "e-old"]
+    assert res.results[1].artifact_status == "historical"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_absolute_file_context_normalizes_against_project_root_for_structure_oracle(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    stub_memory_graph_adapter.list_structure_projects = lambda: [
+        {"name": "repo", "root_path": r"C:\repo"}
+    ]
+    stub_graphiti_client.search_scored_results = [
+        ("e-match", "Auth Module Note", 0.80),
+        ("e-other", "Other Module Note", 0.80),
+    ]
+    stub_memory_graph_adapter.candidate_metadata = [
+        _row("e-match", "Auth Module Note", "Auth handling details."),
+        _row("e-other", "Other Module Note", "Other handling details."),
+    ]
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {
+            "uuid": "e-match",
+            "evidence_node_kinds": [],
+            "anchor_projects": ["repo"],
+            "anchor_paths": ["src/auth.py"],
+            "episode_sources": ["agent"],
+            "work_artifacts": [],
+        },
+        {
+            "uuid": "e-other",
+            "evidence_node_kinds": [],
+            "anchor_projects": ["repo"],
+            "anchor_paths": ["src/other.py"],
+            "episode_sources": ["agent"],
+            "work_artifacts": [],
+        },
+    ]
+    svc = RecallService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=stub_memory_graph_adapter,
+        scoring_service=ScoringService(),
+    )
+    res = await svc.recall(
+        "auth module details",
+        file_context=r"C:\repo\src\auth.py",
+        file_context_project="repo",
+        trace=True,
+        tuning=RetrievalTuningConfig(enable_oracle_ranking=True, enable_warden_gate=True),
+    )
+    assert res.trace is not None and res.trace.ranking
+    by_id = {row.candidate_id: row for row in res.trace.ranking}
+    assert "+relevant structure 1.00" in by_id["e-match"].rationale
+    assert not any("structure" in r for r in by_id["e-other"].rationale)
+    assert by_id["e-match"].role_logits["relevant"] > by_id["e-other"].role_logits["relevant"]
+    assert res.results[0].uuid == "e-match"

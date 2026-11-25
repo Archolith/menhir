@@ -64,6 +64,7 @@ class QueryContext:
     text: str
     intent: str = TemporalLens.CURRENT  # one of TemporalLens: current | historical | any
     as_of_time: str | None = None
+    as_of_world_only: bool = False  # True for world-time "as of <date>" queries (skip learned-at cutoff)
     repo: str | None = None
     branch: str | None = None
     project: str | None = None

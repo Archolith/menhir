@@ -151,20 +151,29 @@ def matches_query(fact: FactTemporal, query: TemporalQuery, *, as_of: str | None
     return is_current_belief(fact)
 
 
-def temporal_role(fact: FactTemporal, *, as_of: str | None = None) -> TemporalRole:
+def temporal_role(
+    fact: FactTemporal,
+    *,
+    as_of: str | None = None,
+    check_known_at: bool = True,
+) -> TemporalRole:
     """Classify a fact's relation to the (optional) reference time, for display.
 
     Belief expiry dominates (HISTORICAL) — a superseded belief is historical regardless of
     world validity. With an as_of pivot, world-time edges (not-yet-valid / expired-world)
-    and the not-yet-known anachronism are distinguished."""
+    are checked; when ``check_known_at`` is True (belief-time / default), facts learned
+    after ``as_of`` are flagged as ``NOT_YET_KNOWN`` (temporal leakage). World-time
+    queries ("what was true as of <date>") pass ``check_known_at=False`` so a fact valid
+    at ``as_of`` but learned later is not dropped."""
     if fact.expired_at is not None:
         return TemporalRole.HISTORICAL
     if as_of is not None:
         pivot = _parse(as_of)
         if pivot is not None:
-            ca = _parse(fact.created_at)
-            if ca is not None and ca > pivot:
-                return TemporalRole.NOT_YET_KNOWN  # learned after the as-of point
+            if check_known_at:
+                ca = _parse(fact.created_at)
+                if ca is not None and ca > pivot:
+                    return TemporalRole.NOT_YET_KNOWN  # learned after the as-of point
             va = _parse(fact.valid_at)
             if va is not None and va > pivot:
                 return TemporalRole.NOT_YET_VALID

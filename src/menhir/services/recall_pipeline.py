@@ -1853,12 +1853,19 @@ async def _run_recall(
         )
 
     # --- Frontier provenance: derive evidence_kinds + project for the oracle/warden path ---
-    # Only when a frontier portion will read it (active gate/ranking or the shadow pass),
+    # Only when a frontier portion will read it (active gate/ranking, oracle_combined, or shadow),
     # so the old path issues no extra query. Merged into metadata_by_uuid so both
     # _apply_frontier and the shadow see it.
+    will_rerank = (
+        tuning.ranking_strategy != RANKER_ORACLE_ONLY
+        and tuning.enable_cross_encoder_rerank
+        and bool(candidates)
+        and bool(getattr(service, "rerank_model_dir", ""))
+    )
     frontier_active = (
         tuning.enable_oracle_ranking
         or tuning.enable_warden_gate
+        or (tuning.ranking_strategy == RANKER_ORACLE_COMBINED and will_rerank)
         or (trace and tuning.enable_assertion_shadow)
     )
     # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
@@ -1879,9 +1886,7 @@ async def _run_recall(
             for c in candidates
         ]
 
-    _fc_norm = (file_context or "").strip().replace("\\", "/")
-    while _fc_norm.startswith("./"):
-        _fc_norm = _fc_norm[2:]
+    _fc_norm = await service._normalize_file_context_path(file_context) if file_context else ""
     query_files: tuple[str, ...] = (_fc_norm,) if _fc_norm else ()
 
     # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---
@@ -1891,11 +1896,7 @@ async def _run_recall(
     rerank_results: dict[str, OracleResult] | None = None
     rerank_note: str | None = None
     # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).
-    if (
-        tuning.ranking_strategy != RANKER_ORACLE_ONLY
-        and tuning.enable_cross_encoder_rerank and candidates
-        and getattr(service, "rerank_model_dir", "")
-    ):
+    if will_rerank:
         _t = perf_counter()
         rerank_oracle = CrossEncoderRerankOracle(
             model_dir=getattr(service, "rerank_model_dir", ""),

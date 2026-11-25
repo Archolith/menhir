@@ -163,7 +163,11 @@ class TemporalOracle:
             valid_at=_s(m.get("valid_at")), invalid_at=_s(m.get("invalid_at")),
             created_at=_s(m.get("created_at")), expired_at=expired_at,
         )
-        role = temporal_role(fact, as_of=query.as_of_time)
+        role = temporal_role(
+            fact,
+            as_of=query.as_of_time,
+            check_known_at=not query.as_of_world_only,
+        )
         directness = 1.0 if (fact.valid_at or fact.invalid_at or fact.expired_at or fact.created_at) else 0.5
         intent = query.intent
         meta = self.source_family
