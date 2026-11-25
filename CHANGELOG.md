@@ -1,3 +1,9 @@
+## 2026-11-25 - Resolve file-linked memory without guessing a project (#682)
+
+- Skip ambiguous file references when writing links or adding file-linked recall candidates.
+  Use indexed roots for absolute paths and cap new link pairs per enrichment pass.
+- Parse full Git diff paths, including quoted names and root files. Use the same path resolver for file-context ranking.
+
 ## 2026-11-25 - An entity whose every source memory is retired is retired too
 
 - `domain/recall_visibility.py`: `memory_retired_cypher` is the single definition of retired: the
@@ -132,12 +138,3 @@
   `services/delete_coordinator.py`: the TTL delete re-checks expiry in the delete statement.
 - `infrastructure/graph_text_inventory.py`: registers the transient lock key.
 - Not retroactive: survivors that already carry a `ttl_expires` keep it.
-
-## 2026-11-24 - File events stay in their project; stale receipts are ordered by instant (#964, #965)
-
-- `infrastructure/tool_event_repository.py`: an event from an indexed project no longer marks another
-  project's files. An event from an unknown project marks files only when every match belongs to one
-  project. Verification receipts are compared as instants and count no later than their server
-  `created_at`; the receipt list is ordered by `created_at`. Files already marked are not cleared.
-- `scripts/maintenance/report_stale_verifications.py`: same receipt rule.
-- `docs/hook-center-tool-events.md`: describes both rules.

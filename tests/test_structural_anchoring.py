@@ -11,8 +11,9 @@ from unittest.mock import patch
 import pytest
 
 from menhir.infrastructure.structural_anchoring import (
+    extract_diff_file_paths,
     extract_file_paths,
-    normalize_to_repo_relative,
+    resolve_file_reference,
     split_narrative_and_diff,
 )
 from menhir.services.ingest_gate import IngestGate
@@ -22,74 +23,51 @@ from menhir.services.ingest_gate import IngestGate
 # Path normalization
 # ---------------------------------------------------------------------------
 
-class TestNormalizeToRepoRelative:
-
-    def test_absolute_windows_path(self):
-        roots = [r"C:\Users\dev\IdeaProjects\projects\example-project"]
-        result = normalize_to_repo_relative(
-            r"C:\Users\dev\IdeaProjects\projects\example-project\src\foo.py",
-            known_roots=roots,
-        )
-        assert result == "src/foo.py"
-
-    def test_absolute_unix_path(self):
-        roots = ["/mnt/c/Users/dev/IdeaProjects/projects/example-project"]
-        result = normalize_to_repo_relative(
-            "/mnt/c/Users/dev/IdeaProjects/projects/example-project/src/foo.py",
-            known_roots=roots,
-        )
-        assert result == "src/foo.py"
-
-    def test_git_bash_path(self):
-        roots = ["/c/Users/dev/IdeaProjects/projects/example-project"]
-        result = normalize_to_repo_relative(
-            "/c/Users/dev/IdeaProjects/projects/example-project/src/foo.py",
-            known_roots=roots,
-        )
-        assert result == "src/foo.py"
-
-    def test_already_relative(self):
-        result = normalize_to_repo_relative("src/foo.py")
-        assert result == "src/foo.py"
-
-    def test_backslash_normalization(self):
-        result = normalize_to_repo_relative(r"src\services\foo.py")
-        assert result == "src/services/foo.py"
-
-    def test_no_matching_root_strips_drive(self):
-        result = normalize_to_repo_relative(
-            r"C:\somewhere\else\foo.py",
-            known_roots=[r"C:\Users\dev\projects"],
-        )
-        assert result == "somewhere/else/foo.py"
-
-    def test_longest_prefix_wins(self):
-        roots = [
-            r"C:\Users\dev\IdeaProjects",
-            r"C:\Users\dev\IdeaProjects\projects\example-project",
+class TestResolveFileReference:
+    @pytest.mark.parametrize(
+        "reference",
+        [r"C:\repo\nested\src\foo.py", "/mnt/c/repo/nested/src/foo.py", "/c/repo/nested/src/foo.py"],
+    )
+    def test_absolute_windows_spellings_use_deepest_indexed_root(self, reference):
+        projects = [
+            {"name": "parent", "root_path": "c:/repo"},
+            {"name": "child", "root_path": "c:/repo/nested"},
         ]
-        result = normalize_to_repo_relative(
-            r"C:\Users\dev\IdeaProjects\projects\example-project\src\foo.py",
-            known_roots=roots,
-        )
-        assert result == "src/foo.py"
+        assert resolve_file_reference(reference, projects) == ("child", "src/foo.py")
 
-    def test_case_insensitive_root_match_on_windows(self):
-        roots = [r"c:\users\dev\ideaprojects\projects\example-project"]
-        result = normalize_to_repo_relative(
-            r"C:\Users\dev\IdeaProjects\projects\example-project\src\bar.py",
-            known_roots=roots,
-        )
-        assert result == "src/bar.py"
+    @pytest.mark.parametrize("reference", [r"a\foo.py", "a/foo.py", "./a/foo.py"])
+    def test_relative_path_keeps_single_letter_directory(self, reference):
+        assert resolve_file_reference(reference, []) == (None, "a/foo.py")
 
-    def test_no_roots_provided(self):
-        result = normalize_to_repo_relative("src/menhir/services/foo.py", known_roots=None)
-        assert result == "src/menhir/services/foo.py"
+    @pytest.mark.parametrize("reference", ["C:/work/other/src/foo.py", "/c/work/other/src/foo.py"])
+    def test_absolute_path_outside_index_abstains(self, reference):
+        projects = [{"name": "proj", "root_path": "C:/work/proj"}]
+        assert resolve_file_reference(reference, projects) is None
 
-    def test_bare_drive_letter_path(self):
-        """C:/foo.py without a known root should strip the drive."""
-        result = normalize_to_repo_relative("C:/foo.py")
-        assert result == "foo.py"
+    def test_plain_leading_slash_is_repo_relative(self):
+        # Same reading as normalize_query_path, which query_structure uses for this spelling.
+        projects = [{"name": "proj", "root_path": "/work/proj"}]
+        assert resolve_file_reference("/src/foo.py", projects, "proj") == ("proj", "src/foo.py")
+        assert resolve_file_reference("/src/foo.py", projects) == (None, "src/foo.py")
+        assert resolve_file_reference("/foo.py", projects, "proj") == ("proj", "./foo.py")
+
+    def test_absolute_path_cannot_select_a_different_project(self):
+        projects = [{"name": "proj", "root_path": "/work/proj"}]
+        assert resolve_file_reference("/work/proj/src/foo.py", projects, "other") is None
+
+    def test_root_file_retains_explicit_directory(self):
+        projects = [{"name": "proj", "root_path": "/work/proj"}]
+        assert resolve_file_reference("/work/proj/foo.py", projects) == ("proj", "./foo.py")
+        assert resolve_file_reference("./foo.py", projects, "proj") == ("proj", "./foo.py")
+
+    def test_ambiguous_project_root_abstains(self):
+        projects = [{"name": name, "root_path": "/work/proj"} for name in ("a", "b")]
+        assert resolve_file_reference("/work/proj/src/foo.py", projects) is None
+
+    def test_duplicate_project_name_cannot_supply_a_scope(self):
+        projects = [{"name": "proj", "root_path": root} for root in ("/work/a", "/work/b")]
+        assert resolve_file_reference("/work/a/src/foo.py", projects) is None
+        assert resolve_file_reference("src/foo.py", projects, "proj") is None
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +80,48 @@ class TestExtractFilePaths:
         text = "Modified src/menhir/services/ingest_service.py to fix the bug."
         result = extract_file_paths(text)
         assert "src/menhir/services/ingest_service.py" in result
+
+    def test_windows_path_is_extracted_as_one_reference(self):
+        path = r"C:\repo\src\server.py"
+        assert extract_file_paths(f"Changed {path}") == [path]
+
+    def test_quoted_windows_path_keeps_spaces_without_a_partial_basename(self):
+        path = r"C:\my repo\src\web server.py"
+        assert extract_file_paths(f"Changed `{path}` and then helper.py") == [path, "helper.py"]
+
+    def test_absolute_file_at_drive_root_is_not_reduced_to_basename(self):
+        assert extract_file_paths("Changed C:/server.py") == ["C:/server.py"]
+
+    def test_diff_prefix_does_not_remove_real_single_letter_directory(self):
+        diff = "diff --git a/a/foo.py b/a/foo.py\n--- a/a/foo.py\n+++ b/a/foo.py"
+        assert extract_diff_file_paths(diff) == ["a/foo.py"]
+
+    @pytest.mark.parametrize(("diff", "expected"), [
+        ("diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py", ["./app.py"]),
+        ('diff --git "a/src/my file.py" "b/src/my file.py"', ["src/my file.py"]),
+        ("diff --git a/src/my file.py b/src/my file.py", ["src/my file.py"]),
+        ('+++ "b/src/caf\\303\\251.py"', ["src/café.py"]),
+        ("+++ b/src/my file.py\t", ["src/my file.py"]),
+    ])
+    def test_diff_headers_keep_the_full_repo_relative_path(self, diff, expected):
+        assert extract_diff_file_paths(diff) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        ["ab/" * 16000, "ab\\" * 16000, "a." * 16000, "x" * 48000],
+        ids=["slashes", "backslashes", "dots", "word"],
+    )
+    def test_long_path_like_run_is_scanned_in_linear_time(self, text):
+        import time
+
+        started = time.perf_counter()
+        extract_file_paths(text)
+        extract_diff_file_paths(text)
+        # Was ~68s per call at this length; linear scanning takes milliseconds.
+        assert time.perf_counter() - started < 2.0
+
+    def test_path_is_not_extracted_from_the_middle_of_a_run(self):
+        assert extract_file_paths("see pkg/src/foo.py and lib.util.py") == ["pkg/src/foo.py", "lib.util.py"]
 
     def test_bare_filename_extracted(self):
         text = "Check ingest_service.py for details."
@@ -193,6 +213,14 @@ class _StubNeo4j:
 
 
 class TestCreateAnchorEdges:
+
+    def test_caps_unique_pairs_before_building_the_write_payload(self):
+        from menhir.infrastructure.structural_anchoring import create_anchor_edges
+
+        stub = _StubNeo4j(rows=[{"created": 2}])
+        assert create_anchor_edges(stub, ["s1", "s1", "s2"], ["f1", "f2"], max_edges=2) == 2
+        pairs = stub.calls[0][1]["pairs"]
+        assert [(pair["sem"], pair["struct"]) for pair in pairs] == [("s1", "f1"), ("s2", "f1")]
 
     def test_creates_anchored_to_edges(self):
         from menhir.infrastructure.structural_anchoring import create_anchor_edges
@@ -336,6 +364,9 @@ class TestEnrichmentAnchoring:
                 self.calls.append((sem_uuids, paths, kwargs))
                 return len(sem_uuids) * len(paths)
 
+            def list_structure_projects(self):
+                return [{"name": "proj", "root_path": "/work/proj"}]
+
             def update_episode_processing(self, *args, **kwargs):
                 pass
 
@@ -367,6 +398,48 @@ class TestEnrichmentAnchoring:
         # diff anchor: 1 node * 1 path = 1
         assert result["diff"] == 1
         assert len(adapter.calls) == 2
+        assert adapter.calls[0][1] == ["src/foo.py"]
+        assert adapter.calls[1][1] == ["src/bar.py"]
+        assert adapter.calls[0][2]["max_edges"] - adapter.calls[1][2]["max_edges"] == 1
+
+    @staticmethod
+    def _anchor(body, projects):
+        from menhir.services.enrichment_steps import _anchor_to_structural_entities
+
+        calls = []
+
+        def anchor(sem_uuids, paths, **kwargs):
+            calls.append((paths, kwargs["project_filter"], kwargs["anchor_source"]))
+            return len(paths)
+
+        adapter = SimpleNamespace(
+            anchor_semantic_to_structural=anchor, list_structure_projects=lambda: projects,
+        )
+        _anchor_to_structural_entities(
+            SimpleNamespace(episode_uuid="ep", graph_adapter=adapter), ["node-1"], body,
+        )
+        return calls
+
+    _PROJECTS = [
+        {"name": "menhir", "root_path": "C:/w/menhir"},
+        {"name": "other", "root_path": "C:/w/other"},
+    ]
+
+    def test_relative_reference_uses_the_project_an_absolute_path_names(self):
+        calls = self._anchor("Edited C:/w/menhir/src/a.py and src/b.py", self._PROJECTS)
+        assert calls == [(["src/a.py", "src/b.py"], ["menhir"], "narrative_path")]
+
+    def test_relative_reference_without_project_evidence_uses_live_projects(self):
+        # Never unfiltered: entities of a deleted project must not make a live file ambiguous.
+        calls = self._anchor("Edited src/b.py", self._PROJECTS)
+        assert calls == [(["src/b.py"], ["menhir", "other"], "narrative_path")]
+
+    def test_no_indexed_project_writes_nothing(self):
+        assert self._anchor("Edited src/b.py", []) == []
+
+    def test_absolute_and_relative_spelling_of_one_file_anchor_once(self):
+        body = "Edited C:/w/menhir/src/a.py\n\n--- git diff ---\ndiff --git a/src/a.py b/src/a.py"
+        assert self._anchor(body, self._PROJECTS) == [(["src/a.py"], ["menhir"], "narrative_path")]
 
     def test_anchoring_no_nodes_skips(self):
         """When no extracted nodes, anchoring does nothing."""

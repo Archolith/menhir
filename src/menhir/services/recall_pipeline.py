@@ -1875,7 +1875,9 @@ async def _run_recall(
             for c in candidates
         ]
 
-    _fc_norm = await service._normalize_file_context_path(file_context) if file_context else ""
+    _fc_norm = (
+        await service._normalize_file_context_path(file_context, file_context_project) if file_context else ""
+    )
     query_files: tuple[str, ...] = (_fc_norm,) if _fc_norm else ()
 
     # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---

@@ -139,42 +139,21 @@ class RecallSupportMixin:
                 success=False,
             )
 
-    async def _normalize_file_context_path(self, file_path: str) -> str:
-        """Normalize a caller ``file_context`` path to repo-relative forward-slash form.
+    async def _normalize_file_context_path(self, file_path: str, project: str | None = None) -> str:
+        """Use the file resolver's repo-relative spelling for StructureOracle overlap."""
+        from menhir.domain.structure_paths import is_absolute_spelling
+        from menhir.infrastructure.structural_anchoring import resolve_file_reference
 
-        Reuses ``normalize_to_repo_relative`` with known project roots for absolute paths
-        so ``StructureOracle`` overlaps cleanly against repo-relative ``ANCHORED_TO`` paths.
-        """
-        from menhir.infrastructure.structural_anchoring import normalize_to_repo_relative
-
-        cleaned = file_path.strip()
-        if not cleaned:
-            return ""
-        is_abs = (
-            cleaned.startswith(("/", "\\"))
-            or (len(cleaned) >= 2 and cleaned[1] == ":")
-        )
-        known_roots: list[str] = []
-        if is_abs:
+        projects = []
+        if is_absolute_spelling(file_path):
             list_projects = getattr(self.graph_adapter, "list_structure_projects", None)
             if callable(list_projects):
                 try:
-                    projects = await asyncio.to_thread(list_projects)
-                    known_roots = [
-                        str(p.get("root_path") or "")
-                        for p in (projects or ())
-                        if isinstance(p, dict) and p.get("root_path")
-                    ]
+                    projects = await asyncio.to_thread(list_projects) or []
                 except Exception:
-                    logger.debug(
-                        "Failed to list structure projects while normalizing file_context=%r",
-                        file_path,
-                        exc_info=True,
-                    )
-        normalized = normalize_to_repo_relative(cleaned, known_roots or None)
-        while normalized.startswith("./"):
-            normalized = normalized[2:]
-        return normalized
+                    logger.debug("Failed to list structure projects for file context", exc_info=True)
+        reference = resolve_file_reference(file_path, projects, project)
+        return reference[1].removeprefix("./") if reference else ""
 
     async def _resolve_file_context(
         self,
@@ -186,14 +165,14 @@ class RecallSupportMixin:
         Returns semantic entity UUIDs that are ANCHORED_TO structural entities
         in the file's neighborhood (the file itself + its imports/importers/tests).
         """
-        from menhir.infrastructure.structural_anchoring import normalize_to_repo_relative
+        from menhir.infrastructure.structural_anchoring import resolve_file_reference
 
-        # Get known roots for path normalization
         projects = await asyncio.to_thread(self.graph_adapter.list_structure_projects)
-        known_roots = [p.get("root_path", "") for p in projects if p.get("root_path")]
-        normalized = normalize_to_repo_relative(file_path, known_roots)
+        reference = resolve_file_reference(file_path, projects, project)
+        if reference is None:
+            return []
+        project, normalized = reference
 
-        # Resolve project if not provided
         if not project:
             project_names = [p["name"] for p in projects if p.get("name")]
             if not project_names:
