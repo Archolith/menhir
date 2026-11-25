@@ -1,3 +1,17 @@
+## 2026-11-22 - A scalar View from a not-yet-admitted turn is recallable (#311)
+
+- `infrastructure/typed_assertion_write_repository.py`, `projection_coverage_repository.py`,
+  `scalar_view_repository.py`: when a turn-anchored assertion's TurnEvidence has no admitting
+  Episodic, its `episode_uuid` is the turn id instead of `''`. The folded View's receipt is then
+  that turn, it gets a TurnEvidence `MENTIONS` edge, and recall's live-provenance check passes;
+  before, the View had an empty receipt and stayed hidden. The turn is used only when it is
+  usable View evidence (finalized, not quarantined): a turn captured before finalization existed
+  keeps the empty receipt, because the write gate would refuse it and abort the entity's rebuild.
+  A finalized admitting episode becomes the receipt; the write path resolves a non-finalized one
+  back to its turn. `source_episode_uuid` still reports admitted episodes only.
+- Live tests cover the turn-only View, finalized and non-finalized admitters, a View rebuilt
+  after admission, and a legacy turn that must not abort the rebuild.
+
 ## 2026-11-22 - Retry a timed-out source-memory embedding (#409)
 
 - Source-memory ingestion retries one embedding timeout before finishing enrichment. A

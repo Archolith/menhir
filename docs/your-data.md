@@ -46,6 +46,13 @@ lists every store, how long it is kept, and how to remove it. Erasure is incompl
 Setting a retention variable to `0` disables pruning for that tier. Pruning runs as scheduled jobs
 inside a running server.
 
+Automatic deletion is a separate switch. Expired-memory (TTL) deletion, decay deletion and orphan
+episode cleanup run only when `MENHIR_AUTO_DELETE_MODE=on`; the default is `off`, so nothing is
+deleted on a timer until you turn it on. `on` has no LLM approval yet. In `propose` the would-be deletions are recorded as
+`delete_proposal` rows in the sidecar (ids and numbers, no text) and nothing is deleted. Automatic
+merging has its own `MENHIR_AUTO_MERGE_MODE` (default `propose`). Deleting on request, erasure,
+namespace delete and unmerge do not depend on either switch.
+
 ## Removing data
 
 - **`delete_memory(node_uuid)`** is a hard delete and needs the operator tier. REST equivalent:

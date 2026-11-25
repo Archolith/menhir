@@ -166,6 +166,17 @@ def _isolate_client_restrictions(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _auto_mutation_modes_on(monkeypatch):
+    """Existing tests exercise the merge and delete mechanisms, so run them with both switches on.
+
+    The shipped defaults are merge=propose and delete=off. A test of the gate itself overrides
+    these with `monkeypatch.setenv`/`delenv` inside the test.
+    """
+    monkeypatch.setenv("MENHIR_AUTO_MERGE_MODE", "on")
+    monkeypatch.setenv("MENHIR_AUTO_DELETE_MODE", "on")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_operator_warning_cache():
     """The FAILED-count snapshot for operator warnings is process-wide; no test may inherit it."""
     from menhir.core import backend_runtime_admin_ops as admin_ops

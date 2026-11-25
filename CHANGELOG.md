@@ -1,3 +1,26 @@
+## 2026-11-25 - Automatic merges and deletions each have an off switch (`MENHIR_AUTO_MERGE_MODE`, `MENHIR_AUTO_DELETE_MODE`)
+
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: two modes, `off | propose | on`.
+  `MENHIR_AUTO_MERGE_MODE` defaults to `propose` and `MENHIR_AUTO_DELETE_MODE` defaults to `off`, so
+  an upgraded deployment no longer merges or deletes on its own until the owner sets `on`. An invalid
+  or empty value stops startup; a setting that cannot be read later counts as `off`. The switches are
+  read from the process environment: set them for every process and restart to change them.
+- Deletion `on` has no LLM approval yet: expiry alone authorizes the delete.
+- `services/auto_mutation_policy.py` (new): reads the mode at call time and fails closed. In
+  `propose` the would-be action is recorded as a `merge_proposal` or `delete_proposal` row in
+  `pending_actions` (uuids, numbers and a reason code only) and nothing is changed.
+- `services/merge_coordinator.py`, `services/correlation_service.py`: merge is refused unless the mode is
+  `on`, and re-checked inside the saga before the mutation. Replay of an interrupted merge that never
+  reached the graph then closes it FAILED and releases the pair; one already applied still commits.
+  The judge still runs, so contradictions are still queued; a confirmed duplicate is not.
+- `services/delete_coordinator.py`, `services/lifecycle_decay.py`, `services/lifecycle_consolidation.py`,
+  `infrastructure/episode_maintenance.py`: the TTL sweep, decay deletion and orphan-episode cleanup
+  need delete mode `on`.
+- Not affected: operator-requested erasure, `delete_entity`, candidate rejection, namespace delete,
+  unmerge and rebuilds of derived data. A manual `recover_orphans` obeys the switch.
+- `tests/test_auto_mutation_census.py` fails on any new ungated merge or delete path.
+- Upgrade note: set `MENHIR_AUTO_MERGE_MODE=on` and `MENHIR_AUTO_DELETE_MODE=on` to keep the old behavior.
+
 ## 2026-11-25 - v0.3.16: merge retention, telemetry, hook ordering and release branch fixes (#939 part 2, #959, #964, #965, #956)
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.16. No dependency changes in this commit.
@@ -70,17 +93,3 @@
   of a bare `TypeError`.
 - #265: the extraction lab passes the edge expiry, invalidation and preserved-attribute hooks
   that ingest uses.
-
-## 2026-11-22 - A scalar View from a not-yet-admitted turn is recallable (#311)
-
-- `infrastructure/typed_assertion_write_repository.py`, `projection_coverage_repository.py`,
-  `scalar_view_repository.py`: when a turn-anchored assertion's TurnEvidence has no admitting
-  Episodic, its `episode_uuid` is the turn id instead of `''`. The folded View's receipt is then
-  that turn, it gets a TurnEvidence `MENTIONS` edge, and recall's live-provenance check passes;
-  before, the View had an empty receipt and stayed hidden. The turn is used only when it is
-  usable View evidence (finalized, not quarantined): a turn captured before finalization existed
-  keeps the empty receipt, because the write gate would refuse it and abort the entity's rebuild.
-  A finalized admitting episode becomes the receipt; the write path resolves a non-finalized one
-  back to its turn. `source_episode_uuid` still reports admitted episodes only.
-- Live tests cover the turn-only View, finalized and non-finalized admitters, a View rebuilt
-  after admission, and a legacy turn that must not abort the rebuild.
