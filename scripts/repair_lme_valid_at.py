@@ -40,12 +40,10 @@ from neo4j import GraphDatabase
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _verify_valid_at_repair import (  # noqa: E402
     INGEST_CUTOFF,
+    NAMESPACE_PREFIX,
     build_session_times,
     session_of,
 )
-
-#: Only the measured corpus. Orphan episodes (null group_id) and any other namespace are untouched.
-NAMESPACE_PREFIX = "lme-scalar-ku-"
 
 
 def main() -> int:
@@ -82,7 +80,8 @@ def main() -> int:
     with driver.session() as session:
         rows = session.run(
             "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $p "
-            "RETURN e.uuid AS uuid, e.name AS name, e.group_id AS ns, e.valid_at AS valid_at",
+            "RETURN e.uuid AS uuid, e.name AS name, e.group_id AS ns, e.valid_at AS valid_at, "
+            "e.valid_at_ingest_original AS original",
             {"p": args.prefix}).data()
 
     tally = collections.Counter()
@@ -102,11 +101,15 @@ def main() -> int:
         if stored_dt is not None and stored_dt.tzinfo is None:
             stored_dt = stored_dt.replace(tzinfo=timezone.utc)
 
+        repaired = row.get("original") is not None
         if stored_dt is not None and abs((stored_dt - target).total_seconds()) < 60:
-            tally["already correct"] += 1
+            tally["already repaired" if repaired else "already correct"] += 1
             continue
-        tally["REPAIR" if (stored_dt is None or stored_dt >= INGEST_CUTOFF)
-              else "REPAIR (non-ingest mismatch)"] += 1
+        if repaired:
+            tally["REPAIR (backup mismatch)"] += 1
+        else:
+            tally["REPAIR" if (stored_dt is None or stored_dt >= INGEST_CUTOFF)
+                  else "REPAIR (non-ingest mismatch)"] += 1
         updates.append({"uuid": row["uuid"], "target": target.isoformat()})
 
     for label, n in sorted(tally.items()):
@@ -117,6 +120,15 @@ def main() -> int:
         print("\nDRY RUN -- nothing written. Re-run with --apply to repair.")
         driver.close()
         return 0
+
+    if tally["REPAIR (non-ingest mismatch)"] or tally["REPAIR (backup mismatch)"]:
+        print(
+            "REFUSING --apply: timestamp mismatches on control or repaired episodes. "
+            "Review the dry run before writing.",
+            file=sys.stderr,
+        )
+        driver.close()
+        return 2
 
     applied = 0
     with driver.session() as session:

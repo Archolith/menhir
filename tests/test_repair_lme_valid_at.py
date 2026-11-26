@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 import scripts.repair_lme_valid_at as repair
+import scripts._verify_valid_at_repair as verifier
 
 
 class _Result:
@@ -17,9 +18,13 @@ class _Result:
 
 
 class _Session:
-    def __init__(self) -> None:
+    def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
         self.write_query = ""
         self.write_params: dict[str, object] = {}
+        self.rows = rows or [{
+            "uuid": "episode-1", "name": "episode-sid-1", "ns": "lme-test-1",
+            "valid_at": datetime(2026, 7, 23, tzinfo=timezone.utc), "original": None,
+        }]
 
     def __enter__(self) -> "_Session":
         return self
@@ -29,20 +34,15 @@ class _Session:
 
     def run(self, query: str, params: dict[str, object]) -> _Result:
         if "RETURN e.uuid AS uuid" in query:
-            return _Result([{
-                "uuid": "episode-1",
-                "name": "episode-sid-1",
-                "ns": "lme-test-1",
-                "valid_at": datetime(2026, 7, 23, tzinfo=timezone.utc),
-            }])
+            return _Result(self.rows)
         self.write_query = query
         self.write_params = params
         return _Result([{"n": 0}])
 
 
 class _Driver:
-    def __init__(self) -> None:
-        self.session_obj = _Session()
+    def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
+        self.session_obj = _Session(rows)
         self.closed = False
 
     def session(self) -> _Session:
@@ -72,6 +72,26 @@ def test_apply_counts_matched_writes_and_rechecks_namespace(monkeypatch: pytest.
     assert driver.closed is True
 
 
+@pytest.mark.parametrize("backup", [None, datetime(2026, 7, 23, tzinfo=timezone.utc)])
+def test_apply_refuses_control_or_repaired_mismatch_before_write_session(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], backup: datetime | None,
+) -> None:
+    driver = _Driver([{
+        "uuid": "episode-1", "name": "episode-sid-1", "ns": "lme-test-1",
+        "valid_at": datetime(2023, 1, 1, tzinfo=timezone.utc), "original": backup,
+    }])
+    monkeypatch.setattr(repair.GraphDatabase, "driver", lambda *args, **kwargs: driver)
+    monkeypatch.setattr(repair, "build_session_times", lambda: {
+        "sid-1": datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+    })
+    monkeypatch.setattr(repair, "session_of", lambda _name: "sid-1")
+    monkeypatch.setattr(sys, "argv", ["repair_lme_valid_at.py", "--apply"])
+
+    assert repair.main() == 2
+    assert driver.session_obj.write_query == ""
+    assert "REFUSING --apply" in capsys.readouterr().err
+
+
 def test_apply_and_revert_are_mutually_exclusive(monkeypatch: pytest.MonkeyPatch) -> None:
     def unexpected_connection(*_args, **_kwargs):
         pytest.fail("Conflicting flags reached driver creation.")
@@ -83,3 +103,46 @@ def test_apply_and_revert_are_mutually_exclusive(monkeypatch: pytest.MonkeyPatch
         repair.main()
 
     assert exc.value.code == 2
+
+
+def test_verifier_scopes_prefix_and_fails_on_controls_and_repaired_disagreements(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _VerifySession(_Session):
+        def run(self, query: str, params: dict[str, object]) -> _Result:
+            assert "WHERE e.group_id STARTS WITH $p" in query
+            assert params == {"p": "custom-"}
+            return _Result([
+                {
+                    "uuid": "control", "name": "episode-sid-1", "ns": "custom-1",
+                    "valid_at": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "original": None,
+                },
+                {
+                    "uuid": "repaired", "name": "episode-sid-1", "ns": "custom-1",
+                    "valid_at": datetime(2023, 1, 2, tzinfo=timezone.utc),
+                    "original": datetime(2026, 7, 23, tzinfo=timezone.utc),
+                },
+            ])
+
+    class _VerifyDriver:
+        def __init__(self) -> None:
+            self.session_obj = _VerifySession()
+
+        def session(self) -> _VerifySession:
+            return self.session_obj
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(verifier.GraphDatabase, "driver", lambda *args, **kwargs: _VerifyDriver())
+    monkeypatch.setattr(verifier, "build_session_times", lambda: {"sid-1": datetime(
+        2023, 5, 25, 20, 21, tzinfo=timezone.utc)})
+    monkeypatch.setattr(verifier.gt, "load", lambda: {"question": {}})
+    monkeypatch.setattr(verifier, "session_of", lambda _name: "sid-1")
+    monkeypatch.setattr(sys, "argv", ["_verify_valid_at_repair.py", "--prefix", "custom-"])
+
+    assert verifier.main() == 1
+    output = capsys.readouterr().out
+    assert "already correct, fixture DISAGREES" in output
+    assert "repaired row, fixture DISAGREES" in output
