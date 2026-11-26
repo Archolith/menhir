@@ -30,13 +30,26 @@ async def _call(fn: Any, *args: Any, **kwargs: Any) -> Any:
 
 def _is_provider_fault(exc: Exception) -> bool:
     """True when a failed rederive call says nothing about the item: timeout, connection, 429/5xx,
-    open breaker, billing, or rejected credentials."""
+    open breaker, billing, rejected credentials, an unknown model, or an unimplemented backend."""
+    if isinstance(exc, NotImplementedError):
+        return True
     if should_trip_circuit(exc) or rate_limit_category(exc) is not None:
         return True
     if provider_unavailable_reason(exc) is not None:
         return True
     status = getattr(find_provider_status_error(exc), "status_code", None)
-    return status in (401, 403)
+    return status in (401, 403, 404)
+
+
+async def _defer(graph_adapter: Any, repair_key: str) -> None:
+    """Best-effort: move a repair behind the queue (no attempt spent). Old adapters lack it."""
+    defer = getattr(graph_adapter, "defer_derived_rederive", None)
+    if defer is None:
+        return
+    try:
+        await _call(defer, repair_key)
+    except Exception:
+        logger.warning("derived_rederive repair=%s: could not defer", repair_key)
 
 
 async def _embed_or_none(embedder: Any, text: str) -> list[float] | None:
@@ -133,8 +146,10 @@ async def run_derived_rederive(
                     break
                 except Exception as exc:  # error class only; never the message (may echo content)
                     if _is_provider_fault(exc):
-                        # Outage, throttling or billing: not the item's fault. Stop, leave
-                        # pending, no attempt (#874).
+                        # Outage, throttling, billing or config: not the item's fault. Stop, leave
+                        # pending, no attempt (#874). Defer the item so a call that always times out
+                        # cannot stop every run at the head of the queue.
+                        await _defer(graph_adapter, repair_key)
                         counts["stopped"] = "provider_unavailable"
                         logger.warning(
                             "derived_rederive stopped: provider unavailable (%s)", type(exc).__name__
@@ -195,6 +210,15 @@ async def run_derived_rederive(
             logger.warning(
                 "derived_rederive repair=%s errored: %s", repair_key, type(exc).__name__
             )
+            # Spend an attempt so an item that errors every run reaches 'failed' instead of
+            # holding a batch slot forever. Best-effort: the store may be what failed.
+            try:
+                await _call(
+                    graph_adapter.record_derived_rederive_failure,
+                    repair_key, type(exc).__name__, MAX_ATTEMPTS,
+                )
+            except Exception:
+                logger.warning("derived_rederive repair=%s: could not record the failure", repair_key)
 
     logger.info("derived_rederive: %s", counts)
     return counts

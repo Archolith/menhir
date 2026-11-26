@@ -162,7 +162,8 @@ def test_one_item_raising_in_apply_does_not_abort_the_others():
     result = asyncio.run(run_derived_rederive(adapter, FakeLLM(("supported", "new fact"))))
     assert result["processed"] == 3 and result["rewritten"] == 2 and result["errors"] == 1
     assert adapter.repairs["k0"]["status"] == "done"
-    assert adapter.repairs["k1"]["status"] == "pending" and adapter.repairs["k1"]["attempts"] == 0
+    # The erroring item spends one attempt, so an item that errors every run reaches 'failed'.
+    assert adapter.repairs["k1"]["status"] == "pending" and adapter.repairs["k1"]["attempts"] == 1
     assert adapter.repairs["k2"]["status"] == "done"
 
 
@@ -190,3 +191,67 @@ def test_other_chat_text_callers_still_get_none_on_timeout():
     adapter = _adapter(_Backend(exc=TimeoutError()))
     result = asyncio.run(adapter._chat_text(system_prompt="s", user_prompt="u", operation="op"))
     assert result is None
+
+
+class _DeferringAdapter(FakeAdapter):
+    """FakeAdapter with the real queue order: a deferred repair goes behind the rest."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.clock = 0
+        for i, r in enumerate(self.repairs.values()):
+            r["order"] = i
+
+    def defer_derived_rederive(self, repair_key):
+        self.clock += 1
+        self.repairs[repair_key]["order"] = 1000 + self.clock
+        return True
+
+    def list_pending_derived_rederive(self, limit):
+        pending = [r for r in self.repairs.values() if r["status"] == "pending"]
+        return sorted(pending, key=lambda r: r["order"])[:limit]
+
+
+class _HeadTimesOut:
+    """The oldest item's call always times out; every other item gets a verdict."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def rederive_from_sources(self, **kw):
+        self.calls += 1
+        if self.calls == 1 or kw.get("current_text") == "slow":
+            raise TimeoutError()
+        return ("supported", "rewritten")
+
+
+def test_an_item_that_always_times_out_does_not_block_the_queue():
+    items = _items(3)
+    items[("fact", "u0")] = dict(_item(), text="slow")
+    adapter = _DeferringAdapter(items, _repairs(3))
+    llm = _HeadTimesOut()
+    for _ in range(3):
+        asyncio.run(run_derived_rederive(adapter, llm))
+    assert adapter.repairs["k1"]["status"] == "done"
+    assert adapter.repairs["k2"]["status"] == "done"
+    # The slow item was never charged an attempt for the provider fault.
+    assert adapter.repairs["k0"]["status"] == "pending" and adapter.repairs["k0"]["attempts"] == 0
+
+
+def test_unimplemented_backend_is_a_provider_fault():
+    adapter = FakeAdapter(_items(2), _repairs(2))
+    llm = FakeLLM(exc=NotImplementedError("chat not supported"))
+    result = asyncio.run(run_derived_rederive(adapter, llm))
+    _assert_stopped_untouched(adapter, result, 2)
+
+
+def test_an_item_whose_graph_write_always_errors_eventually_fails():
+    adapter = FakeAdapter(_items(1), _repairs(1))
+
+    def boom(**kw):
+        raise RuntimeError("neo4j write failed")
+
+    adapter.apply_derived_rederive = boom
+    for _ in range(MAX_ATTEMPTS):
+        asyncio.run(run_derived_rederive(adapter, FakeLLM(verdict=("supported", "x"))))
+    assert adapter.repairs["k0"]["status"] == "failed"
