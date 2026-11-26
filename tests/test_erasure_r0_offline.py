@@ -207,6 +207,9 @@ async def test_a_lease_renewal_store_error_does_not_kill_the_run_loop(tmp_path) 
         assert task is not None
 
         store.fail_renew = True
+        # Wait for a failing renewal to actually run: on a starved loop the provable deadline can
+        # lapse before any tick, which would close the gate without exercising the error path.
+        assert await _until(lambda: store.renew_errors >= 1, timeout_s=10.0), "no renewal attempted"
         assert await _until(lambda: not allowed()), "gate stayed open through a renewal outage"
         row = store.fetch(lease_name=lease_name)
         assert row is not None and row["expired"] is False, row  # unprovable, not expired

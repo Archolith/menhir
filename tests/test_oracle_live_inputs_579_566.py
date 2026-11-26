@@ -693,13 +693,17 @@ async def test_absolute_file_context_normalizes_against_project_root_for_structu
     stub_memory_graph_adapter.list_structure_projects = lambda: [
         {"name": "repo", "root_path": r"C:\repo"}
     ]
+    # One shared timestamp: _row's per-call datetime.now() can differ by a tick on Windows' coarse
+    # clock, and that recency gap, not the structure boost, could decide the 0.80 tie.
+    _now = datetime.now(timezone.utc)
+    same_time = {"last_accessed": _now, "created_at": _now}
     stub_graphiti_client.search_scored_results = [
         ("e-match", "Auth Module Note", 0.80),
         ("e-other", "Other Module Note", 0.80),
     ]
     stub_memory_graph_adapter.candidate_metadata = [
-        _row("e-match", "Auth Module Note", "Auth handling details."),
-        _row("e-other", "Other Module Note", "Other handling details."),
+        _row("e-match", "Auth Module Note", "Auth handling details.", **same_time),
+        _row("e-other", "Other Module Note", "Other handling details.", **same_time),
     ]
     stub_memory_graph_adapter.candidate_provenance_rows = [
         {
