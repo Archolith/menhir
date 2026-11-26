@@ -76,7 +76,7 @@ def _list_reversible(journal: GraphOperationsJournal) -> int:
     ]
     if not rows:
         print("No journaled merges available for exact reversal.")
-        print("(Merges performed before the ENTITY_MERGE saga shipped are legacy: --legacy-report)")
+        print("Use --inventory to see what can be recovered from legacy merges.")
         return 0
     print(f"{len(rows)} journaled merge(s) reversible EXACTLY:\n")
     for r in rows:
