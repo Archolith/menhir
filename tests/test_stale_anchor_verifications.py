@@ -504,6 +504,41 @@ class TestAPIRoutes:
         assert body["verification"]["memory_uuid"] == "m1"
 
     @pytest.mark.unit
+    def test_server_verified_at_keeps_subseconds_and_caller_value_is_untouched(self, monkeypatch):
+        """Fixed clock: a server-assigned receipt keeps microseconds and ends in Z, while a
+        caller-supplied verified_at is forwarded verbatim."""
+        from menhir.api import routes as routes_module
+
+        monkeypatch.setattr(
+            routes_module, "utc_now_iso", lambda: "2026-07-09T12:34:56.123456+00:00",
+        )
+        seen: list[str] = []
+        adapter = _adapter()
+        original = adapter.record_stale_anchor_verification
+
+        def record(**kwargs):
+            seen.append(kwargs["verified_at"])
+            return original(**kwargs)
+
+        adapter.record_stale_anchor_verification = record
+        c = _client(adapter)
+        server = c.post("/api/tool-events/stale-verifications", json={
+            "memory_uuid": "m1", "project": "menhir", "path": "src/foo.py",
+            "outcome": "still_valid",
+        })
+        assert server.status_code == 200
+        assert server.json()["verification"]["verified_at"] == "2026-07-09T12:34:56.123456Z"
+
+        caller_value = "2026-07-09T09:00:00.250+05:00"
+        caller = c.post("/api/tool-events/stale-verifications", json={
+            "memory_uuid": "m1", "project": "menhir", "path": "src/foo.py",
+            "outcome": "outdated", "verified_at": caller_value,
+        })
+        assert caller.status_code == 200
+        assert caller.json()["verification"]["verified_at"] == caller_value
+        assert seen == ["2026-07-09T12:34:56.123456Z", caller_value]
+
+    @pytest.mark.unit
     def test_post_invalid_outcome_rejected(self):
         c = _client(adapter_override=_adapter(
             record_stale_anchor_verification=lambda **k: (_ for _ in ()).throw(

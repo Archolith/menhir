@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from menhir.clock import utc_now_iso
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.ingest import IdempotencyKeyConflict
@@ -937,8 +938,7 @@ async def record_stale_anchor_verification(request: Request,
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "record_stale_anchor_verification"):
         raise HTTPException(status_code=503, detail="stale-anchor verification unavailable")
-    from datetime import datetime, timezone
-    verified_at = body.verified_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    verified_at = body.verified_at or utc_now_iso().replace("+00:00", "Z")
     try:
         result = await asyncio.to_thread(
             adapter.record_stale_anchor_verification,
