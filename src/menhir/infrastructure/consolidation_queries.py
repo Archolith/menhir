@@ -16,7 +16,11 @@ from typing import Any
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.domain.recall_visibility import memory_retired_cypher
-from menhir.domain.retention import destructive_retention_allowed_cypher
+from menhir.domain.retention import (
+    canonical_tenant_cypher,
+    destructive_retention_allowed_cypher,
+    same_tenant_cypher,
+)
 from menhir.infrastructure.cypher import (
     Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
 )
@@ -243,7 +247,7 @@ class ConsolidationRepository:
        n.freshness AS freshness,
        n.user_flagged AS user_flagged,
        n.last_accessed AS last_accessed,
-       coalesce(n.namespace, 'default') AS namespace,
+       """ + canonical_tenant_cypher("n") + """ AS namespace,
        coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at,
@@ -405,6 +409,9 @@ class ConsolidationRepository:
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  // Bridges stay in n's tenant: an existing cross-tenant edge on n must not
+                  // become a new link between two other tenants' nodes.
+                  AND __SAME_TENANT__
                 WITH collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -424,7 +431,7 @@ class ConsolidationRepository:
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
             """.replace(
                 "__NON_DERIVED_VIEW__", harmful_automatic_mutation_allowed_cypher("n")
-            )
+            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
         rows = self.neo4j.execute(
             query,
             params={"node_uuid": node_uuid},
@@ -485,7 +492,7 @@ class ConsolidationRepository:
        n.sharpness AS sharpness,
        n.user_flagged AS user_flagged,
        n.session_id AS session_id,
-       coalesce(n.namespace, 'default') AS namespace,
+       """ + canonical_tenant_cypher("n") + """ AS namespace,
        n.created_at AS created_at,
        n.ttl_expires AS ttl_expires""")
             .order_by(f"{memory_timestamp_cypher('n.created_at')} ASC, n.uuid")
@@ -699,6 +706,9 @@ class ConsolidationRepository:
             WHERE a.uuid = $uuid_a AND b.uuid = $uuid_b
               AND {automatic_lifecycle_protection_cypher("a")}
               AND {automatic_lifecycle_protection_cypher("b")}
+              // A conflict group must not span tenants: resolving it would bridge and retire
+              // across them.
+              AND {same_tenant_cypher("a", "b")}
             WITH a, b,
               CASE
                 WHEN a.conflict_group_id IS NOT NULL THEN a.conflict_group_id
@@ -1156,6 +1166,9 @@ class ConsolidationRepository:
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
                   AND __TENANT_NEIGHBOR_SCOPE__
+                  // Holds with or without a namespace argument: an unscoped call bridged
+                  // across tenants (135 links from one resolve_conflict, 2026-11-26).
+                  AND __SAME_TENANT__
                 WITH node_uuid, collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -1185,7 +1198,7 @@ class ConsolidationRepository:
                 "__TENANT_A_SCOPE__", tenant_scope_cypher("a"),
             ).replace(
                 "__TENANT_B_SCOPE__", tenant_scope_cypher("b"),
-            )
+            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
         rows = self.neo4j.execute(
             query,
             params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},

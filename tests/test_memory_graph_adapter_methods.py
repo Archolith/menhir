@@ -326,8 +326,9 @@ def test_fetch_adjacency_pairs_forwards_namespace_to_query_layer() -> None:
     adapter.fetch_adjacency_pairs(["a", "b"], namespace="alpha")
 
     query, params = neo4j.calls[0]["query"], neo4j.calls[0]["params"]
-    assert "coalesce(a.namespace, 'default') = $namespace" in query
-    assert params["namespace"] == "alpha"
+    assert "coalesce(a.namespace, a.group_id, '') IN $tenant_namespaces" in query
+    assert "coalesce(b.namespace, b.group_id, '') IN $tenant_namespaces" in query
+    assert params["tenant_namespaces"] == ["alpha"]
 
 
 @pytest.mark.unit

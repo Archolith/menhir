@@ -96,13 +96,16 @@ class CorrelationRepository:
     ) -> bool:
         """Create a RELATES_TO edge between two entities if none exists.
 
-        Idempotent — MERGE avoids duplicate edges.  Returns True if an edge
-        was created (first time); False if it already existed.
+        Idempotent — MERGE avoids duplicate edges.  Returns True when the edge exists
+        afterwards; False when either entity is missing or the two are in different tenants,
+        which this refuses: the candidate search is scoped by group_id, and an entity whose
+        namespace disagrees with its group can still pair across tenants.
         """
         rows = self._neo4j.execute(
             """
             MATCH (a:Entity {uuid: $source_uuid})
             MATCH (b:Entity {uuid: $target_uuid})
+            WHERE __SAME_TENANT__
             MERGE (a)-[r:RELATES_TO]->(b)
             ON CREATE SET
                 r.type = 'correlation',
@@ -123,7 +126,7 @@ class CorrelationRepository:
                 END,
                 r.last_traversed = datetime()
             RETURN r.type AS edge_type
-            """,
+            """.replace("__SAME_TENANT__", same_tenant_cypher("a", "b")),
             params={
                 "source_uuid": source_uuid,
                 "target_uuid": target_uuid,
@@ -837,6 +840,9 @@ class CorrelationRepository:
             WHERE NOT type(r) = 'ANCHORED_TO'
             AND neighbor.structure_role IS NULL
             AND neighbor.uuid <> survivor.uuid
+            // A bridge must not join tenants: an absorbed node's existing cross-tenant edge
+            // would otherwise become a new one on the survivor.
+            AND __BRIDGE_SAME_TENANT__
             WITH survivor, absorbed, known_rel_ids, facts_moved,
                  collect(DISTINCT neighbor) AS neighbors
             FOREACH (n IN neighbors |
@@ -890,6 +896,8 @@ class CorrelationRepository:
             ).replace(
                 "__ABSORBED_RETENTION_TENANT__",
                 same_tenant_cypher("retention_source", "absorbed"),
+            ).replace(
+                "__BRIDGE_SAME_TENANT__", same_tenant_cypher("survivor", "neighbor"),
             ).replace("__MOVED_FACT__", _MOVED_FACT_WHERE),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
