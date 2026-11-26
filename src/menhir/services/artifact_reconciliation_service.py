@@ -255,7 +255,7 @@ class ArtifactReconciliationService:
         well-formed or it is not, and that answer must not depend on whether a
         database happens to be up.
         """
-        root = Path(repo_root).resolve()
+        root = _require_readable_corpus_root(repo_root)
         name = repository or root.name
         entries = scan_corpus(root, repository=name)
         findings: list[ValidationFinding] = []

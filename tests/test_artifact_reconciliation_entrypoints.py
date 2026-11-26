@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,44 @@ def test_audit_cli_emits_no_digest_for_an_unavailable_root(
     assert result.exit_code == 3
     assert "corpus_root_unavailable" in result.output
     assert "plan_digest" not in result.output
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("as_json", [False, True])
+def test_validate_cli_rejects_an_absent_root(tmp_path, as_json: bool) -> None:
+    missing = tmp_path / "missing"
+    args = ["validate", str(missing)]
+    if as_json:
+        args.append("--json")
+    result = CliRunner().invoke(artifacts_app, args)
+
+    assert result.exit_code == 3
+    if as_json:
+        payload = json.loads(result.stdout)
+        assert payload["error"] == "corpus_root_unavailable"
+        assert "checked" not in payload
+    else:
+        assert "unavailable" in result.output.lower()
+        assert "validated" not in result.output
+
+
+@pytest.mark.unit
+def test_validate_cli_rejects_a_file_root(tmp_path) -> None:
+    not_a_dir = tmp_path / "artifact.md"
+    not_a_dir.write_text("# title\n", encoding="utf-8")
+    result = CliRunner().invoke(artifacts_app, ["validate", str(not_a_dir)])
+
+    assert result.exit_code == 3
+    assert "not a directory" in result.output
+    assert "validated" not in result.output
+
+
+@pytest.mark.unit
+def test_validate_cli_accepts_an_empty_readable_root(tmp_path) -> None:
+    result = CliRunner().invoke(artifacts_app, ["validate", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "validated  : 0 records" in result.output
 
 
 @pytest.mark.unit
