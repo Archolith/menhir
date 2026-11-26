@@ -58,7 +58,7 @@ _ROLES: tuple[ContentRole, ...] = (
     ContentRole.EVIDENCE, ContentRole.REFERENCE,
 )
 
-# The 8 x 10 affinity matrix (design 4). Rows = task intent, columns = _ROLES order.
+# The 9 x 10 affinity matrix (design 4). Rows = task intent, columns = _ROLES order.
 _ROWS: dict[TaskIntent, tuple[Affinity, ...]] = {
     #                         FAIL INC  DEC  EXP  BEN  TST  PLN  RUN  EVD  REF
     TaskIntent.DEBUG_FAILURE:     (P,  P,   N,   N,   X,   P,   X,   P,   P,   X),
@@ -132,7 +132,9 @@ def resolve_affinity(
     best: tuple[Affinity, TaskIntent, ContentRole] | None = None
     for intent in intents:
         row = INTENT_ROLE_MATRIX[intent]
-        for role in roles:
+        for role in _ROLES:
+            if role not in roles:
+                continue
             a = row[role]
             if best is None or _RANK[a] > _RANK[best[0]]:
                 best = (a, intent, role)

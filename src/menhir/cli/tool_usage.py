@@ -190,7 +190,10 @@ def tool_usage(
             "rows": rows,
             "unused_tools": unused,
             "registered_tool_count": len(registered),
+            "oldest_event_at": oldest,
         }
+        if history_note is not None:
+            payload["history_note"] = history_note
         if all_operations:
             payload["other_operations"] = other_rows
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))

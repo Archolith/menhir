@@ -15,7 +15,8 @@ async def get_artifact(artifact_uuid: str, namespace: str = "") -> str:
         namespace: Optional silo to enforce. Empty looks up by uuid alone.
 
     Returns:
-        Status, embodiment locators, discussed code locations, and shape verdict.
+        Current status and latest status-change date, source locators, discussed
+        code locations, and shape verdict.
     """
     return await GetArtifactTool().execute(artifact_uuid=artifact_uuid, namespace=namespace)
 
@@ -31,8 +32,8 @@ class GetArtifactTool(BaseTextTool):
     open_world_hint = False
     description = (
         "Read one work artifact's record (plan, review, investigation, report, handoff): type, "
-        "title, status and history, where the document lives, and the code it discusses. Returns "
-        "locations, not the document text; open the document to read its reasoning."
+        "title, current status and latest status-change date. Includes source and code locations "
+        "and the shape verdict when available. Open the source document to read its text."
     )
 
     async def endpoint(self, artifact_uuid: str, namespace: str = "") -> str:

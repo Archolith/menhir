@@ -35,6 +35,21 @@ def test_resolve_affinity_max_over_cross_product() -> None:
     assert aff is Affinity.PREFER  # debug prefers failure; max wins
 
 
+def test_resolve_affinity_breaks_role_ties_by_column_order() -> None:
+    class ReverseRoleSet(set[ContentRole]):
+        def __iter__(self):
+            yield ContentRole.TEST
+            yield ContentRole.FAILURE
+
+    aff, intent, role = resolve_affinity(
+        [TaskIntent.DEBUG_FAILURE],
+        ReverseRoleSet({ContentRole.FAILURE, ContentRole.TEST}),
+    )
+    assert aff is Affinity.PREFER
+    assert intent is TaskIntent.DEBUG_FAILURE
+    assert role is ContentRole.FAILURE
+
+
 def test_lens_history_wins_on_conflict_and_verify_is_neutral() -> None:
     # AVOID wants history, DEBUG wants current -> history wins.
     assert task_intents_to_lens([TaskIntent.AVOID_REPEAT, TaskIntent.DEBUG_FAILURE]) == "historical"

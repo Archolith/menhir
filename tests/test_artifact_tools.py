@@ -75,6 +75,28 @@ def test_artifact_op_tiers(operation: str, expected: str) -> None:
     assert _required_tier_for_operation(operation) == expected
 
 
+@pytest.mark.unit
+def test_list_artifact_description_matches_its_renderer() -> None:
+    """The list renderer omits paths, so its description must point at get_artifact."""
+    tool = {t.name: t for t in ALL_TOOLS}["list_artifacts"]()
+    desc = tool.registered_description()
+
+    assert "summaries" in desc
+    assert "get_artifact" in desc
+    assert "locations" not in desc
+
+
+@pytest.mark.unit
+def test_get_artifact_description_matches_its_renderer() -> None:
+    """The detail renderer includes the current status and latest status change."""
+    tool = {t.name: t for t in ALL_TOOLS}["get_artifact"]()
+    desc = tool.registered_description()
+
+    assert "current status" in desc
+    assert "status-change date" in desc
+    assert "code locations" in desc
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -117,8 +139,13 @@ def test_list_artifacts_flags_unmapped_statuses() -> None:
     tool, _ = _tool(
         ListArtifactsTool,
         list_artifacts=[
-            {"artifact_uuid": "a1", "artifact_type": "plan", "title": "Real",
-             "status": "APPROVED"},
+            {
+                "artifact_uuid": "a1",
+                "artifact_type": "plan",
+                "title": "Real",
+                "status": "APPROVED",
+                "embodiments": [{"locator_path": "docs/plan.md"}],
+            },
             {"artifact_uuid": "a2", "artifact_type": "plan", "title": "Unknown",
              "status": "PROPOSED", "status_unresolved_reason": "no_status_header"},
         ],
@@ -128,6 +155,56 @@ def test_list_artifacts_flags_unmapped_statuses() -> None:
 
     assert "artifacts (2)" in out
     assert "1 artifact(s) hold their type's initial status" in out
+
+
+@pytest.mark.unit
+def test_list_artifacts_renders_summaries_without_paths() -> None:
+    from menhir.mcp.tools.ops.list_artifacts import ListArtifactsTool
+
+    tool, _ = _tool(
+        ListArtifactsTool,
+        list_artifacts=[
+            {"artifact_uuid": "a1", "artifact_type": "plan", "title": "Real",
+             "status": "APPROVED"},
+        ],
+    )
+
+    out = _run(tool.endpoint())
+
+    assert "[plan] APPROVED  uuid=a1" in out
+    assert "Real" in out
+    assert "docs/plan.md" not in out
+
+
+@pytest.mark.unit
+def test_get_artifact_renders_status_change_date_and_locations() -> None:
+    from menhir.mcp.tools.ops.get_artifact import GetArtifactTool
+
+    tool, _ = _tool(
+        GetArtifactTool,
+        get_artifact={
+            "artifact_uuid": "a1", "artifact_type": "plan", "title": "T",
+            "status": "APPROVED", "namespace": "menhir",
+            "created_at": "2026-01-02T03:04:05",
+            "status_changed_at": "2026-02-03T04:05:06",
+            "embodiments": [
+                {"medium": "markdown", "locator_path": "docs/plan.md",
+                 "locator_repository": "menhir"},
+            ],
+            "locations": [
+                {"resolution_status": "resolved", "project": "menhir",
+                 "path": "src/x.py"},
+            ],
+            "shape_status": "ok",
+        },
+    )
+
+    out = _run(tool.endpoint(artifact_uuid="a1"))
+
+    assert "status=APPROVED" in out
+    assert "status changed: 2026-02-03" in out
+    assert "menhir:docs/plan.md" in out
+    assert "discusses: menhir:src/x.py" in out
 
 
 @pytest.mark.unit

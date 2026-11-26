@@ -37,7 +37,7 @@ async def recall_context_memories(
         query: Optional natural-language query for relevant context retrieval.
         preset: Ranking preset for relevant retrieval when query is provided.
         limit: Max relevant results to return (default 5). An explicit limit overrides the default rerank cap, up to 50 results.
-        recent_limit: Max recent context rows to include (default: 5).
+        recent_limit: Max recent context rows to include (default: 5). Set to 0 to skip the recent lane entirely.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         workspace: Registered key selecting general + workspace bootstrap pins.
         include_warden_status: Detailed checks for the ranked relevant lane only (default false); recent bootstrap rows are outside those checks.
@@ -110,6 +110,10 @@ class RecallContextMemoriesTool(BaseJsonTool):
             )
         if limit is not None and limit < 1:
             raise McpToolRefusal(f"Invalid limit {limit!r}: limit must be at least 1.")
+        if recent_limit < 0:
+            raise McpToolRefusal(
+                f"Invalid recent_limit {recent_limit!r}: recent_limit must be at least 0."
+            )
         relevant: dict[str, object] = {}
         query_text = (query or "").strip()
         relevant_rows: list[dict[str, object]] = []
@@ -148,10 +152,15 @@ class RecallContextMemoriesTool(BaseJsonTool):
                         "provenance": scored.get("provenance"),
                     }
                 )
-        recent_rows = await backend.fetch_recent_memories(
-            limit=recent_limit * 3,
-            namespace=namespace or None,
-        )
+        if recent_limit == 0:
+            # #836: zero means "no recent lane". Skip the backend read entirely instead of
+            # asking for an empty page -- the cap check below would still admit one row.
+            recent_rows: list[dict[str, object]] = []
+        else:
+            recent_rows = await backend.fetch_recent_memories(
+                limit=recent_limit * 3,
+                namespace=namespace or None,
+            )
         seen_uuids = {str(row.get("uuid") or "") for row in relevant_rows}
         non_flagged_recent: list[dict[str, object]] = []
         for row in recent_rows:
