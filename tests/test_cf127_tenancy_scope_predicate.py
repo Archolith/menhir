@@ -81,7 +81,6 @@ BASELINE: dict[str, int] = {
     # filter -- it compares namespace/group_id across silos (case-insensitive, split nodes), which
     # tenant_scope_cypher would stop seeing. Other predicates in the file are property maps.
     "infrastructure/build_report_queries.py": 6,
-    "infrastructure/consolidation_queries.py": 3,
     "infrastructure/episode_lifecycle.py": 7,
     "infrastructure/episode_maintenance.py": 3,
     "infrastructure/episode_stamping.py": 1,

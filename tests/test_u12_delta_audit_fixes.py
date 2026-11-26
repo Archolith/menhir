@@ -39,11 +39,22 @@ def test_hook_and_backend_recall_agree_on_scalar_history(monkeypatch, stub_graph
     assert built.context_builder.recall_service.scalar_history_enabled is flag
 
 
-def test_fetch_temporal_facts_has_no_namespace_parameter():
-    assert "namespace" not in inspect.signature(MemoryQueryRepository.fetch_temporal_facts).parameters
-    assert "namespace" not in inspect.signature(MemoryGraphAdapter.fetch_temporal_facts).parameters
-    with pytest.raises(TypeError):
-        MemoryQueryRepository(SimpleNamespace()).fetch_temporal_facts(["u"], namespace="ns")
+def test_fetch_temporal_facts_namespace_parameter_is_used():
+    # CF-279 removed an unused namespace parameter. It is back because it now scopes the fact
+    # edge; this keeps it from becoming unused again.
+    assert "namespace" in inspect.signature(MemoryQueryRepository.fetch_temporal_facts).parameters
+    assert "namespace" in inspect.signature(MemoryGraphAdapter.fetch_temporal_facts).parameters
+    calls = []
+
+    class _Neo4j:
+        def execute(self, query, params=None):
+            calls.append((query, params))
+            return []
+
+    MemoryQueryRepository(_Neo4j()).fetch_temporal_facts(["u"], namespace="ns")
+    query, params = calls[-1]
+    assert params["tenant_namespaces"] == ["ns"]
+    assert "$tenant_namespaces" in query
 
 
 def test_fetch_node_receipts_name_falls_back_to_view_name():

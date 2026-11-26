@@ -1129,9 +1129,11 @@ class MemoryGraphAdapter:
             repair_key, error_class, max_attempts
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
-        """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(node_uuids)
+    def fetch_temporal_facts(
+        self, node_uuids: list[str], *, namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Fetch bi-temporal fact-edge state for candidate nodes, scoped to ``namespace``."""
+        return self._memory_queries.fetch_temporal_facts(node_uuids, namespace=namespace)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]

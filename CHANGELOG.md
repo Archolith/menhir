@@ -1,3 +1,16 @@
+## 2026-11-26 - A namespace-scoped recall shows only that namespace's facts
+
+- `memory_queries.fetch_temporal_facts` takes `namespace` again and scopes the fact edge with
+  `tenant_scope_cypher`, as `timeline_facts` does; `recall_pipeline` passes the recall's namespace.
+  Before, an entity admitted in one namespace showed facts written from another namespace's
+  episodes (production had 195, from Graphiti dedupe across groups before fork 0.32.1.post2).
+- `consolidation_queries.requeue_conflicts_for_llm_review` scopes with `tenant_scope_cypher`, so a
+  node carrying only `group_id` is no longer treated as `default`.
+- Tests: new `tests/test_scoped_fact_fetch_live.py` (both fail without this change). Changed
+  `test_fetch_temporal_facts_has_no_namespace_parameter` (CF-279 removed an unused parameter; it
+  is now used), the expected params/kwargs in `test_recall_temporal_facts.py`, and pruned
+  `consolidation_queries.py` from the CF-127 baseline (no hand-written predicate left).
+
 ## 2026-11-26 - Docs: namespaces are not tenancy
 
 - `README.md`: new "Namespaces are not tenancy" section under Security and privacy. A namespace
