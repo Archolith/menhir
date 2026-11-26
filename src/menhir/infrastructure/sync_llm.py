@@ -144,6 +144,9 @@ def make_sync_chat(
                 breaker.report_quota_refusal_threadsafe(exc)
             raise
         complete_llm_usage_call(handle, result=resp)
-        return (resp.choices[0].message.content or "").strip()
+        choices = getattr(resp, "choices", None)
+        if not choices:
+            return ""
+        return (choices[0].message.content or "").strip()
 
     return _complete
