@@ -142,6 +142,37 @@ def test_fetch_result_provenance_turn_ids_capped_at_five(test_neo4j_repo):
 
 
 @pytest.mark.online
+def test_first_seen_orders_by_instant_not_by_string(test_neo4j_repo):
+    """#1006: '2026-01-01T01:00:00+05:00' (= 2025-12-31T20:00Z) sorts after '2026-01-01T00:00:00Z'
+    as a string but is the earlier instant. A string-valued receipt must compare the same way."""
+    ns = f"prov-{uuidlib.uuid4().hex[:8]}"
+    tag = uuidlib.uuid4().hex[:8]
+    test_neo4j_repo.execute(
+        """
+        CREATE (n:Entity {uuid: $n, group_id: $ns, name: 'tz'})
+        CREATE (e1:Episodic {uuid: $e1, group_id: $ns, source: 'user', content: 'a'})
+        CREATE (e2:Episodic {uuid: $e2, group_id: $ns, source: 'user', content: 'b'})
+        CREATE (e1)-[:MENTIONS]->(n)
+        CREATE (e2)-[:MENTIONS]->(n)
+        CREATE (r1:Episodic {uuid: $r1, group_id: $ns, source: 'user', content: 'r1',
+                             resolved_episode_uuid: $e1,
+                             reference_time: datetime('2026-01-01T00:00:00Z')})
+        CREATE (r2:Episodic {uuid: $r2, group_id: $ns, source: 'user', content: 'r2',
+                             resolved_episode_uuid: $e2,
+                             reference_time: '2026-01-01T01:00:00+05:00'})
+        CREATE (r1)-[:ADMITTED_ON]->(:TurnEvidence {turn_id: 'later', namespace: $ns})
+        CREATE (r2)-[:ADMITTED_ON]->(:TurnEvidence {turn_id: 'earlier', namespace: $ns})
+        """,
+        {"n": f"{tag}-n", "e1": f"{tag}-e1", "e2": f"{tag}-e2", "r1": f"{tag}-r1",
+         "r2": f"{tag}-r2", "ns": ns},
+    )
+    rows = MemoryQueryRepository(test_neo4j_repo).fetch_result_provenance([f"{tag}-n"], ns)
+    assert len(rows) == 1
+    assert str(rows[0]["first_seen_at"]).startswith("2026-01-01T01:00")
+    assert list(rows[0]["turn_evidence_ids"]) == ["earlier", "later"]
+
+
+@pytest.mark.online
 def test_receipt_source_wins_over_graphiti_placeholder_source(test_neo4j_repo):
     """Review M1: Graphiti stamps source='message' on the episode until Menhir overwrites it;
     the gate receipt's real source must decide the label."""

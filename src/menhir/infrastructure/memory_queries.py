@@ -1395,15 +1395,15 @@ class MemoryQueryRepository:
             WITH id, epi, coalesce(receipt, anchor) AS rec
             WITH id, rec,
                  coalesce(rec.source, epi.source) AS source,
-                 toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at)) AS first_seen
+                 datetime(toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at))) AS first_seen
             WITH id,
                  collect(DISTINCT source) AS sources,
-                 min(first_seen) AS first_seen_at,
+                 min(first_seen) AS first_seen_dt,
                  collect({{rec: rec, fs: first_seen}}) AS eps
             UNWIND eps AS e
-            WITH id, sources, first_seen_at, e ORDER BY e.fs
-            WITH id, sources, first_seen_at, collect(e.rec)[0..5] AS earliest
-            RETURN id AS uuid, sources, first_seen_at,
+            WITH id, sources, first_seen_dt, e ORDER BY e.fs
+            WITH id, sources, first_seen_dt, collect(e.rec)[0..5] AS earliest
+            RETURN id AS uuid, sources, toString(first_seen_dt) AS first_seen_at,
                    reduce(acc = [], r IN earliest |
                           acc + [ (r)-[:ADMITTED_ON]->(t:TurnEvidence) | t.turn_id ])
                      AS all_turn_ids
