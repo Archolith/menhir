@@ -1,3 +1,12 @@
+## 2026-11-26 - Backfill, corpus audit, and OAuth fixes
+
+- Counted eligible embedding backfill rows across all dry-run pages and capped previews at five.
+- Matched Git rename paths to tracked paths when a corpus scan starts below the repository root.
+- Bypassed the default embedding cache for requests with explicit vector dimensions.
+- Validated the required S256 challenge before OAuth consent and preserved registered callback query encoding.
+- Reported which scope tiers are configured in OAuth operator preflight.
+- Documented how saga summaries count skipped and ownership outcomes.
+
 ## 2026-11-25 - Logging, timeline, telemetry and provider fixes
 
 - Honored `MENHIR_LOG_LEVEL` in the shared logging entry point when callers omit a level.
