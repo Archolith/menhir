@@ -903,12 +903,18 @@ async def tool_events_dirty(request: Request, project: str | None = None) -> dic
     if adapter is None or not hasattr(adapter, "list_dirty_files"):
         raise HTTPException(status_code=503, detail="tool-event diagnostics unavailable")
     dirty = await asyncio.to_thread(adapter.list_dirty_files, project=project)
+    namespace = _resolve_namespace(request, None)
     stale = await asyncio.to_thread(
-        adapter.stale_anchored_memories, project=project,
-        namespace=_resolve_namespace(request, None),
+        adapter.stale_anchored_memories, project=project, namespace=namespace,
     )
+    if hasattr(adapter, "tool_event_dirty_stats"):
+        counts = await asyncio.to_thread(
+            adapter.tool_event_dirty_stats, project=project, namespace=namespace
+        )
+    else:
+        counts = {"dirty_files": len(dirty), "stale_anchors": len(stale)}
     return {"dirty_files": dirty, "stale_anchors": stale,
-            "counts": {"dirty_files": len(dirty), "stale_anchors": len(stale)}}
+            "counts": counts}
 
 
 @router.get("/tool-events/stale")

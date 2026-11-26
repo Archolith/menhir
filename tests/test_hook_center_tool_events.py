@@ -206,6 +206,21 @@ def test_list_dirty_files_and_clear():
     assert repo.clear_file_dirty(path="src/foo.py", project="menhir") == 1
 
 
+@pytest.mark.unit
+def test_dirty_stats_counts_without_diagnostic_list_limits():
+    fake = FakeNeo4j(routes=[
+        ("RETURN dirty_files, stale_anchors", [{"dirty_files": 1200, "stale_anchors": 1300}]),
+    ])
+
+    stats = ToolEventRepository(fake).dirty_stats(project="menhir", namespace="work")
+
+    assert stats == {"dirty_files": 1200, "stale_anchors": 1300}
+    [(query, params)] = fake.executed
+    assert "LIMIT" not in query.upper()
+    assert params["project"] == "menhir"
+    assert params["tenant_namespaces"] == ["work"]
+
+
 # ----------------------------------------------------------------------------- hook normalization
 
 
@@ -397,7 +412,7 @@ def test_hook_dry_run_reports_no_content_upload(monkeypatch, capsys):
 # ----------------------------------------------------------------------------- endpoint (POST /api/tool-events)
 
 
-def _client(record_file_event=None, list_dirty=None, stale=None):
+def _client(record_file_event=None, list_dirty=None, stale=None, dirty_stats=None):
     from types import SimpleNamespace
 
     from fastapi import FastAPI
@@ -411,12 +426,27 @@ def _client(record_file_event=None, list_dirty=None, stale=None):
         list_dirty_files=list_dirty or (lambda **k: [{"project": "menhir", "path": "src/foo.py",
                                                       "dirty_at": "t", "operation": "edit"}]),
         stale_anchored_memories=stale or (lambda **k: [{"memory_uuid": "m1", "path": "src/foo.py"}]),
+        **({"tool_event_dirty_stats": dirty_stats} if dirty_stats is not None else {}),
     )
     built = SimpleNamespace(graph_adapter=adapter)
     app = FastAPI()
     app.include_router(router)
     app.state.runtime_ctx = SimpleNamespace(built=built)
     return TestClient(app)
+
+
+@pytest.mark.unit
+def test_dirty_endpoint_uses_complete_stats_separately_from_limited_lists():
+    c = _client(
+        list_dirty=lambda **_: [{"path": "one.py"}],
+        stale=lambda **_: [{"memory_uuid": "m1", "path": "one.py"}],
+        dirty_stats=lambda **_: {"dirty_files": 1200, "stale_anchors": 1300},
+    )
+
+    response = c.get("/api/tool-events/dirty")
+
+    assert response.status_code == 200
+    assert response.json()["counts"] == {"dirty_files": 1200, "stale_anchors": 1300}
 
 
 @pytest.mark.unit

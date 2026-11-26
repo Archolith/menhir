@@ -195,6 +195,8 @@ unresolved old source plus a newly registered duplicate.
 ### GET /api/tool-events/dirty
 
 Returns `{dirty_files: [...], stale_anchors: [...], counts: {dirty_files: N, stale_anchors: M}}`.
+Each list includes up to 200 entries. The counts cover all matches for the requested project
+and the caller's stale-anchor namespace scope.
 
 ### GET /api/tool-events/stale
 
