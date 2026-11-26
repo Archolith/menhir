@@ -516,12 +516,17 @@ class MemoryGraphAdapter:
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
             namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only,
-            settled_only=settled_only,
+            settled_only=settled_only, max_failures=max_failures,
         )
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+        """See EpisodeLifecycleRepository.record_source_embedding_failures."""
+        return self._episodes.record_source_embedding_failures(episode_uuids)
 
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,

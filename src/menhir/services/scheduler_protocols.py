@@ -115,7 +115,11 @@ class SchedulerGraphAdapter(Protocol):
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, Any]]:
+        ...
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
         ...
 
     def set_episode_content_embedding(

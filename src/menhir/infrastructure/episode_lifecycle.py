@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 #: convention, so a materialized first-person View reads naturally).
 _SELF_ENTITY_NAME = "user"
 
+#: An episode the source-embedding repair stopped listing (#921) is listed again after this long.
+SOURCE_EMBEDDING_FAILURE_COOLDOWN = "P7D"
+
 _PENDING_EPISODE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]{3,}")
 
 #: Context-window errors an OPERATOR can clear without the payload changing -- local
@@ -296,6 +299,7 @@ class EpisodeLifecycleRepository:
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
                 n.content_embedding_at = datetime()
+            REMOVE n.source_embedding_failures, n.source_embedding_last_failed_at
             RETURN n.uuid AS uuid
             """,
             params={
@@ -306,6 +310,26 @@ class EpisodeLifecycleRepository:
             },
         )
         return bool(rows)
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+        """Bump the repair-failure count and stamp the attempt time on each episode (#921).
+
+        Read by ``list_episodes_missing_content_embedding(max_failures=...)``; cleared by a
+        successful ``set_episode_content_embedding``. Returns how many nodes were updated.
+        """
+        if not episode_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.uuid IN $uuids
+            SET n.source_embedding_failures = coalesce(n.source_embedding_failures, 0) + 1,
+                n.source_embedding_last_failed_at = datetime()
+            RETURN count(n) AS n
+            """,
+            params={"uuids": list(episode_uuids)},
+        )
+        return int(rows[0].get("n") or 0) if rows else 0
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """The other `:Episodic` node(s) of the same memory, in the same namespace (read-only).
@@ -652,8 +676,14 @@ class EpisodeLifecycleRepository:
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
+
+        ``max_failures`` (opt-in, #921) skips episodes whose ``source_embedding_failures`` count has
+        reached it, so a repair job's repeatedly failing rows stop heading every run's listing. An
+        excluded episode is listed again once its last failure is older than
+        ``SOURCE_EMBEDDING_FAILURE_COOLDOWN``, so a transient fault never excludes it for good.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
         model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
@@ -686,6 +716,8 @@ class EpisodeLifecycleRepository:
             EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
             "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
+            "($max_failures IS NULL OR coalesce(n.source_embedding_failures, 0) < $max_failures"
+            " OR n.source_embedding_last_failed_at < datetime() - duration($failure_cooldown))",
             non_structural_memory_cypher("n"),
             # Maintenance listing: a retired episode still needs its embedding, because
             # recall_history and timeline query anchoring are vector searches over it.
@@ -697,6 +729,8 @@ class EpisodeLifecycleRepository:
             "model": model,
             "ready_only": bool(ready_only),
             "settled_only": bool(settled_only),
+            "max_failures": max_failures,
+            "failure_cooldown": SOURCE_EMBEDDING_FAILURE_COOLDOWN,
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
