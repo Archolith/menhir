@@ -64,6 +64,8 @@ def compose_scalar_identity(
     relation = _normalized_text(relation_type)
     if relation not in RELATION_TYPES:
         raise ValueError(f"relation_type {relation!r} not in {sorted(RELATION_TYPES)}")
+    derivation_kind = derivation_kind.strip()
+    rule_id = rule_id.strip()
     custom_semantics = target_or_scope is not None or relation != "state"
     if custom_semantics and (
         derivation_kind == "proposal_fields" or rule_id == "fallback_state"
@@ -80,9 +82,9 @@ def compose_scalar_identity(
         span_end=proposal.span_end,
         claim_ordinal=proposal.claim_ordinal,
         source_key=proposal.source_key,
-        derivation_kind=derivation_kind.strip(),
+        derivation_kind=derivation_kind,
         derivation_version=derivation_version.strip(),
-        rule_id=rule_id.strip(),
+        rule_id=rule_id,
     )
     return CompositionalScalarIdentity(
         subject=subject,
