@@ -1,3 +1,10 @@
+## 2026-11-25 - Preserve logging settings, timeline bounds and telemetry deduplication
+
+- Honored `MENHIR_LOG_LEVEL` in the shared logging entry point when callers omit a level.
+- Documented the 200-event read cap and replay order in `infrastructure/audit_trail.py`.
+- Serialized the duplicate check and insert in `infrastructure/telemetry/event_store_failures.py`.
+- Carried the requested date window across next and previous cursors in timeline recall.
+
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
 - Corrected the output descriptions in `mcp/tools/ops/list_artifacts.py` and `get_artifact.py`.
@@ -111,9 +118,3 @@ Step 3 of the retire plan. It writes nothing to the graph and retires nothing; i
   (`valid_at`/`invalid_at`) project only when every active edge carries them. `QueryContext.as_of_time`
   is now populated from `classify_temporal_intent(query).as_of` in both active and shadow frontier
   passes.
-
-## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.
-- Upgrade note: by default automatic merges become proposals and automatic deletion stops. Stop the old
-  process before starting this version; 0.3.16 ignores the new switches.
