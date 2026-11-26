@@ -262,6 +262,60 @@ def test_twenty_entries_keep_full_count_and_latest_sixteen_payload():
     assert [e.assertion_id for e in p.all_entries] == [f"a{i:02d}" for i in range(20)]
 
 
+# ---- display name -------------------------------------------------------------
+
+@pytest.mark.unit
+def test_display_from_latest_valid_contributor_is_order_independent():
+    """The display name follows the latest entry, not the input row order."""
+    rows = [
+        _row(assertion_id="older", subject_display="old name",
+             valid_at="2023-08-11T00:00:00+00:00"),
+        _row(assertion_id="newer", subject_display="new name",
+             valid_at="2023-11-30T00:00:00+00:00"),
+    ]
+    forward = _one(rows)
+    reverse = _one(list(reversed(rows)))
+    assert forward.subject_display == "new name"
+    assert reverse == forward
+
+
+@pytest.mark.unit
+def test_display_tie_break_by_assertion_id():
+    """Same valid_at ties are broken by assertion_id, matching entry ordering."""
+    p = _one(list(reversed([
+        _row(assertion_id="a", subject_display="name a",
+             valid_at="2023-08-11T00:00:00+00:00"),
+        _row(assertion_id="b", subject_display="name b",
+             valid_at="2023-08-11T00:00:00+00:00"),
+    ])))
+    assert p.subject_display == "name b"
+
+
+@pytest.mark.unit
+def test_display_falls_back_to_subject_uuid_when_latest_missing_name():
+    """A blank display on the latest contributor falls back to the subject UUID."""
+    p = _one([
+        _row(assertion_id="older", subject_display="old name",
+             valid_at="2023-08-11T00:00:00+00:00"),
+        _row(assertion_id="newer", subject_display="",
+             valid_at="2023-11-30T00:00:00+00:00"),
+    ])
+    assert p.subject_display == "ent-postcards"
+
+
+@pytest.mark.unit
+def test_display_uses_latest_even_when_payload_is_empty():
+    """Display is chosen before bounding, so an empty payload keeps the latest name."""
+    p = _one([
+        _row(assertion_id="older", subject_display="old name",
+             valid_at="2023-08-11T00:00:00+00:00"),
+        _row(assertion_id="newer", subject_display="new name",
+             valid_at="2023-11-30T00:00:00+00:00"),
+    ], max_entries=0)
+    assert p.entries == []
+    assert p.subject_display == "new name"
+
+
 # ---- episode provenance -------------------------------------------------------
 
 @pytest.mark.unit

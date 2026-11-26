@@ -239,12 +239,12 @@ def build_history(
 
         # Build entries, retaining the identity of every malformed source-time row so the
         # caller can create a durable repair receipt instead of presenting a partial history.
-        valid_entries: list[HistoryEntry] = []
+        valid_members: list[tuple[HistoryEntry, str]] = []
         malformed_assertion_ids: list[str] = []
         for m in members:
             entry = _make_entry(m)
             if entry is not None:
-                valid_entries.append(entry)
+                valid_members.append((entry, str(m.get("subject_display") or subject_uuid)))
             else:
                 malformed_assertion_ids.append(str(m.get("assertion_id") or ""))
 
@@ -259,16 +259,18 @@ def build_history(
             )
             continue
 
-        if not valid_entries:
+        if not valid_members:
             result.abstentions.append(
                 HistoryAbstention(slot_key, NO_VALID_ENTRIES, subject_uuid))
             continue
 
         # Order by (valid_at, assertion_id) — the plan's canonical ordering.
-        valid_entries.sort(key=lambda e: (
-            _parse_dt(e.valid_at) or _EPOCH,
-            e.assertion_id,
+        valid_members.sort(key=lambda member: (
+            _parse_dt(member[0].valid_at) or _EPOCH,
+            member[0].assertion_id,
         ))
+        valid_entries = [entry for entry, _ in valid_members]
+        display = valid_members[-1][1]
 
         # Operation counts.
         op_counts: dict[str, int] = {}
@@ -295,9 +297,6 @@ def build_history(
             if bounded_limit and len(valid_entries) > bounded_limit
             else valid_entries if bounded_limit else []
         )
-
-        # Display comes from the first member's subject_display (deterministic: sorted slot).
-        display = str(members[0].get("subject_display", "") or subject_uuid)
 
         result.projections.append(ScalarHistoryProjection(
             subject_uuid=subject_uuid,
