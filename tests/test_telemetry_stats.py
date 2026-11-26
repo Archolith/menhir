@@ -10,6 +10,9 @@ Tests cover:
 - get_memory_stats tool respects since_hours param
 """
 
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -652,6 +655,43 @@ class TestRecallFeedback:
             score_label="useful", score_value=1.0, session_id="s1"
         )
         assert rated2["token"] == "tok1"
+
+    def test_concurrent_implicit_ratings_claim_distinct_receipts(self, store, monkeypatch):
+        from menhir.infrastructure.telemetry.helpers import _ClosingConnection
+
+        for token in ("tok1", "tok2"):
+            store.record_recall_receipt(token=token, operation="recall_memories", session_id="s1")
+        first = McpTelemetryStore(db_path=store.db_path)
+        second = McpTelemetryStore(db_path=store.db_path)
+        first._ensure_ready()
+        second._ensure_ready()
+        first_selecting = threading.Event()
+        second_started = threading.Event()
+
+        class ObservedConnection(_ClosingConnection):
+            def execute(self, sql, parameters=()):
+                if "WHERE rated_at IS NULL" in sql:
+                    first_selecting.set()
+                    assert self.in_transaction
+                    assert second_started.wait(timeout=5)
+                return super().execute(sql, parameters)
+
+        monkeypatch.setattr(
+            first, "_connect", lambda: sqlite3.connect(store.db_path, factory=ObservedConnection),
+        )
+
+        def rate_second():
+            second_started.set()
+            return second.record_recall_feedback(score_label="noise", score_value=0.0, session_id="s1")
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            rating_one = executor.submit(
+                first.record_recall_feedback, score_label="useful", score_value=1.0, session_id="s1",
+            )
+            assert first_selecting.wait(timeout=5)
+            rating_two = executor.submit(rate_second)
+            assert rating_one.result(timeout=5) == {"token": "tok2", "operation": "recall_memories"}
+            assert rating_two.result(timeout=5) == {"token": "tok1", "operation": "recall_memories"}
 
     def test_unused_counts_as_rated_but_not_scored(self, store: McpTelemetryStore):
         self._receipts(store, n=2)
