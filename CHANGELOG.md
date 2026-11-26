@@ -3,7 +3,7 @@
 - `memory_queries.fetch_temporal_facts` takes `namespace` again and scopes the fact edge with
   `tenant_scope_cypher`, as `timeline_facts` does; `recall_pipeline` passes the recall's namespace.
   Before, an entity admitted in one namespace showed facts written from another namespace's
-  episodes (production had 195, from Graphiti dedupe across groups before fork 0.32.1.post2).
+  episodes (production had 195, from Graphiti dedupe across groups before Archolith/graphiti#38).
 - `consolidation_queries.requeue_conflicts_for_llm_review` scopes with `tenant_scope_cypher`, so a
   node carrying only `group_id` is no longer treated as `default`.
 - Tests: new `tests/test_scoped_fact_fetch_live.py` (both fail without this change). Changed
