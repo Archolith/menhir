@@ -140,7 +140,8 @@ def test_record_failures_returns_episodes_at_or_past_the_limit(test_neo4j_repo: 
         _episode(graph, uuid, "READY")
     repo = EpisodeRepository(graph)
     crossed = [repo.record_source_embedding_failures(["x-a", "x-b"], 3) for _ in range(3)]
-    assert crossed[0] == [] and crossed[1] == [] and sorted(crossed[2]) == ["x-a", "x-b"]
-    assert repo.record_source_embedding_failures(["x-under"], 3) == []
-    assert repo.record_source_embedding_failures(["x-a"], 3) == ["x-a"]  # 4th failure after cooldown
-    assert repo.record_source_embedding_failures(["x-b"]) == []  # no limit: nothing reported
+    assert crossed[0] == {} and crossed[1] == {}
+    assert crossed[2] == {"x-a": 3, "x-b": 3}
+    assert repo.record_source_embedding_failures(["x-under"], 3) == {}
+    assert repo.record_source_embedding_failures(["x-a"], 3) == {"x-a": 4}  # after cooldown
+    assert repo.record_source_embedding_failures(["x-b"]) == {}  # no limit: nothing reported

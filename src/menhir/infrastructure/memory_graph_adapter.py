@@ -526,7 +526,7 @@ class MemoryGraphAdapter:
 
     def record_source_embedding_failures(
         self, episode_uuids: list[str], limit: int | None = None,
-    ) -> list[str]:
+    ) -> dict[str, int]:
         """See EpisodeLifecycleRepository.record_source_embedding_failures."""
         return self._episodes.record_source_embedding_failures(episode_uuids, limit)
 

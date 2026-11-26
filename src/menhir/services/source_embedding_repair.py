@@ -138,14 +138,14 @@ async def repair_source_embeddings(
     if errored and await _embedder_is_up(embed):
         to_record = errored + empty
     if to_record:
-        newly_excluded: list[str] = []
+        newly_excluded: dict[str, int] = {}
         try:
-            newly_excluded = list(await asyncio.to_thread(
+            newly_excluded = dict(await asyncio.to_thread(
                 graph_adapter.record_source_embedding_failures, to_record, MAX_EPISODE_FAILURES
-            ) or [])
+            ) or {})
         except Exception:  # bookkeeping only: never fail the repair run over it
             logger.warning("Could not record source-embedding failures", exc_info=True)
-        for episode_uuid in newly_excluded:
+        for episode_uuid, failure_count in newly_excluded.items():
             excluded += 1
             try:
                 await asyncio.to_thread(
@@ -155,10 +155,12 @@ async def repair_source_embeddings(
                     failure_stage="source_embedding_excluded",
                     classification="exhausted",
                     retryable=False,
-                    processing_attempt=MAX_EPISODE_FAILURES,
+                    # The count keys the event store's dedup: a later exclusion is a new row.
+                    processing_attempt=failure_count,
                     error_type=error_class.get(episode_uuid, "EmptyEmbedding"),
                     error="source embedding repair excluded the episode after repeated failures",
                     details={
+                        "failure_count": failure_count,
                         "failure_limit": MAX_EPISODE_FAILURES,
                         "decision": "excluded_until_cooldown",
                         "note": "listed again after the 7-day cooldown",

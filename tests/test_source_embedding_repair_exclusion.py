@@ -77,3 +77,20 @@ def test_event_failure_does_not_fail_run(monkeypatch: pytest.MonkeyPatch) -> Non
     graph.failures = {"a": 2}
     result = _run(graph, _empty)
     assert result["excluded"] == 1 and result["stopped"] is None
+
+
+def test_reexclusion_event_survives_the_real_event_store_dedup(isolated_telemetry_db) -> None:
+    """Review F14-1: the failure store drops a row identical to an earlier one (no time window).
+    Each exclusion carries its own failure count as the attempt, so both are stored."""
+    import sqlite3
+
+    graph = _CooledGraph({"a": "text"})
+    graph.failures = {"a": repair_mod.MAX_EPISODE_FAILURES - 1}
+    assert _run(graph, _empty)["excluded"] == 1  # count 3
+    graph.cooled.add("a")
+    assert _run(graph, _empty)["excluded"] == 1  # count 4, after the cooldown
+    with sqlite3.connect(isolated_telemetry_db) as conn:
+        attempts = [r[0] for r in conn.execute(
+            "SELECT processing_attempt FROM failure_events "
+            "WHERE failure_stage = 'source_embedding_excluded' ORDER BY processing_attempt")]
+    assert attempts == [3, 4]

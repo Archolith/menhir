@@ -124,7 +124,7 @@ class SchedulerGraphAdapter(Protocol):
 
     def record_source_embedding_failures(
         self, episode_uuids: list[str], limit: int | None = None,
-    ) -> list[str]:
+    ) -> dict[str, int]:
         ...
 
     def set_episode_content_embedding(

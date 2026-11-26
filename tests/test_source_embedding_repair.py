@@ -38,7 +38,7 @@ class _Graph:
     def record_source_embedding_failures(self, uuids, limit=None):
         for u in uuids:
             self.failures[u] = self.failures.get(u, 0) + 1
-        return [u for u in uuids if limit is not None and self.failures[u] >= limit]
+        return {u: self.failures[u] for u in uuids if limit is not None and self.failures[u] >= limit}
 
     def set_episode_content_embedding(self, uuid, embedding, model, *, expected_content=None):
         if uuid not in self.contents:
