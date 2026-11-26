@@ -278,6 +278,13 @@ def _redact_telemetry_value(value: Any, *, key: str | None = None) -> Any:
         if not value:
             return value
         if key in _SAFE_TELEMETRY_STRING_KEYS and _STRUCTURAL_VALUE_RE.fullmatch(value):
+            # Safe-key membership is not enough for URI-shaped values: the authority may carry
+            # credentials that still match the structural alphabet. Preserve ordinary URLs and
+            # local identifiers byte-for-byte, but remove authority userinfo before persistence.
+            if "://" in value and "@" in value:
+                from menhir.config.settings_helpers import redact_uri_credentials
+
+                return redact_uri_credentials(value)
             return value
         return "[redacted]"
     if isinstance(value, (int, float, bool)) or value is None:

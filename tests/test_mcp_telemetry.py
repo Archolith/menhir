@@ -37,6 +37,24 @@ def _cleanup_db_path(db_path: Path) -> None:
     remove_test_dir(db_path.parent)
 
 
+def test_safe_structural_uri_redacts_userinfo_but_preserves_normal_identifiers():
+    from menhir.infrastructure.telemetry.helpers import _preview_of
+
+    preview = _preview_of(
+        {
+            "source": "https://dummy-user:dummy-secret@repo.example/org/repo",
+            "repository": "https://repo.example/org/repo",
+            "project": "C:/work/repo",
+        }
+    )
+
+    assert "dummy-user" not in preview
+    assert "dummy-secret" not in preview
+    assert '"source": "https://repo.example/org/repo"' in preview
+    assert '"repository": "https://repo.example/org/repo"' in preview
+    assert '"project": "C:/work/repo"' in preview
+
+
 def _fetch_rows(db_path):
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -358,6 +376,25 @@ def test_record_mcp_event_drops_unserializable_data(field, caplog):
     store.record.assert_not_called()
     assert any("preparation failed (ValueError)" in message for message in caplog.messages)
     assert "Circular reference detected" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("recorder", "fields", "expected"),
+    [
+        (record_failure_event, {"operation": "test", "error": "test"}, False),
+        (record_lifecycle_event, {"component": "test", "event": "test", "state": "test"}, None),
+        (recorders.record_episode_task_event, {"parent_task": None, "child_task": None, "phase": "test"}, None),
+    ],
+)
+def test_episode_recorders_drop_unserializable_details(recorder, fields, expected, caplog):
+    store = Mock()
+    details = {"hidden argument": 1, 2: 3}
+
+    assert recorder(episode_uuid="test", details=details, store=store, **fields) is expected
+
+    assert not store.mock_calls
+    assert "preparation failed (TypeError)" in caplog.text
+    assert "hidden argument" not in caplog.text
 
 
 def test_record_failure_event_persists_structured_failure_details():

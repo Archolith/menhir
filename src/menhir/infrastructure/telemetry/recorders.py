@@ -203,24 +203,28 @@ def record_failure_event(
     than a NULL key plus arbitrary exception prose.
     """
 
-    scoped = bool(str(episode_uuid or "").strip())
-    details_payload = details
-    if traceback_text:
-        base_details = (
-            dict(details)
-            if isinstance(details, dict)
-            else {"details": details}
-            if details is not None
-            else {}
-        )
-        base_details["traceback"] = traceback_text
-        base_details["traceback_preview"] = traceback_text[:500]
-        details_payload = base_details
-    if details_payload is not None and not scoped:
-        details_payload = _redact_telemetry_value(details_payload)
-    details_json = None
-    if details_payload is not None:
-        details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    try:
+        scoped = bool(str(episode_uuid or "").strip())
+        details_payload = details
+        if traceback_text:
+            base_details = (
+                dict(details)
+                if isinstance(details, dict)
+                else {"details": details}
+                if details is not None
+                else {}
+            )
+            base_details["traceback"] = traceback_text
+            base_details["traceback_preview"] = traceback_text[:500]
+            details_payload = base_details
+        if details_payload is not None and not scoped:
+            details_payload = _redact_telemetry_value(details_payload)
+        details_json = None
+        if details_payload is not None:
+            details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    except Exception as exc:
+        logger.warning("record_failure_event:%s preparation failed (%s)", operation, type(exc).__name__)
+        return False
     try:
         return store.record_failure(
             recorded_at=_utc_now_iso(),
@@ -263,9 +267,11 @@ def record_episode_task_event(
     details: Any = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
-    details_json = None
-    if details is not None:
-        details_json = json.dumps(details, default=_json_default, sort_keys=True)
+    try:
+        details_json = json.dumps(details, default=_json_default, sort_keys=True) if details is not None else None
+    except Exception as exc:
+        logger.warning("record_episode_task_event:%s preparation failed (%s)", phase, type(exc).__name__)
+        return
     try:
         store.record_episode_task_event(
             recorded_at=_utc_now_iso(),
@@ -296,11 +302,16 @@ def record_lifecycle_event(
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
     """Persist a lifecycle event with addressable or explicitly operational lineage."""
-    scoped = bool(str(episode_uuid or "").strip())
-    details_payload = details if scoped else _redact_telemetry_value(details)
-    details_json = None
-    if details_payload is not None:
-        details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    try:
+        scoped = bool(str(episode_uuid or "").strip())
+        details_payload = details if scoped else _redact_telemetry_value(details)
+        details_json = (
+            json.dumps(details_payload, default=_json_default, sort_keys=True)
+            if details_payload is not None else None
+        )
+    except Exception as exc:
+        logger.warning("record_lifecycle_event:%s:%s preparation failed (%s)", component, event, type(exc).__name__)
+        return
     try:
         store.record_lifecycle_event(
             recorded_at=_utc_now_iso(),
