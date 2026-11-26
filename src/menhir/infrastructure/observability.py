@@ -644,7 +644,7 @@ class _CachingEmbeddingsEndpoint:
             return upstream_result
 
         # If we had no cache hits, just return upstream directly (preserves exact contract)
-        if not any(i in cached_vectors for i in range(len(texts)) if i not in miss_indices):
+        if len(miss_indices) == len(texts):
             return upstream_result
 
         # Rebuild merged response
