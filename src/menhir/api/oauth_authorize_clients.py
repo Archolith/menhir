@@ -14,6 +14,7 @@ this leaf free of module-level import cycles.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -227,3 +228,8 @@ def _validate_pkce_and_response(
         raise _RedirectError("invalid_request", "code_challenge is required (PKCE)")
     if code_challenge_method != "S256":
         raise _RedirectError("invalid_request", "code_challenge_method must be S256")
+    if (
+        not isinstance(code_challenge, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{43}", code_challenge, re.ASCII) is None
+    ):
+        raise _RedirectError("invalid_request", "code_challenge has an invalid S256 format")
