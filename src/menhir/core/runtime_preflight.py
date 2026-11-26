@@ -327,6 +327,12 @@ def collect_runtime_capabilities(
             finally:
                 repo.close()
             if health is not None:
+                if health.get("wrong_assertion_count"):
+                    # #1006: reporting only; the assertion backfill is bounded, so never a failure.
+                    logger.warning(
+                        "TypedAssertion embeddings with a different dimension: %s (expected_dim=%s, dims=%s)",
+                        health["wrong_assertion_count"], expected_dim, health.get("assertion_dims"),
+                    )
                 if not health["ok"]:
                     failures.append(
                         "Stored graph embeddings do not match the current embedder "
