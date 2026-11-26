@@ -167,9 +167,20 @@ class CorrelationRepository:
     #: Regex for the path-name clause, passed as the ``$ineligible_path_regex`` query parameter.
     #: It must NOT be embedded as a Cypher string literal: Cypher unescapes ``\\`` and ``\b``
     #: (backspace) before the regex engine sees them, which broke this clause (#888).
+    #: Path-shaped means: a leading root (``/``, ``./``, ``../``, ``~/``, a drive letter or UNC
+    #: prefix); two or more separators; a separator plus a file extension; or a file extension on
+    #: a word that starts lowercase (``main.py:42``). A single slash with no extension (``CI/CD``,
+    #: ``TCP/IP``) and a capitalised name with an extension (``Node.js``) stay mergeable.
+    _PATH_EXTENSIONS = (
+        "py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|cfg|ini|gradle|html|css|png|jpg|svg"
+    )
     _INELIGIBLE_PATH_REGEX = (
-        r"(?is).*([\\/]|\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
-        r"cfg|ini|gradle|html|css|png|jpg|svg)(\b|$)).*"
+        r"(?is)(?:"
+        r"(?:[a-z]:[\\/]|\\\\|\.{0,2}/|~/).*"
+        r"|.*[\\/].*[\\/].*"
+        rf"|.*[\\/].*\.(?:{_PATH_EXTENSIONS})\b.*"
+        rf"|(?:.*[\s(\[,;:\"'])?(?-i:[a-z0-9_])[\w.-]*\.(?:{_PATH_EXTENSIONS})\b.*"
+        r")"
     )
 
     def evaluate_merge_eligibility(self, survivor_uuid: str, absorbed_uuid: str) -> "MergeEligibility":

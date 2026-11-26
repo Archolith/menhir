@@ -93,7 +93,7 @@ def test_eligible_pair_merges(live_repo, make_pair):
         # Path-shaped name -> ineligible role.
         ({}, {"name": "src/menhir/foo.py"}, me.INELIGIBLE_ROLE),
         ({}, {"name": "src/menhir/infrastructure"}, me.INELIGIBLE_ROLE),
-        ({}, {"name": "docs/plans"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "docs/plan.md"}, me.INELIGIBLE_ROLE),
         ({}, {"name": "C:\\Users\\x"}, me.INELIGIBLE_ROLE),
         ({}, {"name": "main.py:42"}, me.INELIGIBLE_ROLE),
         ({}, {"name": "config.yaml settings"}, me.INELIGIBLE_ROLE),
@@ -194,3 +194,17 @@ def test_ordinary_pair_is_still_eligible_at_both_call_sites(live_repo, make_pair
 
     assert repo.check_ineligible_node_veto(s, a) is False
     assert repo.evaluate_merge_eligibility(s, a).allowed is True
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "name, ineligible",
+    [
+        ("main.py:42", True), ("docs/plan.md", True), ("~/notes", True),
+        ("Node.js", False), ("CI/CD", False), ("docs/plans", False), ("my.pyramid", False),
+    ],
+)
+def test_path_regex_agrees_in_neo4j(live_repo, make_pair, name, ineligible):
+    """Neo4j's Java regex must read the parameterised pattern as Python does (#888)."""
+    s, a = make_pair(absorbed_props={"name": name})
+    assert CorrelationRepository(live_repo).check_ineligible_node_veto(s, a) is ineligible
