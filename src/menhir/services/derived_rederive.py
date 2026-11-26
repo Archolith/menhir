@@ -18,10 +18,15 @@ from menhir.infrastructure.circuit_breaker import provider_unavailable_reason, s
 from menhir.infrastructure.observability import LlmUsageControlSignal
 from menhir.infrastructure.openai_rate_limit import find_provider_status_error, rate_limit_category
 from menhir.infrastructure.telemetry import record_failure_event
+from menhir.services.scheduler_protocols import JOB_FAILED_KEY
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
+#: A 'failed' repair goes back to 'pending' (attempts reset) once its last attempt is this old.
+REQUEUE_COOLDOWN_DAYS = 7
+#: At most this many 'failed' repairs are requeued per run.
+REQUEUE_LIMIT = 5
 
 
 async def _call(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -64,6 +69,84 @@ async def _embed_or_none(embedder: Any, text: str) -> list[float] | None:
         return None
 
 
+async def _requeue_failed(graph_adapter: Any) -> int:
+    """Move 'failed' repairs past the cooldown back to 'pending', with a failure event each (#1005).
+
+    Best-effort: old adapters lack the method, and a store error only skips the requeue."""
+    requeue = getattr(graph_adapter, "requeue_failed_derived_rederive", None)
+    if requeue is None:
+        return 0
+    try:
+        rows = await _call(requeue, REQUEUE_COOLDOWN_DAYS, REQUEUE_LIMIT)
+    except Exception as exc:
+        logger.warning("derived_rederive: could not requeue failed repairs: %s", type(exc).__name__)
+        return 0
+    for row in rows:
+        await _call(
+            record_failure_event,
+            operation="scheduler_derived_rederive",
+            failure_stage="rederive_requeued",
+            classification="requeued",
+            retryable=True,
+            processing_attempt=int(row.get("requeue_count") or 0),
+            error_type=str(row.get("last_error") or "error"),
+            error="failed derived rederive repair requeued after cooldown",
+            details={
+                "item_kind": str(row.get("item_kind") or ""),
+                "decision": "requeued",
+                "requeue_count": int(row.get("requeue_count") or 0),
+            },
+        )
+    return len(rows)
+
+
+async def _reembed_pending(graph_adapter: Any, embedder: Any, limit: int, counts: dict) -> bool:
+    """Embed facts rewritten while the embedder failed ('embed_pending', #1005).
+
+    Returns False when an embed failed: the pass stops there and defers that repair, spending no
+    attempt (the embedder's fault is not the item's). A gone or re-flagged fact is 'obsolete'.
+    """
+    lister = getattr(graph_adapter, "list_embed_pending_derived_rederive", None)
+    if embedder is None or lister is None:
+        return True
+    for repair in await _call(lister, limit):
+        repair_key = str(repair.get("repair_key") or "")
+        item_uuid = str(repair.get("item_uuid") or "")
+        if not repair_key or not item_uuid:
+            continue
+        try:
+            item = await _call(graph_adapter.load_derived_rederive_item, "fact", item_uuid)
+            if item is None or item.get("pending"):
+                # Gone, or re-flagged by a later erasure whose own repair rewrites it.
+                await _call(graph_adapter.mark_derived_rederive_status, repair_key, "obsolete")
+                counts["obsolete"] += 1
+                continue
+            text = str(item.get("text") or "")
+            if not text.strip():
+                await _call(graph_adapter.mark_derived_rederive_status, repair_key, "done")
+                continue
+            vector = await _embed_or_none(embedder, text)
+            if vector is None:
+                await _defer(graph_adapter, repair_key)
+                counts["stopped_embedding"] = "embedder_unavailable"
+                return False
+            applied = await _call(
+                graph_adapter.apply_derived_rederive,
+                repair_key=repair_key, item_kind="fact", item_uuid=item_uuid, flagged_at=None,
+                episodes=[], new_text=text, embedding=vector, reembed=True,
+            )
+            if applied:
+                counts["reembedded"] += 1
+            else:
+                counts["cas_failed"] += 1
+        except Exception as exc:  # class name only
+            counts["errors"] += 1
+            logger.warning(
+                "derived_rederive repair=%s re-embed errored: %s", repair_key, type(exc).__name__
+            )
+    return True
+
+
 async def run_derived_rederive(
     graph_adapter: Any, llm: Any, *, limit: int = 25, embedder: Any = None
 ) -> dict:
@@ -78,6 +161,13 @@ async def run_derived_rederive(
     attempt (``counts["stopped"]``). A repair that reaches ``MAX_ATTEMPTS`` becomes ``'failed'``
     and records a failure event. A graph error on one item is counted in ``errors`` and the batch
     continues.
+
+    #1005: each run first requeues up to ``REQUEUE_LIMIT`` 'failed' repairs older than
+    ``REQUEUE_COOLDOWN_DAYS`` (``requeued``), then re-embeds 'embed_pending' facts. A rewritten
+    fact whose embedding fails keeps its rewrite and becomes 'embed_pending' when an embedder is
+    configured (``embedding_missing`` counts every fact rewritten without a vector). The result
+    carries ``JOB_FAILED_KEY`` when the run stopped on an unavailable LLM or embedder, or
+    counted any ``errors``.
     """
     # UnavailableLLMAdapter (degraded startup) has no rederive method; skipping keeps repairs
     # pending instead of burning their attempts into 'failed'.
@@ -87,7 +177,11 @@ async def run_derived_rederive(
     counts = {
         "processed": 0, "rewritten": 0, "deleted": 0, "obsolete": 0,
         "cas_failed": 0, "errors": 0, "failed": 0,
+        "requeued": 0, "reembedded": 0, "embedding_missing": 0,
     }
+    counts["requeued"] = await _requeue_failed(graph_adapter)
+    # After one failed embed this run, later rewrites skip the embedder and queue a re-embed.
+    embedder_down = not await _reembed_pending(graph_adapter, embedder, limit, counts)
     repairs = await _call(graph_adapter.list_pending_derived_rederive, limit)
     for repair in repairs:
         repair_key = str(repair.get("repair_key") or "")
@@ -96,6 +190,7 @@ async def run_derived_rederive(
         if not repair_key or kind not in ("fact", "entity") or not item_uuid:
             continue
         counts["processed"] += 1
+        missing_embedding = False
 
         try:
             item = await _call(graph_adapter.load_derived_rederive_item, kind, item_uuid)
@@ -189,9 +284,18 @@ async def run_derived_rederive(
                 else:
                     extra: dict[str, Any] = {}
                     if kind == "fact":
-                        vector = await _embed_or_none(embedder, text or "")
+                        vector = None if embedder_down else await _embed_or_none(
+                            embedder, text or ""
+                        )
                         if vector is not None:
                             extra["embedding"] = vector
+                        elif (text or "").strip():
+                            missing_embedding = True
+                            if embedder is not None:
+                                # #1005: keep the rewrite (recall shows it again) and queue the
+                                # fact for re-embedding instead of finishing it with no vector.
+                                extra["embedding_missing"] = True
+                                embedder_down = True
                     applied = await _call(
                         graph_adapter.apply_derived_rederive, new_text=text or "", **extra, **cas
                     )
@@ -199,6 +303,8 @@ async def run_derived_rederive(
 
             if applied:
                 counts[outcome] += 1
+                if missing_embedding:
+                    counts["embedding_missing"] += 1
             else:
                 # Re-flagged or stripped meanwhile (or gone): stays pending; next run re-reads it.
                 counts["cas_failed"] += 1
@@ -220,5 +326,13 @@ async def run_derived_rederive(
             except Exception:
                 logger.warning("derived_rederive repair=%s: could not record the failure", repair_key)
 
+    # #1005: an outage stop or any spent attempt makes the run unsuccessful in the scheduler's
+    # record. A budget refusal (llm_usage_control) is a decision, not a failure.
+    if (
+        counts.get("stopped") == "provider_unavailable"
+        or counts.get("stopped_embedding")
+        or counts["errors"]
+    ):
+        counts[JOB_FAILED_KEY] = True
     logger.info("derived_rederive: %s", counts)
     return counts

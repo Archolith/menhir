@@ -1136,6 +1136,12 @@ class MemoryGraphAdapter:
     def defer_derived_rederive(self, repair_key: str) -> bool:
         return self._memory_queries.defer_derived_rederive(repair_key)
 
+    def list_embed_pending_derived_rederive(self, limit: int) -> list[dict]:
+        return self._memory_queries.list_embed_pending_derived_rederive(limit)
+
+    def requeue_failed_derived_rederive(self, cooldown_days: float, limit: int) -> list[dict]:
+        return self._memory_queries.requeue_failed_derived_rederive(cooldown_days, limit)
+
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int
     ) -> str | None:
