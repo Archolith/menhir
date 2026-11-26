@@ -13,6 +13,13 @@
 - Kept the telemetry feature dashboard available when timestamps with and without offsets are mixed.
 - Directed unmerge operators to the supported read-only `--inventory` option.
 - Dropped malformed telemetry events without letting serialization errors escape into the caller.
+- Serialized telemetry log counter updates and eviction across threads.
+- Listed reversible merges beyond the first 100,000 committed journal operations.
+- Bounded both stale-anchor diagnostic list endpoints while retaining zero-result requests.
+- Honored legacy default namespaces in scalar activation and kept projection repairs scoped.
+- Bounded recent SQLite telemetry reads to 500 rows.
+- Reused one chat client when concurrent calls first reach the same cache key.
+- Refused to mark a source unresolved when its audited state had changed.
 
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
