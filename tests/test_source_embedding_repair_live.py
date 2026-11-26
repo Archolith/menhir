@@ -111,3 +111,23 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(
     # The edited episode is picked up with its new text on the next run.
     asyncio.run(repair_source_embeddings(adapter, embed=embed, model_name=lambda: "m-1"))
     assert _stamp(graph, "e-edited") == ([10.0, 1.0], "m-1")
+
+
+def test_listing_skips_repeat_failures_until_cooldown(test_neo4j_repo: Any) -> None:
+    """#921: an episode at the failure limit is skipped, and listed again after the cooldown."""
+    graph = test_neo4j_repo
+    for uuid in ("f-fresh", "f-recent", "f-old", "f-under"):
+        _episode(graph, uuid, "READY")
+    repo = EpisodeRepository(graph)
+    for _ in range(3):
+        repo.record_source_embedding_failures(["f-recent", "f-old"])
+    repo.record_source_embedding_failures(["f-under"])
+    graph.execute("MATCH (n:Episodic {uuid: 'f-old'}) "
+                  "SET n.source_embedding_last_failed_at = datetime() - duration('P8D')")
+    listed = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, max_failures=3)}
+    assert {"f-fresh", "f-old", "f-under"} <= listed
+    assert "f-recent" not in listed
+    repo.set_episode_content_embedding("f-recent", [1.0], "m-1")
+    row = graph.execute("MATCH (n:Episodic {uuid: 'f-recent'}) "
+                        "RETURN n.source_embedding_failures AS c", params={})[0]
+    assert row["c"] is None

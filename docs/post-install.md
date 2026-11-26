@@ -5,7 +5,7 @@ runtime dependencies, an MCP client connection, and whichever optional agent int
 has explicitly chosen.
 
 If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
-installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.32.1.post1`.
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.32.1.post2`.
 Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
 reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
 checkout, a fresh installation is:
@@ -99,7 +99,7 @@ when enabled or when perceiver versions change. Review namespace/version and his
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.
 Keep configuration and verified data backups for a separately approved deployment rollback.
 
-**Known limitations in 0.3.17.** The source checks on five scalar kinds (duration, frequency,
+**Known limitations in 0.3.20.** The source checks on five scalar kinds (duration, frequency,
 weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
 (#411; see
 [source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).

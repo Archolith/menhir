@@ -516,12 +516,17 @@ class MemoryGraphAdapter:
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
             namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only,
-            settled_only=settled_only,
+            settled_only=settled_only, max_failures=max_failures,
         )
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+        """See EpisodeLifecycleRepository.record_source_embedding_failures."""
+        return self._episodes.record_source_embedding_failures(episode_uuids)
 
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,
@@ -558,6 +563,12 @@ class MemoryGraphAdapter:
         self, limit: int = 100
     ) -> list[dict[str, Any]]:
         return self._episodes.fetch_failed_episode_retry_candidates(limit)
+
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        """See EpisodeLifecycleRepository.park_failed_episode_retry (#925)."""
+        return self._episodes.park_failed_episode_retry(
+            episode_uuid, failed_at=failed_at, reason=reason
+        )
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Return FAILED episodes grouped by error text, most common first."""
@@ -1122,6 +1133,9 @@ class MemoryGraphAdapter:
     def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
         return self._memory_queries.mark_derived_rederive_status(repair_key, status)
 
+    def defer_derived_rederive(self, repair_key: str) -> bool:
+        return self._memory_queries.defer_derived_rederive(repair_key)
+
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int
     ) -> str | None:
@@ -1129,9 +1143,11 @@ class MemoryGraphAdapter:
             repair_key, error_class, max_attempts
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
-        """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(node_uuids)
+    def fetch_temporal_facts(
+        self, node_uuids: list[str], *, namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Fetch bi-temporal fact-edge state for candidate nodes, scoped to ``namespace``."""
+        return self._memory_queries.fetch_temporal_facts(node_uuids, namespace=namespace)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]

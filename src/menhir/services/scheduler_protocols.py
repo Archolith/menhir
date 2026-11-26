@@ -41,6 +41,9 @@ class SchedulerGraphAdapter(Protocol):
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
         ...
 
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        ...
+
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, object]]:
         ...
 
@@ -115,7 +118,11 @@ class SchedulerGraphAdapter(Protocol):
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, Any]]:
+        ...
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
         ...
 
     def set_episode_content_embedding(

@@ -96,13 +96,16 @@ class CorrelationRepository:
     ) -> bool:
         """Create a RELATES_TO edge between two entities if none exists.
 
-        Idempotent — MERGE avoids duplicate edges.  Returns True if an edge
-        was created (first time); False if it already existed.
+        Idempotent — MERGE avoids duplicate edges.  Returns True when the edge exists
+        afterwards; False when either entity is missing or the two are in different tenants,
+        which this refuses: the candidate search is scoped by group_id, and an entity whose
+        namespace disagrees with its group can still pair across tenants.
         """
         rows = self._neo4j.execute(
             """
             MATCH (a:Entity {uuid: $source_uuid})
             MATCH (b:Entity {uuid: $target_uuid})
+            WHERE __SAME_TENANT__
             MERGE (a)-[r:RELATES_TO]->(b)
             ON CREATE SET
                 r.type = 'correlation',
@@ -123,7 +126,7 @@ class CorrelationRepository:
                 END,
                 r.last_traversed = datetime()
             RETURN r.type AS edge_type
-            """,
+            """.replace("__SAME_TENANT__", same_tenant_cypher("a", "b")),
             params={
                 "source_uuid": source_uuid,
                 "target_uuid": target_uuid,
@@ -159,8 +162,25 @@ class CorrelationRepository:
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'inferred_self' OR "
         "n.self_tier IS NOT NULL OR "
-        r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
-        r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
+        "(n.name =~ $ineligible_path_regex)"
+    )
+    #: Regex for the path-name clause, passed as the ``$ineligible_path_regex`` query parameter.
+    #: It must NOT be embedded as a Cypher string literal: Cypher unescapes ``\\`` and ``\b``
+    #: (backspace) before the regex engine sees them, which broke this clause (#888).
+    #: Path-shaped means: a leading root (``/``, ``./``, ``../``, ``~/``, a drive letter or UNC
+    #: prefix); two or more separators; a separator plus a file extension; or a file extension on
+    #: a word that starts lowercase (``main.py:42``). A single slash with no extension (``CI/CD``,
+    #: ``TCP/IP``) and a capitalised name with an extension (``Node.js``) stay mergeable.
+    _PATH_EXTENSIONS = (
+        "py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|cfg|ini|gradle|html|css|png|jpg|svg"
+    )
+    _INELIGIBLE_PATH_REGEX = (
+        r"(?is)(?:"
+        r"(?:[a-z]:[\\/]|\\\\|\.{0,2}/|~/).*"
+        r"|.*[\\/].*[\\/].*"
+        rf"|.*[\\/].*\.(?:{_PATH_EXTENSIONS})\b.*"
+        rf"|(?:.*[\s(\[,;:\"'])?(?-i:[a-z0-9_])[\w.-]*\.(?:{_PATH_EXTENSIONS})\b.*"
+        r")"
     )
 
     def evaluate_merge_eligibility(self, survivor_uuid: str, absorbed_uuid: str) -> "MergeEligibility":
@@ -185,7 +205,11 @@ class CorrelationRepository:
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
-            params={"s": survivor_uuid, "a": absorbed_uuid},
+            params={
+                "s": survivor_uuid,
+                "a": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         by_uuid = {str(r["uuid"]): dict(r) for r in rows}
 
@@ -837,6 +861,9 @@ class CorrelationRepository:
             WHERE NOT type(r) = 'ANCHORED_TO'
             AND neighbor.structure_role IS NULL
             AND neighbor.uuid <> survivor.uuid
+            // A bridge must not join tenants: an absorbed node's existing cross-tenant edge
+            // would otherwise become a new one on the survivor.
+            AND __BRIDGE_SAME_TENANT__
             WITH survivor, absorbed, known_rel_ids, facts_moved,
                  collect(DISTINCT neighbor) AS neighbors
             FOREACH (n IN neighbors |
@@ -890,6 +917,8 @@ class CorrelationRepository:
             ).replace(
                 "__ABSORBED_RETENTION_TENANT__",
                 same_tenant_cypher("retention_source", "absorbed"),
+            ).replace(
+                "__BRIDGE_SAME_TENANT__", same_tenant_cypher("survivor", "neighbor"),
             ).replace("__MOVED_FACT__", _MOVED_FACT_WHERE),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
@@ -1085,16 +1114,19 @@ class CorrelationRepository:
         uuid_a: str,
         uuid_b: str,
     ) -> bool:
-        """Anchor-project veto: if both entities are anchored to different single projects, veto.
+        """Anchor-project veto: veto when both entities are anchored and their project sets differ.
 
-        Returns True if a veto applies (both anchored to different projects), False otherwise.
+        Identical anchor sets (single or multi) are not vetoed (#888); an unanchored side never vetoes.
         """
         rows = self._neo4j.execute(
             """
             MATCH (a:Entity {uuid: $a})-[:ANCHORED_TO]->(proj_a)
+            WITH collect(DISTINCT proj_a) AS projs_a
             MATCH (b:Entity {uuid: $b})-[:ANCHORED_TO]->(proj_b)
-            WHERE proj_a <> proj_b
-            RETURN count(*) > 0 AS veto_applies
+            WITH projs_a, collect(DISTINCT proj_b) AS projs_b
+            RETURN size(projs_a) > 0
+                   AND (any(p IN projs_a WHERE NOT p IN projs_b)
+                        OR any(p IN projs_b WHERE NOT p IN projs_a)) AS veto_applies
             """,
             params={"a": uuid_a, "b": uuid_b},
         )
@@ -1121,7 +1153,11 @@ class CorrelationRepository:
             WITH n, ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_node
             RETURN count(CASE WHEN ineligible_node THEN 1 END) > 0 AS ineligible
             """,
-            params={"a": survivor_uuid, "b": absorbed_uuid},
+            params={
+                "a": survivor_uuid,
+                "b": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         if rows:
             return bool(rows[0].get("ineligible", False))

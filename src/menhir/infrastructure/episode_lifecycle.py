@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 #: convention, so a materialized first-person View reads naturally).
 _SELF_ENTITY_NAME = "user"
 
+#: An episode the source-embedding repair stopped listing (#921) is listed again after this long.
+SOURCE_EMBEDDING_FAILURE_COOLDOWN = "P7D"
+
 _PENDING_EPISODE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]{3,}")
 
 #: Context-window errors an OPERATOR can clear without the payload changing -- local
@@ -76,6 +79,15 @@ _PROVIDER_CONTEXT_LIMIT_MARKERS = (
 #: instead rides this separate, much larger counter — a permanently dead provider must still stop
 #: consuming claim cycles eventually.
 TRANSIENT_RETRY_CAP = 20
+
+#: The failure timestamp the retry job orders FAILED candidates by (#925). Every writer that moves
+#: an episode into FAILED stamps `processing_completed_at = datetime()`, so a fresh failure always
+#: changes this value.
+_FAILED_AT = "coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at)"
+
+#: A parked retry candidate is re-examined after this long, so a raised attempt cap or a
+#: classifier change can still pick it up without an operator requeue (#925).
+RETRY_PARK_RECHECK_S = 24 * 3600
 
 
 def is_recoverable_context_window_error(error: object | None) -> bool:
@@ -296,6 +308,7 @@ class EpisodeLifecycleRepository:
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
                 n.content_embedding_at = datetime()
+            REMOVE n.source_embedding_failures, n.source_embedding_last_failed_at
             RETURN n.uuid AS uuid
             """,
             params={
@@ -306,6 +319,26 @@ class EpisodeLifecycleRepository:
             },
         )
         return bool(rows)
+
+    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+        """Bump the repair-failure count and stamp the attempt time on each episode (#921).
+
+        Read by ``list_episodes_missing_content_embedding(max_failures=...)``; cleared by a
+        successful ``set_episode_content_embedding``. Returns how many nodes were updated.
+        """
+        if not episode_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.uuid IN $uuids
+            SET n.source_embedding_failures = coalesce(n.source_embedding_failures, 0) + 1,
+                n.source_embedding_last_failed_at = datetime()
+            RETURN count(n) AS n
+            """,
+            params={"uuids": list(episode_uuids)},
+        )
+        return int(rows[0].get("n") or 0) if rows else 0
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """The other `:Episodic` node(s) of the same memory, in the same namespace (read-only).
@@ -652,8 +685,14 @@ class EpisodeLifecycleRepository:
         model: str | None = None,
         ready_only: bool = False,
         settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
+
+        ``max_failures`` (opt-in, #921) skips episodes whose ``source_embedding_failures`` count has
+        reached it, so a repair job's repeatedly failing rows stop heading every run's listing. An
+        excluded episode is listed again once its last failure is older than
+        ``SOURCE_EMBEDDING_FAILURE_COOLDOWN``, so a transient fault never excludes it for good.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
         model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
@@ -686,6 +725,8 @@ class EpisodeLifecycleRepository:
             EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
             "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
+            "($max_failures IS NULL OR coalesce(n.source_embedding_failures, 0) < $max_failures"
+            " OR n.source_embedding_last_failed_at < datetime() - duration($failure_cooldown))",
             non_structural_memory_cypher("n"),
             # Maintenance listing: a retired episode still needs its embedding, because
             # recall_history and timeline query anchoring are vector searches over it.
@@ -697,6 +738,8 @@ class EpisodeLifecycleRepository:
             "model": model,
             "ready_only": bool(ready_only),
             "settled_only": bool(settled_only),
+            "max_failures": max_failures,
+            "failure_cooldown": SOURCE_EMBEDDING_FAILURE_COOLDOWN,
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
@@ -1000,13 +1043,57 @@ class EpisodeLifecycleRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
+            .where(
+                "n.processing_state = 'FAILED'",
+                EPISODE_NOT_ERASED,
+                EPISODE_NOT_MARKED,
+                # #925: skip a row parked for THIS failure. The marker names the failure it was
+                # parked for, so a later failure (new timestamp) is a candidate again even if no
+                # requeue path cleared the marker.
+                "(properties(n)['retry_parked_for'] IS NULL"
+                f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})"
+                " OR properties(n)['retry_parked_at']"
+                " < datetime() - duration({seconds: $park_recheck_s}))",
+            )
             .return_fields(EPISODE_RETRY_FIELDS)
-            .order_by("coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at) ASC")
+            .order_by(f"{_FAILED_AT} ASC")
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"limit": safe_limit})
+        return self.neo4j.execute(
+            query, params={"limit": safe_limit, "park_recheck_s": RETRY_PARK_RECHECK_S}
+        )
+
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        """Mark a FAILED episode the retry job judged not retryable for this failure (#925).
+
+        Only the retry candidate query reads the marker; the episode stays FAILED for every
+        other reader. `failed_at` is the candidate row's `processing_completed_at` (the ordering
+        timestamp as a string): the write is a no-op if the episode has failed again since.
+        """
+        query = (
+            Cypher()
+            .match("(n:Episodic {uuid: $episode_uuid})")
+            .where(
+                "n.processing_state = 'FAILED'",
+                f"toString({_FAILED_AT}) = $failed_at",
+                EPISODE_NOT_MARKED,
+            )
+            .set(
+                (
+                    "n.retry_parked_at = datetime()",
+                    "n.retry_parked_for = $failed_at",
+                    "n.retry_parked_reason = $reason",
+                )
+            )
+            .return_raw("count(n) AS parked")
+            .build()
+        )
+        rows = self.neo4j.execute(
+            query,
+            params={"episode_uuid": episode_uuid, "failed_at": failed_at, "reason": reason},
+        )
+        return bool(rows and int(rows[0].get("parked", 0)) > 0)
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Group FAILED episodes by their error text, most common first.

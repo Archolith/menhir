@@ -16,7 +16,11 @@ from typing import Any
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.domain.recall_visibility import memory_retired_cypher
-from menhir.domain.retention import destructive_retention_allowed_cypher
+from menhir.domain.retention import (
+    canonical_tenant_cypher,
+    destructive_retention_allowed_cypher,
+    same_tenant_cypher,
+)
 from menhir.infrastructure.cypher import (
     Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
 )
@@ -243,7 +247,7 @@ class ConsolidationRepository:
        n.freshness AS freshness,
        n.user_flagged AS user_flagged,
        n.last_accessed AS last_accessed,
-       coalesce(n.namespace, 'default') AS namespace,
+       """ + canonical_tenant_cypher("n") + """ AS namespace,
        coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at,
@@ -405,6 +409,9 @@ class ConsolidationRepository:
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  // Bridges stay in n's tenant: an existing cross-tenant edge on n must not
+                  // become a new link between two other tenants' nodes.
+                  AND __SAME_TENANT__
                 WITH collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -424,7 +431,7 @@ class ConsolidationRepository:
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
             """.replace(
                 "__NON_DERIVED_VIEW__", harmful_automatic_mutation_allowed_cypher("n")
-            )
+            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
         rows = self.neo4j.execute(
             query,
             params={"node_uuid": node_uuid},
@@ -485,7 +492,7 @@ class ConsolidationRepository:
        n.sharpness AS sharpness,
        n.user_flagged AS user_flagged,
        n.session_id AS session_id,
-       coalesce(n.namespace, 'default') AS namespace,
+       """ + canonical_tenant_cypher("n") + """ AS namespace,
        n.created_at AS created_at,
        n.ttl_expires AS ttl_expires""")
             .order_by(f"{memory_timestamp_cypher('n.created_at')} ASC, n.uuid")
@@ -699,6 +706,9 @@ class ConsolidationRepository:
             WHERE a.uuid = $uuid_a AND b.uuid = $uuid_b
               AND {automatic_lifecycle_protection_cypher("a")}
               AND {automatic_lifecycle_protection_cypher("b")}
+              // A conflict group must not span tenants: resolving it would bridge and retire
+              // across them.
+              AND {same_tenant_cypher("a", "b")}
             WITH a, b,
               CASE
                 WHEN a.conflict_group_id IS NOT NULL THEN a.conflict_group_id
@@ -956,8 +966,10 @@ class ConsolidationRepository:
         ``namespace`` is opt-in and filters BOTH halves of this statement. Filtering only
         the selecting match would pick groups by the caller's silo and then mutate every
         member of them, including members in another silo if a legacy group is mixed --
-        a cross-tenant write authorized by a same-tenant read. The predicate on ``m`` is
-        what makes the write set a subset of what the caller may see.
+        a cross-namespace write authorized by a same-namespace read. The predicate on ``m`` is
+        what makes the write set a subset of what the caller may see. Both use
+        ``tenant_scope_cypher`` so a node carrying only ``group_id`` is matched by its group,
+        not treated as default.
         """
         safe_limit = max(1, min(limit, 1000))
         ns = str(namespace).strip() if namespace is not None else ""
@@ -966,13 +978,13 @@ class ConsolidationRepository:
             MATCH (n:Entity)
             WHERE n.conflict_group_id IS NOT NULL
               AND n.conflict_status = $from_status
-              AND ($namespace IS NULL OR coalesce(n.namespace, 'default') = $namespace)
+              AND {tenant_scope_cypher("n")}
               AND {automatic_lifecycle_protection_cypher("n")}
             WITH DISTINCT n.conflict_group_id AS gid
             LIMIT $limit
             MATCH (m:Entity)
             WHERE m.conflict_group_id = gid
-              AND ($namespace IS NULL OR coalesce(m.namespace, 'default') = $namespace)
+              AND {tenant_scope_cypher("m")}
               AND {automatic_lifecycle_protection_cypher("m")}
             SET m.conflict_pending_since = CASE WHEN m.conflict_status = 'pending_llm_review'
                                                 THEN m.conflict_pending_since ELSE datetime() END,
@@ -982,7 +994,7 @@ class ConsolidationRepository:
             params={
                 "from_status": from_status,
                 "limit": safe_limit,
-                "namespace": ns or None,
+                **tenant_scope_params(ns or None),
             },
         )
         return int(rows[0].get("groups_requeued", 0)) if rows else 0
@@ -1156,6 +1168,9 @@ class ConsolidationRepository:
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
                   AND __TENANT_NEIGHBOR_SCOPE__
+                  // Holds with or without a namespace argument: an unscoped call bridged
+                  // across tenants (135 links from one resolve_conflict, 2026-11-26).
+                  AND __SAME_TENANT__
                 WITH node_uuid, collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -1185,7 +1200,7 @@ class ConsolidationRepository:
                 "__TENANT_A_SCOPE__", tenant_scope_cypher("a"),
             ).replace(
                 "__TENANT_B_SCOPE__", tenant_scope_cypher("b"),
-            )
+            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
         rows = self.neo4j.execute(
             query,
             params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},

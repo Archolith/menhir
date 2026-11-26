@@ -79,6 +79,10 @@ _llm_usage_callback: ContextVar[LLMUsageCallback | None] = ContextVar(
     "menhir_llm_usage_callback",
     default=None,
 )
+_llm_operation_label: ContextVar[str | None] = ContextVar(
+    "menhir_llm_operation_label",
+    default=None,
+)
 _default_llm_usage_callback: LLMUsageCallback | None = None
 
 
@@ -92,6 +96,19 @@ def reset_llm_usage_callback(token: Token[LLMUsageCallback | None]) -> None:
     """Reset the request-scoped LLM usage callback to a previous token."""
 
     _llm_usage_callback.reset(token)
+
+
+def set_llm_operation_label(label: str | None) -> Token[str | None]:
+    """Install a request-scoped operation label (for example Graphiti ``prompt_name``)."""
+
+    normalized = label.strip() if isinstance(label, str) and label.strip() else None
+    return _llm_operation_label.set(normalized)
+
+
+def reset_llm_operation_label(token: Token[str | None]) -> None:
+    """Reset the request-scoped LLM operation label to its previous token."""
+
+    _llm_operation_label.reset(token)
 
 
 def set_default_llm_usage_callback(callback: LLMUsageCallback | None) -> None:
@@ -523,11 +540,16 @@ class _InstrumentedEndpoint:
 
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         model = kwargs.get("model")
+        operation = (
+            (_llm_operation_label.get() or self._endpoint)
+            if self._event_type == "chat"
+            else self._endpoint
+        )
         handle = start_llm_usage_call(
             kind=self._event_type,
             model=model,
             endpoint=self._endpoint,
-            operation=self._endpoint,
+            operation=operation,
         )
         try:
             if self._retry_rate_limits:

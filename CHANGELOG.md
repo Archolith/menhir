@@ -1,3 +1,52 @@
+## 2026-11-26 - A namespace-scoped recall shows only that namespace's facts
+
+- `memory_queries.fetch_temporal_facts` takes `namespace` again and scopes the fact edge with
+  `tenant_scope_cypher`, as `timeline_facts` does; `recall_pipeline` passes the recall's namespace.
+  Before, an entity admitted in one namespace showed facts written from another namespace's
+  episodes (production had 195, from Graphiti dedupe across groups before Archolith/graphiti#38).
+- `consolidation_queries.requeue_conflicts_for_llm_review` scopes with `tenant_scope_cypher`, so a
+  node carrying only `group_id` is no longer treated as `default`.
+- Tests: new `tests/test_scoped_fact_fetch_live.py` (both fail without this change). Changed
+  `test_fetch_temporal_facts_has_no_namespace_parameter` (CF-279 removed an unused parameter; it
+  is now used), the expected params/kwargs in `test_recall_temporal_facts.py`, and pruned
+  `consolidation_queries.py` from the CF-127 baseline (no hand-written predicate left).
+
+## 2026-11-26 - Docs: namespaces are not tenancy
+
+- `README.md`: new "Namespaces are not tenancy" section under Security and privacy. A namespace
+  organizes memory and scopes recall; it is not an access boundary, and Menhir has no tenant model.
+- `domain/namespace.py`, `domain/retention.py`, `core/tenancy.py`: docstrings record the
+  2026-11-15 owner decision and say that helpers named "tenant" mean namespace scope. No code changes.
+
+## 2026-11-26 - v0.3.20: Menhir links and conflict groups stay inside one tenant
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.20. No dependency changes in this commit.
+
+## 2026-11-26 - Menhir links and conflict groups stay inside one tenant
+
+- `correlation_queries.py`: `create_related_to_edge` refuses a pair in different tenants, and
+  merge bridges only the absorbed node's neighbours in the survivor's tenant.
+- `consolidation_queries.py`: `bridge_and_delete` and `bridge_edges_for_nodes` bridge only
+  neighbours in the removed node's tenant, with or without a namespace argument; `set_conflict`
+  refuses a cross-tenant pair; the decay and session candidate queries report the tenant from
+  `namespace` or `group_id`.
+- `memory_queries.py`: `fetch_adjacency_pairs` scopes with `tenant_scope_cypher`.
+- Tenant here is `canonical_tenant_cypher`: `coalesce(namespace, group_id, '')`, with `''` and
+  `'default'` the same. Production held 581 cross-tenant Menhir links; one unscoped
+  `resolve_conflict` on 2026-11-26 created 135 of them, which were deleted.
+
+## 2026-11-26 - v0.3.19: Graphiti fork 0.32.1.post2: default-namespace dedupe and invalidation stay in the default group (Archolith/graphiti#38); the Graphiti differential check script
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.19. No dependency changes in this commit.
+
+## 2026-11-26 - Graphiti fork 0.32.1.post2: default-group searches stay in the default group (Archolith/graphiti#38)
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.32.1.post2`, fork commit `bcae80b8`. Pins, docs and release checks updated.
+
+## 2026-11-26 - v0.3.18: Retire and restore memories (visibility only), retired entities follow their sources, the report-only retire judge, GitHub and GitLab tokens redacted whole (GHSA-ppqh-gffg-6j74), Graphiti fork 0.32.1.post1 (upstream v0.32.1), cross-encoder rerank as a batch oracle, Graphiti prompt names in LLM telemetry, and recall, projection and artifact fixes.
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.18. No dependency changes in this commit.
+
 ## 2026-11-26 - Backfill, corpus audit, and OAuth fixes
 
 - Counted eligible embedding backfill rows across all dry-run pages and capped previews at five.

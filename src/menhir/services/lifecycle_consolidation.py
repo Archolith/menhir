@@ -18,6 +18,8 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.infrastructure.llm import LLMAdapter
+from menhir.infrastructure.graph_operations_model import SagaWritesPausedError
+from menhir.infrastructure.observability import LlmUsageControlSignal
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient, UnavailableLLMAdapter
@@ -110,7 +112,9 @@ class LifecycleConsolidationMixin:
         )
         return result
 
-    async def _expire_demoted_session_nodes(self, session_id: str | None) -> int:
+    async def _expire_demoted_session_nodes(
+        self, session_id: str | None, exclude: frozenset[str] = frozenset()
+    ) -> int:
         """Delete demoted SESSION nodes whose grace TTL has expired, through the journaled saga.
 
         Runs as a SESSION_TTL_DELETE operation (plan Phase 6): a complete snapshot of every target is
@@ -126,7 +130,8 @@ class LifecycleConsolidationMixin:
         by promote_to_persistent -- is excluded up front.
         """
         result = await asyncio.to_thread(
-            self._delete_coordinator().delete_expired_session_nodes, session_id=session_id
+            self._delete_coordinator().delete_expired_session_nodes,
+            session_id=session_id, exclude=exclude,
         )
         deleted = result.get("deleted") or []
         for node_uuid in deleted:
@@ -268,11 +273,14 @@ class LifecycleConsolidationMixin:
 
         # Phase 3: Contradiction detection for promotion candidates
         conflicts_detected = 0
+        merge_error_log: list[str] = []
         for i in range(0, len(promote_candidates_for_conflict_check), CONSOLIDATION_BATCH_SIZE):
             batch = promote_candidates_for_conflict_check[i:i + CONSOLIDATION_BATCH_SIZE]
-            batch_conflicts = await self._check_contradictions_batch(batch)
+            batch_conflicts = await self._check_contradictions_batch(batch, merge_error_log)
             conflicts_detected += batch_conflicts
-            promote_uuids.extend(str(node["uuid"]) for node in batch)
+            # A candidate whose check raised is not promoted unchecked; the next pass retries it.
+            failed = set(merge_error_log)
+            promote_uuids.extend(str(node["uuid"]) for node in batch if str(node["uuid"]) not in failed)
 
         # Phase 4: Execute transitions and demote
         promoted = await asyncio.to_thread(self.graph_adapter.promote_to_persistent, promote_uuids)
@@ -295,7 +303,11 @@ class LifecycleConsolidationMixin:
 
         # Phase 4b: TTL-expiry delete AFTER promotion — promotion wins. promote_to_persistent
         # cleared ttl_expires on rescued nodes, so they no longer match the expired query.
-        deleted = await self._expire_demoted_session_nodes(session_id)
+        # A candidate whose contradiction check raised was neither promoted nor checked; it must not
+        # be TTL-deleted in the same pass either (#938). The next pass decides it.
+        deleted = await self._expire_demoted_session_nodes(
+            session_id, exclude=frozenset(merge_error_log)
+        )
 
         # Count pending/enriching episodes (informational — they are not consolidated)
         skipped_pending = await asyncio.to_thread(self.graph_adapter.count_pending_episodes, session_id)
@@ -312,6 +324,7 @@ class LifecycleConsolidationMixin:
             skipped_pending=skipped_pending,
             orphan_episodes_cleaned=orphans,
             demoted=demoted,
+            merge_errors=len(merge_error_log),
         )
 
     async def _count_similar_nodes(
@@ -418,6 +431,7 @@ class LifecycleConsolidationMixin:
     async def _check_contradictions_batch(
         self,
         candidates: list[dict[str, Any]],
+        errors: list[str] | None = None,
     ) -> int:
         """Check a batch of promotion candidates for contradictions with existing PERSISTENT nodes.
 
@@ -463,9 +477,22 @@ class LifecycleConsolidationMixin:
                 if other_uuid == uuid:
                     continue
 
-                final_action, details = await correlation_service.classify_pair(
-                    uuid, other_uuid, score,
-                )
+                try:
+                    final_action, details = await correlation_service.classify_pair(
+                        uuid, other_uuid, score,
+                    )
+                except (LlmUsageControlSignal, SagaWritesPausedError):
+                    raise
+                except Exception as exc:
+                    # #938: only a caller that collects errors gets containment; others keep raising.
+                    if errors is None:
+                        raise
+                    logger.warning(
+                        "classify_pair failed for %s <-> %s (%s); candidate left for the next pass",
+                        uuid, other_uuid, type(exc).__name__, exc_info=True,
+                    )
+                    errors.append(uuid)
+                    break
 
                 if final_action == "none" and details is not None:
                     # Dropped where this loop used to queue or merge and stop. Going on would reach

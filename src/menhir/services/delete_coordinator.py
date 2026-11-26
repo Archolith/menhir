@@ -92,7 +92,8 @@ class DeleteCoordinator:
 
     # ------------------------------------------------------------------ session TTL sweep
     def delete_expired_session_nodes(
-        self, *, session_id: str | None = None, dry_run: bool = False
+        self, *, session_id: str | None = None, dry_run: bool = False,
+        exclude: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         """Delete SESSION nodes whose demotion TTL has expired.
 
@@ -103,13 +104,15 @@ class DeleteCoordinator:
         Gated by MENHIR_AUTO_DELETE_MODE. "off" deletes nothing and reads nothing; "propose"
         records a pending proposal per expired node and deletes nothing; "on" deletes. NOTE: "on"
         has NO LLM approval yet -- expiry alone authorizes the delete. An explicit ``dry_run=True``
-        keeps its normal dry-run result in every mode.
+        keeps its normal dry-run result in every mode. ``exclude`` names nodes the caller could not
+        finish checking this pass (#938); they are left for the next pass.
         """
         mode = amp.auto_delete_mode()
         if mode == "off" and not dry_run:
             return {"deleted": [], "skipped": [], "reason": amp.AUTO_DELETE_OFF}
         expired = self.graph_adapter.fetch_ttl_expired_session_uuids(session_id)
-        targets = [str(r.get("uuid")) for r in (expired or []) if r.get("uuid")]
+        targets = [str(r.get("uuid")) for r in (expired or [])
+                   if r.get("uuid") and str(r.get("uuid")) not in exclude]
         if not targets:
             return {"deleted": [], "skipped": [], "reason": NOTHING_TO_DELETE}
         if mode == "propose" and not dry_run:

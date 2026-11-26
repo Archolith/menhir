@@ -1120,6 +1120,9 @@ class MemoryQueryRepository:
         safe_limit = max(1, min(limit, 500))
         where = [
             "a.name_embedding IS NOT NULL",
+            # A stale-dimension embedding is skipped, not raised on (mirrors search_episode_embeddings);
+            # `where` feeds both the scan and the index-candidate post-filter.
+            "size(a.name_embedding) = size($query_vector)",
             "NOT coalesce(a.superseded, false)",
             "NOT coalesce(a.binding_pending, false)",
             "($namespaces IS NULL OR a.namespace IN $namespaces)",
@@ -1196,11 +1199,17 @@ class MemoryQueryRepository:
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
+    def fetch_temporal_facts(
+        self, node_uuids: list[str], *, namespace: str | None = None,
+    ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
         Only edges with fact text count: link edges without it would take the per-node slots
         (and mark a node as having temporal facts for the belief gate).
+
+        ``namespace`` scopes the fact edge itself, as ``timeline_facts`` does: an entity
+        admitted in the caller's namespace can still carry a fact written from another
+        namespace's episode, and a scoped recall must not show it. ``None`` = no filter.
         """
         if not node_uuids:
             return []
@@ -1208,11 +1217,14 @@ class MemoryQueryRepository:
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
             .where(
                 f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING} "
-                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')}"
+                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')} "
+                f"AND {tenant_scope_cypher('r')}"
             )
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
-        return self.neo4j.execute(query, params={"uuids": node_uuids})
+        return self.neo4j.execute(
+            query, params={"uuids": node_uuids, **tenant_scope_params(namespace)},
+        )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
@@ -1483,18 +1495,15 @@ class MemoryQueryRepository:
             WHERE a.uuid IN $all_uuids AND b.uuid IN $all_uuids
               AND a.uuid <> b.uuid
         """
-        if namespace is not None:
-            query += """
-              AND coalesce(a.namespace, 'default') = $namespace
-              AND coalesce(b.namespace, 'default') = $namespace
-        """
-        query += """
+        # The shared tenant predicate, so a node scoped only by group_id (or by the legacy ''
+        # default) is matched; a no-op when namespace is None.
+        query += f"""
+              AND {tenant_scope_cypher("a")}
+              AND {tenant_scope_cypher("b")}
             RETURN DISTINCT a.uuid AS source, b.uuid AS target,
                    r.weight AS weight, r.uuid AS edge_uuid
             """
-        params = {"all_uuids": all_uuids}
-        if namespace is not None:
-            params["namespace"] = namespace
+        params = {"all_uuids": all_uuids, **tenant_scope_params(namespace)}
         return self.neo4j.execute(query, params=params)
 
     def touch_retrieved_nodes(self, node_uuids: list[str]) -> int:
@@ -2082,7 +2091,11 @@ class MemoryQueryRepository:
     )
 
     def list_pending_derived_rederive(self, limit: int) -> list[dict[str, Any]]:
-        """Pending DerivedRederiveRepair nodes, oldest first."""
+        """Pending DerivedRederiveRepair nodes, oldest first; a deferred one goes behind the rest.
+
+        ``deferred_at`` is set when a provider fault stopped the batch on that repair (#874), so
+        one item whose call always times out cannot stop every run at the head of the queue.
+        """
         rows = self.neo4j.execute(
             """
             MATCH (rr:DerivedRederiveRepair)
@@ -2090,7 +2103,7 @@ class MemoryQueryRepository:
             RETURN rr.repair_key AS repair_key, rr.item_uuid AS item_uuid,
                    rr.item_kind AS item_kind, rr.namespace AS namespace,
                    coalesce(rr.attempts, 0) AS attempts
-            ORDER BY rr.created_at ASC, rr.repair_key ASC
+            ORDER BY coalesce(rr.deferred_at, rr.created_at) ASC, rr.repair_key ASC
             LIMIT $limit
             """,
             params={"limit": int(limit)},
@@ -2233,6 +2246,19 @@ class MemoryQueryRepository:
             RETURN count(rr) AS c
             """,
             params={"repair_key": repair_key, "status": status},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def defer_derived_rederive(self, repair_key: str) -> bool:
+        """Move a pending repair behind the rest of the queue without spending an attempt (#874)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            SET rr.deferred_at = datetime()
+            RETURN count(rr) AS c
+            """,
+            params={"repair_key": repair_key},
         )
         return bool(rows) and int(rows[0].get("c") or 0) > 0
 
