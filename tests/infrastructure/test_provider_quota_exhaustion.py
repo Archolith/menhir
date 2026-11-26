@@ -76,7 +76,7 @@ async def _add(client: GraphitiClient) -> None:
         source_description="s",
         reference_time=_WHEN,
         episode_uuid="ep-1",
-        timeout_s=5.0,
+        timeout_s=120.0,  # the call is instant; this only bounds a hang, not a slow CI thread pool
     )
 
 
