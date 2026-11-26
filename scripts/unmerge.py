@@ -44,6 +44,7 @@ import json
 import sys
 
 from menhir.config import MemorySettings
+from menhir.env_file import load_menhir_env
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -156,6 +157,9 @@ def main() -> int:
                          "nothing outside this list can be touched. Never an exact restoration.")
     args = ap.parse_args()
 
+    # Match the server and other Menhir entry points.  Shell variables remain authoritative because
+    # load_menhir_env defaults to override=False.
+    load_menhir_env()
     settings = MemorySettings.from_env()
     coordinator, legacy, journal, neo4j = _build(settings)
 

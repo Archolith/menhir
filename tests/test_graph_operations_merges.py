@@ -152,3 +152,30 @@ def test_unmerge_list_reaches_qualifying_merge_past_old_100k_cap(tmp_path, capsy
         "\n"
         "Reverse one with:  python scripts/unmerge.py --op <OP_ID> [--execute]\n"
     )
+
+
+@pytest.mark.unit
+def test_unmerge_main_loads_env_file_without_overriding_shell(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("NEO4J_URI=bolt://from-file:7687\n", encoding="utf-8")
+    captured = []
+
+    monkeypatch.setenv("ENV_FILE", str(env_file))
+    monkeypatch.delenv("NEO4J_URI", raising=False)
+
+    def fake_build(settings):
+        captured.append(settings)
+        return None, None, object(), object()
+
+    monkeypatch.setattr(_UNMERGE, "_build", fake_build)
+    monkeypatch.setattr(_UNMERGE, "_list_reversible", lambda _journal: 0)
+
+    monkeypatch.setattr("sys.argv", ["unmerge.py", "--list"])
+    assert _UNMERGE.main() == 0
+    assert captured[-1].neo4j_uri == "bolt://from-file:7687"
+
+    monkeypatch.setenv("NEO4J_URI", "bolt://from-shell:7687")
+    assert _UNMERGE.main() == 0
+    assert captured[-1].neo4j_uri == "bolt://from-shell:7687"
