@@ -53,9 +53,10 @@ def main() -> int:
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
     ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     ap.add_argument("--prefix", default=NAMESPACE_PREFIX)
-    ap.add_argument("--apply", action="store_true", help="write (default is a dry run)")
-    ap.add_argument("--revert", action="store_true",
-                    help="restore valid_at from valid_at_ingest_original and clear the backup")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="write (default is a dry run)")
+    mode.add_argument("--revert", action="store_true",
+                      help="restore valid_at from valid_at_ingest_original and clear the backup")
     args = ap.parse_args()
 
     driver = GraphDatabase.driver(args.uri, auth=("neo4j", args.password))
@@ -117,18 +118,22 @@ def main() -> int:
         driver.close()
         return 0
 
+    applied = 0
     with driver.session() as session:
         for i in range(0, len(updates), 500):
-            session.run(
+            result = session.run(
                 "UNWIND $rows AS row "
                 "MATCH (e:Episodic {uuid: row.uuid}) "
+                "WHERE e.group_id STARTS WITH $p "
                 # Preserve the original ONCE: a second --apply must not overwrite the backup with an
                 # already-repaired value, or --revert would silently become a no-op.
                 "SET e.valid_at_ingest_original = coalesce(e.valid_at_ingest_original, e.valid_at), "
-                "    e.valid_at = datetime(row.target)",
-                {"rows": updates[i:i + 500]})
+                "    e.valid_at = datetime(row.target) "
+                "RETURN count(e) AS n",
+                {"rows": updates[i:i + 500], "p": args.prefix})
+            applied += result.data()[0]["n"]
     driver.close()
-    print(f"repaired {len(updates)} episodes (original kept in valid_at_ingest_original)")
+    print(f"repaired {applied} episodes (original kept in valid_at_ingest_original)")
     return 0
 
 
