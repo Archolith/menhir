@@ -1,6 +1,6 @@
 """A namespace-scoped recall shows only that namespace's facts (online, real Neo4j).
 
-Counterexample for the leak found on 2026-11-26: before Graphiti fork 0.32.1.post2 a default
+Counterexample for the leak found on 2026-11-26: before Archolith/graphiti#38 a default
 episode could resolve onto an archolith entity, so the archolith entity carried a default-group
 fact, and a recall scoped to archolith showed it. ``fetch_temporal_facts`` now scopes the fact
 edge. Also covers ``requeue_conflicts_for_llm_review`` matching a node that has only ``group_id``.
