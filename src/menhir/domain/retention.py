@@ -12,7 +12,11 @@ def _validate_variable(variable: str) -> None:
 
 
 def canonical_tenant_cypher(variable: str) -> str:
-    """Return a Cypher expression that treats legacy ``''`` as ``default``."""
+    """Return a Cypher expression for a node's namespace that treats legacy ``''`` as ``default``.
+
+    "Tenant" in the name means namespace, which is a relevance scope, not an access boundary
+    (see ``menhir.domain.namespace``).
+    """
 
     _validate_variable(variable)
     raw = f"coalesce({variable}.namespace, {variable}.group_id, '')"
@@ -20,7 +24,10 @@ def canonical_tenant_cypher(variable: str) -> str:
 
 
 def same_tenant_cypher(left: str, right: str) -> str:
-    """Return the tenant-equality predicate used by retention provenance."""
+    """Return the same-namespace predicate used by retention provenance.
+
+    "Tenant" in the name means namespace (see :func:`canonical_tenant_cypher`).
+    """
 
     return f"{canonical_tenant_cypher(left)} = {canonical_tenant_cypher(right)}"
 

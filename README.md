@@ -745,6 +745,23 @@ for each operator or trust domain. The full threat model and known limitations a
 [`docs/security-posture.md`](docs/security-posture.md). The full inventory of stored data and
 its retention is in [`docs/your-data.md`](docs/your-data.md).
 
+### Namespaces are not tenancy
+
+A **namespace** organizes memory by project or purpose. Passing one scopes recall, context and
+listings to that namespace; omitting it searches every namespace. A recall scoped to one
+namespace should not surface another namespace's content, because that content is off-topic
+for the caller, not because the caller is forbidden to see it. Namespaces are not a privacy
+or access boundary.
+
+**Tenancy** would be that boundary: who may read or write which memory, carried by a verified
+identity. Menhir does not implement tenancy. It serves one owner and that owner's agents and
+bots. Credential tiers limit which tools a client can call, and `MENHIR_CLIENT_NAMESPACES` pins
+a named client to one namespace on the server. Neither makes a namespace safe to share with
+someone you do not trust; use a separate instance for that.
+
+Some code names say "tenant" (`tenant_scope_cypher`, `canonical_tenant_cypher`,
+`core/tenancy.py`). They predate this distinction and mean namespace scope.
+
 With no key configured, the server refuses non-loopback binds. Bypassing that guard with
 `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH=1` is unsafe and is intended only for an isolated
 local lab network.
