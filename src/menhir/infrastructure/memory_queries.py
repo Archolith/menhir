@@ -1483,18 +1483,15 @@ class MemoryQueryRepository:
             WHERE a.uuid IN $all_uuids AND b.uuid IN $all_uuids
               AND a.uuid <> b.uuid
         """
-        if namespace is not None:
-            query += """
-              AND coalesce(a.namespace, 'default') = $namespace
-              AND coalesce(b.namespace, 'default') = $namespace
-        """
-        query += """
+        # The shared tenant predicate, so a node scoped only by group_id (or by the legacy ''
+        # default) is matched; a no-op when namespace is None.
+        query += f"""
+              AND {tenant_scope_cypher("a")}
+              AND {tenant_scope_cypher("b")}
             RETURN DISTINCT a.uuid AS source, b.uuid AS target,
                    r.weight AS weight, r.uuid AS edge_uuid
             """
-        params = {"all_uuids": all_uuids}
-        if namespace is not None:
-            params["namespace"] = namespace
+        params = {"all_uuids": all_uuids, **tenant_scope_params(namespace)}
         return self.neo4j.execute(query, params=params)
 
     def touch_retrieved_nodes(self, node_uuids: list[str]) -> int:

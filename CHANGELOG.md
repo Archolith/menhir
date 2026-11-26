@@ -1,3 +1,16 @@
+## 2026-11-26 - Menhir links and conflict groups stay inside one tenant
+
+- `correlation_queries.py`: `create_related_to_edge` refuses a pair in different tenants, and
+  merge bridges only the absorbed node's neighbours in the survivor's tenant.
+- `consolidation_queries.py`: `bridge_and_delete` and `bridge_edges_for_nodes` bridge only
+  neighbours in the removed node's tenant, with or without a namespace argument; `set_conflict`
+  refuses a cross-tenant pair; the decay and session candidate queries report the tenant from
+  `namespace` or `group_id`.
+- `memory_queries.py`: `fetch_adjacency_pairs` scopes with `tenant_scope_cypher`.
+- Tenant here is `canonical_tenant_cypher`: `coalesce(namespace, group_id, '')`, with `''` and
+  `'default'` the same. Production held 581 cross-tenant Menhir links; one unscoped
+  `resolve_conflict` on 2026-11-26 created 135 of them, which were deleted.
+
 ## 2026-11-26 - v0.3.19: Graphiti fork 0.32.1.post2: default-namespace dedupe and invalidation stay in the default group (Archolith/graphiti#38); the Graphiti differential check script
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.19. No dependency changes in this commit.
