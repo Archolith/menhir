@@ -437,10 +437,23 @@ async def retry_failed_enrichments(
         graph_adapter.fetch_failed_episode_retry_candidates, limit=failed_retry_limit
     )
     max_attempts = ingest_service.get_max_enrichment_attempts()
+    # Adapters without the method (older fakes) keep the pre-#925 behaviour.
+    park = getattr(graph_adapter, "park_failed_episode_retry", None)
     for row in candidates:
         action = await retry_process_candidate(graph_adapter, ingest_service, row, max_attempts, now)
         if action in counts:
             counts[action] += 1
+        # #925: park a row judged not retryable so it stops filling the candidate window and
+        # stops writing a failure event every tick. The query re-admits it on a new failure.
+        episode_uuid = str(row.get("uuid") or "")
+        failed_at = row.get("processing_completed_at")
+        if action in ("terminal", "exhausted") and park and episode_uuid and failed_at:
+            try:
+                await asyncio.to_thread(
+                    park, episode_uuid, failed_at=str(failed_at), reason=action
+                )
+            except Exception:  # bookkeeping only: a failed park must not stop the retry pass
+                logger.warning("Could not park retry candidate %s", episode_uuid, exc_info=True)
     return {
         "candidates": len(candidates),
         **counts,

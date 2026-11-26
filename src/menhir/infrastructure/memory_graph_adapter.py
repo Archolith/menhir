@@ -564,6 +564,12 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, Any]]:
         return self._episodes.fetch_failed_episode_retry_candidates(limit)
 
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        """See EpisodeLifecycleRepository.park_failed_episode_retry (#925)."""
+        return self._episodes.park_failed_episode_retry(
+            episode_uuid, failed_at=failed_at, reason=reason
+        )
+
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Return FAILED episodes grouped by error text, most common first."""
         return self._episodes.fetch_failed_error_signatures(limit)
