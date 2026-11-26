@@ -74,6 +74,43 @@ def _fetch_lifecycle_rows(db_path):
         ).fetchall()
 
 
+def _synthetic_timestamp(index: int) -> str:
+    return f"2026-11-25T00:{index // 60:02d}:{index % 60:02d}"
+
+
+def _seed_mcp_events(db_path: Path, count: int) -> None:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.executemany(
+            """
+            INSERT INTO mcp_events (
+                started_at, completed_at, duration_ms, operation, kind, success
+            ) VALUES (?, ?, 0, ?, 'tool', 1)
+            """,
+            (
+                (_synthetic_timestamp(index), _synthetic_timestamp(index), f"operation-{index}")
+                for index in range(count)
+            ),
+        )
+
+
+def _seed_failure_events(db_path: Path, count: int) -> None:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.executemany(
+            """
+            INSERT INTO failure_events (recorded_at, operation, episode_uuid, error)
+            VALUES (?, 'episode_enrichment', ?, ?)
+            """,
+            (
+                (
+                    _synthetic_timestamp(index),
+                    "episode-even" if index % 2 == 0 else "episode-odd",
+                    f"failure-{index}",
+                )
+                for index in range(count)
+            ),
+        )
+
+
 def test_bump_failure_count_is_atomic_under_concurrency(monkeypatch):
     class YieldingCounts(dict[str, int]):
         def get(self, key: str, default: int = 0) -> int:
@@ -605,5 +642,54 @@ def test_record_lab_runs_return_none_on_sqlite_operational_error(monkeypatch):
             result_payload={"current_message": "x", "arms": []},
             namespace="lab",
         ) is None
+    finally:
+        _cleanup_db_path(db_path)
+
+
+def test_fetch_recent_clamps_limit_and_keeps_default_and_order():
+    db_path = _make_db_path()
+    store = McpTelemetryStore(db_path=db_path)
+    try:
+        store._ensure_ready()
+        _seed_mcp_events(db_path, 502)
+
+        assert store.fetch_recent(limit=-1) == []
+        assert store.fetch_recent(limit=0) == []
+        clamped = store.fetch_recent(limit=10_000)
+        assert len(clamped) == 500
+        assert [row["operation"] for row in clamped[:3]] == [
+            "operation-501", "operation-500", "operation-499",
+        ]
+
+        default = store.fetch_recent()
+        assert len(default) == 50
+        assert default[0]["operation"] == "operation-501"
+    finally:
+        _cleanup_db_path(db_path)
+
+
+def test_fetch_recent_failures_clamps_limit_and_keeps_episode_filter():
+    db_path = _make_db_path()
+    store = McpTelemetryStore(db_path=db_path)
+    try:
+        store._ensure_ready()
+        _seed_failure_events(db_path, 502)
+
+        assert store.fetch_recent_failures(limit=-5) == []
+        assert store.fetch_recent_failures(limit=0) == []
+        clamped = store.fetch_recent_failures(limit=10_000)
+        assert len(clamped) == 500
+        assert [row["error"] for row in clamped[:3]] == [
+            "failure-501", "failure-500", "failure-499",
+        ]
+
+        scoped = store.fetch_recent_failures(limit=10_000, episode_uuid="episode-even")
+        assert len(scoped) == 251
+        assert all(row["episode_uuid"] == "episode-even" for row in scoped)
+        assert scoped[0]["error"] == "failure-500"
+
+        default = store.fetch_recent_failures()
+        assert len(default) == 50
+        assert default[0]["error"] == "failure-501"
     finally:
         _cleanup_db_path(db_path)
