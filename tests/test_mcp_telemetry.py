@@ -375,6 +375,52 @@ def test_record_failure_event_deduplicates_same_episode_attempt_and_error():
         _cleanup_db_path(db_path)
 
 
+def test_record_failure_event_dedupe_runs_in_immediate_transaction(monkeypatch):
+    db_path = _make_db_path()
+    first_store = McpTelemetryStore(db_path=db_path)
+    second_store = McpTelemetryStore(db_path=db_path)
+    identity = dict(
+        operation="scheduler_retry_failed_enrichments",
+        episode_uuid="episode-1",
+        failure_stage="retry_classification",
+        classification="terminal",
+        retryable=False,
+        processing_attempt=3,
+        error_type="terminal_failure",
+        error="zero_extraction",
+    )
+    try:
+        assert record_failure_event(store=first_store, **identity) is True
+
+        second_store._ensure_ready()
+        statements: list[str] = []
+        select_in_transaction: list[bool] = []
+        original_connect = second_store._connect
+
+        def _instrumented_connect():
+            conn = original_connect()
+
+            def _trace(statement: str) -> None:
+                statements.append(statement)
+                if "SELECT 1" in statement and "FROM failure_events" in statement:
+                    select_in_transaction.append(conn.in_transaction)
+
+            conn.set_trace_callback(_trace)
+            return conn
+
+        monkeypatch.setattr(second_store, "_connect", _instrumented_connect)
+
+        assert record_failure_event(store=second_store, **identity) is False
+        assert any(
+            statement.strip().upper().startswith("BEGIN IMMEDIATE")
+            for statement in statements
+        )
+        assert select_in_transaction == [True]
+        assert len(_fetch_failure_rows(db_path)) == 1
+    finally:
+        _cleanup_db_path(db_path)
+
+
 def test_record_failure_event_keeps_distinct_attempts():
     db_path = _make_db_path()
     store = McpTelemetryStore(db_path=db_path)

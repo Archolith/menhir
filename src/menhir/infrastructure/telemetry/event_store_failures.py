@@ -31,6 +31,8 @@ class _EventStoreFailuresMixin:
         self._ensure_ready()
         with self._connect() as conn:
             if episode_uuid and processing_attempt is not None:
+                # Serialize the duplicate check and insert across SQLite connections.
+                conn.execute("BEGIN IMMEDIATE")
                 existing = conn.execute(
                     """
                     SELECT 1
