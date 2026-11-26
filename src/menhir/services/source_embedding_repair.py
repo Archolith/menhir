@@ -39,6 +39,19 @@ EMBED_TIMEOUT_S = 30.0
 PAGE_SIZE = 100
 #: Consecutive embed failures that end a run early (embedder down); the next run tries again.
 MAX_CONSECUTIVE_FAILURES = 5
+#: Recorded failures after which an episode is no longer listed by this job (#921), so rows that
+#: keep failing stop heading every run's listing. A successful embed clears the count.
+MAX_EPISODE_FAILURES = 3
+_PROBE_TEXT = "embedder health probe"
+
+
+async def _embedder_is_up(embed: Callable[[str], Awaitable[list[float] | None]]) -> bool:
+    """One probe after an ``embedder_failing`` stop: up means the failures were item-specific."""
+    try:
+        return bool(await await_with_backoff_aware_timeout(
+            embed(_PROBE_TEXT), timeout_s=EMBED_TIMEOUT_S))
+    except Exception:
+        return False
 
 
 async def repair_source_embeddings(
@@ -55,6 +68,8 @@ async def repair_source_embeddings(
     """
     written = failed = skipped = calls = 0
     consecutive_failures = 0
+    errored: list[str] = []  # embed raised: item-specific only if the embedder is up (see below)
+    empty: list[str] = []  # embed returned nothing: item-specific by construction
     stopped = None
     after_uuid: str | None = None
     while stopped is None:
@@ -64,6 +79,7 @@ async def repair_source_embeddings(
             PAGE_SIZE,
             after_uuid=after_uuid,
             settled_only=True,
+            max_failures=MAX_EPISODE_FAILURES,
         )
         if not rows:
             break
@@ -83,6 +99,7 @@ async def repair_source_embeddings(
                 )
             except Exception as exc:  # timeout or embedder error: count it, keep going
                 failed += 1
+                errored.append(str(row["uuid"]))
                 consecutive_failures += 1
                 logger.warning(
                     "Source-memory embedding repair failed episode_id=%s: %s: %s",
@@ -95,6 +112,7 @@ async def repair_source_embeddings(
             consecutive_failures = 0
             if not embedding:
                 skipped += 1
+                empty.append(str(row["uuid"]))
                 continue
             ok = await asyncio.to_thread(
                 graph_adapter.set_episode_content_embedding,
@@ -107,6 +125,14 @@ async def repair_source_embeddings(
                 written += 1
             else:  # content changed, node erased, or an evidence projection
                 skipped += 1
+    to_record = empty
+    if errored and (stopped != "embedder_failing" or await _embedder_is_up(embed)):
+        to_record = errored + empty
+    if to_record:
+        try:
+            await asyncio.to_thread(graph_adapter.record_source_embedding_failures, to_record)
+        except Exception:  # bookkeeping only: never fail the repair run over it
+            logger.warning("Could not record source-embedding failures", exc_info=True)
     if written or failed:
         logger.info(
             "Source-memory embedding repair: wrote %d, failed %d, skipped %d (stopped=%s)",
