@@ -74,6 +74,14 @@ class TestOAuthPreflightEnabled:
         assert all(c["status"] == "pass" for c in result["checks"])
 
     @pytest.mark.unit
+    def test_scope_check_reports_configured_tiers_when_admin_is_disabled(self):
+        result = build_oauth_preflight(_complete_config(admin_scopes=()))
+        scope_check = next(check for check in result["checks"] if check["name"] == "oauth_scopes_configured")
+
+        assert scope_check["status"] == "pass"
+        assert scope_check["message"].startswith("Read/write scopes configured")
+
+    @pytest.mark.unit
     def test_missing_resource_public_base_url_returns_fail(self):
         config = OAuthConfig(enabled=True)
         result = build_oauth_preflight(config)

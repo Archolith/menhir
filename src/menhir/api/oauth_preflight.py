@@ -230,10 +230,11 @@ def build_oauth_preflight(config: OAuthConfig) -> dict[str, object]:
 
     # 7. scopes
     if config.read_scopes and config.write_scopes:
+        tiers = "Read/write/admin" if config.admin_scopes else "Read/write"
         checks.append(_check(
             "oauth_scopes_configured",
             "pass",
-            f"Read/write/admin scopes configured ({len(config.scopes_supported)} total).",
+            f"{tiers} scopes configured ({len(config.scopes_supported)} supported).",
         ))
     else:
         checks.append(_check(
