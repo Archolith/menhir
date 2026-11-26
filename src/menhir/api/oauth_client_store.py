@@ -98,10 +98,14 @@ def upsert_cimd_client(client: OAuthClient, *, fetched_at: float) -> None:
 def _connect_cimd_cache() -> sqlite3.Connection:
     store = get_client_store()
     conn = sqlite3.connect(str(store.db_path))
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
-        "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
-    )
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
+            "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
+        )
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 

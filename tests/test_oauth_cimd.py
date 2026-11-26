@@ -87,6 +87,30 @@ def _install_resolver(monkeypatch, docs: dict[str, dict], calls: list[str] | Non
     return resolver
 
 
+def test_cimd_schema_failure_closes_connection_before_reraising(monkeypatch):
+    class FailingConnection:
+        closed = False
+
+        def execute(self, _sql):
+            raise RuntimeError("schema unavailable")
+
+        def close(self):
+            self.closed = True
+
+    connection = FailingConnection()
+    monkeypatch.setattr(
+        oauth_client_store,
+        "get_client_store",
+        lambda: SimpleNamespace(db_path="unused.db"),
+    )
+    monkeypatch.setattr(oauth_client_store.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+
+    with pytest.raises(RuntimeError, match="schema unavailable"):
+        oauth_client_store._connect_cimd_cache()
+
+    assert connection.closed
+
+
 def test_agent_smith_cimd_resolves_locally_without_public_hairpin(monkeypatch, tmp_path):
     from tests.test_oauth_as_metadata import agent_smith_policy
 
