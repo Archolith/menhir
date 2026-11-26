@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 from menhir.api import oauth_client_store
 from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth_client_store import OAuthClient, get_client_store
-from menhir.api.oauth_as_register import router as oauth_as_register_router
+from menhir.api.oauth_as_register import (
+    _redirect_uri_ok,
+    _supported_metadata_list,
+    router as oauth_as_register_router,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -103,6 +107,24 @@ def test_empty_redirect_uris_returns_400():
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_client_metadata"
 
+
+def test_registration_helpers_reject_unencodable_redirect_and_non_string_metadata():
+    assert not _redirect_uri_ok("https://app.example.com/\ud800")
+    assert not _supported_metadata_list([{}], {"authorization_code"})
+    assert not _supported_metadata_list(["authorization_code", 1], {"authorization_code"})
+
+
+def test_register_normalizes_client_display_controls():
+    client = _client(_ENABLED)
+    response = client.post(
+        "/oauth/register",
+        json={
+            "redirect_uris": ["https://app.example.com/cb"],
+            "client_name": "  Café \u202e\u2066\n  ",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["client_name"] == "Café"
 
 def test_non_https_non_loopback_redirect_rejected():
     resp = _client(_ENABLED).post(

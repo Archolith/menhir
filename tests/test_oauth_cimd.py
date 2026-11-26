@@ -345,7 +345,16 @@ def test_cimd_selects_none_when_client_prefers_private_key_jwt(monkeypatch):
     assert get_client_store().get(_URL).token_endpoint_auth_method == "none"
 
 
+def test_cimd_normalizes_client_display_controls_and_preserves_international_text():
+    from menhir.api.oauth_authorize_clients import _client_from_cimd_document
 
+    client = _client_from_cimd_document(
+        _URL, _doc(client_name="  می\u200cتوان \u202b\u2069App  "), _ENABLED
+    )
+    assert client.client_name == "می\u200cتوان App"
+
+    null_client = _client_from_cimd_document(_URL, _doc(client_name=None), _ENABLED)
+    assert null_client.client_name == ""
 
 def test_cimd_rejects_private_key_jwt_when_none_is_not_offered(monkeypatch):
     _install_resolver(

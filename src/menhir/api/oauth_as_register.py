@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from menhir.api.oauth_as_metadata import _as_enabled
-from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
+from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id, normalize_client_display_name
 from menhir.api.oauth_rate_limit import (  # noqa: F401 - test reset seam
     FixedWindowLimiter,
     build_register_limiter,
@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 _NEARING_CAP_FRACTION = 0.8
 
 _MAX_REDIRECT_URIS = 5
-_MAX_CLIENT_NAME_LEN = 255
 _SUPPORTED_GRANT_TYPES = {"authorization_code", "refresh_token"}
 _SUPPORTED_RESPONSE_TYPES = {"code"}
 
@@ -47,8 +46,22 @@ _register_limiter = FixedWindowLimiter(max_per_window=20, window_s=600)
 
 
 def _redirect_uri_ok(uri: object) -> bool:
-    """Apply the same strict redirect-URI rules as shared DCR and CIMD."""
-    return isinstance(uri, str) and valid_redirect_uri(uri)
+    """Require UTF-8 encodability and the shared redirect URI rules."""
+    if not isinstance(uri, str):
+        return False
+    try:
+        uri.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return valid_redirect_uri(uri)
+
+
+def _supported_metadata_list(value: object, supported: set[str]) -> bool:
+    """Validate a DCR metadata list before applying its supported-value policy."""
+    return (
+        isinstance(value, list)
+        and all(isinstance(item, str) and item in supported for item in value)
+    )
 
 
 def refresh_tokens_enabled(settings: object) -> bool:
@@ -171,9 +184,7 @@ async def register_client(request: Request) -> JSONResponse:
         )
 
     grant_types = body.get("grant_types")
-    if grant_types is not None and (
-        not isinstance(grant_types, list) or not set(grant_types) <= _SUPPORTED_GRANT_TYPES
-    ):
+    if grant_types is not None and not _supported_metadata_list(grant_types, _SUPPORTED_GRANT_TYPES):
         return _error("invalid_client_metadata", "Unsupported grant_types")
     refresh_enabled = refresh_tokens_enabled(settings)
     if not refresh_enabled and grant_types and "refresh_token" in grant_types:
@@ -184,9 +195,7 @@ async def register_client(request: Request) -> JSONResponse:
         )
 
     response_types = body.get("response_types")
-    if response_types is not None and (
-        not isinstance(response_types, list) or not set(response_types) <= _SUPPORTED_RESPONSE_TYPES
-    ):
+    if response_types is not None and not _supported_metadata_list(response_types, _SUPPORTED_RESPONSE_TYPES):
         return _error("invalid_client_metadata", "Unsupported response_types")
 
     supported = as_scope_surface(settings)
@@ -201,7 +210,7 @@ async def register_client(request: Request) -> JSONResponse:
     client_name_raw = body.get("client_name", "")
     if not isinstance(client_name_raw, str):
         return _error("invalid_client_metadata", "client_name must be a string")
-    client_name = client_name_raw.strip()[:_MAX_CLIENT_NAME_LEN]
+    client_name = normalize_client_display_name(client_name_raw)
 
     if not _register_limiter.allow(client_ip(request, settings)):
         return JSONResponse(

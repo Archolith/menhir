@@ -21,9 +21,11 @@ from urllib.parse import urlsplit
 from archolith_oauth import resolve_client_metadata_document as _shared_cimd_resolver
 
 from menhir.api.oauth_client_store import (
+    MAX_CLIENT_DISPLAY_NAME_LENGTH,
     OAuthClient,
     cimd_fetched_at,
     get_client_store,
+    normalize_client_display_name,
     upsert_cimd_client,
 )
 from menhir.config.oauth import _get_setting
@@ -35,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Default bounded CIMD snapshot freshness: 24h.
 _CIMD_DEFAULT_MAX_AGE_S = 86400
-_MAX_CIMD_CLIENT_NAME_LEN = 255
+_MAX_CIMD_CLIENT_NAME_LEN = MAX_CLIENT_DISPLAY_NAME_LENGTH
 
 
 class _RedirectError(Exception):
@@ -112,7 +114,7 @@ def _client_from_cimd_document(
     )
     if not offers_public_client_auth:
         raise ValueError("Only public clients (token endpoint auth method 'none') are supported")
-    client_name = str(doc.get("client_name", "")).strip()[:_MAX_CIMD_CLIENT_NAME_LEN]
+    client_name = normalize_client_display_name(doc.get("client_name"))
     return OAuthClient(
         client_id=client_id,
         client_name=client_name,
