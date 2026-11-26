@@ -10,6 +10,7 @@ defaults > 0 because perception's k-sample self-consistency needs sampling diver
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Mapping
 
 from menhir.config import MemorySettings
@@ -69,36 +70,43 @@ def make_sync_chat(
 
     model = model or cfg.chat_model
     client_holder: dict[str, Any] = {}
+    client_init_lock = threading.Lock()
 
     def _resolve_client() -> Any:
         client = client_holder.get("client")
         if client is not None:
             return client
-        base_url = cfg.base_url
-        # Gated on the DECLARED provider, not on the base_url alone: an empty base_url on a
-        # local config must never be handed to the OpenAI SDK, which resolves it to
-        # https://api.openai.com/v1/ and ships namespace-scoped memory text off the host
-        # before the 401 comes back.
-        if cfg.kind is ProviderKind.LOCAL:
-            if not base_url:
-                raise RuntimeError(
-                    "sync chat seam will not fall back to the public OpenAI endpoint: the "
-                    "configured chat provider is local and no local endpoint could be resolved"
-                )
-        # CF-190: both must be explicit. The SDK defaults to a 600 s read timeout and 2 automatic
-        # retries, so an unrefused-but-hung server holds this thread for ~30 minutes per call --
-        # and this seam runs under `asyncio.to_thread`, so the stall is a consumed thread-pool
-        # slot. `llm.py` states the policy for the async path: "fail fast -- don't block MCP on a
-        # down server". Retries belong to the caller, which already implements its own bounded
-        # retry loop; SDK-level retries would multiply that budget invisibly.
-        client = OpenAI(
-            api_key=cfg.api_key,
-            base_url=base_url or None,
-            timeout=DEFAULT_REQUEST_TIMEOUT_S if timeout_s is None else float(timeout_s),
-            max_retries=0,
-        )
-        client_holder["client"] = client
-        return client
+        # Multiple worker threads can enter the same lazily initialized seam at once. Keep the
+        # lock scoped to construction only: requests using the resulting client remain concurrent.
+        with client_init_lock:
+            client = client_holder.get("client")
+            if client is not None:
+                return client
+            base_url = cfg.base_url
+            # Gated on the DECLARED provider, not on the base_url alone: an empty base_url on a
+            # local config must never be handed to the OpenAI SDK, which resolves it to
+            # https://api.openai.com/v1/ and ships namespace-scoped memory text off the host
+            # before the 401 comes back.
+            if cfg.kind is ProviderKind.LOCAL:
+                if not base_url:
+                    raise RuntimeError(
+                        "sync chat seam will not fall back to the public OpenAI endpoint: the "
+                        "configured chat provider is local and no local endpoint could be resolved"
+                    )
+            # CF-190: both must be explicit. The SDK defaults to a 600 s read timeout and 2 automatic
+            # retries, so an unrefused-but-hung server holds this thread for ~30 minutes per call --
+            # and this seam runs under `asyncio.to_thread`, so the stall is a consumed thread-pool
+            # slot. `llm.py` states the policy for the async path: "fail fast -- don't block MCP on a
+            # down server". Retries belong to the caller, which already implements its own bounded
+            # retry loop; SDK-level retries would multiply that budget invisibly.
+            client = OpenAI(
+                api_key=cfg.api_key,
+                base_url=base_url or None,
+                timeout=DEFAULT_REQUEST_TIMEOUT_S if timeout_s is None else float(timeout_s),
+                max_retries=0,
+            )
+            client_holder["client"] = client
+            return client
 
     # Built once, outside the per-call path: an empty dict means the request is byte-identical
     # to before, so the default configuration cannot be perturbed by this option existing.

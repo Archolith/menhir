@@ -29,6 +29,8 @@ pass against a client that is configured somewhere else and then overridden.
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -227,3 +229,64 @@ def test_sync_chat_normal_completion_is_stripped(monkeypatch: pytest.MonkeyPatch
 
     assert chat("system", "user") == "ok"
     assert completed == [response]
+
+
+def test_sync_chat_shares_one_lazily_built_client_across_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent first calls serialize construction but still share the resulting client."""
+    import openai
+
+    from menhir.config import MemorySettings
+    from menhir.infrastructure import sync_llm
+
+    construction_started = threading.Event()
+    release_construction = threading.Event()
+    requests = threading.Barrier(2, timeout=3)
+
+    class _SlowOpenAI(_CapturingOpenAI):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            construction_started.set()
+            assert release_construction.wait(timeout=2)
+
+    monkeypatch.setenv("MENHIR_CHAT_PROVIDER", "local")
+    monkeypatch.setenv("MENHIR_LOCAL_LLM_BASE_URL", "http://localhost:1234/v1")
+    monkeypatch.setenv("MENHIR_LOCAL_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("MENHIR_LOCAL_LLM_CHAT_MODEL", "test-model")
+    monkeypatch.setattr(openai, "OpenAI", _SlowOpenAI)
+    def complete(*_args, **_kwargs):
+        requests.wait()
+        return SimpleNamespace(choices=[])
+
+    monkeypatch.setattr(sync_llm, "create_chat_completion", complete)
+    monkeypatch.setattr(sync_llm, "start_llm_usage_call", lambda **_kwargs: None)
+    monkeypatch.setattr(sync_llm, "complete_llm_usage_call", lambda *_args, **_kwargs: None)
+
+    chat = sync_llm.make_sync_chat(MemorySettings.from_env())
+    assert chat is not None
+    start = threading.Barrier(3)
+    errors: list[BaseException] = []
+
+    def invoke() -> None:
+        try:
+            start.wait(timeout=2)
+            chat("system", "user")
+        except BaseException as exc:  # pragma: no cover - assertion below reports unexpected errors
+            errors.append(exc)
+
+    threads = [threading.Thread(target=invoke) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    try:
+        start.wait(timeout=2)
+        assert construction_started.wait(timeout=2)
+        time.sleep(0.05)
+    finally:
+        release_construction.set()
+        for thread in threads:
+            thread.join(timeout=4)
+
+    assert errors == []
+    assert all(not thread.is_alive() for thread in threads)
+    assert len(_CapturingOpenAI.instances) == 1
