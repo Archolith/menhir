@@ -21,6 +21,9 @@ class _Session:
     def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
         self.write_query = ""
         self.write_params: dict[str, object] = {}
+        self.committed = False
+        self.rolled_back = False
+        self.batch_counts = iter([1])
         self.rows = rows or [{
             "uuid": "episode-1", "name": "episode-sid-1", "ns": "lme-test-1",
             "valid_at": datetime(2026, 7, 23, tzinfo=timezone.utc), "original": None,
@@ -37,7 +40,24 @@ class _Session:
             return _Result(self.rows)
         self.write_query = query
         self.write_params = params
-        return _Result([{"n": 0}])
+        return _Result([{"n": next(self.batch_counts)}])
+
+    def begin_transaction(self):
+        session = self
+
+        class _Transaction:
+            run = session.run
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                session.rolled_back = not session.committed
+
+            def commit(self):
+                session.committed = True
+
+        return _Transaction()
 
 
 class _Driver:
@@ -64,12 +84,35 @@ def test_apply_counts_matched_writes_and_rechecks_namespace(monkeypatch: pytest.
 
     assert repair.main() == 0
 
-    assert "WHERE e.group_id STARTS WITH $p" in driver.session_obj.write_query
+    assert "e.group_id STARTS WITH $p" in driver.session_obj.write_query
+    assert "e.valid_at = row.expected_valid_at" in driver.session_obj.write_query
     assert driver.session_obj.write_params["p"] == repair.NAMESPACE_PREFIX
+    [planned] = driver.session_obj.write_params["rows"]
+    assert planned["expected_valid_at"] == driver.session_obj.rows[0]["valid_at"]
+    assert planned["namespace"] == "lme-test-1"
     output = capsys.readouterr().out
     assert "1 episodes would be rewritten" in output
-    assert "repaired 0 episodes" in output
+    assert "repaired 1 episodes" in output
+    assert driver.session_obj.committed
     assert driver.closed is True
+
+
+def test_apply_rolls_back_earlier_batches_when_a_later_batch_changes(monkeypatch, capsys):
+    driver = _Driver()
+    row = driver.session_obj.rows[0]
+    driver.session_obj.rows = [dict(row, uuid=f"episode-{i}") for i in range(501)]
+    driver.session_obj.batch_counts = iter([500, 0])
+    monkeypatch.setattr(repair.GraphDatabase, "driver", lambda *args, **kwargs: driver)
+    monkeypatch.setattr(repair, "build_session_times", lambda: {
+        ("1", "sid-1"): datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+    })
+    monkeypatch.setattr(repair, "session_of", lambda _name: "sid-1")
+    monkeypatch.setattr(sys, "argv", ["repair_lme_valid_at.py", "--apply"])
+
+    assert repair.main() == 2
+    assert driver.session_obj.rolled_back
+    assert driver.closed
+    assert "matched 0 of 1 planned episodes" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("backup", [None, datetime(2026, 7, 23, tzinfo=timezone.utc)])
@@ -123,6 +166,11 @@ def test_verifier_scopes_prefix_and_fails_on_controls_and_repaired_disagreements
                     "valid_at": datetime(2023, 1, 2, tzinfo=timezone.utc),
                     "original": datetime(2026, 7, 23, tzinfo=timezone.utc),
                 },
+                {
+                    "uuid": "repaired-missing", "name": "episode-sid-1", "ns": "custom-1",
+                    "valid_at": datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+                    "original": None, "was_missing": True,
+                },
             ])
 
     class _VerifyDriver:
@@ -146,6 +194,7 @@ def test_verifier_scopes_prefix_and_fails_on_controls_and_repaired_disagreements
     output = capsys.readouterr().out
     assert "already correct, fixture DISAGREES" in output
     assert "repaired row, fixture DISAGREES" in output
+    assert "repaired row, fixture AGREES" in output
 
 
 def test_fixture_index_scopes_shared_hyphenated_session_ids_by_question(

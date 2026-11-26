@@ -117,7 +117,8 @@ def main() -> int:
         rows = session.run(
             "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $p "
             "RETURN e.uuid AS uuid, e.name AS name, e.group_id AS ns, "
-            "e.valid_at AS valid_at, e.valid_at_ingest_original AS original",
+            "e.valid_at AS valid_at, e.valid_at_ingest_original AS original, "
+            "e.valid_at_ingest_was_missing AS was_missing",
             {"p": args.prefix}).data()
 
     for row in rows:
@@ -137,7 +138,7 @@ def main() -> int:
             stored_dt = stored_dt.replace(tzinfo=timezone.utc)
 
         agrees = stored_dt is not None and abs((stored_dt - fixture_time).total_seconds()) < 60
-        if row.get("original") is not None:
+        if row.get("original") is not None or row.get("was_missing") is True:
             if agrees:
                 tally["repaired row, fixture AGREES"] += 1
             else:

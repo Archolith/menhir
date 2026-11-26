@@ -86,6 +86,7 @@
 - Validated normalized research derivation receipts and accepted a valid episode UUID when the index is null.
 - Made implicit recall ratings claim distinct receipts under concurrent requests.
 - Rejected conflicting LME repair modes and reported matched updates.
+- Rolled back LME timestamp repairs when an episode changes after preflight and restored originally missing timestamps on revert.
 - Preserved the occurrence time of telemetry events queued for a background writer.
 - Scoped LME timestamp verification to the repair namespace and refused writes on control or repaired-row mismatches.
 - Preserved argument boundaries when the OAuth smoke CLI starts a local server.
