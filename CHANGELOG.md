@@ -1,3 +1,7 @@
+## 2026-11-26 - Graphiti fork 0.32.1.post2: default-group searches stay in the default group (Archolith/graphiti#38)
+
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.32.1.post2`, fork commit `bcae80b8`. Pins, docs and release checks updated.
+
 ## 2026-11-26 - v0.3.18: Retire and restore memories (visibility only), retired entities follow their sources, the report-only retire judge, GitHub and GitLab tokens redacted whole (GHSA-ppqh-gffg-6j74), Graphiti fork 0.32.1.post1 (upstream v0.32.1), cross-encoder rerank as a batch oracle, Graphiti prompt names in LLM telemetry, and recall, projection and artifact fixes.
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.18. No dependency changes in this commit.
