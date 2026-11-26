@@ -78,6 +78,15 @@ async def _embed_text(client: Any, *, model: str, text: str) -> list[float]:
     return [float(v) for v in getattr(data[0], "embedding")]
 
 
+def _eligible_content(row: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the listed and bounded content when this row is an apply candidate."""
+    listed_content = str(row.get("content") or "")
+    content = listed_content[:_EMBED_MAX_CHARS]
+    if not content.strip():
+        return None
+    return listed_content, content
+
+
 async def _run(args: argparse.Namespace) -> int:
     settings = _load_settings()
     neo4j = Neo4jRepository(
@@ -92,6 +101,7 @@ async def _run(args: argparse.Namespace) -> int:
     # Re-embed vectors stamped by a different model too (audit F2); None = model unresolved.
     model = comparable_model(ProviderConfig.for_graphiti_embedder(settings).embed_model)
     client = None
+    preview_count = 0
     # Exclusive uuid cursor (audit F1): a row skipped below is never re-listed ahead of the rest,
     # and the loop ends only on an empty page.
     after_uuid: str | None = None
@@ -108,20 +118,22 @@ async def _run(args: argparse.Namespace) -> int:
             if not rows:
                 break
             after_uuid = str(rows[-1]["uuid"])
-            if args.dry_run:
-                print(f"[dry-run] would embed {len(rows)} episode(s) in the first page; e.g.:")
-                for row in rows[:5]:
-                    preview = str(row.get("content") or "")[:70].replace("\n", " ")
-                    print(f"  {row.get('uuid')} {preview!r}")
-                written += len(rows)
-                break
-            if client is None:
+            if not args.dry_run and client is None:
                 client, embed_model = _resolve_embedder(settings)
             for row in rows:
-                listed_content = str(row.get("content") or "")
-                content = listed_content[:_EMBED_MAX_CHARS]
-                if not content.strip():
+                eligible = _eligible_content(row)
+                if eligible is None:
                     skipped += 1
+                    continue
+                listed_content, content = eligible
+                if args.dry_run:
+                    if preview_count < 5:
+                        preview = content[:70].replace("\n", " ")
+                        if preview_count == 0:
+                            print("[dry-run] eligible episodes (up to five previews):")
+                        print(f"  {row.get('uuid')} {preview!r}")
+                        preview_count += 1
+                    written += 1
                     continue
                 embedding = await _embed_text(client, model=embed_model, text=content)
                 # The bounded text is the model input; the full listed value is the conditional
@@ -132,8 +144,10 @@ async def _run(args: argparse.Namespace) -> int:
                     written += 1
                 else:
                     skipped += 1
-        mode = "would write" if args.dry_run else "wrote"
-        print(f"{mode} {written} embedding(s); skipped {skipped}.")
+        if args.dry_run:
+            print(f"[dry-run] {written} embedding candidate(s); skipped {skipped}.")
+        else:
+            print(f"wrote {written} embedding(s); skipped {skipped}.")
         if getattr(args, "require_complete", False):
             missing = _count_ready_missing(repo, args.namespace)
             if missing:

@@ -115,3 +115,45 @@ def test_stale_listed_content_is_not_counted_as_written(monkeypatch: pytest.Monk
     assert _run(monkeypatch, repo) == 3
     assert set(repo.embedded) == {"r01"}
     assert repo.expected_contents == {"r00": long_content, "r01": "text 1"}
+
+
+@pytest.mark.parametrize(("limit", "candidates", "previews"), [(3, 3, 3), (None, 7, 5)])
+def test_dry_run_pages_and_counts_only_nonblank_candidates(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    limit: int | None, candidates: int, previews: int,
+) -> None:
+    rows = _rows(8)
+    rows[1]["content"] = ""
+    repo = _Repo(rows)
+    script = _load_script()
+    monkeypatch.setattr(
+        script,
+        "_load_settings",
+        lambda: SimpleNamespace(
+            neo4j_uri="bolt://x", neo4j_database="neo4j", neo4j_user="u", neo4j_password="p"
+        ),
+    )
+    monkeypatch.setattr(script, "Neo4jRepository", lambda **kw: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(script, "EpisodeRepository", lambda neo4j: repo)
+    monkeypatch.setattr(
+        script.ProviderConfig,
+        "for_graphiti_embedder",
+        staticmethod(lambda settings: SimpleNamespace(embed_model="m1")),
+    )
+    monkeypatch.setattr(
+        script,
+        "_resolve_embedder",
+        lambda settings: pytest.fail("dry-run must not construct an embedder"),
+    )
+
+    result = asyncio.run(
+        script._run(
+            SimpleNamespace(namespace=None, batch=2, limit=limit, dry_run=True, require_complete=False)
+        )
+    )
+
+    assert result == 0
+    assert repo.embedded == {}
+    output = capsys.readouterr().out
+    assert f"{candidates} embedding candidate(s); skipped 1." in output
+    assert output.count("  r") == previews
