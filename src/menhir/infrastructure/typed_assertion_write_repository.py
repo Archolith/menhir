@@ -7,6 +7,7 @@ from typing import Any, Callable
 from menhir.domain.assertion_operations import SETS_VALUE_OPS_CYPHER
 from menhir.domain.namespace import (
     normalize_namespace,
+    silo_key_cypher,
     tenant_scope_cypher,
     tenant_scope_params,
 )
@@ -16,6 +17,12 @@ from menhir.domain.typed_assertion import (
 from menhir.infrastructure.typed_assertion_models import (
     _RECORD_CYPHER,
 )
+
+
+def _canonical_namespace_allowlist(namespaces: list[str] | None) -> list[str] | None:
+    if namespaces is None:
+        return None
+    return list(dict.fromkeys(normalize_namespace(namespace) for namespace in namespaces))
 
 
 class TypedAssertionWriteMixin:
@@ -192,28 +199,46 @@ class TypedAssertionWriteMixin:
 
         These receipts are created in the same Neo4j transaction that removes the assertions.  They
         therefore survive the assertions they describe and make a delete/rebuild crash recoverable.
+        Scoped calls canonicalize both the allowlist and returned namespaces; a TIME_ACTIVATION
+        receipt with no namespace is resolved from its assertion, and is skipped when that assertion
+        is missing or ambiguous.
         """
         preds = ["rr.status = 'pending'"]
         params: dict[str, Any] = {"limit": int(limit)}
         if operation_id is not None:
             preds.append("rr.operation_id = $operation_id")
             params["operation_id"] = operation_id
+        namespace_projection = "rr.namespace"
+        scope_query = ""
         if namespaces is not None:
-            preds.append("rr.namespace IN $namespaces")
-            params["namespaces"] = list(dict.fromkeys(namespaces))
+            params["namespaces"] = _canonical_namespace_allowlist(namespaces)
+            namespace_projection = "namespace_key"
+            scope_query = f"""
+            OPTIONAL MATCH (source:TypedAssertion {{assertion_id: rr.operation_id}})
+            WHERE rr.operation_kind = 'TIME_ACTIVATION' AND rr.namespace IS NULL
+            WITH rr, collect(source) AS claims
+            WITH rr, CASE WHEN size(claims) = 1 THEN head(claims) END AS claim
+            WITH rr,
+                 CASE
+                     WHEN rr.namespace IS NOT NULL THEN {silo_key_cypher("rr")}
+                     WHEN claim IS NOT NULL THEN {silo_key_cypher("claim")}
+                 END AS namespace_key
+            WHERE namespace_key IN $namespaces
+            """
         rows = self._neo4j.execute(
             f"""
             MATCH (rr:ScalarProjectionRepair)
             WHERE {' AND '.join(preds)}
+            {scope_query}
             RETURN rr.repair_key AS repair_key, rr.operation_id AS operation_id,
                    rr.operation_kind AS operation_kind, rr.subject_uuid AS subject_uuid,
-                   rr.namespace AS namespace, toString(rr.started_at) AS started_at
+                   {namespace_projection} AS namespace, toString(rr.started_at) AS started_at
             ORDER BY rr.started_at ASC, rr.repair_key ASC
             LIMIT $limit
             """,
             params=params,
         )
-        return [dict(r) for r in rows]
+        return [dict(row) for row in rows]
 
     def claim_due_scalar_activations(
         self,
@@ -226,9 +251,12 @@ class TypedAssertionWriteMixin:
 
         The fallback ``valid_at > recorded_at`` discovers future rows written before the explicit
         activation_pending property existed. Claiming clears the bit and creates the receipt in one
-        transaction, so a crash can only leave replayable work, never a lost wake-up.
+        transaction, so a crash can only leave replayable work, never a lost wake-up. Allowlists and
+        new receipt namespaces use the canonical silo key, so blank/default rows match an explicit
+        default scope.
         """
-        ns_pred = " AND a.namespace IN $namespaces" if namespaces is not None else ""
+        assertion_silo_key = silo_key_cypher("a")
+        ns_pred = f" AND {assertion_silo_key} IN $namespaces" if namespaces is not None else ""
         rows = self._neo4j.execute(
             f"""
             MATCH (a:TypedAssertion)
@@ -243,14 +271,18 @@ class TypedAssertionWriteMixin:
             }})
             ON CREATE SET rr.operation_id = a.assertion_id,
                           rr.operation_kind = 'TIME_ACTIVATION',
-                          rr.namespace = a.namespace, rr.subject_uuid = a.subject_uuid,
+                          rr.namespace = {assertion_silo_key}, rr.subject_uuid = a.subject_uuid,
                           rr.status = 'pending', rr.started_at = datetime(),
                           rr.due_at = a.valid_at
             RETURN rr.repair_key AS repair_key, rr.operation_id AS operation_id,
                    rr.operation_kind AS operation_kind, rr.subject_uuid AS subject_uuid,
                    rr.namespace AS namespace, toString(rr.started_at) AS started_at
             """,
-            params={"as_of": as_of, "namespaces": namespaces, "limit": int(limit)},
+            params={
+                "as_of": as_of,
+                "namespaces": _canonical_namespace_allowlist(namespaces),
+                "limit": int(limit),
+            },
         )
         return [dict(r) for r in rows]
 
