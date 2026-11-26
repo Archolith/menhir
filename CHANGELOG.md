@@ -1,3 +1,15 @@
+## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
+
+- Corrected the output descriptions in `mcp/tools/ops/list_artifacts.py` and `get_artifact.py`.
+  Connected clients see them after reconnecting (#828).
+- Used affinity matrix order to break recall explanation ties in `domain/intent_affinity.py` (#849).
+- Included the oldest telemetry event and the applicable coverage note in the JSON from `cli/tool_usage.py` (#506).
+- Chose the display name from the latest contributor in canonical order in `domain/scalar_history.py` (#856).
+- Skipped the recent-memory lookup at zero and rejected negative limits in
+  `mcp/tools/recall/recall_context_memories.py` (#836).
+- Rejected missing and non-directory validation roots in `services/artifact_reconciliation_service.py`
+  and `cli/artifacts.py` (#863).
+
 ## 2026-11-25 - Graphiti fork 0.32.1.post1: sync upstream graphiti v0.32.1 (Archolith/graphiti #35)
 
 - `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.32.1.post1`, fork commit `3f900b9e`. Pins, docs and release checks updated; no other locked package changed.
@@ -105,26 +117,3 @@ Step 3 of the retire plan. It writes nothing to the graph and retires nothing; i
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.
 - Upgrade note: by default automatic merges become proposals and automatic deletion stops. Stop the old
   process before starting this version; 0.3.16 ignores the new switches.
-
-## 2026-11-25 - Automatic merges and deletions each have an off switch (`MENHIR_AUTO_MERGE_MODE`, `MENHIR_AUTO_DELETE_MODE`)
-
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: two modes, `off | propose | on`.
-  `MENHIR_AUTO_MERGE_MODE` defaults to `propose` and `MENHIR_AUTO_DELETE_MODE` defaults to `off`, so
-  an upgraded deployment no longer merges or deletes on its own until the owner sets `on`. An invalid
-  or empty value stops startup; a setting that cannot be read later counts as `off`. The switches are
-  read from the process environment: set them for every process and restart to change them.
-- Deletion `on` has no LLM approval yet: expiry alone authorizes the delete.
-- `services/auto_mutation_policy.py` (new): reads the mode at call time and fails closed. In
-  `propose` the would-be action is recorded as a `merge_proposal` or `delete_proposal` row in
-  `pending_actions` (uuids, numbers and a reason code only) and nothing is changed.
-- `services/merge_coordinator.py`, `services/correlation_service.py`: merge is refused unless the mode is
-  `on`, and re-checked inside the saga before the mutation. Replay of an interrupted merge that never
-  reached the graph then closes it FAILED and releases the pair; one already applied still commits.
-  The judge still runs, so contradictions are still queued; a confirmed duplicate is not.
-- `services/delete_coordinator.py`, `services/lifecycle_decay.py`, `services/lifecycle_consolidation.py`,
-  `infrastructure/episode_maintenance.py`: the TTL sweep, decay deletion and orphan-episode cleanup
-  need delete mode `on`.
-- Not affected: operator-requested erasure, `delete_entity`, candidate rejection, namespace delete,
-  unmerge and rebuilds of derived data. A manual `recover_orphans` obeys the switch.
-- `tests/test_auto_mutation_census.py` fails on any new ungated merge or delete path.
-- Upgrade note: set `MENHIR_AUTO_MERGE_MODE=on` and `MENHIR_AUTO_DELETE_MODE=on` to keep the old behavior.
