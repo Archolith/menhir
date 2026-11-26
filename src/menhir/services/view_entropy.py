@@ -73,7 +73,15 @@ async def probe_view_reachability(
     ranked results. The healthy state is rank 1 / ~one surface of tokens (the Arm A
     ceiling: rank 1, 1 memory, ~21 tokens); ``reached=False`` means the View did not
     appear in the top ``top_k`` at all — the strongest regression signal.
+
+    Raises ValueError when ``max_views`` is outside 1..200 or ``top_k`` outside 1..50,
+    before any graph read or recall runs.
     """
+    if not 1 <= max_views <= 200:
+        raise ValueError(f"max_views must be between 1 and 200 (got {max_views})")
+    if not 1 <= top_k <= 50:
+        raise ValueError(f"top_k must be between 1 and 50 (got {top_k})")
+
     views = await asyncio.to_thread(
         graph_adapter.list_views, kind=kind, namespace=namespace, limit=max_views
     )

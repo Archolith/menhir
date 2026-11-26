@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 
 
 async def view_entropy(
@@ -63,10 +64,13 @@ class ViewEntropyTool(BaseJsonTool):
             JSON with a summary (views_probed, reached, median rank/tokens) and per-View rows.
         """
         backend = self.get_backend()
-        result = await backend.view_entropy(
-            namespace=namespace or None,
-            kind=kind or None,
-            top_k=top_k,
-            max_views=max_views,
-        )
+        try:
+            result = await backend.view_entropy(
+                namespace=namespace or None,
+                kind=kind or None,
+                top_k=top_k,
+                max_views=max_views,
+            )
+        except ValueError as exc:
+            raise McpToolRefusal(str(exc), code="invalid_argument") from exc
         return self.render_json({"tool": self.operation, **(result or {})})
