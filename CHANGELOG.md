@@ -1,3 +1,10 @@
+## 2026-11-26 - Docs: namespaces are not tenancy
+
+- `README.md`: new "Namespaces are not tenancy" section under Security and privacy. A namespace
+  organizes memory and scopes recall; it is not an access boundary, and Menhir has no tenant model.
+- `domain/namespace.py`, `domain/retention.py`, `core/tenancy.py`: docstrings record the
+  2026-11-15 owner decision and say that helpers named "tenant" mean namespace scope. No code changes.
+
 ## 2026-11-26 - v0.3.20: Menhir links and conflict groups stay inside one tenant
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.20. No dependency changes in this commit.
