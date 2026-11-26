@@ -124,6 +124,65 @@ def test_on_loop_writes_are_ordered_and_visible_to_the_next_read(tmp_path, monke
     assert [r["event"] for r in reversed(rows)] == [f"e{i:02d}" for i in range(25)]
 
 
+def test_offloaded_lifecycle_action_uses_submission_timestamp(tmp_path, monkeypatch) -> None:
+    db = tmp_path / "telemetry.db"
+    store = McpTelemetryStore(db_path=db)
+    store._ensure_ready()
+    submitted_at = "2026-01-01T00:00:01+00:00"
+    flushed_at = "2026-01-01T00:05:01+00:00"
+    monkeypatch.setattr(async_writer, "_utc_now_iso", lambda: submitted_at)
+    release = _hold_writer()
+    try:
+        async def _queue_action() -> None:
+            store.record_lifecycle_action(
+                action="compress",
+                node_uuid="node-1",
+                trigger="decay_sweep",
+            )
+
+        asyncio.run(_queue_action())
+        monkeypatch.setattr(async_writer, "_utc_now_iso", lambda: flushed_at)
+    finally:
+        release.set()
+    assert TELEMETRY_WRITER.drain(30)
+
+    with sqlite3.connect(db) as conn:
+        recorded_at = conn.execute(
+            "SELECT recorded_at FROM lifecycle_actions WHERE node_uuid = 'node-1'"
+        ).fetchone()[0]
+    assert recorded_at == submitted_at
+
+
+def test_offloaded_recall_query_uses_submission_timestamp_and_preserves_explicit(
+    tmp_path, monkeypatch
+) -> None:
+    db = tmp_path / "telemetry.db"
+    store = McpTelemetryStore(db_path=db)
+    store._ensure_ready()
+    submitted_at = "2026-01-01T00:00:01+00:00"
+    explicit_at = "2025-12-31T23:59:59+00:00"
+    monkeypatch.setattr(async_writer, "_utc_now_iso", lambda: submitted_at)
+    release = _hold_writer()
+    try:
+        async def _queue_queries() -> None:
+            store.record_recall_query(query="submitted", operation="first")
+            store.record_recall_query(query="null timestamp", operation="default", created_at=None)
+            store.record_recall_query(
+                query="explicit", operation="second", created_at=explicit_at
+            )
+
+        asyncio.run(_queue_queries())
+    finally:
+        release.set()
+    assert TELEMETRY_WRITER.drain(30)
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT operation, created_at FROM recall_query_log ORDER BY id"
+        ).fetchall()
+    assert rows == [("first", submitted_at), ("default", submitted_at), ("second", explicit_at)]
+
+
 def test_off_loop_write_is_synchronous(tmp_path) -> None:
     db = tmp_path / "telemetry.db"
     store = McpTelemetryStore(db_path=db)
