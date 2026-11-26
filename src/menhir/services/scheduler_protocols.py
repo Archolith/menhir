@@ -122,7 +122,9 @@ class SchedulerGraphAdapter(Protocol):
     ) -> list[dict[str, Any]]:
         ...
 
-    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+    def record_source_embedding_failures(
+        self, episode_uuids: list[str], limit: int | None = None,
+    ) -> dict[str, int]:
         ...
 
     def set_episode_content_embedding(

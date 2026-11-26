@@ -35,10 +35,10 @@ class _Graph:
                 and (max_failures is None or self.failures.get(u, 0) < max_failures)]
         return rows[:limit]
 
-    def record_source_embedding_failures(self, uuids):
+    def record_source_embedding_failures(self, uuids, limit=None):
         for u in uuids:
             self.failures[u] = self.failures.get(u, 0) + 1
-        return len(uuids)
+        return {u: self.failures[u] for u in uuids if limit is not None and self.failures[u] >= limit}
 
     def set_episode_content_embedding(self, uuid, embedding, model, *, expected_content=None):
         if uuid not in self.contents:
@@ -62,7 +62,8 @@ def test_embeds_ready_missing_rows_with_the_model_stamp() -> None:
     graph = _Graph({"a": "alpha", "b": "beta"})
     result = _run(graph, _ok)
     assert graph.written == {"a": ([5.0], "m-1"), "b": ([4.0], "m-1")}
-    assert result == {"written": 2, "failed": 0, "skipped": 0, "embed_calls": 2, "stopped": None}
+    assert result == {"written": 2, "failed": 0, "skipped": 0, "embed_calls": 2, "excluded": 0,
+                      "stopped": None}
     # Settled (READY or FAILED, #662) and missing-only: never a model re-embed (model=None),
     # all namespaces.
     assert all(c["settled_only"] is True and c["ready_only"] is False and c["model"] is None

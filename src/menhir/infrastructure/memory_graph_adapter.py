@@ -524,9 +524,11 @@ class MemoryGraphAdapter:
             settled_only=settled_only, max_failures=max_failures,
         )
 
-    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+    def record_source_embedding_failures(
+        self, episode_uuids: list[str], limit: int | None = None,
+    ) -> dict[str, int]:
         """See EpisodeLifecycleRepository.record_source_embedding_failures."""
-        return self._episodes.record_source_embedding_failures(episode_uuids)
+        return self._episodes.record_source_embedding_failures(episode_uuids, limit)
 
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,
