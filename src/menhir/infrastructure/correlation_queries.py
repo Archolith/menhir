@@ -162,8 +162,14 @@ class CorrelationRepository:
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'inferred_self' OR "
         "n.self_tier IS NOT NULL OR "
-        r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
-        r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
+        "(n.name =~ $ineligible_path_regex)"
+    )
+    #: Regex for the path-name clause, passed as the ``$ineligible_path_regex`` query parameter.
+    #: It must NOT be embedded as a Cypher string literal: Cypher unescapes ``\\`` and ``\b``
+    #: (backspace) before the regex engine sees them, which broke this clause (#888).
+    _INELIGIBLE_PATH_REGEX = (
+        r"(?i).*([\\/]|\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
+        r"cfg|ini|gradle|html|css|png|jpg|svg)(\b|$)).*"
     )
 
     def evaluate_merge_eligibility(self, survivor_uuid: str, absorbed_uuid: str) -> "MergeEligibility":
@@ -188,7 +194,11 @@ class CorrelationRepository:
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
-            params={"s": survivor_uuid, "a": absorbed_uuid},
+            params={
+                "s": survivor_uuid,
+                "a": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         by_uuid = {str(r["uuid"]): dict(r) for r in rows}
 
@@ -1093,16 +1103,19 @@ class CorrelationRepository:
         uuid_a: str,
         uuid_b: str,
     ) -> bool:
-        """Anchor-project veto: if both entities are anchored to different single projects, veto.
+        """Anchor-project veto: veto when both entities are anchored and their project sets differ.
 
-        Returns True if a veto applies (both anchored to different projects), False otherwise.
+        Identical anchor sets (single or multi) are not vetoed (#888); an unanchored side never vetoes.
         """
         rows = self._neo4j.execute(
             """
             MATCH (a:Entity {uuid: $a})-[:ANCHORED_TO]->(proj_a)
+            WITH collect(DISTINCT proj_a) AS projs_a
             MATCH (b:Entity {uuid: $b})-[:ANCHORED_TO]->(proj_b)
-            WHERE proj_a <> proj_b
-            RETURN count(*) > 0 AS veto_applies
+            WITH projs_a, collect(DISTINCT proj_b) AS projs_b
+            RETURN size(projs_a) > 0
+                   AND (any(p IN projs_a WHERE NOT p IN projs_b)
+                        OR any(p IN projs_b WHERE NOT p IN projs_a)) AS veto_applies
             """,
             params={"a": uuid_a, "b": uuid_b},
         )
@@ -1129,7 +1142,11 @@ class CorrelationRepository:
             WITH n, ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_node
             RETURN count(CASE WHEN ineligible_node THEN 1 END) > 0 AS ineligible
             """,
-            params={"a": survivor_uuid, "b": absorbed_uuid},
+            params={
+                "a": survivor_uuid,
+                "b": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         if rows:
             return bool(rows[0].get("ineligible", False))

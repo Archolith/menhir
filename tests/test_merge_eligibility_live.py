@@ -92,6 +92,11 @@ def test_eligible_pair_merges(live_repo, make_pair):
         ({"namespace": "proj-a"}, {"namespace": "proj-b"}, me.NAMESPACE_MISMATCH),
         # Path-shaped name -> ineligible role.
         ({}, {"name": "src/menhir/foo.py"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "src/menhir/infrastructure"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "docs/plans"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "C:\\Users\\x"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "main.py:42"}, me.INELIGIBLE_ROLE),
+        ({}, {"name": "config.yaml settings"}, me.INELIGIBLE_ROLE),
         # Canonical self is an endpoint authority and must never be absorbed or used as survivor.
         ({"is_self": True, "entity_role": "self"}, {}, me.INELIGIBLE_ROLE),
         ({}, {"is_self": True, "entity_role": "self"}, me.INELIGIBLE_ROLE),
