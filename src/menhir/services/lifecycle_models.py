@@ -74,6 +74,7 @@ class ConsolidationResult:
     skipped_pending: int
     orphan_episodes_cleaned: int
     demoted: int = 0
+    merge_errors: int = 0
 
 
 @dataclass(frozen=True)
