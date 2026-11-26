@@ -1,3 +1,25 @@
+## 2026-11-26 - Wave 1 follow-ups (#1013-#1018)
+
+- Consolidation (#1008): a failed contradiction search no longer promotes the candidate
+  unchecked; it waits for the next pass like a failed merge check. `merge_errors` is in the
+  completion log, the consolidation event and the scheduler job result.
+- Source-embedding repair (#1009): each exclusion records a failure event (with its failure
+  count, so a re-exclusion after the cooldown is kept) and the run returns an `excluded` count.
+- Embeddings and provenance (#1006): the startup report shows TypedAssertion dimensions
+  without blocking on them, and preflight warns on a mismatch. The count-key cosine skips rows of
+  another vector size. Provenance orders receipts by instant, in UTC, and a malformed stored time
+  no longer fails the query.
+- Failed-enrichment retry (#1007): unparked rows, then parked rows that gained a twin link, come
+  before the daily recheck batch, so the recheck can't crowd out new candidates and a late twin
+  link is finalized on the next tick.
+- Derived rederive (#1005): a run that stops on an outage or has errors is recorded as failed
+  (opt-in `job_failed`). A failed repair is requeued after seven days, at most three times. A
+  fact rewritten while the embedder fails stays searchable and is re-embedded later; a fact the
+  embedder keeps rejecting stops after three tries (`embed_failed`). Its failure events,
+  including the attempts-exhausted event from #874, are no longer collapsed by the event
+  store's duplicate check.
+- Tests (#1010): three Windows-flaky tests no longer depend on wall-clock timing.
+
 ## 2026-11-26 - Wave 1 maintainability fixes (#998-#1004)
 
 - `view_entropy` (#966): `max_views` must be an integer in 1..200 and `top_k` one in 1..50; other
