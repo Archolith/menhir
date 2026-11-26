@@ -70,19 +70,26 @@ def _build(settings: MemorySettings):
 
 
 def _list_reversible(journal: GraphOperationsJournal) -> int:
-    rows = [
-        r for r in journal.list_by_state("COMMITTED", limit=100_000)
-        if r.get("operation_kind") == "ENTITY_MERGE" and r.get("before_snapshot_json")
-    ]
+    rows = []
+    for r in journal.iter_by_state("COMMITTED"):
+        if r.get("operation_kind") != "ENTITY_MERGE" or not r.get("before_snapshot_json"):
+            continue
+        req = json.loads(r["request_json"])
+        rows.append({
+            "op_id": r["op_id"],
+            "survivor_uuid": req["survivor_uuid"],
+            "absorbed_uuid": req["absorbed_uuid"],
+            "committed_at": r.get("committed_at"),
+            "similarity": req.get("similarity"),
+        })
     if not rows:
         print("No journaled merges available for exact reversal.")
         print("Use --inventory to see what can be recovered from legacy merges.")
         return 0
     print(f"{len(rows)} journaled merge(s) reversible EXACTLY:\n")
     for r in rows:
-        req = json.loads(r["request_json"])
-        print(f"  op={r['op_id']}  {req['survivor_uuid']}  <-  {req['absorbed_uuid']}")
-        print(f"      committed_at={r.get('committed_at')}  similarity={req.get('similarity')}")
+        print(f"  op={r['op_id']}  {r['survivor_uuid']}  <-  {r['absorbed_uuid']}")
+        print(f"      committed_at={r['committed_at']}  similarity={r['similarity']}")
     print("\nReverse one with:  python scripts/unmerge.py --op <OP_ID> [--execute]")
     return 0
 
