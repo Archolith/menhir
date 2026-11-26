@@ -1133,6 +1133,9 @@ class MemoryGraphAdapter:
     def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
         return self._memory_queries.mark_derived_rederive_status(repair_key, status)
 
+    def defer_derived_rederive(self, repair_key: str) -> bool:
+        return self._memory_queries.defer_derived_rederive(repair_key)
+
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int
     ) -> str | None:

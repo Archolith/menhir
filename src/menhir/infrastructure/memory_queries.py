@@ -2091,7 +2091,11 @@ class MemoryQueryRepository:
     )
 
     def list_pending_derived_rederive(self, limit: int) -> list[dict[str, Any]]:
-        """Pending DerivedRederiveRepair nodes, oldest first."""
+        """Pending DerivedRederiveRepair nodes, oldest first; a deferred one goes behind the rest.
+
+        ``deferred_at`` is set when a provider fault stopped the batch on that repair (#874), so
+        one item whose call always times out cannot stop every run at the head of the queue.
+        """
         rows = self.neo4j.execute(
             """
             MATCH (rr:DerivedRederiveRepair)
@@ -2099,7 +2103,7 @@ class MemoryQueryRepository:
             RETURN rr.repair_key AS repair_key, rr.item_uuid AS item_uuid,
                    rr.item_kind AS item_kind, rr.namespace AS namespace,
                    coalesce(rr.attempts, 0) AS attempts
-            ORDER BY rr.created_at ASC, rr.repair_key ASC
+            ORDER BY coalesce(rr.deferred_at, rr.created_at) ASC, rr.repair_key ASC
             LIMIT $limit
             """,
             params={"limit": int(limit)},
@@ -2242,6 +2246,19 @@ class MemoryQueryRepository:
             RETURN count(rr) AS c
             """,
             params={"repair_key": repair_key, "status": status},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def defer_derived_rederive(self, repair_key: str) -> bool:
+        """Move a pending repair behind the rest of the queue without spending an attempt (#874)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            SET rr.deferred_at = datetime()
+            RETURN count(rr) AS c
+            """,
+            params={"repair_key": repair_key},
         )
         return bool(rows) and int(rows[0].get("c") or 0) > 0
 
