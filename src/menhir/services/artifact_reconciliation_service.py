@@ -562,6 +562,14 @@ class ArtifactReconciliationService:
                 source_uuid=action.source_uuid,
                 reason=action.reason or "source_not_observed",
                 observed_commit=observed_commit,
+                expected_artifact_uuid=action.artifact_uuid,
+                expected_locator={
+                    "repository": action.repository,
+                    "medium": action.medium,
+                    "path": action.path,
+                },
+                expected_integrity=action.expected_integrity,
+                expected_last_reconciled_at=action.last_reconciled_at,
             )
         return {"applied": False, "reason": f"unsupported_action:{action.kind}"}
 

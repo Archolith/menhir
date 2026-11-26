@@ -23,6 +23,7 @@ from menhir.domain.artifact_reconciliation import (
     ResolutionStatus,
     SourceObservation,
     WorkArtifactIdentitySnapshot,
+    plan_reconciliation,
     sha256_bytes,
 )
 from menhir.domain.work_artifact import ArtifactType
@@ -175,17 +176,130 @@ def test_a_source_without_a_backfilled_uuid_refuses_rather_than_guessing() -> No
 
 @pytest.mark.unit
 def test_marking_unresolved_never_deletes_and_keeps_the_locator() -> None:
-    neo = _StubNeo4j(responses=[[{"artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(responses=[[{"artifact_uuid": "a-1", "fresh": True}]])
     result = WorkArtifactRepository(neo).mark_artifact_source_unresolved(
         source_uuid="s-1",
         reason="source_not_observed",
+        expected_artifact_uuid="a-1",
+        expected_locator={"repository": "t", "medium": "markdown", "path": "gone.md"},
+        expected_integrity="abc",
+        expected_last_reconciled_at=RECONCILED_AT,
         observed_commit="c0ffee",
     )
     assert result["applied"] is True
     query = neo.calls[0]["query"]
     assert "DELETE" not in query
-    assert "locator_path" not in query
+    assert "SET s.locator_path" not in query
+    assert "REMOVE s._reconcile_unresolved_lock" in query
+    assert query.index("SET s._reconcile_unresolved_lock") < query.index("s.last_reconciled_at")
+    assert "$expected_path" in query
+    assert "$expected_integrity" in query
+    assert neo.calls[0]["params"]["expected_last_reconciled_at"] == RECONCILED_AT
     assert neo.calls[0]["params"]["unresolved"] == ResolutionStatus.UNRESOLVED
+
+
+RECONCILED_AT = "2026-08-10T01:02:03+00:00"
+
+
+def _missing_snapshot(
+    *, last_reconciled_at: str | None = RECONCILED_AT
+) -> ArtifactSourceSnapshot:
+    return ArtifactSourceSnapshot(
+        artifact_uuid="a-1",
+        medium="markdown",
+        source_uuid="s-1",
+        artifact_type=ArtifactType.PLAN,
+        repository="t",
+        path=".agent/plans/gone.md",
+        integrity="abc123",
+        last_reconciled_at=last_reconciled_at,
+    )
+
+
+@pytest.mark.unit
+def test_marker_action_carries_the_timestamp_only_in_the_internal_digest() -> None:
+    first = plan_reconciliation(
+        repository="t", entries=[], snapshots=[_missing_snapshot()]
+    )
+    action = next(
+        a
+        for a in first.safe_actions
+        if a.kind == ActionKind.MARK_SOURCE_UNRESOLVED
+    )
+    assert action.last_reconciled_at == RECONCILED_AT
+    assert action.expected_integrity == "abc123"
+    assert "last_reconciled_at" not in action.as_dict()
+    assert "expected_integrity" not in action.as_dict()
+
+    second = plan_reconciliation(
+        repository="t",
+        entries=[],
+        snapshots=[_missing_snapshot(last_reconciled_at="2026-08-11T00:00:00+00:00")],
+    )
+    assert [a.as_dict() for a in first.actions] == [a.as_dict() for a in second.actions]
+    assert first.plan_digest != second.plan_digest
+
+
+@pytest.mark.unit
+def test_audit_source_snapshot_carries_last_reconciled_at() -> None:
+    row = {
+        "artifact_uuid": "a-1",
+        "source_uuid": "s-1",
+        "medium": "markdown",
+        "repository": "t",
+        "path": "gone.md",
+        "integrity": "abc123",
+        "last_reconciled_at": RECONCILED_AT,
+    }
+    neo = _StubNeo4j(responses=[[row]])
+    repo = WorkArtifactRepository(neo)
+    scoped = repo.list_artifact_source_snapshots(repository="t")[0]
+    assert scoped.last_reconciled_at == RECONCILED_AT
+    assert "s.last_reconciled_at" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_apply_passes_the_audited_source_premises_to_the_marker(
+    tmp_path: Path,
+) -> None:
+    repo = _RecordingRepo(snapshots=[_missing_snapshot()])
+    service = ArtifactReconciliationService(repo)
+    report = service.audit(tmp_path, repository="t")
+    assert [a.kind for a in report.safe_actions] == [
+        ActionKind.MARK_SOURCE_UNRESOLVED
+    ]
+
+    repo.calls.clear()
+    result = service.apply(
+        tmp_path, expected_digest=report.plan_digest, repository="t"
+    )
+    assert result.ok
+    kwargs = next(kwargs for name, kwargs in repo.calls if name == "unresolved")
+    assert kwargs["expected_artifact_uuid"] == "a-1"
+    assert kwargs["expected_locator"] == {
+        "repository": "t",
+        "medium": "markdown",
+        "path": ".agent/plans/gone.md",
+    }
+    assert kwargs["expected_integrity"] == "abc123"
+    assert kwargs["expected_last_reconciled_at"] == RECONCILED_AT
+
+
+@pytest.mark.unit
+def test_a_stale_marker_is_reported_as_a_skipped_write(tmp_path: Path) -> None:
+    class _StaleRepo(_RecordingRepo):
+        def mark_artifact_source_unresolved(self, **kwargs):
+            self.calls.append(("unresolved", kwargs))
+            return {"applied": False, "reason": "stale_source_snapshot"}
+
+    repo = _StaleRepo(snapshots=[_missing_snapshot()])
+    service = ArtifactReconciliationService(repo)
+    digest = service.audit(tmp_path, repository="t").plan_digest
+    result = service.apply(tmp_path, expected_digest=digest, repository="t")
+    assert result.ok
+    assert len(result.skipped) == 1
+    assert result.skipped[0]["outcome"]["reason"] == "stale_source_snapshot"
+    assert result.cursor_reason == "writes_skipped"
 
 
 @pytest.mark.unit
