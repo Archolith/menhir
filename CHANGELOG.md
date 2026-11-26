@@ -1,3 +1,7 @@
+## 2026-11-26 - v0.3.18: Retire and restore memories (visibility only), retired entities follow their sources, the report-only retire judge, GitHub and GitLab tokens redacted whole (GHSA-ppqh-gffg-6j74), Graphiti fork 0.32.1.post1 (upstream v0.32.1), cross-encoder rerank as a batch oracle, Graphiti prompt names in LLM telemetry, and recall, projection and artifact fixes.
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.18. No dependency changes in this commit.
+
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
 - Corrected the output descriptions in `mcp/tools/ops/list_artifacts.py` and `get_artifact.py`.
@@ -111,9 +115,3 @@ Step 3 of the retire plan. It writes nothing to the graph and retires nothing; i
   (`valid_at`/`invalid_at`) project only when every active edge carries them. `QueryContext.as_of_time`
   is now populated from `classify_temporal_intent(query).as_of` in both active and shadow frontier
   passes.
-
-## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
-
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.
-- Upgrade note: by default automatic merges become proposals and automatic deletion stops. Stop the old
-  process before starting this version; 0.3.16 ignores the new switches.
