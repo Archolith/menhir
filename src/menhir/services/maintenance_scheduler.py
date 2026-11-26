@@ -1012,6 +1012,7 @@ class MaintenanceScheduler:
             "conflicts_detected": result.conflicts_detected,
             "skipped_pending": result.skipped_pending,
             "orphan_episodes_cleaned": result.orphan_episodes_cleaned,
+            "merge_errors": result.merge_errors,
         }
 
     async def _make_decay_lifecycle(self) -> dict[str, object]:

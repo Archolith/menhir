@@ -96,18 +96,20 @@ class LifecycleConsolidationMixin:
                 "conflicts_detected": result.conflicts_detected,
                 "skipped_pending": result.skipped_pending,
                 "orphan_episodes_cleaned": result.orphan_episodes_cleaned,
+                "merge_errors": result.merge_errors,
             },
             duration_ms=duration_ms,
             success=True,
         )
         logger.info(
-            "Consolidation complete: promoted=%d deleted=%d demoted=%d conflicts=%d skipped_pending=%d orphans=%d duration_ms=%d",
+            "Consolidation complete: promoted=%d deleted=%d demoted=%d conflicts=%d skipped_pending=%d orphans=%d merge_errors=%d duration_ms=%d",
             result.promoted,
             result.deleted,
             result.demoted,
             result.conflicts_detected,
             result.skipped_pending,
             result.orphan_episodes_cleaned,
+            result.merge_errors,
             duration_ms,
         )
         return result
@@ -471,6 +473,9 @@ class LifecycleConsolidationMixin:
                 )
             except Exception:  # skip node: contradiction check is best-effort
                 logger.warning("Contradiction search failed for node=%s", uuid, exc_info=True)
+                if errors is not None:
+                    # #1008: like a classify_pair failure, never promote unchecked; the next pass retries.
+                    errors.append(uuid)
                 continue
 
             for other_uuid, other_name, score in similar:
