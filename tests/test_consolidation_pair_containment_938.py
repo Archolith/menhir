@@ -84,3 +84,34 @@ async def test_callers_without_error_list_still_raise(
 
     with pytest.raises(RuntimeError):
         await svc._check_contradictions_batch([{"uuid": "a", "name": "entity-a", "content": "content a"}])
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_whose_check_raised_is_not_ttl_deleted_in_the_same_pass(
+    stub_memory_graph_adapter, stub_graphiti_client, monkeypatch,
+):
+    # "a" was demoted earlier and its TTL has expired; this pass makes it a promotion candidate,
+    # but its check raises. It must survive the sweep; an unrelated expired node is still deleted.
+    stub_memory_graph_adapter.ttl_expired_uuids = [{"uuid": "a"}, {"uuid": "z"}]
+    correlation = _Correlation({("a", "p1"): RuntimeError("neo4j transient")})
+    svc = _svc(stub_memory_graph_adapter, stub_graphiti_client, correlation, monkeypatch)
+
+    result = await svc.consolidate_session("session-1")
+
+    assert result.merge_errors == 1
+    assert "a" not in stub_memory_graph_adapter.deleted_session_nodes
+    assert "a" not in stub_memory_graph_adapter.promoted_nodes
+    assert "z" in stub_memory_graph_adapter.deleted_session_nodes
+
+
+@pytest.mark.asyncio
+async def test_saga_pause_still_propagates(
+    stub_memory_graph_adapter, stub_graphiti_client, monkeypatch,
+):
+    from menhir.infrastructure.graph_operations_model import SagaWritesPausedError
+
+    correlation = _Correlation({("a", "p1"): SagaWritesPausedError("paused")})
+    svc = _svc(stub_memory_graph_adapter, stub_graphiti_client, correlation, monkeypatch)
+
+    with pytest.raises(SagaWritesPausedError):
+        await svc.consolidate_session("session-1")

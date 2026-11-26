@@ -18,6 +18,7 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.infrastructure.llm import LLMAdapter
+from menhir.infrastructure.graph_operations_model import SagaWritesPausedError
 from menhir.infrastructure.observability import LlmUsageControlSignal
 
 if TYPE_CHECKING:
@@ -111,7 +112,9 @@ class LifecycleConsolidationMixin:
         )
         return result
 
-    async def _expire_demoted_session_nodes(self, session_id: str | None) -> int:
+    async def _expire_demoted_session_nodes(
+        self, session_id: str | None, exclude: frozenset[str] = frozenset()
+    ) -> int:
         """Delete demoted SESSION nodes whose grace TTL has expired, through the journaled saga.
 
         Runs as a SESSION_TTL_DELETE operation (plan Phase 6): a complete snapshot of every target is
@@ -127,7 +130,8 @@ class LifecycleConsolidationMixin:
         by promote_to_persistent -- is excluded up front.
         """
         result = await asyncio.to_thread(
-            self._delete_coordinator().delete_expired_session_nodes, session_id=session_id
+            self._delete_coordinator().delete_expired_session_nodes,
+            session_id=session_id, exclude=exclude,
         )
         deleted = result.get("deleted") or []
         for node_uuid in deleted:
@@ -299,7 +303,11 @@ class LifecycleConsolidationMixin:
 
         # Phase 4b: TTL-expiry delete AFTER promotion — promotion wins. promote_to_persistent
         # cleared ttl_expires on rescued nodes, so they no longer match the expired query.
-        deleted = await self._expire_demoted_session_nodes(session_id)
+        # A candidate whose contradiction check raised was neither promoted nor checked; it must not
+        # be TTL-deleted in the same pass either (#938). The next pass decides it.
+        deleted = await self._expire_demoted_session_nodes(
+            session_id, exclude=frozenset(merge_error_log)
+        )
 
         # Count pending/enriching episodes (informational — they are not consolidated)
         skipped_pending = await asyncio.to_thread(self.graph_adapter.count_pending_episodes, session_id)
@@ -473,7 +481,7 @@ class LifecycleConsolidationMixin:
                     final_action, details = await correlation_service.classify_pair(
                         uuid, other_uuid, score,
                     )
-                except LlmUsageControlSignal:
+                except (LlmUsageControlSignal, SagaWritesPausedError):
                     raise
                 except Exception as exc:
                     # #938: only a caller that collects errors gets containment; others keep raising.
