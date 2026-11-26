@@ -266,10 +266,14 @@ class TestOAuthPreflightChecks:
         _check_no_secrets(result)
 
     @pytest.mark.unit
-    def test_jwks_uri_http_non_loopback_warns(self):
-        config = _complete_config(
-            jwks_uri="http://auth.example.com/.well-known/jwks.json",
-        )
+    @pytest.mark.parametrize("jwks_uri", [
+        "http://auth.example.com/.well-known/jwks.json",
+        "auth.example.com/.well-known/jwks.json",
+        "file:///keys/jwks.json",
+        "https://auth.example.com:no-port/jwks.json",
+    ])
+    def test_jwks_uri_with_unsupported_scheme_or_invalid_authority_warns(self, jwks_uri):
+        config = _complete_config(jwks_uri=jwks_uri)
         result = build_oauth_preflight(config)
         assert any(
             c["name"] == "oauth_jwks_uri_scheme" and c["status"] == "warn"

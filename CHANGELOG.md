@@ -5,6 +5,7 @@
 - Bypassed the default embedding cache for requests with explicit vector dimensions.
 - Validated the required S256 challenge before OAuth consent and preserved registered callback query encoding.
 - Reported which scope tiers are configured in OAuth operator preflight.
+- Warned in OAuth preflight when a JWKS URL is malformed or uses an unsupported scheme.
 - Documented how saga summaries count skipped and ownership outcomes.
 
 ## 2026-11-25 - Logging, timeline, telemetry and provider fixes

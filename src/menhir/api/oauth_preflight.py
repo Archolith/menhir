@@ -6,6 +6,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
+
 from menhir.config import redact_uri_for_display
 from menhir.config.oauth import OAuthConfig
 from menhir.config.settings import is_loopback_host
@@ -51,6 +53,17 @@ def _is_https_or_loopback_http(url: str) -> bool:
         return True
     except Exception:
         return True
+
+
+def _jwks_uri_has_supported_scheme(uri: str) -> bool:
+    """Check the URL shape using the same parser as the JWKS HTTP client."""
+    try:
+        url = httpx.URL(uri)
+    except httpx.InvalidURL:
+        return False
+    return url.is_absolute_url and (
+        url.scheme == "https" or (url.scheme == "http" and is_loopback_host(url.host))
+    )
 
 
 #: A URL embedded in prose: everything up to the first whitespace. Trailing punctuation is peeled
@@ -200,11 +213,11 @@ def build_oauth_preflight(config: OAuthConfig) -> dict[str, object]:
                 "warn",
                 "MENHIR_OAUTH_JWKS_URI contains credentials (will be redacted).",
             ))
-        if not _is_https_or_loopback_http(config.jwks_uri):
+        if not _jwks_uri_has_supported_scheme(config.jwks_uri):
             checks.append(_check(
                 "oauth_jwks_uri_scheme",
                 "warn",
-                "MENHIR_OAUTH_JWKS_URI uses http for a non-loopback host.",
+                "MENHIR_OAUTH_JWKS_URI should be an absolute HTTPS URL or an HTTP URL on loopback.",
             ))
         checks.append(_check("oauth_jwks_uri_configured", "pass", "OAuth JWKS URI is configured."))
     else:
