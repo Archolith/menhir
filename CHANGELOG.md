@@ -1,3 +1,27 @@
+## 2026-11-26 - Wave 1 maintainability fixes (#998-#1004)
+
+- `view_entropy` (#966): `max_views` must be an integer in 1..200 and `top_k` one in 1..50; other
+  values get `invalid_argument` over MCP and HTTP 400 over REST.
+- Merge eligibility (#888): the path-name regex is a query parameter, so Cypher no longer
+  unescapes it. A name counts as a path only when it is path-shaped, such as `src/menhir/x`,
+  `C:\Users\x`, `~/notes` or `main.py:42`; `Node.js`, `CI/CD` and `docs/plans` stay mergeable.
+  The anchor-project veto fires only when both sides are anchored to different project sets.
+- Observation search (#900): stale-dimension embeddings are skipped by a size guard instead of
+  failing the scalar lane.
+- Source-embedding repair (#921): an episode that fails three times is skipped for seven days,
+  so it no longer blocks the episodes behind it. A probe after any error tells an outage from a
+  bad episode, and an outage counts against no one.
+- Lifecycle consolidation (#938): one failing merge no longer aborts the pass. The candidate is
+  neither promoted nor TTL-deleted that pass, and the next pass decides it.
+- Failed-enrichment retry (#925): rows that will never be retried are parked for their current
+  failure, so they stop filling the window and writing a failure event every tick. A new
+  failure re-admits a row, and parked rows are rechecked daily.
+- Derived rederive (#874): an LLM outage, a config fault (unknown model, unimplemented backend)
+  or a slow item no longer burns repair attempts. The item is deferred behind the queue.
+  Exhausting attempts records a failure event, and one item's graph error no longer ends the
+  batch.
+- Follow-ups: #1005-#1010.
+
 ## 2026-11-26 - A namespace-scoped recall shows only that namespace's facts
 
 - `memory_queries.fetch_temporal_facts` takes `namespace` again and scopes the fact edge with
