@@ -2002,7 +2002,8 @@ async def _run_recall(
         ]
         if result_uuids_for_facts:
             fact_rows = await asyncio.to_thread(
-                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts,
+                namespace=namespace,
             )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)

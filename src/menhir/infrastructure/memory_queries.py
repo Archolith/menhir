@@ -1196,11 +1196,17 @@ class MemoryQueryRepository:
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
+    def fetch_temporal_facts(
+        self, node_uuids: list[str], *, namespace: str | None = None,
+    ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
         Only edges with fact text count: link edges without it would take the per-node slots
         (and mark a node as having temporal facts for the belief gate).
+
+        ``namespace`` scopes the fact edge itself, as ``timeline_facts`` does: an entity
+        admitted in the caller's namespace can still carry a fact written from another
+        namespace's episode, and a scoped recall must not show it. ``None`` = no filter.
         """
         if not node_uuids:
             return []
@@ -1208,11 +1214,14 @@ class MemoryQueryRepository:
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
             .where(
                 f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING} "
-                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')}"
+                f"AND NOT {memory_retired_cypher('n')} AND NOT {memory_retired_cypher('m')} "
+                f"AND {tenant_scope_cypher('r')}"
             )
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
-        return self.neo4j.execute(query, params={"uuids": node_uuids})
+        return self.neo4j.execute(
+            query, params={"uuids": node_uuids, **tenant_scope_params(namespace)},
+        )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
