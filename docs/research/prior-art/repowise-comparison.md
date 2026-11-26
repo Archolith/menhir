@@ -1,5 +1,7 @@
 # Repowise vs Menhir — Prior-Art / Positioning Comparison
 
+> **2026-11-25 Re-pin Update (v0.62.0, `oss_primary_sources`):** Re-verified against `repowise-dev/repowise` (`v0.62.0`, released 2026-11-22, AGPL-3.0 + commercial dual license) and `repowise-bench`. Since July 2026, Repowise expanded directly into architectural-decision governance (`v0.57`–`v0.61`): **Background / In-Force / Human-Only Pinned decisions** enforced on coding agents and its GitHub PR Bot (`repowise decision pin`, `repowise decision health`), PR review-thread learning, Change Records, 10 task-shaped MCP tools (`lean`/`core`/`standard`/`all` profiles cutting tool-list overhead 41%), single-prompt setup, VS Code + Cursor plugins (`v0.62.0`), and zero-DB-ops storage (`.repowise/wiki.db` SQLite + LanceDB + NetworkX). It still has no general episodic memory, deterministic typed scalar state (`Event -> Fold -> View`), fail-closed Oracles/Wardens, provenance-aware erasure (`#423`), `WorkArtifact`/TODO lifecycles, or self-hosted OAuth 2.1 (local auth is `None`). See [landscape-matrix-2026-11.md](landscape-matrix-2026-11.md) for the S1–S8 scorecard.
+
 **Date:** 2026-07-09  
 **Status:** External comparison note; use for positioning, roadmap triage, and benchmark planning.  
 **Compared project:** [`repowise-dev/repowise`](https://github.com/repowise-dev/repowise)  

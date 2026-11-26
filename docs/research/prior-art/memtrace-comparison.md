@@ -1,5 +1,7 @@
 # MemTrace vs Menhir — Prior-Art / Positioning Comparison
 
+> **2026-11-25 Re-pin Update (v1.2.22+, `partial_public`):** Re-verified against `syncable-dev/memtrace-public` (`v1.2.22+`, npm `memtrace`, proprietary EULA for core binaries / MIT for `benchmarks/`). Since July 2026, Memtrace expanded into Menhir's decision-memory flank via **Cortex Decision Memory** (`memtrace govern` + `recall_decision`, persisted separately from `memtrace index --clear`), 20+ Tree-sitter languages + 18-language cross-repo non-HTTP topology (gRPC, Kafka, RabbitMQ, SQS, NATS, GraphQL, WebSockets), ~200–800ms live `.memtraceignore`-aware file-save indexing, on-demand bi-temporal graph rendering (`v1.2.7+`), and LeanCTX Native compressed reads. It remains closed-source (EULA) and still trails Menhir `v0.3.15` on general episodic memory, deterministic typed scalar state (`Event -> Fold -> View`), fail-closed Oracles/Wardens, `CANDIDATE/PERSISTENT/PROMOTED` + conflict-inbox governance, `WorkArtifact`/TODO lifecycles, provenance-aware erasure (`#423`), and embedded OAuth 2.1. **Disambiguation:** Do not conflate Syncable's Memtrace with the unrelated Oct 2026 academic paper `arXiv:2610.04838` (`Homy-Xu/MemTrace`, SJTU/MemTensor). See [landscape-matrix-2026-11.md](landscape-matrix-2026-11.md) for the S1–S8 scorecard.
+
 **Date:** 2026-07-09  
 **Status:** External comparison note; use for positioning, roadmap triage, and benchmark planning.  
 **Compared project:** [`syncable-dev/memtrace-public`](https://github.com/syncable-dev/memtrace-public)  

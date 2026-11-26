@@ -5,6 +5,7 @@ Compact inventory of the main `.agent` docs.
 ## Routing
 
 - `README.md` -> minimal bot entry router
+- `work-sections.md` -> canonical 8-section / 27-subsection work-organization map (`S1`–`S8`, aligned with `archolith-atlas`)
 - `maintenance.md` -> maintenance and changelog policy
 - `workflows/artifact_authoring.md` -> canonical contract for creating, moving, archiving,
   and reclassifying tracked artifacts; owns the metadata field definitions

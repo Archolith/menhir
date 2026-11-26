@@ -51,6 +51,7 @@ Start with one file:
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
 - local-MVP release history -> `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (closed tracker #123)
 - current executable plans and dependency order -> `plans/README.md`
+- project work sections & subsections (`S1`–`S8`, aligned with `archolith-atlas`) -> `work-sections.md`
 - what has been tried on recall, and what's still open -> `reference/menhir-recall-experiment-record.md`
 - useful non-executable design, research, and negative evidence -> `reference/README.md`
 
