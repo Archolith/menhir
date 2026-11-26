@@ -22,6 +22,7 @@ Writes are idempotent, so a second owner (after a lease handover) repeating a ro
 from __future__ import annotations
 
 import asyncio
+import uuid
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -46,10 +47,13 @@ _PROBE_TEXT = "embedder health probe"
 
 
 async def _embedder_is_up(embed: Callable[[str], Awaitable[list[float] | None]]) -> bool:
-    """One probe after an ``embedder_failing`` stop: up means the failures were item-specific."""
+    """One probe after a run with errors: up means the failures were item-specific.
+
+    The text is unique per call so the shared embedding cache cannot answer it during an outage.
+    """
     try:
         return bool(await await_with_backoff_aware_timeout(
-            embed(_PROBE_TEXT), timeout_s=EMBED_TIMEOUT_S))
+            embed(f"{_PROBE_TEXT} {uuid.uuid4().hex}"), timeout_s=EMBED_TIMEOUT_S))
     except Exception:
         return False
 
@@ -126,7 +130,9 @@ async def repair_source_embeddings(
             else:  # content changed, node erased, or an evidence projection
                 skipped += 1
     to_record = empty
-    if errored and (stopped != "embedder_failing" or await _embedder_is_up(embed)):
+    # Probe after any errors, not only an embedder_failing stop: a short listing or a budget stop
+    # during an outage must not count the outage against each episode.
+    if errored and await _embedder_is_up(embed):
         to_record = errored + empty
     if to_record:
         try:

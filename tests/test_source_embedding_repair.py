@@ -301,3 +301,39 @@ def test_listing_relists_excluded_episode_after_cooldown() -> None:
     (query, params), = neo4j.calls
     assert "n.source_embedding_last_failed_at < datetime() - duration($failure_cooldown)" in query
     assert params["failure_cooldown"] == SOURCE_EMBEDDING_FAILURE_COOLDOWN
+
+
+def test_an_outage_with_few_rows_does_not_count_against_episodes() -> None:
+    # Fewer rows than MAX_CONSECUTIVE_FAILURES: the run ends without an embedder_failing stop.
+    graph = _Graph({"a": "alpha", "b": "beta"})
+
+    async def down(text: str) -> list[float]:
+        raise ConnectionError("embedder down")
+
+    for _ in range(repair_mod.MAX_EPISODE_FAILURES + 2):
+        assert _run(graph, down)["stopped"] is None
+    assert graph.failures == {}
+
+
+def test_the_outage_probe_cannot_be_answered_by_a_cache() -> None:
+    graph = _Graph({f"r{i:02d}": f"text {i}" for i in range(10)})
+    cache: dict[str, list[float]] = {}
+    probes: list[str] = []
+    up = {"value": True}
+
+    async def cached_embed(text: str) -> list[float]:
+        if text.startswith(repair_mod._PROBE_TEXT):
+            probes.append(text)
+        if text in cache:
+            return cache[text]
+        if not up["value"] or not text.startswith(repair_mod._PROBE_TEXT):
+            raise ConnectionError("embedder down")
+        cache[text] = [1.0]
+        return cache[text]
+
+    _run(graph, cached_embed)  # rows fail, probe succeeds and is cached: item faults counted
+    counted = dict(graph.failures)
+    up["value"] = False
+    _run(graph, cached_embed)  # real outage: a cached probe answer must not count it
+    assert graph.failures == counted
+    assert len(probes) == len(set(probes)) == 2
