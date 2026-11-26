@@ -168,8 +168,30 @@ def test_first_seen_orders_by_instant_not_by_string(test_neo4j_repo):
     )
     rows = MemoryQueryRepository(test_neo4j_repo).fetch_result_provenance([f"{tag}-n"], ns)
     assert len(rows) == 1
-    assert str(rows[0]["first_seen_at"]).startswith("2026-01-01T01:00")
+    assert str(rows[0]["first_seen_at"]).startswith("2025-12-31T20:00")  # normalised to UTC
     assert list(rows[0]["turn_evidence_ids"]) == ["earlier", "later"]
+
+
+@pytest.mark.online
+def test_malformed_receipt_time_falls_back_instead_of_failing(test_neo4j_repo):
+    """#1006 review: a malformed legacy reference_time must not fail the batched query; the next
+    field (epi.valid_at) decides first_seen_at."""
+    ns = f"prov-{uuidlib.uuid4().hex[:8]}"
+    tag = uuidlib.uuid4().hex[:8]
+    test_neo4j_repo.execute(
+        """
+        CREATE (n:Entity {uuid: $n, group_id: $ns, name: 'bad'})
+        CREATE (e1:Episodic {uuid: $e1, group_id: $ns, source: 'user', content: 'a',
+                             valid_at: datetime('2026-02-03T04:05:06Z')})
+        CREATE (e1)-[:MENTIONS]->(n)
+        CREATE (r1:Episodic {uuid: $r1, group_id: $ns, source: 'user', content: 'r1',
+                             resolved_episode_uuid: $e1, reference_time: '2026-02-30 nonsense'})
+        """,
+        {"n": f"{tag}-n", "e1": f"{tag}-e1", "r1": f"{tag}-r1", "ns": ns},
+    )
+    rows = MemoryQueryRepository(test_neo4j_repo).fetch_result_provenance([f"{tag}-n"], ns)
+    assert len(rows) == 1
+    assert str(rows[0]["first_seen_at"]).startswith("2026-02-03T04:05:06")
 
 
 @pytest.mark.online

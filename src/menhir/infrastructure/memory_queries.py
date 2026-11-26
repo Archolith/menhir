@@ -55,6 +55,7 @@ from menhir.infrastructure.cypher import (
     FACT_TEXT_PRESENT,
     MEMORY_RETURN_FIELDS,
     memory_recency_cypher,
+    memory_timestamp_cypher,
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
@@ -1395,7 +1396,9 @@ class MemoryQueryRepository:
             WITH id, epi, coalesce(receipt, anchor) AS rec
             WITH id, rec,
                  coalesce(rec.source, epi.source) AS source,
-                 datetime(toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at))) AS first_seen
+                 coalesce({memory_timestamp_cypher('rec.reference_time')},
+                          {memory_timestamp_cypher('epi.valid_at')},
+                          {memory_timestamp_cypher('epi.created_at')}) AS first_seen
             WITH id,
                  collect(DISTINCT source) AS sources,
                  min(first_seen) AS first_seen_dt,

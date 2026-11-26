@@ -9,6 +9,7 @@ from menhir.infrastructure.embedding_dimensions import (
     embedding_dimension_health,
     evaluate_embedding_compatibility,
 )
+from menhir.infrastructure.cypher import memory_timestamp_cypher
 from menhir.infrastructure.memory_queries import MemoryQueryRepository
 
 
@@ -103,7 +104,10 @@ def test_result_provenance_compares_datetimes_not_strings():
     neo4j = _Neo4j({})
     MemoryQueryRepository(neo4j).fetch_result_provenance(["u"], "ns")
     query = neo4j.queries[0]
-    assert "datetime(toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at)))" in query
+    # Non-throwing per-field normaliser (cypher.memory_timestamp_cypher), so one malformed legacy
+    # value falls through to the next field instead of failing the whole batched query.
+    for field in ("rec.reference_time", "epi.valid_at", "epi.created_at"):
+        assert memory_timestamp_cypher(field) in query
     assert "min(first_seen) AS first_seen_dt" in query
     assert "toString(first_seen_dt) AS first_seen_at" in query
     assert "toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at)) AS first_seen" not in query
