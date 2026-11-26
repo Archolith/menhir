@@ -1,3 +1,7 @@
+## 2026-11-26 - v0.3.20: Menhir links and conflict groups stay inside one tenant
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.20. No dependency changes in this commit.
+
 ## 2026-11-26 - Menhir links and conflict groups stay inside one tenant
 
 - `correlation_queries.py`: `create_related_to_edge` refuses a pair in different tenants, and
