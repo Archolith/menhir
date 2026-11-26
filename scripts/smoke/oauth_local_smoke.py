@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     self-serve orchestration lives in ``_cli`` so this stays trivially unit-testable
     against a mocked HTTP layer.
     """
-    args = _parse_args(argv or sys.argv[1:])
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
     base = args.base_url if args.base_url else _resolve_base_url()
     use_json = args.json
 
@@ -195,6 +195,28 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def _strip_target_args(argv: list[str]) -> list[str]:
+    """Remove target-url options and their separate operands before CLI passthrough."""
+    stripped: list[str] = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            stripped.extend(argv[index:])
+            break
+        if argument in ("--base-url", "--url"):
+            index += 1
+            if index < len(argv) and (argv[index] == "" or not argv[index].startswith("-")):
+                index += 1
+            continue
+        if argument.startswith("--base-url=") or argument.startswith("--url="):
+            index += 1
+            continue
+        stripped.append(argument)
+        index += 1
+    return stripped
+
+
 def _cli(argv: list[str] | None = None) -> int:
     """CLI entry: self-serve a throwaway OAuth-mode server unless a target is given.
 
@@ -215,7 +237,7 @@ def _cli(argv: list[str] | None = None) -> int:
     with smoke_server("oauth", url=None) as base:
         # Re-invoke the pure check layer against the throwaway server. Preserve
         # any other flags (e.g. --json) the caller passed.
-        passthrough = [a for a in argv if a not in ("--base-url", "--url")]
+        passthrough = _strip_target_args(argv)
         return main(["--base-url", base, *passthrough])
 
 
