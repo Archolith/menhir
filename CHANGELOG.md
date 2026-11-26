@@ -7,6 +7,11 @@
 - Returned empty text for synchronous chat completions with no choices.
 - Preserved newer circuit-breaker billing holds when an older probe settles.
 - Resolved explicit Graphiti providers without parsing an unused chat provider fallback.
+- Logged and handled SQLite startup failures when saving Recall Lab and Extraction Lab history.
+- Preserved subsecond precision in server-generated stale-anchor verification receipts.
+- Reported measured zero-millisecond lifecycle averages as zero.
+- Kept the telemetry feature dashboard available when timestamps with and without offsets are mixed.
+- Directed unmerge operators to the supported read-only `--inventory` option.
 
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
