@@ -234,7 +234,9 @@ def test_crash_after_graph_write_before_committed_converges(coord):
     # Rewind the journal to PREPARED: the graph write landed, the commit stamp did not.
     with sqlite3.connect(coord.telemetry_db_path) as conn:
         conn.execute(
-            "UPDATE graph_operations SET state='PREPARED', committed_at=NULL WHERE op_id=?", (op,)
+            "UPDATE graph_operations SET state='PREPARED', committed_at=NULL, owner_token=? "
+            "WHERE op_id=?",
+            (oo.process_owner_token(), op),
         )
         conn.commit()
 
@@ -279,7 +281,10 @@ def test_drift_marks_needs_review_and_does_not_mutate(coord):
     coord.graph_adapter.metrics["ns::s::c"]["value"] = 999.0
     writes_before = coord.graph_adapter.write_calls
     with sqlite3.connect(coord.telemetry_db_path) as conn:
-        conn.execute("UPDATE graph_operations SET state='PREPARED' WHERE op_id=?", (op,))
+        conn.execute(
+            "UPDATE graph_operations SET state='PREPARED', owner_token=? WHERE op_id=?",
+            (oo.process_owner_token(), op),
+        )
         conn.commit()
 
     out = coord._replay_prepared()

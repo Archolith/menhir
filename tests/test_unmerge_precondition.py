@@ -55,6 +55,10 @@ class _Journal:
     def get(self, op_id):
         return {"expected_after_sha256": self.expected_after}
 
+    def renew_owner_heartbeat(self, op_id, *, seconds, owner_token):
+        self._check(owner_token)
+        return True
+
     def mark_needs_review(self, op_id, observed_error, *, owner_token):
         self._check(owner_token)
         self.review_calls.append((op_id, observed_error))
