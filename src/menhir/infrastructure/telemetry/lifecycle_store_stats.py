@@ -170,7 +170,7 @@ class TelemetryRetentionStatsMixin:
         for row in rows:
             result[row["action"]] = {
                 "count": int(row["cnt"]),
-                "avg_ms": round(float(row["avg_ms"])) if row["avg_ms"] else None,
+                "avg_ms": round(float(row["avg_ms"])) if row["avg_ms"] is not None else None,
                 "llm_count": int(row["llm_count"]),
             }
         result["revisions"] = int(revision_count["cnt"]) if revision_count else 0
