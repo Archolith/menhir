@@ -52,6 +52,10 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
+from menhir.infrastructure.observability import (
+    reset_llm_operation_label,
+    set_llm_operation_label,
+)
 from menhir.infrastructure.openai_calls import ResilientChatClient, acreate_chat_completion
 from menhir.infrastructure.openai_rate_limit import (
     find_quota_exhaustion,
@@ -522,108 +526,111 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
 
         retry_count = 0
         last_error: Exception | None = None
-
-        while retry_count <= _LOCAL_MODEL_MAX_RETRIES:
-            try:
-                response = await self._generate_response(
-                    messages,
-                    response_model,
-                    max_tokens=effective_max_tokens,
-                    model_size=model_size,
-                    group_id=group_id,
-                    prompt_name=prompt_name,
-                )
-                # This normalizer rewrites generic keys such as ``type`` and
-                # ``entity``. Apply it only to extraction envelopes; typed
-                # attribute models may use those keys literally.
-                if (
-                    getattr(self, "structured_output_mode", "json_schema") == "json_object"
-                    and response_model in (CombinedExtraction, ExtractedEdges)
+        op_token = set_llm_operation_label(prompt_name)
+        try:
+            while retry_count <= _LOCAL_MODEL_MAX_RETRIES:
+                try:
+                    response = await self._generate_response(
+                        messages,
+                        response_model,
+                        max_tokens=effective_max_tokens,
+                        model_size=model_size,
+                        group_id=group_id,
+                        prompt_name=prompt_name,
+                    )
+                    # This normalizer rewrites generic keys such as ``type`` and
+                    # ``entity``. Apply it only to extraction envelopes; typed
+                    # attribute models may use those keys literally.
+                    if (
+                        getattr(self, "structured_output_mode", "json_schema") == "json_object"
+                        and response_model in (CombinedExtraction, ExtractedEdges)
+                    ):
+                        return _normalize_graphiti_json_payload(response)
+                    return response
+                except RateLimitError:
+                    raise
+                except GraphitiRequestTooLargeError:
+                    # Retrying cannot help: the retry prompt only makes the payload larger.
+                    raise
+                except (
+                    _openai.APITimeoutError,
+                    _openai.APIConnectionError,
+                    _openai.InternalServerError,
                 ):
-                    return _normalize_graphiti_json_payload(response)
-                return response
-            except RateLimitError:
-                raise
-            except GraphitiRequestTooLargeError:
-                # Retrying cannot help: the retry prompt only makes the payload larger.
-                raise
-            except (
-                _openai.APITimeoutError,
-                _openai.APIConnectionError,
-                _openai.InternalServerError,
-            ):
-                raise
-            except Exception as exc:
-                if find_quota_exhaustion(exc) is not None:
-                    # Billing state (402 etc.): a retry cannot help and would burn provider calls.
                     raise
-                if is_transient_payment_refusal(exc):
-                    # Throttling: the rate-limit backoff around this call waits and retries.
-                    raise
-                last_error = exc
-                if retry_count >= _LOCAL_MODEL_MAX_RETRIES:
-                    logger.error(
-                        "Graphiti LLM max retries (%d) exceeded. Last error: %s",
-                        _LOCAL_MODEL_MAX_RETRIES,
-                        exc,
-                    )
-                    raise
+                except Exception as exc:
+                    if find_quota_exhaustion(exc) is not None:
+                        # Billing state (402 etc.): a retry cannot help and would burn provider calls.
+                        raise
+                    if is_transient_payment_refusal(exc):
+                        # Throttling: the rate-limit backoff around this call waits and retries.
+                        raise
+                    last_error = exc
+                    if retry_count >= _LOCAL_MODEL_MAX_RETRIES:
+                        logger.error(
+                            "Graphiti LLM max retries (%d) exceeded. Last error: %s",
+                            _LOCAL_MODEL_MAX_RETRIES,
+                            exc,
+                        )
+                        raise
 
-                retry_count += 1
+                    retry_count += 1
 
-                _is_truncation = _looks_like_truncation(exc)
+                    _is_truncation = _looks_like_truncation(exc)
 
-                if _is_truncation and retry_count == 1:
-                    effective_max_tokens = min(effective_max_tokens * 2, 16384)
-                    retry_prompt = (
-                        f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
-                        f"Your previous response was truncated (output too long). "
-                        f"Output ONLY a raw JSON object. "
-                        f"Start immediately with {{ and end with }}. "
-                        f"No thinking tags, no markdown fences, no extra text."
-                    )
-                    logger.warning(
-                        "Graphiti LLM retry %d/%d: truncation detected (char %s), "
-                        "escalating max_tokens %d -> %d",
-                        retry_count,
-                        _LOCAL_MODEL_MAX_RETRIES,
-                        _truncation_offset(exc),
-                        max_tokens,
-                        effective_max_tokens,
-                    )
-                elif _is_truncation and retry_count >= 2:
-                    effective_max_tokens = min(effective_max_tokens * 2, 16384)
-                    retry_prompt = (
-                        f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
-                        f"Your response was STILL truncated. You MUST fit "
-                        f"the entire JSON in one response. Reduce the number "
-                        f"of extracted entities and edges to the most important "
-                        f"ones. Output ONLY a raw JSON object. "
-                        f"Start immediately with {{ and end with }}. "
-                        f"No thinking tags, no markdown fences, no extra text."
-                    )
-                    logger.warning(
-                        "Graphiti LLM retry %d/%d: persistent truncation, "
-                        "requesting reduced extraction (max_tokens=%d)",
-                        retry_count,
-                        _LOCAL_MODEL_MAX_RETRIES,
-                        effective_max_tokens,
-                    )
-                else:
-                    retry_prompt = (
-                        f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
-                        f"Previous attempt failed: {exc}\n\n"
-                        f"Output ONLY a raw JSON object. "
-                        f"Start immediately with {{ and end with }}. "
-                        f"No thinking tags, no markdown fences, no extra text."
-                    )
-                    logger.warning(
-                        "Graphiti LLM retry %d/%d after error: %s",
-                        retry_count,
-                        _LOCAL_MODEL_MAX_RETRIES,
-                        exc,
-                    )
+                    if _is_truncation and retry_count == 1:
+                        effective_max_tokens = min(effective_max_tokens * 2, 16384)
+                        retry_prompt = (
+                            f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
+                            f"Your previous response was truncated (output too long). "
+                            f"Output ONLY a raw JSON object. "
+                            f"Start immediately with {{ and end with }}. "
+                            f"No thinking tags, no markdown fences, no extra text."
+                        )
+                        logger.warning(
+                            "Graphiti LLM retry %d/%d: truncation detected (char %s), "
+                            "escalating max_tokens %d -> %d",
+                            retry_count,
+                            _LOCAL_MODEL_MAX_RETRIES,
+                            _truncation_offset(exc),
+                            max_tokens,
+                            effective_max_tokens,
+                        )
+                    elif _is_truncation and retry_count >= 2:
+                        effective_max_tokens = min(effective_max_tokens * 2, 16384)
+                        retry_prompt = (
+                            f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
+                            f"Your response was STILL truncated. You MUST fit "
+                            f"the entire JSON in one response. Reduce the number "
+                            f"of extracted entities and edges to the most important "
+                            f"ones. Output ONLY a raw JSON object. "
+                            f"Start immediately with {{ and end with }}. "
+                            f"No thinking tags, no markdown fences, no extra text."
+                        )
+                        logger.warning(
+                            "Graphiti LLM retry %d/%d: persistent truncation, "
+                            "requesting reduced extraction (max_tokens=%d)",
+                            retry_count,
+                            _LOCAL_MODEL_MAX_RETRIES,
+                            effective_max_tokens,
+                        )
+                    else:
+                        retry_prompt = (
+                            f"Retry {retry_count}/{_LOCAL_MODEL_MAX_RETRIES}. "
+                            f"Previous attempt failed: {exc}\n\n"
+                            f"Output ONLY a raw JSON object. "
+                            f"Start immediately with {{ and end with }}. "
+                            f"No thinking tags, no markdown fences, no extra text."
+                        )
+                        logger.warning(
+                            "Graphiti LLM retry %d/%d after error: %s",
+                            retry_count,
+                            _LOCAL_MODEL_MAX_RETRIES,
+                            exc,
+                        )
 
-                messages.append(Message(role="user", content=retry_prompt))
+                    messages.append(Message(role="user", content=retry_prompt))
 
-        raise last_error or Exception("Max retries exceeded with no specific error")
+            raise last_error or Exception("Max retries exceeded with no specific error")
+        finally:
+            reset_llm_operation_label(op_token)
