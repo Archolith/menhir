@@ -665,8 +665,8 @@ class MemorySettings:
             "oauth_as_refresh_ttl_s": self.oauth_as_refresh_ttl_s,
         }
         for name, value in positive_oauth_numbers.items():
-            if value <= 0:
-                raise ValueError(f"{name} must be > 0, got {value}")
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and > 0, got {value}")
         if self.oauth_clock_skew_s < 0:
             raise ValueError(f"oauth_clock_skew_s must be >= 0, got {self.oauth_clock_skew_s}")
         if self.oauth_as_stale_client_max_age_s < 0:
