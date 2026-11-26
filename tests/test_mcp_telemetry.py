@@ -93,6 +93,23 @@ def _seed_mcp_events(db_path: Path, count: int) -> None:
         )
 
 
+def _recent_query_plan(db_path: Path) -> list[str]:
+    with closing(sqlite3.connect(db_path)) as conn:
+        return [
+            row[3]
+            for row in conn.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT id, started_at, completed_at, duration_ms, operation, kind,
+                       success, error, input_size, result_size, payload_preview
+                FROM mcp_events
+                ORDER BY started_at DESC
+                LIMIT 50
+                """
+            ).fetchall()
+        ]
+
+
 def _seed_failure_events(db_path: Path, count: int) -> None:
     with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.executemany(
@@ -664,6 +681,60 @@ def test_fetch_recent_clamps_limit_and_keeps_default_and_order():
         default = store.fetch_recent()
         assert len(default) == 50
         assert default[0]["operation"] == "operation-501"
+    finally:
+        _cleanup_db_path(db_path)
+
+
+def test_fetch_recent_query_uses_started_at_index():
+    db_path = _make_db_path()
+    store = McpTelemetryStore(db_path=db_path)
+    try:
+        store._ensure_ready()
+        _seed_mcp_events(db_path, 502)
+
+        plan = _recent_query_plan(db_path)
+        assert any(
+            "USING INDEX idx_mcp_events_started_at" in detail for detail in plan
+        )
+        assert not any("TEMP B-TREE" in detail for detail in plan)
+        assert [row["operation"] for row in store.fetch_recent(limit=3)] == [
+            "operation-501", "operation-500", "operation-499",
+        ]
+    finally:
+        _cleanup_db_path(db_path)
+
+
+def test_started_at_index_is_recreated_on_reopen_without_losing_events():
+    db_path = _make_db_path()
+    store = McpTelemetryStore(db_path=db_path)
+    try:
+        store._ensure_ready()
+        _seed_mcp_events(db_path, 12)
+        with closing(sqlite3.connect(db_path)) as conn, conn:
+            conn.execute("DROP INDEX IF EXISTS idx_mcp_events_started_at")
+        assert not any(
+            "idx_mcp_events_started_at" in detail for detail in _recent_query_plan(db_path)
+        )
+
+        reopened = McpTelemetryStore(db_path=db_path)
+        reopened._ensure_ready()
+        with closing(sqlite3.connect(db_path)) as conn:
+            (index_sql,) = conn.execute(
+                """
+                SELECT sql FROM sqlite_master
+                WHERE type = 'index' AND name = 'idx_mcp_events_started_at'
+                """
+            ).fetchone()
+            (count,) = conn.execute("SELECT COUNT(*) FROM mcp_events").fetchone()
+        assert "started_at DESC" in index_sql
+        assert count == 12
+        assert any(
+            "USING INDEX idx_mcp_events_started_at" in detail
+            for detail in _recent_query_plan(db_path)
+        )
+        assert [row["operation"] for row in reopened.fetch_recent(limit=12)] == [
+            f"operation-{index}" for index in range(11, -1, -1)
+        ]
     finally:
         _cleanup_db_path(db_path)
 
