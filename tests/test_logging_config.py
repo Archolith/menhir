@@ -6,6 +6,7 @@ import logging
 
 from uvicorn.logging import AccessFormatter
 
+from menhir.infrastructure import logging_config
 from menhir.infrastructure.logging_config import build_logging_config
 
 
@@ -52,3 +53,42 @@ def test_explicit_level_argument_still_wins_over_the_env_var(monkeypatch, tmp_pa
     monkeypatch.setenv("MENHIR_LOG_LEVEL", "DEBUG")
     config = build_logging_config(level="WARNING", log_dir=str(tmp_path))
     assert config["root"]["level"] == "WARNING"
+
+
+def _capture_configure_logging(monkeypatch, tmp_path, **kwargs) -> tuple[dict, list[str]]:
+    captured: dict = {}
+    installed: list[str] = []
+
+    monkeypatch.setattr(logging_config.logging.config, "dictConfig", captured.update)
+    monkeypatch.setattr(
+        logging_config,
+        "install_neo4j_notification_filter",
+        lambda: installed.append("neo4j-notifications"),
+    )
+
+    logging_config.configure_logging(log_dir=str(tmp_path), **kwargs)
+    return captured, installed
+
+
+def test_configure_logging_defaults_to_info_without_the_env_var(monkeypatch, tmp_path) -> None:
+    """configure_logging must not hard-code INFO past MENHIR_LOG_LEVEL."""
+    monkeypatch.delenv("MENHIR_LOG_LEVEL", raising=False)
+    captured, installed = _capture_configure_logging(monkeypatch, tmp_path)
+    assert captured["root"]["level"] == "INFO"
+    assert installed == ["neo4j-notifications"]
+
+
+def test_configure_logging_honors_lowercase_debug_env_var(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MENHIR_LOG_LEVEL", "debug")
+    captured, installed = _capture_configure_logging(monkeypatch, tmp_path)
+    assert captured["root"]["level"] == "DEBUG"
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "menhir"):
+        assert captured["loggers"][name]["level"] == "DEBUG"
+    assert installed == ["neo4j-notifications"]
+
+
+def test_configure_logging_explicit_level_overrides_the_env_var(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MENHIR_LOG_LEVEL", "DEBUG")
+    captured, installed = _capture_configure_logging(monkeypatch, tmp_path, level="WARNING")
+    assert captured["root"]["level"] == "WARNING"
+    assert installed == ["neo4j-notifications"]
