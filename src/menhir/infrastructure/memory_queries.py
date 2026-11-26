@@ -1120,6 +1120,9 @@ class MemoryQueryRepository:
         safe_limit = max(1, min(limit, 500))
         where = [
             "a.name_embedding IS NOT NULL",
+            # A stale-dimension embedding is skipped, not raised on (mirrors search_episode_embeddings);
+            # `where` feeds both the scan and the index-candidate post-filter.
+            "size(a.name_embedding) = size($query_vector)",
             "NOT coalesce(a.superseded, false)",
             "NOT coalesce(a.binding_pending, false)",
             "($namespaces IS NULL OR a.namespace IN $namespaces)",
