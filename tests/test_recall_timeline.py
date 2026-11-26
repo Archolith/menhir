@@ -452,6 +452,38 @@ async def test_window_paging_and_next_cursor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_window_cursor_preserves_both_bounds_in_either_direction() -> None:
+    rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 6)]
+    service = _svc(_StubAdapter(rows))
+    first = await service.recall_timeline(
+        namespace="ns", window_from="2026-01-02", window_to="2026-01-04", limit=2,
+    )
+    assert [entry.uuid for entry in first.entries] == ["ep-2", "ep-3"]
+    assert first.next_cursor is not None
+
+    last = await service.recall_timeline(namespace="ns", cursor=first.next_cursor, limit=2)
+    assert [entry.uuid for entry in last.entries] == ["ep-4"]
+    assert last.next_cursor is None
+    assert last.prev_cursor is not None
+
+    previous = await service.recall_timeline(namespace="ns", cursor=last.prev_cursor, limit=3)
+    assert [entry.uuid for entry in previous.entries] == ["ep-2", "ep-3"]
+    assert previous.prev_cursor is None
+
+
+@pytest.mark.asyncio
+async def test_window_cursor_preserves_an_upper_bound_without_a_lower_bound() -> None:
+    rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 4)]
+    service = _svc(_StubAdapter(rows))
+    first = await service.recall_timeline(namespace="ns", window_to="2026-01-02", limit=1)
+    assert first.next_cursor is not None
+
+    second = await service.recall_timeline(namespace="ns", cursor=first.next_cursor, limit=2)
+    assert [entry.uuid for entry in second.entries] == ["ep-2"]
+    assert second.next_cursor is None
+
+
+@pytest.mark.asyncio
 async def test_around_anchor_flag_and_neighbors() -> None:
     rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 6)]
     result = await _svc(_StubAdapter(rows)).recall_timeline(
