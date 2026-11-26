@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock
@@ -8,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+import menhir.infrastructure.telemetry.recorders as recorders
 from tests._temp_cleanup import remove_test_dir
 from menhir.infrastructure.observability import LLMUsageEvent
 from menhir.mcp.telemetry import (
@@ -68,6 +72,40 @@ def _fetch_lifecycle_rows(db_path):
             ORDER BY id ASC
             """
         ).fetchall()
+
+
+def test_bump_failure_count_is_atomic_under_concurrency(monkeypatch):
+    class YieldingCounts(dict[str, int]):
+        def get(self, key: str, default: int = 0) -> int:
+            count = super().get(key, default)
+            time.sleep(0)  # Give another thread a chance to read the same count.
+            return count
+
+    counts = YieldingCounts()
+    monkeypatch.setattr(recorders, "_TELEMETRY_FAILURE_COUNTS", counts)
+    workers = 8
+    increments_per_worker = 32
+    start = threading.Barrier(workers, timeout=5)
+
+    def bump() -> list[int]:
+        start.wait()
+        return [recorders._bump_failure_count("op") for _ in range(increments_per_worker)]
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        jobs = [executor.submit(bump) for _ in range(workers)]
+        observed = [count for job in jobs for count in job.result(timeout=10)]
+
+    assert sorted(observed) == list(range(1, workers * increments_per_worker + 1))
+
+
+def test_bump_failure_count_evicts_oldest_at_capacity(monkeypatch):
+    counts = {"oldest": 1, "newest": 1}
+    monkeypatch.setattr(recorders, "_TELEMETRY_FAILURE_COUNTS", counts)
+    monkeypatch.setattr(recorders, "_TELEMETRY_FAILURE_COUNTS_MAX", 2)
+
+    assert recorders._bump_failure_count("oldest") == 2
+    assert recorders._bump_failure_count("added") == 1
+    assert counts == {"newest": 1, "added": 1}
 
 
 def test_track_mcp_call_records_success():

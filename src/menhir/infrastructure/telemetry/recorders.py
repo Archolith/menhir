@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import traceback
 from typing import Any
 
@@ -79,19 +80,21 @@ def record_llm_usage_event(
 _TELEMETRY_FAILURE_COUNTS_MAX = 512
 
 _TELEMETRY_FAILURE_COUNTS: dict[str, int] = {}
+_TELEMETRY_FAILURE_COUNTS_LOCK = threading.Lock()
 
 
 def _bump_failure_count(operation: str) -> int:
     """Increment the failure count for ``operation``, evicting the oldest key at capacity."""
 
-    if (
-        operation not in _TELEMETRY_FAILURE_COUNTS
-        and len(_TELEMETRY_FAILURE_COUNTS) >= _TELEMETRY_FAILURE_COUNTS_MAX
-    ):
-        _TELEMETRY_FAILURE_COUNTS.pop(next(iter(_TELEMETRY_FAILURE_COUNTS)))
-    count = _TELEMETRY_FAILURE_COUNTS.get(operation, 0) + 1
-    _TELEMETRY_FAILURE_COUNTS[operation] = count
-    return count
+    with _TELEMETRY_FAILURE_COUNTS_LOCK:
+        if (
+            operation not in _TELEMETRY_FAILURE_COUNTS
+            and len(_TELEMETRY_FAILURE_COUNTS) >= _TELEMETRY_FAILURE_COUNTS_MAX
+        ):
+            _TELEMETRY_FAILURE_COUNTS.pop(next(iter(_TELEMETRY_FAILURE_COUNTS)))
+        count = _TELEMETRY_FAILURE_COUNTS.get(operation, 0) + 1
+        _TELEMETRY_FAILURE_COUNTS[operation] = count
+        return count
 
 
 def _log_telemetry_persist_failure(operation: str, exc: Exception) -> None:
