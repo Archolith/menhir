@@ -27,6 +27,6 @@ that change and the candidate comparison means nothing. Masked tokens are Menhir
 temp project paths and nonces. The cache and run outputs hold prompt text, so keep the runs dir
 outside the repository.
 
-First used for the Graphiti 0.31.2.post4 -> 0.32.1.post1 sync (Archolith/graphiti#35): the same 14
+First used for the Graphiti sync to upstream v0.32.1 (Archolith/graphiti#35): the same 14
 chat and 18 embedding requests, zero misses, an identical graph (59 nodes, 49 relationships) and an
 identical session report, for about $0.015.
