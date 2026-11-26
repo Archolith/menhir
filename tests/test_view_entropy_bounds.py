@@ -119,3 +119,11 @@ async def test_tool_endpoint_maps_out_of_range_to_invalid_argument():
     with pytest.raises(McpToolRefusal) as excinfo:
         await tool.endpoint(max_views=0)
     assert getattr(excinfo.value, "code", None) == "invalid_argument"
+
+
+@pytest.mark.parametrize("bad", ["5", 10.5, True, None])
+async def test_non_integer_bounds_are_rejected(bad):
+    with pytest.raises(ValueError, match="must be an integer"):
+        await probe_view_reachability(
+            graph_adapter=object(), recall_service=_RecordingRecall(), max_views=bad, top_k=5,
+        )

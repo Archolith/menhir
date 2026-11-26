@@ -77,6 +77,9 @@ async def probe_view_reachability(
     Raises ValueError when ``max_views`` is outside 1..200 or ``top_k`` outside 1..50,
     before any graph read or recall runs.
     """
+    for name, value in (("max_views", max_views), ("top_k", top_k)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer (got {type(value).__name__})")
     if not 1 <= max_views <= 200:
         raise ValueError(f"max_views must be between 1 and 200 (got {max_views})")
     if not 1 <= top_k <= 50:
