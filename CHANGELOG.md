@@ -1,9 +1,12 @@
-## 2026-11-25 - Preserve logging settings, timeline bounds and telemetry deduplication
+## 2026-11-25 - Logging, timeline, telemetry and provider fixes
 
 - Honored `MENHIR_LOG_LEVEL` in the shared logging entry point when callers omit a level.
 - Documented the 200-event read cap and replay order in `infrastructure/audit_trail.py`.
 - Serialized the duplicate check and insert in `infrastructure/telemetry/event_store_failures.py`.
 - Carried the requested date window across next and previous cursors in timeline recall.
+- Returned empty text for synchronous chat completions with no choices.
+- Preserved newer circuit-breaker billing holds when an older probe settles.
+- Resolved explicit Graphiti providers without parsing an unused chat provider fallback.
 
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
