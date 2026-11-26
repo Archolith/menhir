@@ -12,6 +12,7 @@
 - Reported measured zero-millisecond lifecycle averages as zero.
 - Kept the telemetry feature dashboard available when timestamps with and without offsets are mixed.
 - Directed unmerge operators to the supported read-only `--inventory` option.
+- Dropped malformed telemetry events without letting serialization errors escape into the caller.
 
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 

@@ -145,14 +145,19 @@ def record_mcp_event(
     explicit-erasure completeness checks.
     """
 
-    timestamp = _utc_now_iso()
-    input_size = _size_of(payload) if payload is not None else None
-    result_size = _size_of(result) if result is not None else None
-    preview_source = payload if payload is not None else result
-    payload_preview = _safe_preview_of(preview_source) if preview_source is not None else None
-    effective_namespace, effective_uuid = _mcp_event_lineage(
-        payload, namespace=namespace, node_uuid=node_uuid
-    )
+    try:
+        timestamp = _utc_now_iso()
+        input_size = _size_of(payload) if payload is not None else None
+        result_size = _size_of(result) if result is not None else None
+        preview_source = payload if payload is not None else result
+        payload_preview = _safe_preview_of(preview_source) if preview_source is not None else None
+        effective_namespace, effective_uuid = _mcp_event_lineage(
+            payload, namespace=namespace, node_uuid=node_uuid
+        )
+    except Exception as exc:
+        logger.warning("record_mcp_event:%s:%s preparation failed (%s)", kind, operation, type(exc).__name__)
+        return
+
     try:
         store.record(
             kind=kind,

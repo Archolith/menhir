@@ -1,8 +1,12 @@
 import asyncio
+import logging
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
+
+import pytest
 
 from tests._temp_cleanup import remove_test_dir
 from menhir.infrastructure.observability import LLMUsageEvent
@@ -246,6 +250,22 @@ def test_record_mcp_event_records_background_metrics():
         assert '"queue_depth": 2' in row["payload_preview"]
     finally:
         _cleanup_db_path(db_path)
+
+
+@pytest.mark.parametrize("field", ["payload", "result"])
+def test_record_mcp_event_drops_unserializable_data(field, caplog):
+    store = Mock(spec=McpTelemetryStore)
+    value = {"nested": []}
+    value["nested"].append(value)
+
+    with caplog.at_level(logging.WARNING, logger="menhir.infrastructure.telemetry.recorders"):
+        record_mcp_event(
+            kind="background", operation="synthetic", store=store, **{field: value},
+        )
+
+    store.record.assert_not_called()
+    assert any("preparation failed (ValueError)" in message for message in caplog.messages)
+    assert "Circular reference detected" not in caplog.text
 
 
 def test_record_failure_event_persists_structured_failure_details():
