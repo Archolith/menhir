@@ -131,3 +131,16 @@ def test_listing_skips_repeat_failures_until_cooldown(test_neo4j_repo: Any) -> N
     row = graph.execute("MATCH (n:Episodic {uuid: 'f-recent'}) "
                         "RETURN n.source_embedding_failures AS c", params={})[0]
     assert row["c"] is None
+
+
+def test_record_failures_returns_episodes_at_or_past_the_limit(test_neo4j_repo: Any) -> None:
+    """#1009: the uuids that reached the limit come back, including a re-exclusion past it."""
+    graph = test_neo4j_repo
+    for uuid in ("x-a", "x-b", "x-under"):
+        _episode(graph, uuid, "READY")
+    repo = EpisodeRepository(graph)
+    crossed = [repo.record_source_embedding_failures(["x-a", "x-b"], 3) for _ in range(3)]
+    assert crossed[0] == [] and crossed[1] == [] and sorted(crossed[2]) == ["x-a", "x-b"]
+    assert repo.record_source_embedding_failures(["x-under"], 3) == []
+    assert repo.record_source_embedding_failures(["x-a"], 3) == ["x-a"]  # 4th failure after cooldown
+    assert repo.record_source_embedding_failures(["x-b"]) == []  # no limit: nothing reported

@@ -320,25 +320,30 @@ class EpisodeLifecycleRepository:
         )
         return bool(rows)
 
-    def record_source_embedding_failures(self, episode_uuids: list[str]) -> int:
+    def record_source_embedding_failures(
+        self, episode_uuids: list[str], limit: int | None = None,
+    ) -> list[str]:
         """Bump the repair-failure count and stamp the attempt time on each episode (#921).
 
         Read by ``list_episodes_missing_content_embedding(max_failures=...)``; cleared by a
-        successful ``set_episode_content_embedding``. Returns how many nodes were updated.
+        successful ``set_episode_content_embedding``. Returns the uuids whose new count reached
+        ``limit`` (just excluded from the listing); empty when ``limit`` is None.
         """
         if not episode_uuids:
-            return 0
+            return []
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic)
             WHERE n.uuid IN $uuids
             SET n.source_embedding_failures = coalesce(n.source_embedding_failures, 0) + 1,
                 n.source_embedding_last_failed_at = datetime()
-            RETURN count(n) AS n
+            RETURN n.uuid AS uuid, n.source_embedding_failures AS failures
             """,
             params={"uuids": list(episode_uuids)},
         )
-        return int(rows[0].get("n") or 0) if rows else 0
+        if limit is None:
+            return []
+        return [str(r["uuid"]) for r in rows if int(r.get("failures") or 0) >= limit]
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """The other `:Episodic` node(s) of the same memory, in the same namespace (read-only).

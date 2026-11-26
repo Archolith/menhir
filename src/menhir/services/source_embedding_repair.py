@@ -28,6 +28,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
+from menhir.infrastructure.telemetry import record_failure_event
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,8 @@ async def repair_source_embeddings(
     Pages the listing with an exclusive uuid cursor, so a row that fails or is skipped is not
     re-listed ahead of the rest within a run; the next run starts from the beginning again.
     """
-    written = failed = skipped = calls = 0
+    written = failed = skipped = calls = excluded = 0
+    error_class: dict[str, str] = {}
     consecutive_failures = 0
     errored: list[str] = []  # embed raised: item-specific only if the embedder is up (see below)
     empty: list[str] = []  # embed returned nothing: item-specific by construction
@@ -104,6 +106,7 @@ async def repair_source_embeddings(
             except Exception as exc:  # timeout or embedder error: count it, keep going
                 failed += 1
                 errored.append(str(row["uuid"]))
+                error_class[str(row["uuid"])] = exc.__class__.__name__
                 consecutive_failures += 1
                 logger.warning(
                     "Source-memory embedding repair failed episode_id=%s: %s: %s",
@@ -135,14 +138,38 @@ async def repair_source_embeddings(
     if errored and await _embedder_is_up(embed):
         to_record = errored + empty
     if to_record:
+        newly_excluded: list[str] = []
         try:
-            await asyncio.to_thread(graph_adapter.record_source_embedding_failures, to_record)
+            newly_excluded = list(await asyncio.to_thread(
+                graph_adapter.record_source_embedding_failures, to_record, MAX_EPISODE_FAILURES
+            ) or [])
         except Exception:  # bookkeeping only: never fail the repair run over it
             logger.warning("Could not record source-embedding failures", exc_info=True)
+        for episode_uuid in newly_excluded:
+            excluded += 1
+            try:
+                await asyncio.to_thread(
+                    record_failure_event,
+                    operation="scheduler_source_embedding_repair",
+                    episode_uuid=episode_uuid,
+                    failure_stage="source_embedding_excluded",
+                    classification="exhausted",
+                    retryable=False,
+                    processing_attempt=MAX_EPISODE_FAILURES,
+                    error_type=error_class.get(episode_uuid, "EmptyEmbedding"),
+                    error="source embedding repair excluded the episode after repeated failures",
+                    details={
+                        "failure_limit": MAX_EPISODE_FAILURES,
+                        "decision": "excluded_until_cooldown",
+                        "note": "listed again after the 7-day cooldown",
+                    },
+                )
+            except Exception:  # best-effort: never fail the repair run over it
+                logger.warning("Could not record source-embedding exclusion event", exc_info=True)
     if written or failed:
         logger.info(
             "Source-memory embedding repair: wrote %d, failed %d, skipped %d (stopped=%s)",
             written, failed, skipped, stopped,
         )
     return {"written": written, "failed": failed, "skipped": skipped, "embed_calls": calls,
-            "stopped": stopped}
+            "excluded": excluded, "stopped": stopped}
