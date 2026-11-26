@@ -224,7 +224,7 @@ def test_candidate_query_excludes_only_rows_parked_for_the_current_failure() -> 
     assert "properties(n)['retry_parked_for'] IS NULL" in query
     assert f"properties(n)['retry_parked_for'] <> toString({failed_at})" in query
     assert "duration({seconds: $park_recheck_s})" in query
-    assert f"ORDER BY {failed_at} ASC" in query
+    assert f"ORDER BY retry_tier ASC, {failed_at} ASC" in query
     assert params == {"limit": 50, "park_recheck_s": RETRY_PARK_RECHECK_S}
 
 

@@ -89,6 +89,24 @@ _FAILED_AT = "coalesce(n.processing_completed_at, n.processing_started_at, n.que
 #: classifier change can still pick it up without an operator requeue (#925).
 RETRY_PARK_RECHECK_S = 24 * 3600
 
+#: The twin link finalize-from-link reads (`linked_twin_artifact`): the queue node names its twin
+#: and the twin exists. Shared with the retry candidate query so the two cannot drift (#1007).
+_TWIN_LINK_SET = "n.resolved_episode_uuid IS NOT NULL"
+_TWIN_LINK_MATCH = "(g:Episodic {uuid: n.resolved_episode_uuid})"
+_HAS_TWIN_LINK = f"({_TWIN_LINK_SET} AND EXISTS {{ MATCH {_TWIN_LINK_MATCH} }})"
+
+#: Retry candidate tier (#925, #1007). 0: not parked for this failure. 1: parked, but a twin link
+#: now exists, so finalize-from-link can close it. 2: parked and due for its recheck. 3: parked
+#: (excluded). Rows are ordered by tier first, so a recheck herd cannot crowd out tiers 0 and 1.
+_RETRY_TIER = (
+    "CASE WHEN (properties(n)['retry_parked_for'] IS NULL"
+    f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})) THEN 0"
+    f" WHEN {_HAS_TWIN_LINK} THEN 1"
+    " WHEN properties(n)['retry_parked_at']"
+    " < datetime() - duration({seconds: $park_recheck_s}) THEN 2"
+    " ELSE 3 END"
+)
+
 
 def is_recoverable_context_window_error(error: object | None) -> bool:
     """Return True for a context-window error a config change could clear.
@@ -1043,20 +1061,14 @@ class EpisodeLifecycleRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where(
-                "n.processing_state = 'FAILED'",
-                EPISODE_NOT_ERASED,
-                EPISODE_NOT_MARKED,
-                # #925: skip a row parked for THIS failure. The marker names the failure it was
-                # parked for, so a later failure (new timestamp) is a candidate again even if no
-                # requeue path cleared the marker.
-                "(properties(n)['retry_parked_for'] IS NULL"
-                f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})"
-                " OR properties(n)['retry_parked_at']"
-                " < datetime() - duration({seconds: $park_recheck_s}))",
-            )
+            .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
+            # #925: skip a row parked for THIS failure. The marker names the failure it was
+            # parked for, so a later failure (new timestamp) is a candidate again even if no
+            # requeue path cleared the marker. #1007: a parked row with a twin link is re-admitted.
+            .with_clause(f"n, {_RETRY_TIER} AS retry_tier")
+            .where("retry_tier < 3")
             .return_fields(EPISODE_RETRY_FIELDS)
-            .order_by(f"{_FAILED_AT} ASC")
+            .order_by(f"retry_tier ASC, {_FAILED_AT} ASC")
             .limit()
             .build()
         )
@@ -1130,8 +1142,8 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Episodic {{uuid: $episode_uuid}})
-            WHERE n.resolved_episode_uuid IS NOT NULL AND {EPISODE_NOT_MARKED}
-            MATCH (g:Episodic {{uuid: n.resolved_episode_uuid}})
+            WHERE {_TWIN_LINK_SET} AND {EPISODE_NOT_MARKED}
+            MATCH {_TWIN_LINK_MATCH}
             RETURN g.uuid AS resolved_episode_uuid,
                    [(g)-[:MENTIONS]->(e:Entity) | e.uuid] AS entity_uuids,
                    [(:Entity)-[r:RELATES_TO]->(:Entity)

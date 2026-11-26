@@ -110,3 +110,56 @@ def test_parked_row_stays_failed_for_other_readers(graph) -> None:
 
     row = repo.fetch_episode_processing(u["parked"])
     assert row is not None and row["processing_state"] == "FAILED"
+
+
+def _park(repo: EpisodeLifecycleRepository, u: dict) -> None:
+    failed_at = str(_candidates(repo, u)[u["parked"]]["processing_completed_at"])
+    assert repo.park_failed_episode_retry(u["parked"], failed_at=failed_at, reason="terminal")
+    assert u["parked"] not in _candidates(repo, u)
+
+
+def test_1007_due_parked_row_sorts_after_an_unparked_newer_failure(graph) -> None:
+    repo, neo4j, u = graph
+    _park(repo, u)
+    neo4j.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.retry_parked_at = datetime() - duration({days: 2})",
+        params={"u": u["parked"]},
+    )
+
+    # The parked row failed first, so failure-time order alone would put it ahead.
+    order = [
+        r["uuid"]
+        for r in repo.fetch_failed_episode_retry_candidates(limit=500)
+        if r["uuid"] in set(u.values())
+    ]
+    assert order == [u["open"], u["parked"]]
+
+
+def test_1007_parked_row_with_a_twin_link_is_readmitted(graph) -> None:
+    repo, neo4j, u = graph
+    _park(repo, u)
+    twin = f"{u['parked']}-twin"
+    neo4j.execute(
+        """
+        MATCH (q:Episodic {uuid: $q})
+        CREATE (g:Episodic {uuid: $g, name: $g, namespace: q.namespace, content: 'x',
+                            test_tag: q.test_tag})
+        SET q.resolved_episode_uuid = $g
+        """,
+        params={"q": u["parked"], "g": twin},
+    )
+
+    assert u["parked"] in _candidates(repo, u)
+    assert repo.linked_twin_artifact(u["parked"]) is not None
+
+
+def test_1007_parked_row_linked_to_a_missing_twin_stays_parked(graph) -> None:
+    repo, neo4j, u = graph
+    _park(repo, u)
+    neo4j.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.resolved_episode_uuid = $g",
+        params={"u": u["parked"], "g": f"{u['parked']}-missing"},
+    )
+
+    assert u["parked"] not in _candidates(repo, u)
+    assert repo.linked_twin_artifact(u["parked"]) is None
