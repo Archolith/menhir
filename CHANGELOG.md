@@ -20,6 +20,29 @@
 - Bounded recent SQLite telemetry reads to 500 rows.
 - Reused one chat client when concurrent calls first reach the same cache key.
 - Refused to mark a source unresolved when its audited state had changed.
+- Confirmed saga writer ownership before dispatching the first guarded graph mutation.
+- Indexed recent telemetry events by timestamp so SQLite can read them in order.
+- Removed a quadratic scan when rebuilding mixed-hit embedding batches.
+- Shared one lazily constructed synchronous chat client across concurrent callers.
+- Validated normalized research derivation receipts and accepted a valid episode UUID when the index is null.
+- Made implicit recall ratings claim distinct receipts under concurrent requests.
+- Rejected conflicting LME repair modes and reported matched updates.
+- Preserved the occurrence time of telemetry events queued for a background writer.
+- Scoped LME timestamp verification to the repair namespace and refused writes on control or repaired-row mismatches.
+- Preserved argument boundaries when the OAuth smoke CLI starts a local server.
+- Mapped LME session times by question and preserved hyphens in session IDs.
+- Rolled back LME scalar timestamp changes when the number of matched rows differs from the plan.
+- Refused ambiguous benchmark namespace suffixes and reported empty proposals for each affected comparison arm.
+- Corrected the Auth0 diagnostic routes and surfaced malformed or failed responses.
+- Rejected nonpositive PIDs as proof that a recorded writer stopped.
+- Removed URI credentials from telemetry previews and kept serialization failures inside the affected recorders.
+- Reported complete dirty-file and stale-anchor totals while keeping the diagnostic lists bounded.
+- Closed the CIMD cache connection if SQLite schema setup fails.
+- Guarded episode embedding backfills with the full content observed before the model call.
+- Loaded Menhir's configured environment file in the unmerge CLI while preserving shell precedence.
+- Failed the Auth0 smoke check on partial credentials or missing responses and reported optional skipped checks.
+- Rejected duplicate OAuth permission scopes and non-finite OAuth settings at startup.
+- Cleaned new OAuth display names and validated client registration metadata before storage.
 
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
