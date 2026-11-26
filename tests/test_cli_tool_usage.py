@@ -99,7 +99,10 @@ def test_by_client_rows(db: McpTelemetryStore) -> None:
 def test_json_shape(db: McpTelemetryStore) -> None:
     _seed(db, "alpha")
     data = _json([])
-    assert set(data) == {"since_hours", "by", "rows", "unused_tools", "registered_tool_count"}
+    assert set(data) == {
+        "since_hours", "by", "rows", "unused_tools", "registered_tool_count",
+        "oldest_event_at", "history_note",
+    }
     assert data["since_hours"] == 720 and data["by"] == "tool"
     assert data["registered_tool_count"] == 3
     assert data["unused_tools"] == ["beta", "gamma"]

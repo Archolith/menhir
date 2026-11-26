@@ -376,14 +376,52 @@ def test_note_when_database_has_no_events(tmp_path: Path, monkeypatch: pytest.Mo
     assert "The telemetry database holds no events" in result.stdout
 
 
-def test_horizon_note_does_not_alter_json_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The JSON payload is unchanged by the note (see report: a JSON field is blocked by an existing
-    exact-key-set assertion), and nothing but the JSON document reaches stdout."""
+def test_json_reports_partial_window_with_oldest_event_and_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A window longer than the surviving history carries the oldest event and the caveat."""
 
     _patch_catalog(monkeypatch)
     db = _store_at(tmp_path / "t.db", monkeypatch)
     _seed(db, "alpha", age_hours=2)
     result = runner.invoke(app, ["tool-usage", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["registered_tool_count"] == 3
     assert result.stderr == ""
+    data = json.loads(result.stdout)
+    assert data["registered_tool_count"] == 3
+    assert data["oldest_event_at"] is not None
+    assert data["history_note"] == (
+        f"Telemetry history only starts at {data['oldest_event_at']} UTC, so the last 720 hours are "
+        "not fully covered and unused tools may be overstated "
+        "(retention is set by MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS)."
+    )
+
+
+def test_json_reports_fully_covered_window_without_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the history predates the window, the oldest event is still reported and no note is added."""
+
+    _patch_catalog(monkeypatch)
+    db = _store_at(tmp_path / "t.db", monkeypatch)
+    _seed(db, "alpha", age_hours=100)
+    result = runner.invoke(app, ["tool-usage", "--json", "--since-hours", "24"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["oldest_event_at"] is not None
+    assert "history_note" not in data
+    assert data["unused_tools"] == ["alpha", "beta", "gamma"]
+
+
+def test_json_reports_null_oldest_event_and_note_when_database_has_no_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_catalog(monkeypatch)
+    _store_at(tmp_path / "t.db", monkeypatch)._ensure_ready()
+    result = runner.invoke(app, ["tool-usage", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["oldest_event_at"] is None
+    assert data["history_note"] == (
+        "The telemetry database holds no events, so nothing is established about tool usage."
+    )
