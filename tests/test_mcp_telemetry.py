@@ -526,3 +526,26 @@ def test_record_llm_usage_event_persists_and_aggregates_provider_counts(monkeypa
         assert summary["by_model"][0]["model"] == "gpt-test"
     finally:
         _cleanup_db_path(db_path)
+
+
+def test_record_lab_runs_return_none_on_sqlite_operational_error(monkeypatch):
+    db_path = _make_db_path()
+    store = McpTelemetryStore(db_path=db_path)
+
+    def _raise_sqlite_error():
+        raise sqlite3.OperationalError("synthetic failure")
+
+    monkeypatch.setattr(store, "_ensure_ready", _raise_sqlite_error)
+
+    try:
+        assert store.record_recall_lab_run(
+            request_payload={"query": "x"},
+            result_payload={"query": "x", "arms": []},
+        ) is None
+        assert store.record_extraction_lab_run(
+            request_payload={"current_message": "x"},
+            result_payload={"current_message": "x", "arms": []},
+            namespace="lab",
+        ) is None
+    finally:
+        _cleanup_db_path(db_path)

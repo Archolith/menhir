@@ -26,7 +26,6 @@ class _EventStoreLabRunsMixin:
         time by the explorer history routes (``redact_recall_lab_history_row``).
         """
 
-        self._ensure_ready()
         judgment = result_payload.get("judgment") or {}
         arm_summaries = [
             {
@@ -40,6 +39,7 @@ class _EventStoreLabRunsMixin:
             for arm in result_payload.get("arms") or []
         ]
         try:
+            self._ensure_ready()
             with self._connect() as conn:
                 cursor = conn.execute(
                     """
@@ -137,7 +137,6 @@ class _EventStoreLabRunsMixin:
         rather than NULL; NULL is reserved for genuine pre-lineage historical residue.
         """
 
-        self._ensure_ready()
         arm_summaries = [
             {
                 "id": arm.get("id"),
@@ -155,6 +154,7 @@ class _EventStoreLabRunsMixin:
             or "__extraction_lab_unscoped__"
         )
         try:
+            self._ensure_ready()
             with self._connect() as conn:
                 cursor = conn.execute(
                     """
