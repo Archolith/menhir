@@ -567,7 +567,8 @@ class _CachingEmbeddingsEndpoint:
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         # Extract input texts from the OpenAI embeddings contract
         input_val = kwargs.get("input") or (args[0] if args else None)
-        if input_val is None or self._cache is None:
+        # Cache keys describe default-size vectors only.
+        if input_val is None or self._cache is None or kwargs.get("dimensions") is not None:
             return await self._inner.create(*args, **kwargs)
 
         # Normalize to list
