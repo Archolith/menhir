@@ -9,7 +9,7 @@ error page used for untrusted targets.
 from __future__ import annotations
 
 import html
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -53,9 +53,11 @@ def _consent_headers_for_redirect(redirect_uri: str) -> dict[str, str]:
 def _redirect(redirect_uri: str, params: dict[str, str]) -> RedirectResponse:
     """302 to *redirect_uri* with *params* merged into its query string."""
     parts = urlsplit(redirect_uri)
-    query = parse_qsl(parts.query, keep_blank_values=True)
-    query.extend((k, v) for k, v in params.items() if v != "")
-    new_query = urlencode(query)
+    additions = urlencode([(key, value) for key, value in params.items() if value != ""])
+    if parts.query and additions:
+        new_query = f"{parts.query}&{additions}"
+    else:
+        new_query = parts.query or additions
     target = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
     return RedirectResponse(target, status_code=302)
 
