@@ -168,7 +168,7 @@ class CorrelationRepository:
     #: It must NOT be embedded as a Cypher string literal: Cypher unescapes ``\\`` and ``\b``
     #: (backspace) before the regex engine sees them, which broke this clause (#888).
     _INELIGIBLE_PATH_REGEX = (
-        r"(?i).*([\\/]|\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
+        r"(?is).*([\\/]|\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
         r"cfg|ini|gradle|html|css|png|jpg|svg)(\b|$)).*"
     )
 

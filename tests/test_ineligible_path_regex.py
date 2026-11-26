@@ -35,3 +35,11 @@ def test_predicate_uses_the_parameter_not_a_literal():
     predicate = CorrelationRepository._INELIGIBLE_ROLE_PREDICATE
     assert "$ineligible_path_regex" in predicate
     assert "\\b" not in predicate
+
+
+def test_multi_line_name_with_a_path_matches():
+    import re
+
+    from menhir.infrastructure.correlation_queries import CorrelationRepository
+
+    assert re.fullmatch(CorrelationRepository._INELIGIBLE_PATH_REGEX, "first line\nsrc/foo")
