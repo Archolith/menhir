@@ -38,6 +38,7 @@ from datetime import timezone
 from neo4j import GraphDatabase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lme_ground_truth as gt  # noqa: E402
 from _verify_valid_at_repair import (  # noqa: E402
     INGEST_CUTOFF,
     NAMESPACE_PREFIX,
@@ -57,9 +58,8 @@ def main() -> int:
                       help="restore valid_at from valid_at_ingest_original and clear the backup")
     args = ap.parse_args()
 
-    driver = GraphDatabase.driver(args.uri, auth=("neo4j", args.password))
-
     if args.revert:
+        driver = GraphDatabase.driver(args.uri, auth=("neo4j", args.password))
         with driver.session() as session:
             n = session.run(
                 "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $p "
@@ -71,12 +71,16 @@ def main() -> int:
         print(f"reverted {n} episodes to their original ingest timestamps")
         return 0
 
-    session_times = build_session_times()
+    try:
+        session_times = build_session_times()
+    except ValueError as exc:
+        print(f"invalid fixture: {exc}", file=sys.stderr)
+        return 2
     if not session_times:
         print("no fixture data; refusing to run", file=sys.stderr)
-        driver.close()
         return 2
 
+    driver = GraphDatabase.driver(args.uri, auth=("neo4j", args.password))
     with driver.session() as session:
         rows = session.run(
             "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $p "
@@ -91,7 +95,7 @@ def main() -> int:
         if sid is None:
             tally["skipped: no session id in name"] += 1
             continue
-        target = session_times.get(sid)
+        target = session_times.get((gt.question_id(row["ns"]), sid))
         if target is None:
             tally["skipped: session id absent from fixture"] += 1
             continue

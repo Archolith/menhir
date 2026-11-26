@@ -57,7 +57,7 @@ def test_apply_counts_matched_writes_and_rechecks_namespace(monkeypatch: pytest.
     driver = _Driver()
     monkeypatch.setattr(repair.GraphDatabase, "driver", lambda *args, **kwargs: driver)
     monkeypatch.setattr(repair, "build_session_times", lambda: {
-        "sid-1": datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+        ("1", "sid-1"): datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
     })
     monkeypatch.setattr(repair, "session_of", lambda _name: "sid-1")
     monkeypatch.setattr(sys, "argv", ["repair_lme_valid_at.py", "--apply"])
@@ -82,7 +82,7 @@ def test_apply_refuses_control_or_repaired_mismatch_before_write_session(
     }])
     monkeypatch.setattr(repair.GraphDatabase, "driver", lambda *args, **kwargs: driver)
     monkeypatch.setattr(repair, "build_session_times", lambda: {
-        "sid-1": datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+        ("1", "sid-1"): datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
     })
     monkeypatch.setattr(repair, "session_of", lambda _name: "sid-1")
     monkeypatch.setattr(sys, "argv", ["repair_lme_valid_at.py", "--apply"])
@@ -136,7 +136,7 @@ def test_verifier_scopes_prefix_and_fails_on_controls_and_repaired_disagreements
             return None
 
     monkeypatch.setattr(verifier.GraphDatabase, "driver", lambda *args, **kwargs: _VerifyDriver())
-    monkeypatch.setattr(verifier, "build_session_times", lambda: {"sid-1": datetime(
+    monkeypatch.setattr(verifier, "build_session_times", lambda: {("1", "sid-1"): datetime(
         2023, 5, 25, 20, 21, tzinfo=timezone.utc)})
     monkeypatch.setattr(verifier.gt, "load", lambda: {"question": {}})
     monkeypatch.setattr(verifier, "session_of", lambda _name: "sid-1")
@@ -146,3 +146,42 @@ def test_verifier_scopes_prefix_and_fails_on_controls_and_repaired_disagreements
     output = capsys.readouterr().out
     assert "already correct, fixture DISAGREES" in output
     assert "repaired row, fixture DISAGREES" in output
+
+
+def test_fixture_index_scopes_shared_hyphenated_session_ids_by_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sid = "answer_ab-cd_1"
+    suffix = "644c0e5a-1234-4321-aaaa-123456789abc"
+    monkeypatch.setattr(verifier.gt, "load", lambda: {
+        "first": {"haystack_session_ids": [sid], "haystack_dates": ["2023/05/25 (Thu) 20:21"]},
+        "second": {"haystack_session_ids": [sid], "haystack_dates": ["2023/05/27 (Sat) 10:20"]},
+    })
+
+    for prefix in ("episode-", "episode-lme-first-"):
+        assert verifier.session_of(f"{prefix}{sid}-{suffix}") == sid
+
+    assert verifier.build_session_times() == {
+        ("first", sid): datetime(2023, 5, 25, 20, 21, tzinfo=timezone.utc),
+        ("second", sid): datetime(2023, 5, 27, 10, 20, tzinfo=timezone.utc),
+    }
+
+
+@pytest.mark.parametrize("script", [repair, verifier])
+def test_conflicting_fixture_dates_refuse_before_opening_driver(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], script,
+) -> None:
+    monkeypatch.setattr(script.gt, "load", lambda: {
+        "first": {
+            "haystack_session_ids": ["answer_shared", "answer_shared"],
+            "haystack_dates": ["2023/05/25 (Thu) 20:21", "2023/05/27 (Sat) 10:20"],
+        }
+    })
+    monkeypatch.setattr(sys, "argv", [script.__name__])
+
+    def unexpected_connection(*_args, **_kwargs):
+        pytest.fail("Conflicting fixture reached driver creation.")
+
+    monkeypatch.setattr(script.GraphDatabase, "driver", unexpected_connection)
+    assert script.main() == 2
+    assert "conflicting fixture dates for first/answer_shared" in capsys.readouterr().err
