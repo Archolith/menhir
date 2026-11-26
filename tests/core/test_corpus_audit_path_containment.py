@@ -7,6 +7,7 @@ can read and get back its markdown paths, statuses, titles and commit ids.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ import pytest
 from menhir.api.routes import _required_tier_for_operation
 from menhir.core.backend_runtime_admin_ops import RuntimeProviderAdminOpsMixin
 from menhir.core.ingest_guard import IngestPathNotAllowedError
+from menhir.infrastructure.artifact_corpus_scanner import collect_git_evidence
 from menhir.mcp.service_access import bind_request_tier, reset_request_tier
 
 pytestmark = pytest.mark.unit
@@ -83,3 +85,41 @@ async def test_operator_keeps_its_reach(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_dispatch_requires_agent_tier_for_the_audit() -> None:
     assert _required_tier_for_operation("fetch_artifact_corpus_audit") == "agent"
+
+
+def test_nested_corpus_git_renames_are_relative_to_the_corpus_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    corpus = repo / "nested-corpus"
+    plans = corpus / ".agent" / "plans"
+    plans.mkdir(parents=True)
+    (repo / "outside-old.md").write_text("outside", encoding="utf-8")
+    (plans / "old.md").write_text("old", encoding="utf-8")
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    git("init", "--quiet")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Corpus Test")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "base")
+    base = git("rev-parse", "HEAD")
+
+    (plans / "old.md").rename(plans / "new.md")
+    (repo / "outside-old.md").rename(repo / "outside-new.md")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "rename")
+
+    evidence = collect_git_evidence(corpus, from_commit=base)
+
+    assert evidence.rename_evidence_available
+    assert set(evidence.blob_oids) == {".agent/plans/new.md"}
+    assert [(rename.old_path, rename.new_path) for rename in evidence.renames] == [
+        (".agent/plans/old.md", ".agent/plans/new.md")
+    ]
