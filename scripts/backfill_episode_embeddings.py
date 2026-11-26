@@ -118,12 +118,17 @@ async def _run(args: argparse.Namespace) -> int:
             if client is None:
                 client, embed_model = _resolve_embedder(settings)
             for row in rows:
-                content = str(row.get("content") or "")[:_EMBED_MAX_CHARS]
+                listed_content = str(row.get("content") or "")
+                content = listed_content[:_EMBED_MAX_CHARS]
                 if not content.strip():
                     skipped += 1
                     continue
                 embedding = await _embed_text(client, model=embed_model, text=content)
-                if repo.set_episode_content_embedding(str(row["uuid"]), embedding, embed_model):
+                # The bounded text is the model input; the full listed value is the conditional
+                # write premise, so a change after listing cannot stamp a stale vector.
+                if repo.set_episode_content_embedding(
+                    str(row["uuid"]), embedding, embed_model, expected_content=listed_content
+                ):
                     written += 1
                 else:
                     skipped += 1
