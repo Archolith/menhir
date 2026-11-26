@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import menhir.infrastructure.providers as providers
 from menhir.config import MemorySettings
 from menhir.infrastructure.providers import (
     OpenAIStyleChatBackend,
@@ -242,5 +247,45 @@ async def test_openai_style_backend_uses_openai_client() -> None:
     ]
     assert mock_create.call_args.kwargs["model"] == "test-model"
     assert mock_create.call_args.kwargs["max_tokens"] == 64
+
+
+@pytest.mark.unit
+def test_same_key_concurrent_calls_construct_one_client(monkeypatch) -> None:
+    monkeypatch.setattr(providers, "_openai_client_cache", {})
+    start = threading.Barrier(2, timeout=5)
+    constructed = []
+
+    def build_client(**kwargs) -> SimpleNamespace:
+        time.sleep(0.025)  # Let a competing lookup reach the cache during construction.
+        create = AsyncMock(
+            return_value=SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+            )
+        )
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        constructed.append(client)
+        return client
+
+    backend = build_chat_backend(
+        MemorySettings(),
+        dependencies=ProviderRuntimeDependencies(openai_client_factory=build_client),
+    )
+
+    def run_call() -> str:
+        start.wait()
+        return asyncio.run(backend.create_chat_completion(
+            system_prompt="", user_prompt="", operation="fixture", max_tokens=1, temperature=0,
+        ))
+
+    with (
+        patch.object(providers, "start_llm_usage_call"),
+        patch.object(providers, "complete_llm_usage_call"),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        jobs = [pool.submit(run_call) for _ in range(2)]
+        results = [job.result(timeout=5) for job in jobs]
+    assert results == ["ok", "ok"]
+    assert len(constructed) == 1
+    assert constructed[0].chat.completions.create.await_count == 2
 
 

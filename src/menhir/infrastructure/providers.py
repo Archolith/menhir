@@ -274,14 +274,13 @@ class OpenAIStyleChatBackend:
         )
         with _openai_client_cache_lock:
             client = _openai_client_cache.get(cache_key)
-        if client is None:
-            client = self.dependencies.openai_client_factory(
-                base_url=base_url,
-                api_key=self.provider.api_key,
-                settings=self.settings,
-                request_timeout_s=self.dependencies.request_timeout_s,
-            )
-            with _openai_client_cache_lock:
+            if client is None:
+                client = self.dependencies.openai_client_factory(
+                    base_url=base_url,
+                    api_key=self.provider.api_key,
+                    settings=self.settings,
+                    request_timeout_s=self.dependencies.request_timeout_s,
+                )
                 _openai_client_cache[cache_key] = client
         # CF-234: this backend announced nothing, so every `LLMAdapter` call it served was
         # invisible to both LLM budgets -- including the judge fan-out (3 calls per proposal per
