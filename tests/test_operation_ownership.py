@@ -126,6 +126,32 @@ def test_expired_claim_classifies_as_abandoned():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("pid", [0, -1])
+def test_nonpositive_pid_is_malformed_not_death_evidence(pid, monkeypatch):
+    def unexpected_pid_probe(_pid):
+        pytest.fail("Malformed owner token reached the PID probe")
+
+    monkeypatch.setattr(process_liveness, "pid_alive", unexpected_pid_probe)
+    row = {
+        "owner_token": f"someone-else:{process_liveness.hostname()}:{pid}:abc",
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+    }
+    assert oo.classify_ownership(row) == oo.OWNER_UNKNOWN
+
+
+@pytest.mark.unit
+def test_explicit_attestation_still_authorizes_malformed_pid():
+    token = f"someone-else:{process_liveness.hostname()}:0:abc"
+    row = {
+        "owner_token": token,
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+        "owner_death_attested_by": "operator",
+        "owner_death_attested_for_token": token,
+    }
+    assert oo.classify_ownership(row) == oo.ABANDONED
+
+
+@pytest.mark.unit
 def test_a_nonpositive_lease_is_never_minted_already_dead():
     """A clamped-to-1s claim still reads live for a moment, rather than inviting instant replay."""
     row = {"owner_token": "t:h:1:a", "owner_lease_expires_at": oo.lease_expiry_iso(seconds=0)}

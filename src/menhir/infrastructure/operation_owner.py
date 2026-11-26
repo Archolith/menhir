@@ -240,9 +240,12 @@ def _owner_parts(token: str) -> tuple[str, int] | None:
     if len(parts) != 4:
         return None
     try:
-        return parts[1], int(parts[2])
+        pid = int(parts[2])
     except (TypeError, ValueError):
         return None
+    if pid <= 0:
+        return None
+    return parts[1], pid
 
 
 #: Deployment assertion: hostname equality in an owner token really does identify the SAME PID
