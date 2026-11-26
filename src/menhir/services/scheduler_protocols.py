@@ -10,6 +10,10 @@ if TYPE_CHECKING:
     from menhir.infrastructure.project_scanner import ProjectScanResult
     from menhir.services.lifecycle_models import ConsolidationResult, DecayResult
 
+#: Reserved result key (#1005): a scheduled job that returns ``{JOB_FAILED_KEY: True, ...}`` is
+#: recorded as unsuccessful. Opt-in; a job that never sets it is recorded exactly as before.
+JOB_FAILED_KEY = "job_failed"
+
 
 class SchedulerIngestService(Protocol):
     async def recover_stale_enrichment_leases(self, limit: int = 100) -> tuple[int, int]:

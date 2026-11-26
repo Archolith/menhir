@@ -2185,12 +2185,19 @@ class MemoryQueryRepository:
         new_text: str | None,
         delete: bool = False,
         embedding: Sequence[float] | None = None,
+        embedding_missing: bool = False,
+        reembed: bool = False,
     ) -> bool:
         """CAS write of a re-derive result; True only when it applied.
 
         Applies only if the item still has ``rederive_pending`` with the same
         ``rederive_flagged_at`` and the same source-episode set the caller read. The repair node
         is finished in the same statement ('done', or 'deleted' for a deleted fact edge).
+
+        ``embedding_missing`` (fact rewrite whose embedder failed, #1005): the rewrite applies but
+        the repair becomes 'embed_pending' instead of 'done'. ``reembed`` writes only the
+        embedding of an 'embed_pending' repair's fact, and only while the edge is unflagged and its
+        fact still equals ``new_text``; the repair then becomes 'done'.
         """
         params = {
             "repair_key": repair_key,
@@ -2199,13 +2206,25 @@ class MemoryQueryRepository:
             "episodes": list(episodes),
             "new_text": new_text,
             "embedding": list(embedding) if embedding is not None else None,
+            "embedding_missing": bool(embedding_missing),
         }
         edge_guard = (
             "coalesce(r['rederive_pending'], false) "
             "AND toString(r['rederive_flagged_at']) = $flagged_at "
             "AND coalesce(r.episodes, []) = $episodes"
         )
-        if item_kind == "fact" and delete:
+        if item_kind == "fact" and reembed:
+            if embedding is None:
+                return False
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                "WHERE rr.status = 'embed_pending' "
+                + self._REDERIVE_EDGE_MATCH
+                + " AND NOT coalesce(r['rederive_pending'], false) AND r.fact = $new_text "
+                "SET r.fact_embedding = $embedding, rr.status = 'done', rr.finished_at = datetime() "
+                "RETURN count(r) AS c"
+            )
+        elif item_kind == "fact" and delete:
             query = (
                 "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
                 + self._REDERIVE_EDGE_MATCH
@@ -2220,7 +2239,8 @@ class MemoryQueryRepository:
                 + f" AND {edge_guard} "
                 "SET r.fact = $new_text, r.fact_embedding = $embedding, "
                 + self._REDERIVE_CLEAR.format(v="r")
-                + ", rr.status = 'done', rr.finished_at = datetime() "
+                + ", rr.status = CASE WHEN $embedding_missing THEN 'embed_pending' ELSE 'done' END, "
+                "rr.finished_at = CASE WHEN $embedding_missing THEN null ELSE datetime() END "
                 "RETURN count(r) AS c"
             )
         else:
@@ -2240,11 +2260,12 @@ class MemoryQueryRepository:
         return bool(rows) and int(rows[0].get("c") or 0) > 0
 
     def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
-        """Set a pending repair's terminal status (e.g. 'obsolete' when the item is gone)."""
+        """Set a pending (or embed_pending) repair's terminal status (e.g. 'obsolete' when the
+        item is gone)."""
         rows = self.neo4j.execute(
             """
             MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
-            WHERE rr.status = 'pending'
+            WHERE rr.status IN ['pending', 'embed_pending']
             SET rr.status = $status, rr.finished_at = datetime()
             RETURN count(rr) AS c
             """,
@@ -2253,17 +2274,88 @@ class MemoryQueryRepository:
         return bool(rows) and int(rows[0].get("c") or 0) > 0
 
     def defer_derived_rederive(self, repair_key: str) -> bool:
-        """Move a pending repair behind the rest of the queue without spending an attempt (#874)."""
+        """Move a pending (or embed_pending) repair behind the rest of its queue without spending
+        an attempt (#874)."""
         rows = self.neo4j.execute(
             """
             MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
-            WHERE rr.status = 'pending'
+            WHERE rr.status IN ['pending', 'embed_pending']
             SET rr.deferred_at = datetime()
             RETURN count(rr) AS c
             """,
             params={"repair_key": repair_key},
         )
         return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def list_embed_pending_derived_rederive(self, limit: int) -> list[dict[str, Any]]:
+        """Rewritten facts whose embedding failed (#1005), oldest first, deferred ones last."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair)
+            WHERE rr.status = 'embed_pending'
+            RETURN rr.repair_key AS repair_key, rr.item_uuid AS item_uuid,
+                   rr.item_kind AS item_kind
+            ORDER BY coalesce(rr.deferred_at, rr.created_at) ASC, rr.repair_key ASC
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [dict(row) for row in rows]
+
+    def requeue_failed_derived_rederive(
+        self, cooldown_days: float, limit: int, max_requeues: int
+    ) -> list[dict[str, Any]]:
+        """Move up to ``limit`` 'failed' repairs whose last attempt is older than the cooldown back
+        to 'pending' with attempts reset (#1005). Requeued repairs go behind the pending queue. A
+        repair already requeued ``max_requeues`` times stays 'failed'.
+
+        Only the repair node changes; the repair key (erasure replay reads it by prefix) is kept.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair)
+            WHERE rr.status = 'failed'
+              AND coalesce(rr.requeue_count, 0) < $max_requeues
+              AND coalesce(rr.last_attempt_at, rr.created_at)
+                  < datetime() - duration({seconds: $cooldown_s})
+            WITH rr
+            ORDER BY coalesce(rr.last_attempt_at, rr.created_at) ASC, rr.repair_key ASC
+            LIMIT $limit
+            SET rr.status = 'pending', rr.attempts = 0, rr.deferred_at = datetime(),
+                rr.requeued_at = datetime(), rr.requeue_count = coalesce(rr.requeue_count, 0) + 1
+            RETURN rr.repair_key AS repair_key, rr.item_kind AS item_kind,
+                   rr.last_error AS last_error, rr.requeue_count AS requeue_count
+            """,
+            params={
+                "cooldown_s": int(float(cooldown_days) * 86400),
+                "limit": int(limit),
+                "max_requeues": int(max_requeues),
+            },
+        )
+        return [dict(row) for row in rows]
+
+    def record_derived_rederive_embed_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        """Count an item-specific re-embed failure of an 'embed_pending' repair (#1005) and move it
+        behind that queue; 'embed_failed' at the cap (the fact keeps its text, with no vector)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'embed_pending'
+            WITH rr, coalesce(rr.embed_attempts, 0) + 1 AS n
+            SET rr.embed_attempts = n, rr.last_error = $error_class, rr.deferred_at = datetime(),
+                rr.status = CASE WHEN n >= $max_attempts THEN 'embed_failed' ELSE 'embed_pending' END,
+                rr.finished_at = CASE WHEN n >= $max_attempts THEN datetime() ELSE rr.finished_at END
+            RETURN rr.status AS status
+            """,
+            params={
+                "repair_key": repair_key,
+                "error_class": str(error_class)[:80],
+                "max_attempts": int(max_attempts),
+            },
+        )
+        return str(rows[0]["status"]) if rows else None
 
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int

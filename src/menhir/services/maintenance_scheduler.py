@@ -23,6 +23,7 @@ from menhir.services.scheduler_lease import (
     register_local_scheduler,
 )
 from menhir.services.scheduler_protocols import (
+    JOB_FAILED_KEY,
     SchedulerGraphAdapter,
     SchedulerIngestService,
     SchedulerLeaseStoreProtocol,
@@ -838,13 +839,17 @@ class MaintenanceScheduler:
         result: dict[str, object]
         try:
             result = await self._await_job_under_lease(coro, operation)
+            # #1005: opt-in. Only a job that returns the reserved key true is recorded as failed;
+            # it still ran to completion and is rescheduled on its interval like any other.
+            success = not (isinstance(result, dict) and result.get(JOB_FAILED_KEY) is True)
             record_mcp_event(
                 kind="background",
                 operation=operation,
                 payload=result,
                 result=result,
                 duration_ms=int((asyncio.get_running_loop().time() - started) * 1000),
-                success=True,
+                success=success,
+                **({} if success else {"error": "job reported failure"}),
             )
         except _LeaseLostDuringJob as exc:
             # Not a job failure: the job was abandoned deliberately because a second owner may
