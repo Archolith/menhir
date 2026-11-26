@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -113,6 +114,88 @@ def test_provider_config_for_graphiti_reranker_explicit_model_override() -> None
 
     assert config.kind is ProviderKind.OPENAI
     assert config.chat_model == "gpt-5-mini"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("selector", "override_field", "expected_kind", "expected_base_url"),
+    [
+        (
+            ProviderConfig.for_graphiti_llm,
+            None,
+            ProviderKind.LOCAL,
+            "http://localhost:1234/v1",
+        ),
+        (
+            ProviderConfig.for_graphiti_embedder,
+            "graphiti_embed_provider",
+            ProviderKind.OPENAI,
+            "https://api.openai.com/v1",
+        ),
+        (
+            ProviderConfig.for_graphiti_reranker,
+            "graphiti_reranker_provider",
+            ProviderKind.OPENAI,
+            "https://api.openai.com/v1",
+        ),
+    ],
+)
+def test_graphiti_selectors_ignore_invalid_chat_provider_when_override_is_valid(
+    selector: Callable[[MemorySettings], ProviderConfig],
+    override_field: str | None,
+    expected_kind: ProviderKind,
+    expected_base_url: str,
+) -> None:
+    settings = MemorySettings(
+        chat_provider="not-a-provider",
+        graphiti_provider="local",
+        graphiti_embed_provider="openai" if override_field == "graphiti_embed_provider" else "",
+        graphiti_reranker_provider="openai" if override_field == "graphiti_reranker_provider" else "",
+        local_llm_base_url="http://localhost:1234/v1",
+        openai_api_key="openai-key",
+        openai_chat_model="gpt-5-mini",
+    )
+
+    config = selector(settings)
+
+    assert config.kind is expected_kind
+    assert config.base_url == expected_base_url
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ProviderConfig.for_graphiti_llm,
+        ProviderConfig.for_graphiti_embedder,
+        ProviderConfig.for_graphiti_reranker,
+    ],
+)
+def test_graphiti_selectors_reject_invalid_chat_provider_fallback(
+    selector: Callable[[MemorySettings], ProviderConfig],
+) -> None:
+    settings = MemorySettings(
+        chat_provider="not-a-provider",
+        graphiti_provider="  ",
+        graphiti_embed_provider="  ",
+        graphiti_reranker_provider="  ",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported LLM provider"):
+        selector(settings)
+
+
+@pytest.mark.unit
+def test_graphiti_whitespace_overrides_keep_existing_chat_fallback() -> None:
+    settings = MemorySettings(
+        chat_provider="openai",
+        graphiti_provider="local",
+        graphiti_embed_provider="  ",
+        graphiti_reranker_provider="  ",
+    )
+
+    assert ProviderConfig.for_graphiti_embedder(settings).kind is ProviderKind.OPENAI
+    assert ProviderConfig.for_graphiti_reranker(settings).kind is ProviderKind.OPENAI
 
 
 @pytest.mark.unit

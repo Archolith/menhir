@@ -100,20 +100,24 @@ class ProviderConfig:
         kind = parse_provider_kind(settings.chat_provider)
         return cls._base_for_kind(kind, settings)
 
+    @staticmethod
+    def _for_graphiti_kind(
+        provider: str | ProviderKind | None,
+        settings: MemorySettings,
+    ) -> ProviderKind:
+        if provider is None or not str(provider).strip():
+            return parse_provider_kind(settings.chat_provider)
+        return parse_provider_kind(provider)
+
     @classmethod
     def for_graphiti_llm(cls, settings: MemorySettings) -> "ProviderConfig":
-        kind = parse_provider_kind(
-            settings.graphiti_provider,
-            default=parse_provider_kind(settings.chat_provider),
-        )
+        kind = cls._for_graphiti_kind(settings.graphiti_provider, settings)
         return cls._base_for_kind(kind, settings)
 
     @classmethod
     def for_graphiti_embedder(cls, settings: MemorySettings) -> "ProviderConfig":
-        kind = parse_provider_kind(
-            settings.graphiti_embed_provider or settings.graphiti_provider,
-            default=parse_provider_kind(settings.chat_provider),
-        )
+        provider = settings.graphiti_embed_provider or settings.graphiti_provider
+        kind = cls._for_graphiti_kind(provider, settings)
         base = cls._base_for_kind(kind, settings)
         # Local embed may use a separate base URL (different port/server)
         if kind is ProviderKind.LOCAL and settings.local_llm_embed_base_url:
@@ -128,10 +132,8 @@ class ProviderConfig:
 
     @classmethod
     def for_graphiti_reranker(cls, settings: MemorySettings) -> "ProviderConfig":
-        kind = parse_provider_kind(
-            settings.graphiti_reranker_provider or settings.graphiti_provider,
-            default=parse_provider_kind(settings.chat_provider),
-        )
+        provider = settings.graphiti_reranker_provider or settings.graphiti_provider
+        kind = cls._for_graphiti_kind(provider, settings)
         return cls._base_for_kind(kind, settings)
 
     def supports_graphiti_openai_contract(self) -> bool:
