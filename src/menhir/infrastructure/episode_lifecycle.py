@@ -77,6 +77,15 @@ _PROVIDER_CONTEXT_LIMIT_MARKERS = (
 #: consuming claim cycles eventually.
 TRANSIENT_RETRY_CAP = 20
 
+#: The failure timestamp the retry job orders FAILED candidates by (#925). Every writer that moves
+#: an episode into FAILED stamps `processing_completed_at = datetime()`, so a fresh failure always
+#: changes this value.
+_FAILED_AT = "coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at)"
+
+#: A parked retry candidate is re-examined after this long, so a raised attempt cap or a
+#: classifier change can still pick it up without an operator requeue (#925).
+RETRY_PARK_RECHECK_S = 24 * 3600
+
 
 def is_recoverable_context_window_error(error: object | None) -> bool:
     """Return True for a context-window error a config change could clear.
@@ -1000,13 +1009,57 @@ class EpisodeLifecycleRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
+            .where(
+                "n.processing_state = 'FAILED'",
+                EPISODE_NOT_ERASED,
+                EPISODE_NOT_MARKED,
+                # #925: skip a row parked for THIS failure. The marker names the failure it was
+                # parked for, so a later failure (new timestamp) is a candidate again even if no
+                # requeue path cleared the marker.
+                "(properties(n)['retry_parked_for'] IS NULL"
+                f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})"
+                " OR properties(n)['retry_parked_at']"
+                " < datetime() - duration({seconds: $park_recheck_s}))",
+            )
             .return_fields(EPISODE_RETRY_FIELDS)
-            .order_by("coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at) ASC")
+            .order_by(f"{_FAILED_AT} ASC")
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"limit": safe_limit})
+        return self.neo4j.execute(
+            query, params={"limit": safe_limit, "park_recheck_s": RETRY_PARK_RECHECK_S}
+        )
+
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        """Mark a FAILED episode the retry job judged not retryable for this failure (#925).
+
+        Only the retry candidate query reads the marker; the episode stays FAILED for every
+        other reader. `failed_at` is the candidate row's `processing_completed_at` (the ordering
+        timestamp as a string): the write is a no-op if the episode has failed again since.
+        """
+        query = (
+            Cypher()
+            .match("(n:Episodic {uuid: $episode_uuid})")
+            .where(
+                "n.processing_state = 'FAILED'",
+                f"toString({_FAILED_AT}) = $failed_at",
+                EPISODE_NOT_MARKED,
+            )
+            .set(
+                (
+                    "n.retry_parked_at = datetime()",
+                    "n.retry_parked_for = $failed_at",
+                    "n.retry_parked_reason = $reason",
+                )
+            )
+            .return_raw("count(n) AS parked")
+            .build()
+        )
+        rows = self.neo4j.execute(
+            query,
+            params={"episode_uuid": episode_uuid, "failed_at": failed_at, "reason": reason},
+        )
+        return bool(rows and int(rows[0].get("parked", 0)) > 0)
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Group FAILED episodes by their error text, most common first.

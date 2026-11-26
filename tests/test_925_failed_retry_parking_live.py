@@ -1,0 +1,112 @@
+"""#925 live: the retry candidate query skips a row parked for its current failure only.
+
+Online because the exclusion compares a stored string against `toString(coalesce(...))` of a
+Neo4j datetime, and the park write is fenced on that same value.
+"""
+
+from __future__ import annotations
+
+import uuid as uuidlib
+
+import pytest
+
+from menhir.infrastructure.episode_lifecycle import EpisodeLifecycleRepository
+
+pytestmark = pytest.mark.online
+
+
+@pytest.fixture
+def graph(test_neo4j_repo):
+    tag = f"i925-{uuidlib.uuid4().hex[:10]}"
+    u = {k: f"{tag}-{k}" for k in ("parked", "open")}
+    test_neo4j_repo.execute(
+        """
+        UNWIND $rows AS row
+        CREATE (n:Episodic {uuid: row.uuid, name: row.uuid, namespace: $ns, content: 'x',
+                            processing_state: 'FAILED', processing_attempts: 1,
+                            processing_error: 'Failed to extract JSON from LLM response',
+                            created_at: datetime(row.at), processing_completed_at: datetime(row.at),
+                            test_tag: $tag})
+        """,
+        params={
+            "ns": f"{tag}-ns",
+            "tag": tag,
+            "rows": [
+                {"uuid": u["parked"], "at": "1990-01-01T00:00:00Z"},
+                {"uuid": u["open"], "at": "1990-01-02T00:00:00Z"},
+            ],
+        },
+    )
+    repo = EpisodeLifecycleRepository()
+    repo.neo4j = test_neo4j_repo
+    try:
+        yield repo, test_neo4j_repo, u
+    finally:
+        test_neo4j_repo.execute("MATCH (n {test_tag: $t}) DETACH DELETE n", params={"t": tag})
+
+
+def _candidates(repo: EpisodeLifecycleRepository, u: dict) -> dict[str, dict]:
+    wanted = set(u.values())
+    return {
+        r["uuid"]: r
+        for r in repo.fetch_failed_episode_retry_candidates(limit=500)
+        if r["uuid"] in wanted
+    }
+
+
+def test_parked_row_is_skipped_until_it_fails_again(graph) -> None:
+    repo, _neo4j, u = graph
+
+    before = _candidates(repo, u)
+    assert set(before) == {u["parked"], u["open"]}
+
+    failed_at = str(before[u["parked"]]["processing_completed_at"])
+    assert repo.park_failed_episode_retry(u["parked"], failed_at=failed_at, reason="terminal")
+    assert set(_candidates(repo, u)) == {u["open"]}
+
+    # A fresh failure stamps a new processing_completed_at; the stale marker no longer matches.
+    assert repo.mark_episode_failed(u["parked"], "Failed to load model")
+    assert set(_candidates(repo, u)) == {u["parked"], u["open"]}
+
+
+def test_park_is_a_noop_for_a_failure_it_was_not_judged_for(graph) -> None:
+    repo, _neo4j, u = graph
+
+    assert not repo.park_failed_episode_retry(
+        u["parked"], failed_at="1970-01-01T00:00:00Z", reason="terminal"
+    )
+    assert u["parked"] in _candidates(repo, u)
+
+
+def test_park_is_a_noop_once_the_row_left_failed(graph) -> None:
+    repo, neo4j, u = graph
+    failed_at = str(_candidates(repo, u)[u["parked"]]["processing_completed_at"])
+    neo4j.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.processing_state = 'PENDING'",
+        params={"u": u["parked"]},
+    )
+
+    assert not repo.park_failed_episode_retry(u["parked"], failed_at=failed_at, reason="terminal")
+
+
+def test_park_expires_after_the_recheck_window(graph) -> None:
+    repo, neo4j, u = graph
+    failed_at = str(_candidates(repo, u)[u["parked"]]["processing_completed_at"])
+    assert repo.park_failed_episode_retry(u["parked"], failed_at=failed_at, reason="exhausted")
+    assert u["parked"] not in _candidates(repo, u)
+
+    neo4j.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.retry_parked_at = datetime() - duration({days: 2})",
+        params={"u": u["parked"]},
+    )
+
+    assert u["parked"] in _candidates(repo, u)
+
+
+def test_parked_row_stays_failed_for_other_readers(graph) -> None:
+    repo, _neo4j, u = graph
+    failed_at = str(_candidates(repo, u)[u["parked"]]["processing_completed_at"])
+    assert repo.park_failed_episode_retry(u["parked"], failed_at=failed_at, reason="terminal")
+
+    row = repo.fetch_episode_processing(u["parked"])
+    assert row is not None and row["processing_state"] == "FAILED"
