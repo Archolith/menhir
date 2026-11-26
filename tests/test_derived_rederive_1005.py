@@ -13,6 +13,8 @@ import pytest
 from menhir.services import derived_rederive as dr
 from menhir.services.derived_rederive import (
     MAX_ATTEMPTS,
+    MAX_EMBED_ATTEMPTS,
+    MAX_REQUEUES,
     REQUEUE_COOLDOWN_DAYS,
     REQUEUE_LIMIT,
     run_derived_rederive,
@@ -124,7 +126,7 @@ class Adapter(FakeAdapter):
 
     def __init__(self, items, repairs, **kw):
         super().__init__(items, repairs, **kw)
-        self.requeue_calls: list[tuple[float, int]] = []
+        self.requeue_calls: list[tuple[float, int, int]] = []
         self.deferred: list[str] = []
 
     def record_derived_rederive_failure(self, repair_key, error_class, max_attempts):
@@ -132,12 +134,13 @@ class Adapter(FakeAdapter):
         self.repairs[repair_key]["last_attempt_at"] = NOW
         return status
 
-    def requeue_failed_derived_rederive(self, cooldown_days, limit):
-        self.requeue_calls.append((cooldown_days, limit))
+    def requeue_failed_derived_rederive(self, cooldown_days, limit, max_requeues):
+        self.requeue_calls.append((cooldown_days, limit, max_requeues))
         cutoff = NOW - timedelta(days=cooldown_days)
         due = sorted(
             (r for r in self.repairs.values()
-             if r["status"] == "failed" and r.get("last_attempt_at", NOW) < cutoff),
+             if r["status"] == "failed" and r.get("last_attempt_at", NOW) < cutoff
+             and r.get("requeue_count", 0) < max_requeues),
             key=lambda r: (r.get("last_attempt_at", NOW), r["repair_key"]),
         )[:limit]
         for r in due:
@@ -155,6 +158,17 @@ class Adapter(FakeAdapter):
     def defer_derived_rederive(self, repair_key):
         self.deferred.append(repair_key)
         return True
+
+    def record_derived_rederive_embed_failure(self, repair_key, error_class, max_attempts):
+        r = self.repairs[repair_key]
+        if r["status"] != "embed_pending":
+            return None
+        r["embed_attempts"] = r.get("embed_attempts", 0) + 1
+        r["last_error"] = error_class
+        self.deferred.append(repair_key)
+        if r["embed_attempts"] >= max_attempts:
+            r["status"] = "embed_failed"
+        return r["status"]
 
     def apply_derived_rederive(self, **kw):
         self.applied.append(kw)
@@ -188,14 +202,19 @@ def _fact_items(n):
 
 
 class Embedder:
-    def __init__(self, fail=False, vector=(0.5, 0.25)):
+    """``fail``: every call raises (outage). ``reject``: only these texts raise (item fault).
+    ``fail_first``: the first N calls raise, later ones (the probe included) succeed."""
+
+    def __init__(self, fail=False, vector=(0.5, 0.25), reject=(), fail_first=0):
         self.fail = fail
         self.vector = list(vector)
+        self.reject = set(reject)
+        self.fail_first = fail_first
         self.calls: list[str] = []
 
     async def embed_query(self, text):
         self.calls.append(text)
-        if self.fail:
+        if self.fail or text in self.reject or len(self.calls) <= self.fail_first:
             raise TimeoutError("embedder down")
         return self.vector
 
@@ -252,7 +271,7 @@ def test_failed_repair_past_cooldown_is_requeued_and_processed(monkeypatch):
     result = _run(adapter, FakeLLM(("supported", "new fact")), embedder=Embedder())
     assert result["requeued"] == 1 and result["rewritten"] == 1
     assert adapter.repairs["k0"]["status"] == "done"
-    assert adapter.requeue_calls == [(REQUEUE_COOLDOWN_DAYS, REQUEUE_LIMIT)]
+    assert adapter.requeue_calls == [(REQUEUE_COOLDOWN_DAYS, REQUEUE_LIMIT, MAX_REQUEUES)]
     [event] = events
     assert event["operation"] == "scheduler_derived_rederive"
     assert event["failure_stage"] == "rederive_requeued" and event["retryable"] is True
@@ -306,7 +325,7 @@ def test_requeued_repair_that_keeps_failing_fails_again_and_waits_another_cooldo
 
 def test_requeue_store_error_does_not_end_the_run():
     class _Broken(Adapter):
-        def requeue_failed_derived_rederive(self, cooldown_days, limit):
+        def requeue_failed_derived_rederive(self, cooldown_days, limit, max_requeues):
             raise RuntimeError("neo4j down")
 
     adapter = _Broken(_fact_items(1), _fact_repairs(1))
@@ -332,8 +351,9 @@ def test_failed_embedding_keeps_the_rewrite_and_queues_a_reembed():
     assert adapter.items[("fact", "u0")]["pending"] is False  # searchable again
     repair = adapter.repairs["k0"]
     assert repair["status"] == "embed_pending" and repair["attempts"] == 0
-    # The rewrite is not a failed attempt; the run is not a failure either.
-    assert result["errors"] == 0 and JOB_FAILED_KEY not in result
+    # The rewrite is not a failed attempt, but an embedder outage makes the run a failure (F18-4).
+    assert result["errors"] == 0
+    assert result["stopped_embedding"] == "embedder_unavailable" and result[JOB_FAILED_KEY] is True
 
 
 def test_reembed_on_a_later_run_finishes_the_repair():
@@ -358,7 +378,7 @@ def test_reembed_while_embedder_down_spends_nothing_and_stops():
     for _ in range(MAX_ATTEMPTS + 2):
         embedder = Embedder(fail=True)
         result = _run(adapter, llm, embedder=embedder)
-        assert len(embedder.calls) == 1  # stopped at the first failure
+        assert len(embedder.calls) == 2  # stopped at the first failure (one embed, one probe)
         assert result["stopped_embedding"] == "embedder_unavailable"
         assert result[JOB_FAILED_KEY] is True
     assert all(
@@ -371,9 +391,133 @@ def test_embedder_failure_skips_the_embedder_for_the_rest_of_the_run():
     adapter = Adapter(_fact_items(3), _fact_repairs(3))
     embedder = Embedder(fail=True)
     result = _run(adapter, FakeLLM(("supported", "new fact")), embedder=embedder)
-    assert len(embedder.calls) == 1
+    assert len(embedder.calls) == 2  # one embed, one probe that confirms the outage
     assert result["rewritten"] == 3 and result["embedding_missing"] == 3
     assert {r["status"] for r in adapter.repairs.values()} == {"embed_pending"}
+
+
+def test_inline_item_fault_with_embedder_up_keeps_inline_embedding_on():
+    adapter = Adapter(_fact_items(3), _fact_repairs(3))
+    embedder = Embedder(fail_first=1)  # the first fact's embed fails; the probe and the rest work
+    result = _run(adapter, FakeLLM(("supported", "new fact")), embedder=embedder)
+    assert len(embedder.calls) == 4  # embed, probe, embed, embed
+    assert result["rewritten"] == 3 and result["embedding_missing"] == 1
+    assert "stopped_embedding" not in result and JOB_FAILED_KEY not in result
+    assert [r["status"] for r in adapter.repairs.values()] == ["embed_pending", "done", "done"]
+
+
+# --------------------------------------------------------------------------- item-specific re-embed
+def _embed_pending(n, poison=("u0",)):
+    """n 'embed_pending' repairs; the facts in ``poison`` have text the embedder rejects."""
+    adapter = Adapter(_fact_items(n), _fact_repairs(n))
+    _run(adapter, FakeLLM(("supported", "new fact")), embedder=Embedder(fail=True))
+    assert {r["status"] for r in adapter.repairs.values()} == {"embed_pending"}
+    for u in poison:
+        adapter.items[("fact", u)]["text"] = "poison fact"
+    return adapter
+
+
+def _failure_rows(stage):
+    from menhir.infrastructure.telemetry import telemetry_store
+
+    with telemetry_store._connect() as conn:
+        return conn.execute(
+            "SELECT processing_attempt, details_json FROM failure_events "
+            "WHERE operation = 'scheduler_derived_rederive' AND failure_stage = ?",
+            (stage,),
+        ).fetchall()
+
+
+def test_reembed_item_fault_with_embedder_up_spends_an_attempt_and_continues():
+    adapter = _embed_pending(3)
+    embedder = Embedder(reject={"poison fact"})
+    result = _run(adapter, FakeLLM(("supported", "new fact")), embedder=embedder)
+    assert "stopped_embedding" not in result
+    assert result["reembedded"] == 2 and result["errors"] == 1 and result["embed_failed"] == 0
+    assert result[JOB_FAILED_KEY] is True  # a spent attempt, like the main pass
+    poisoned = adapter.repairs["k0"]
+    assert poisoned["status"] == "embed_pending" and poisoned["embed_attempts"] == 1
+    assert poisoned["attempts"] == 0  # the LLM attempts are untouched
+    assert "k0" in adapter.deferred
+    assert [adapter.repairs[k]["status"] for k in ("k1", "k2")] == ["done", "done"]
+
+
+def test_reembed_item_fault_gives_up_at_max_embed_attempts_with_one_event():
+    adapter = _embed_pending(1)
+    llm = FakeLLM(("supported", "new fact"))
+    for i in range(MAX_EMBED_ATTEMPTS):
+        result = _run(adapter, llm, embedder=Embedder(reject={"poison fact"}))
+        assert result["embed_failed"] == (1 if i == MAX_EMBED_ATTEMPTS - 1 else 0)
+    repair = adapter.repairs["k0"]
+    assert repair["status"] == "embed_failed" and repair["embed_attempts"] == MAX_EMBED_ATTEMPTS
+    item = adapter.items[("fact", "u0")]
+    assert item["text"] == "poison fact" and item["pending"] is False  # rewrite kept
+    assert item.get("embedding") is None
+    rows = _failure_rows("reembed_attempts_exhausted")
+    assert len(rows) == 1 and rows[0][0] is None
+    # Terminal: later runs do not list it again.
+    embedder = Embedder(reject={"poison fact"})
+    later = _run(adapter, llm, embedder=embedder)
+    assert embedder.calls == [] and JOB_FAILED_KEY not in later
+    assert len(_failure_rows("reembed_attempts_exhausted")) == 1
+
+
+def test_reembed_item_error_with_embedder_up_spends_an_attempt():
+    class _Raising(Adapter):
+        def load_derived_rederive_item(self, kind, uuid):
+            if uuid == "u0" and self.repairs["k0"]["status"] == "embed_pending":
+                raise RuntimeError("graph error on this edge")
+            return super().load_derived_rederive_item(kind, uuid)
+
+    adapter = _Raising(_fact_items(2), _fact_repairs(2))
+    llm = FakeLLM(("supported", "new fact"))
+    _run(adapter, llm, embedder=Embedder(fail=True))
+    result = _run(adapter, llm, embedder=Embedder())
+    assert result["reembedded"] == 1 and result["errors"] == 1
+    assert "stopped_embedding" not in result
+    assert adapter.repairs["k0"]["embed_attempts"] == 1
+    assert adapter.repairs["k0"]["last_error"] == "RuntimeError"
+
+
+def test_reembed_item_fault_with_embedder_down_stops_and_spends_nothing():
+    adapter = _embed_pending(3)
+    embedder = Embedder(fail=True)
+    result = _run(adapter, FakeLLM(("supported", "new fact")), embedder=embedder)
+    assert result["stopped_embedding"] == "embedder_unavailable" and result["errors"] == 0
+    assert len(embedder.calls) == 2
+    assert all(r.get("embed_attempts", 0) == 0 for r in adapter.repairs.values())
+
+
+# --------------------------------------------------------------------------- events not deduped
+def test_failure_events_reach_the_real_store_once_per_occurrence():
+    """F18-1: the store dedups on (operation, subject, stage, classification, attempt, error); a
+    non-episode event shares one subject and the error is redacted, so only processing_attempt
+    None keeps distinct repairs' events apart."""
+    adapter = Adapter(_fact_items(2), _fact_repairs(2))
+    for key in ("k0", "k1"):
+        _failed(adapter, key, REQUEUE_COOLDOWN_DAYS + 1)
+    llm = FakeLLM(verdict=None)
+    for _ in range(MAX_ATTEMPTS):
+        _run(adapter, llm)
+    requeued = _failure_rows("rederive_requeued")
+    exhausted = _failure_rows("rederive_attempts_exhausted")
+    assert len(requeued) == 2 and len(exhausted) == 2
+    assert all(row[0] is None for row in requeued + exhausted)
+    assert all('"requeue_count": 1' in row[1] for row in requeued)
+    assert all(f'"attempts": {MAX_ATTEMPTS}' in row[1] for row in exhausted)
+
+
+# --------------------------------------------------------------------------- requeue cap
+def test_requeue_stops_at_max_requeues():
+    adapter = Adapter(_fact_items(2), _fact_repairs(2))
+    _failed(adapter, "k0", REQUEUE_COOLDOWN_DAYS + 1)
+    _failed(adapter, "k1", REQUEUE_COOLDOWN_DAYS + 1)
+    adapter.repairs["k0"]["requeue_count"] = MAX_REQUEUES
+    adapter.repairs["k1"]["requeue_count"] = MAX_REQUEUES - 1
+    result = _run(adapter, FakeLLM(("supported", "x")))
+    assert result["requeued"] == 1
+    assert adapter.repairs["k0"]["status"] == "failed"
+    assert adapter.repairs["k1"]["status"] == "done"
 
 
 def test_reembed_of_a_reflagged_or_gone_fact_is_obsolete():

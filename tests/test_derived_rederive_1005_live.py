@@ -51,7 +51,7 @@ def test_requeue_moves_only_failed_repairs_past_the_cooldown(test_neo4j_repo, ta
     _failed(test_neo4j_repo, old, 8)
     _failed(test_neo4j_repo, fresh, 6)
 
-    rows = q.requeue_failed_derived_rederive(7, 1000)
+    rows = q.requeue_failed_derived_rederive(7, 1000, 3)
 
     mine = {r["repair_key"]: r for r in rows if tag in r["repair_key"]}
     assert set(mine) == {old}
@@ -72,7 +72,7 @@ def test_requeue_is_bounded_and_oldest_first(test_neo4j_repo, tag):
     for i, key in enumerate(keys):
         _failed(test_neo4j_repo, key, 36500 - i)  # keys[0] is the oldest anywhere
 
-    rows = q.requeue_failed_derived_rederive(7, 1)
+    rows = q.requeue_failed_derived_rederive(7, 1, 3)
 
     assert [r["repair_key"] for r in rows] == [keys[0]]
     assert [_repair(test_neo4j_repo, tag, k)["status"] for k in keys] == [
@@ -88,9 +88,26 @@ def test_requeue_ignores_repairs_that_are_not_failed(test_neo4j_repo, tag):
         "MATCH (rr:DerivedRederiveRepair {repair_key: $k}) SET rr.status = 'done'",
         params={"k": key},
     )
-    rows = q.requeue_failed_derived_rederive(7, 1000)
+    rows = q.requeue_failed_derived_rederive(7, 1000, 3)
     assert key not in [r["repair_key"] for r in rows]
     assert _repair(test_neo4j_repo, tag, key)["status"] == "done"
+
+
+def test_requeue_skips_repairs_at_the_requeue_cap(test_neo4j_repo, tag):
+    q = MemoryQueryRepository(test_neo4j_repo)
+    capped, below = f"{tag}-capped", f"{tag}-below"
+    _failed(test_neo4j_repo, capped, 30)
+    _failed(test_neo4j_repo, below, 30)
+    test_neo4j_repo.execute(
+        "MATCH (rr:DerivedRederiveRepair) WHERE rr.repair_key IN [$c, $b] "
+        "SET rr.requeue_count = CASE rr.repair_key WHEN $c THEN 3 ELSE 2 END",
+        params={"c": capped, "b": below},
+    )
+    rows = q.requeue_failed_derived_rederive(7, 100000, 3)
+    mine = {r["repair_key"]: r for r in rows if tag in r["repair_key"]}
+    assert set(mine) == {below} and mine[below]["requeue_count"] == 3
+    assert _repair(test_neo4j_repo, tag, capped)["status"] == "failed"
+    assert _repair(test_neo4j_repo, tag, capped)["requeue_count"] == 3
 
 
 # --------------------------------------------------------------------------- embed_pending
@@ -192,6 +209,36 @@ def test_reembed_refuses_a_reflagged_fact_and_obsolete_applies(test_neo4j_repo, 
     assert _repair(test_neo4j_repo, tag, ids["key"])["status"] == "obsolete"
 
 
+def test_embed_failure_counts_on_embed_pending_and_ends_embed_failed(test_neo4j_repo, tag):
+    q = MemoryQueryRepository(test_neo4j_repo)
+    ids = _flagged_fact(test_neo4j_repo, tag)
+    # Not embed_pending yet ('pending'): the CAS does not match.
+    assert q.record_derived_rederive_embed_failure(ids["key"], "embedding_failed", 3) is None
+    assert _repair(test_neo4j_repo, tag, ids["key"]).get("embed_attempts") is None
+    _rewrite(q, ids, embedding_missing=True)
+
+    assert q.record_derived_rederive_embed_failure(ids["key"], "embedding_failed", 3) == (
+        "embed_pending"
+    )
+    repair = _repair(test_neo4j_repo, tag, ids["key"])
+    assert repair["embed_attempts"] == 1 and repair["deferred_at"] is not None
+    assert repair.get("finished_at") is None and repair.get("attempts") in (None, 0)
+    assert q.record_derived_rederive_embed_failure(ids["key"], "RuntimeError", 3) == "embed_pending"
+    assert q.record_derived_rederive_embed_failure(ids["key"], "RuntimeError", 3) == "embed_failed"
+    repair = _repair(test_neo4j_repo, tag, ids["key"])
+    assert repair["status"] == "embed_failed" and repair["embed_attempts"] == 3
+    assert repair["finished_at"] is not None and repair["last_error"] == "RuntimeError"
+    # Terminal: no longer listed, counted, re-embedded or requeued; the rewrite stays.
+    assert ids["key"] not in [r["repair_key"] for r in q.list_embed_pending_derived_rederive(100000)]
+    assert q.record_derived_rederive_embed_failure(ids["key"], "RuntimeError", 3) is None
+    assert _reembed(q, ids) is False
+    assert ids["key"] not in [
+        r["repair_key"] for r in q.requeue_failed_derived_rederive(0, 100000, 3)
+    ]
+    edge = _edge(test_neo4j_repo, ids["edge"])
+    assert edge["fact"] == "new fact" and edge["embedding"] is None and edge["pending"] is None
+
+
 # --------------------------------------------------------------------------- erasure replay
 def test_erasure_replay_finds_requeued_and_embed_pending_repairs(test_neo4j_repo, tag):
     q = MemoryQueryRepository(test_neo4j_repo)
@@ -206,7 +253,7 @@ def test_erasure_replay_finds_requeued_and_embed_pending_repairs(test_neo4j_repo
     )
     ids["key"] = embed_key
     _rewrite(q, ids, embedding_missing=True)
-    assert [r["repair_key"] for r in q.requeue_failed_derived_rederive(7, 100000)
+    assert [r["repair_key"] for r in q.requeue_failed_derived_rederive(7, 100000, 3)
             if r["repair_key"] == failed_key] == [failed_key]
 
     class _Self:

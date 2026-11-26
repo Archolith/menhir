@@ -2300,10 +2300,11 @@ class MemoryQueryRepository:
         return [dict(row) for row in rows]
 
     def requeue_failed_derived_rederive(
-        self, cooldown_days: float, limit: int
+        self, cooldown_days: float, limit: int, max_requeues: int
     ) -> list[dict[str, Any]]:
         """Move up to ``limit`` 'failed' repairs whose last attempt is older than the cooldown back
-        to 'pending' with attempts reset (#1005). Requeued repairs go behind the pending queue.
+        to 'pending' with attempts reset (#1005). Requeued repairs go behind the pending queue. A
+        repair already requeued ``max_requeues`` times stays 'failed'.
 
         Only the repair node changes; the repair key (erasure replay reads it by prefix) is kept.
         """
@@ -2311,6 +2312,7 @@ class MemoryQueryRepository:
             """
             MATCH (rr:DerivedRederiveRepair)
             WHERE rr.status = 'failed'
+              AND coalesce(rr.requeue_count, 0) < $max_requeues
               AND coalesce(rr.last_attempt_at, rr.created_at)
                   < datetime() - duration({seconds: $cooldown_s})
             WITH rr
@@ -2321,9 +2323,36 @@ class MemoryQueryRepository:
             RETURN rr.repair_key AS repair_key, rr.item_kind AS item_kind,
                    rr.last_error AS last_error, rr.requeue_count AS requeue_count
             """,
-            params={"cooldown_s": int(float(cooldown_days) * 86400), "limit": int(limit)},
+            params={
+                "cooldown_s": int(float(cooldown_days) * 86400),
+                "limit": int(limit),
+                "max_requeues": int(max_requeues),
+            },
         )
         return [dict(row) for row in rows]
+
+    def record_derived_rederive_embed_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        """Count an item-specific re-embed failure of an 'embed_pending' repair (#1005) and move it
+        behind that queue; 'embed_failed' at the cap (the fact keeps its text, with no vector)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'embed_pending'
+            WITH rr, coalesce(rr.embed_attempts, 0) + 1 AS n
+            SET rr.embed_attempts = n, rr.last_error = $error_class, rr.deferred_at = datetime(),
+                rr.status = CASE WHEN n >= $max_attempts THEN 'embed_failed' ELSE 'embed_pending' END,
+                rr.finished_at = CASE WHEN n >= $max_attempts THEN datetime() ELSE rr.finished_at END
+            RETURN rr.status AS status
+            """,
+            params={
+                "repair_key": repair_key,
+                "error_class": str(error_class)[:80],
+                "max_attempts": int(max_attempts),
+            },
+        )
+        return str(rows[0]["status"]) if rows else None
 
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int

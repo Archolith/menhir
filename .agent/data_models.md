@@ -511,7 +511,9 @@ removes Graphiti `RELATES_TO` facts and `:Entity` nodes derived only from the er
 ones have their `fact` / `summary` / `content` blanked and get
 `rederive_pending/rederive_reason/rederive_flagged_at` plus a
 `(:DerivedRederiveRepair {repair_key, item_uuid, item_kind, namespace, status})` that the
-`derived_rederive` job resolves (`done|deleted|obsolete|failed`). Optional schema activation and
+`derived_rederive` job resolves (`done|deleted|obsolete|failed`, or `embed_pending` -> `done|embed_failed`
+for a fact rewritten without a vector, tracked by `embed_attempts`; `failed` is requeued to `pending`
+after a cooldown, at most 3 times, tracked by `requeued_at`/`requeue_count`). Optional schema activation and
 legacy reconciliation have not run, and replay tombstones remain non-operational until an HMAC key
 ring and producer checks are provided.
 

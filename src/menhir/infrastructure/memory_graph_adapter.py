@@ -1139,8 +1139,19 @@ class MemoryGraphAdapter:
     def list_embed_pending_derived_rederive(self, limit: int) -> list[dict]:
         return self._memory_queries.list_embed_pending_derived_rederive(limit)
 
-    def requeue_failed_derived_rederive(self, cooldown_days: float, limit: int) -> list[dict]:
-        return self._memory_queries.requeue_failed_derived_rederive(cooldown_days, limit)
+    def requeue_failed_derived_rederive(
+        self, cooldown_days: float, limit: int, max_requeues: int
+    ) -> list[dict]:
+        return self._memory_queries.requeue_failed_derived_rederive(
+            cooldown_days, limit, max_requeues
+        )
+
+    def record_derived_rederive_embed_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        return self._memory_queries.record_derived_rederive_embed_failure(
+            repair_key, error_class, max_attempts
+        )
 
     def record_derived_rederive_failure(
         self, repair_key: str, error_class: str, max_attempts: int
