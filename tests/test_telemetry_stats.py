@@ -609,6 +609,16 @@ class TestFetchFeatureStats:
         assert row["total_calls"] == 20
         assert 9.0 <= row["calls_per_day"] <= 11.0
 
+    def test_calls_per_day_mixed_naive_and_aware_timestamps(self, store: McpTelemetryStore):
+        """Mixed offset-naive/aware rows fall back to a 1.0-day span."""
+        naive_old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
+        _record_full(store, operation="mixed_timestamps", started_at=naive_old.isoformat())
+        _record_full(store, operation="mixed_timestamps", started_at=_now_iso())
+
+        row = {r["operation"]: r for r in store.fetch_feature_stats()}["mixed_timestamps"]
+        assert row["total_calls"] == 2
+        assert row["calls_per_day"] == 2.0
+
     def test_empty_store_returns_empty(self, store: McpTelemetryStore):
         assert store.fetch_feature_stats() == []
 

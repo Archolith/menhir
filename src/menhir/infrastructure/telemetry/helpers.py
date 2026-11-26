@@ -132,9 +132,9 @@ def _span_days(first_seen: str | None, last_seen: str | None) -> float:
     try:
         start = datetime.fromisoformat(first_seen)
         end = datetime.fromisoformat(last_seen)
-    except ValueError:
+        return max((end - start).total_seconds() / 86400.0, 1.0)
+    except (TypeError, ValueError):
         return 1.0
-    return max((end - start).total_seconds() / 86400.0, 1.0)
 
 
 def _size_of(value: Any) -> int:
