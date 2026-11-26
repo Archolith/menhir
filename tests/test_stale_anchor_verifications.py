@@ -614,6 +614,30 @@ class TestAPIRoutes:
         assert r.json()["count"] == 5
 
     @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("path", "method", "default"),
+        [
+            ("stale", "stale_anchored_memories", 200),
+            ("stale-verifications", "list_stale_anchor_verifications", 50),
+        ],
+    )
+    def test_list_limit_default_and_bounds(self, path, method, default):
+        seen: list[int] = []
+
+        def list_rows(*, limit, **kwargs):
+            seen.append(limit)
+            return []
+
+        client = _client(_adapter(**{method: list_rows}))
+        route = f"/api/tool-events/{path}"
+        assert client.get(route).status_code == 200
+        for limit in (0, 500):
+            assert client.get(route, params={"limit": limit}).status_code == 200
+        for limit in (-1, 501):
+            assert client.get(route, params={"limit": limit}).status_code == 422
+        assert seen == [default, 0, 500]
+
+    @pytest.mark.unit
     def test_receipt_does_not_clear_dirty(self):
         """Adapter has no clear_file_dirty call — verification is audit-only."""
         adapter = _adapter()

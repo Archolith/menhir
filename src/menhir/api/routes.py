@@ -912,8 +912,11 @@ async def tool_events_dirty(request: Request, project: str | None = None) -> dic
 
 
 @router.get("/tool-events/stale")
-async def tool_events_stale(request: Request, project: str | None = None,
-                            limit: int = 200) -> dict:
+async def tool_events_stale(
+    request: Request,
+    project: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 200,
+) -> dict:
     """Readonly: return stale anchored memories without the full dirty-file diagnostic."""
     _require_tier("readonly")
     runtime_ctx = _require_runtime_context(request)
@@ -958,9 +961,11 @@ async def record_stale_anchor_verification(request: Request,
 
 @router.get("/tool-events/stale-verifications")
 async def list_stale_anchor_verifications(
-    request: Request, memory_uuid: str | None = None,
-    project: str | None = None, path: str | None = None,
-    limit: int = 50,
+    request: Request,
+    memory_uuid: str | None = None,
+    project: str | None = None,
+    path: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 50,
 ) -> dict:
     """Return stored stale-anchor verification receipts, optionally filtered."""
     _require_tier("readonly")
