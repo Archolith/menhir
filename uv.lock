@@ -85,7 +85,7 @@ wheels = [
 
 [[package]]
 name = "archolith-menhir"
-version = "0.3.18"
+version = "0.3.19"
 source = { editable = "." }
 dependencies = [
     { name = "archolith-graphiti-core" },

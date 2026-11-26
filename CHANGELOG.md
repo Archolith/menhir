@@ -1,3 +1,7 @@
+## 2026-11-26 - v0.3.19: Graphiti fork 0.32.1.post2: default-namespace dedupe and invalidation stay in the default group (Archolith/graphiti#38); the Graphiti differential check script
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.19. No dependency changes in this commit.
+
 ## 2026-11-26 - Graphiti fork 0.32.1.post2: default-group searches stay in the default group (Archolith/graphiti#38)
 
 - `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.32.1.post2`, fork commit `bcae80b8`. Pins, docs and release checks updated.
