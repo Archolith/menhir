@@ -20,7 +20,9 @@ async def list_artifacts(
         limit: Max rows (default 25, max 200).
 
     Returns:
-        One line per artifact with uuid, type, status and title.
+        A summary per artifact (type, status, uuid and title), plus a note when
+        some statuses could not be read. Call get_artifact with a uuid to see
+        source paths and discussed code locations.
     """
     return await ListArtifactsTool().execute(
         artifact_type=artifact_type, status=status, namespace=namespace, limit=limit
@@ -37,9 +39,9 @@ class ListArtifactsTool(BaseTextTool):
     destructive_hint = False
     open_world_hint = False
     description = (
-        "Locate recorded plans, reviews, investigations, reports and handoffs, filtered by type, "
-        "status, or namespace. Returns locations and metadata; read the document for its "
-        "rationale."
+        "List recorded plans, reviews, investigations, reports and handoffs, filtered by type, "
+        "status, or namespace. Returns artifact summaries (type, status, uuid and title). Use "
+        "get_artifact for source paths and the code each artifact discusses."
     )
 
     async def endpoint(
