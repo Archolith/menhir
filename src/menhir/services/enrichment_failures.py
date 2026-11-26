@@ -173,7 +173,7 @@ def persisted_failure_text(error: BaseException) -> str:
 def classify_enrichment_failure(error: object | None, *, error_type: object | None = None) -> str:
     """Classify an enrichment failure as retryable, terminal, or manual review."""
 
-    if error is None:
+    if error is None or not _normalize_error_text(error):
         return "retryable"
 
     # A deterministic transport collision needs an operator decision, not another extraction.
