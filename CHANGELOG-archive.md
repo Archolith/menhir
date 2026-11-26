@@ -1,3 +1,9 @@
+## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.
+- Upgrade note: by default automatic merges become proposals and automatic deletion stops. Stop the old
+  process before starting this version; 0.3.16 ignores the new switches.
+
 ## 2026-11-25 - Automatic merges and deletions each have an off switch (`MENHIR_AUTO_MERGE_MODE`, `MENHIR_AUTO_DELETE_MODE`)
 
 - `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: two modes, `off | propose | on`.
