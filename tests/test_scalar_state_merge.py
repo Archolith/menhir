@@ -627,6 +627,10 @@ def test_unmerge_coordinator_fires_scalar_hook_on_commit():
 
         expected_token = "tok"
 
+        def renew_owner_heartbeat(self, oid, *, seconds, owner_token):
+            assert oid == op_id and owner_token == self.expected_token and seconds > 0
+            return True
+
         def mark_committed(self, oid, *, owner_token, after_graph_work=True):
             assert owner_token == self.expected_token, (owner_token, self.expected_token)
 
@@ -667,6 +671,10 @@ def test_unmerge_coordinator_hook_failure_does_not_break_commit():
         def _ensure_ready(self): pass
         def get(self, oid): return {"expected_after_sha256": expected_after}
         expected_token = "tok"
+
+        def renew_owner_heartbeat(self, oid, *, seconds, owner_token):
+            assert oid == op_id and owner_token == self.expected_token and seconds > 0
+            return True
 
         def mark_committed(self, oid, *, owner_token, after_graph_work=True):
             assert owner_token == self.expected_token, (owner_token, self.expected_token)

@@ -136,30 +136,48 @@ def test_the_project_filter_still_works_alongside_the_namespace() -> None:
 def test_both_readonly_routes_and_recall_pass_a_namespace() -> None:
     """TRAP T17. The repository accepting a namespace proves nothing about the three callers
     passing one, and not passing it is indistinguishable from the defect."""
+    import ast
     import inspect
 
     from menhir.api import routes
     from menhir.services import recall_pipeline
 
-    route_src = inspect.getsource(routes)
-    # Per CALL SITE, not a total count. An earlier version asserted the resolver appeared ">= 2"
-    # times, which stayed true when one of the four sites dropped it -- a mutation walked straight
-    # through. Each tenant-bearing adapter call is checked where it actually is.
-    for method in (
+    methods = {
         "adapter.stale_anchored_memories",
+        "adapter.tool_event_dirty_stats",
         "adapter.record_stale_anchor_verification",
         "adapter.list_stale_anchor_verifications",
-    ):
-        starts = [
-            i for i in range(len(route_src))
-            if route_src.startswith(method, i)
-        ]
-        assert starts, f"{method} is no longer called from routes"
-        for start in starts:
-            window = route_src[start : start + 320]
-            assert "_resolve_namespace(request, None)" in window, (
-                f"{method} at offset {start} does not resolve a namespace"
-            )
+    }
+    resolver = "_resolve_namespace(request, None)"
+    seen = set()
+    for route in ast.parse(inspect.getsource(routes)).body:
+        if not isinstance(route, ast.AsyncFunctionDef):
+            continue
+        for call in ast.walk(route):
+            if not isinstance(call, ast.Call) or not call.args:
+                continue
+            method = ast.unparse(call.args[0])
+            if method not in methods:
+                continue
+            seen.add((route.name, method))
+            namespace = next((kw.value for kw in call.keywords if kw.arg == "namespace"), None)
+            assert namespace is not None, f"{route.name}: {method} omits the namespace"
+            if isinstance(namespace, ast.Name):
+                assignments = [
+                    node for node in ast.walk(route)
+                    if isinstance(node, ast.Assign)
+                    and any(ast.unparse(target) == namespace.id for target in node.targets)
+                ]
+                assert len(assignments) == 1 and assignments[0].lineno < call.lineno
+                namespace = assignments[0].value
+            assert ast.unparse(namespace) == resolver, f"{route.name}: {method} uses an unresolved namespace"
+    assert seen == {
+        ("tool_events_dirty", "adapter.stale_anchored_memories"),
+        ("tool_events_dirty", "adapter.tool_event_dirty_stats"),
+        ("tool_events_stale", "adapter.stale_anchored_memories"),
+        ("record_stale_anchor_verification", "adapter.record_stale_anchor_verification"),
+        ("list_stale_anchor_verifications", "adapter.list_stale_anchor_verifications"),
+    }
 
     recall_src = inspect.getsource(recall_pipeline)
     assert "service.graph_adapter.stale_anchored_memories," in recall_src
