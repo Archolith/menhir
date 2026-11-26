@@ -867,6 +867,83 @@ def test_read_flagged_then_recall_context_flow(stubbed_mcp_state):
     assert context_payload["recent"][0]["name"] == "Daily focus"
 
 
+def test_recall_context_zero_recent_limit_skips_backend_fetch(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    calls: list[int] = []
+
+    def _recent_with_available_row(limit: int = 10):
+        calls.append(limit)
+        return [
+            {
+                "uuid": "123e4567-e89b-12d3-a456-426614174310",
+                "name": "Available row",
+                "content": "A row exists but must not be fetched at zero.",
+                "source": "claude-code",
+                "user_flagged": False,
+            }
+        ]
+
+    graph_adapter.fetch_recent_memories = _recent_with_available_row  # type: ignore[method-assign]
+
+    payload = _parse_json_text(
+        asyncio.run(
+            recall_context_memories(
+                reader_id="bot-a",
+                query="",
+                recent_limit=0,
+            )
+        )
+    )
+
+    assert calls == []
+    assert payload["bootstrap_verified"] is True
+    assert payload["recent_count"] == 0
+    assert payload["recent"] == []
+
+
+def test_recall_context_rejects_negative_recent_limit(stubbed_mcp_state):
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    result = asyncio.run(
+        recall_context_memories(reader_id="bot-a", recent_limit=-1)
+    )
+
+    error = error_of(result, code="invalid_argument")
+    assert "recent_limit" in error["message"]
+
+
+def test_recall_context_default_recent_limit_returns_five_rows(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    calls: list[int] = []
+
+    def _recent_rows(limit: int = 10):
+        calls.append(limit)
+        return [
+            {
+                "uuid": f"123e4567-e89b-12d3-a456-4266141744{idx:02d}",
+                "name": f"Recent {idx}",
+                "content": f"Recent row {idx}",
+                "source": "claude-code",
+                "user_flagged": False,
+            }
+            for idx in range(8)
+        ]
+
+    graph_adapter.fetch_recent_memories = _recent_rows  # type: ignore[method-assign]
+
+    payload = _parse_json_text(
+        asyncio.run(recall_context_memories(reader_id="bot-a"))
+    )
+
+    assert calls == [15]
+    assert payload["recent_count"] == 5
+    assert len(payload["recent"]) == 5
+
+
 def test_read_flagged_reports_omissions_and_keeps_pin_text(stubbed_mcp_state, monkeypatch):
     _, adapter, _ = stubbed_mcp_state
     rule = ("Apply this project rule first.\n" + "x" * 400)[:400]
