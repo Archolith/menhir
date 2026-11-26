@@ -100,12 +100,16 @@ def encode_cursor(
     direction: str,
     namespace_key: str,
     subject_uuid: str | None,
+    *,
+    window_from: str | None = None,
+    window_to: str | None = None,
 ) -> str:
     """Encode an order key + paging direction as a tenant/thread-bound opaque cursor.
 
     `key` is `(valid_at_iso, created_at_iso, uuid)`; `created_at_iso` may be None (the
     epoch coalesce of the total order). The cursor embeds the namespace key and subject
-    uuid so `decode_cursor` can refuse cursors that cross tenants or threads.
+    uuid so `decode_cursor` can refuse cursors that cross tenants or threads. Optional
+    window bounds preserve the requested range across pages.
     """
     if direction not in CURSOR_DIRECTIONS:
         raise ValueError(f"cursor direction must be one of {CURSOR_DIRECTIONS}, got {direction!r}")
@@ -118,21 +122,26 @@ def encode_cursor(
         "ns": namespace_key,
         "s": subject_uuid or "",
     }
+    if window_from is not None:
+        payload["wf"] = str(window_from)
+    if window_to is not None:
+        payload["wt"] = str(window_to)
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
-def decode_cursor(
+def decode_cursor_with_window(
     token: str,
     *,
     namespace_key: str,
     subject_uuid: str | None,
-) -> tuple[tuple[str, str | None, str], str]:
-    """Decode a cursor token, refusing tampered, malformed, or foreign cursors.
+) -> tuple[tuple[str, str | None, str], str, str | None, str | None]:
+    """Decode a cursor token and validate its format, tenant and thread.
 
-    Returns `((valid_at, created_at, uuid), direction)`. Raises `ValueError` on bad
-    base64/JSON, missing keys, an unknown direction, or an `ns`/`s` mismatch -- a cursor
-    must never cross tenants or threads.
+    Returns `((valid_at, created_at, uuid), direction, window_from, window_to)`. Window
+    bounds are `None` for old unbounded tokens. Raises `ValueError` on bad base64/JSON,
+    missing keys, an unknown direction, non-string window bounds, or an `ns`/`s`
+    mismatch -- a cursor must never cross tenants or threads.
     """
     if not token or not isinstance(token, str):
         raise ValueError("cursor must be a non-empty token")
@@ -152,8 +161,33 @@ def decode_cursor(
         raise ValueError("cursor does not belong to this namespace")
     if payload["s"] != (subject_uuid or ""):
         raise ValueError("cursor does not belong to this thread")
+    window_from = payload.get("wf")
+    if window_from is not None and not isinstance(window_from, str):
+        raise ValueError("cursor window_from must be a string")
+    window_to = payload.get("wt")
+    if window_to is not None and not isinstance(window_to, str):
+        raise ValueError("cursor window_to must be a string")
     created_at = payload["c"]
     return (
         (str(payload["v"]), None if created_at is None else str(created_at), str(payload["u"])),
         str(payload["d"]),
+        window_from,
+        window_to,
     )
+
+
+def decode_cursor(
+    token: str,
+    *,
+    namespace_key: str,
+    subject_uuid: str | None,
+) -> tuple[tuple[str, str | None, str], str]:
+    """Decode a cursor token and validate its format, tenant and thread.
+
+    Returns `((valid_at, created_at, uuid), direction)`. Kept as the two-value contract;
+    use `decode_cursor_with_window` when the optional window bounds are also needed.
+    """
+    key, direction, _window_from, _window_to = decode_cursor_with_window(
+        token, namespace_key=namespace_key, subject_uuid=subject_uuid
+    )
+    return key, direction

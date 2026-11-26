@@ -19,7 +19,7 @@ from menhir.domain.timeline import (
     TimelineResult,
     TypedHistory,
     TypedHistoryEntry,
-    decode_cursor,
+    decode_cursor_with_window,
     encode_cursor,
 )
 from menhir.services.recall_pipeline import (
@@ -304,7 +304,6 @@ async def run_recall_timeline(
     before_more = after_more = False
     before_probed = after_probed = False
     anchor_row: dict[str, Any] | None = None
-
     mode = starts[0] if starts else "subject"
     if mode == "at":
         boundary = (at, _MAX_INSTANT, _MAX_UUID)
@@ -354,21 +353,26 @@ async def run_recall_timeline(
                 side="after", key=anchor_key, count=count_after,
             )
     elif mode == "cursor":
-        (c_valid, c_created, c_uuid), cursor_direction = decode_cursor(
+        cursor_key, cursor_direction, window_from, window_to = decode_cursor_with_window(
             str(cursor), namespace_key=namespace_key, subject_uuid=subject_uuid
         )
-        cursor_key = (c_valid, c_created, c_uuid)
+        if window_from is not None:
+            window_from = _validate_instant("window_from", window_from)
+        if window_to is not None:
+            window_to = _validate_instant("window_to", window_to)
         if cursor_direction == "after":
             after_probed = True
             after_rows, after_more = await _probe_page(
                 adapter, namespace=namespace, subject_uuid=subject_uuid,
                 side="after", key=cursor_key, count=safe_limit,
+                window_from=window_from, window_to=window_to,
             )
         else:
             before_probed = True
             before_rows, before_more = await _probe_page(
                 adapter, namespace=namespace, subject_uuid=subject_uuid,
                 side="before", key=cursor_key, count=safe_limit,
+                window_from=window_from, window_to=window_to,
             )
     elif mode == "query":
         stripped = str(query).strip()
@@ -456,11 +460,17 @@ async def run_recall_timeline(
         first_key = _row_key(page_rows[0])
         last_key = _row_key(page_rows[-1])
         prev_cursor = (
-            encode_cursor(first_key, "before", namespace_key, subject_uuid)
+            encode_cursor(
+                first_key, "before", namespace_key, subject_uuid,
+                window_from=window_from, window_to=window_to,
+            )
             if not before_probed or before_more else None
         )
         next_cursor = (
-            encode_cursor(last_key, "after", namespace_key, subject_uuid)
+            encode_cursor(
+                last_key, "after", namespace_key, subject_uuid,
+                window_from=window_from, window_to=window_to,
+            )
             if not after_probed or after_more else None
         )
 

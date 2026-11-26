@@ -132,9 +132,9 @@ def _span_days(first_seen: str | None, last_seen: str | None) -> float:
     try:
         start = datetime.fromisoformat(first_seen)
         end = datetime.fromisoformat(last_seen)
-    except ValueError:
+        return max((end - start).total_seconds() / 86400.0, 1.0)
+    except (TypeError, ValueError):
         return 1.0
-    return max((end - start).total_seconds() / 86400.0, 1.0)
 
 
 def _size_of(value: Any) -> int:
@@ -278,6 +278,13 @@ def _redact_telemetry_value(value: Any, *, key: str | None = None) -> Any:
         if not value:
             return value
         if key in _SAFE_TELEMETRY_STRING_KEYS and _STRUCTURAL_VALUE_RE.fullmatch(value):
+            # Safe-key membership is not enough for URI-shaped values: the authority may carry
+            # credentials that still match the structural alphabet. Preserve ordinary URLs and
+            # local identifiers byte-for-byte, but remove authority userinfo before persistence.
+            if "://" in value and "@" in value:
+                from menhir.config.settings_helpers import redact_uri_credentials
+
+                return redact_uri_credentials(value)
             return value
         return "[redacted]"
     if isinstance(value, (int, float, bool)) or value is None:

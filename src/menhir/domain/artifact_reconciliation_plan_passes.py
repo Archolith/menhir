@@ -245,6 +245,8 @@ def _plan_unresolved_sources(state: _PlanState) -> None:
                 source_identity=snapshot.identity,
                 artifact_uuid=snapshot.artifact_uuid,
                 artifact_type=snapshot.artifact_type,
+                expected_integrity=snapshot.integrity,
+                last_reconciled_at=snapshot.last_reconciled_at,
                 reason="source_not_observed_in_corpus_scan",
             )
         )

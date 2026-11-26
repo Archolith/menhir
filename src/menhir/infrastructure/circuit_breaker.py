@@ -315,7 +315,9 @@ class CircuitBreaker:
         self._end_probe()
         self._hard_open_reason = None
 
-    async def _acquire_or_abandon(self, is_probe: bool, *, healthy: bool) -> None:
+    async def _acquire_or_abandon(
+        self, is_probe: bool, *, healthy: bool, probe_seq: int
+    ) -> None:
         """Acquire _lock, settling probe state first if cancellation lands on the wait.
 
         The bare ``async with self._lock`` form leaks the same wedge ``_abandon_probe``
@@ -326,10 +328,21 @@ class CircuitBreaker:
             await self._lock.acquire()
         except BaseException:
             if is_probe:
-                self._abandon_probe(healthy=healthy)
+                self._abandon_probe(healthy=healthy, probe_seq=probe_seq)
             raise
 
-    def _abandon_probe(self, *, healthy: bool) -> None:
+    def _close_probe_if_current(self, probe_seq: int) -> bool:
+        """Release the probe slot and close only if no newer billing hold exists."""
+        self._end_probe()
+        if self._hard_open_seq != probe_seq:
+            return False
+        self._state = CircuitState.CLOSED
+        self._failures = 0
+        self._opened_at = None
+        self._hard_open_reason = None
+        return True
+
+    def _abandon_probe(self, *, healthy: bool, probe_seq: int) -> None:
         """Settle probe state without the lock, for use on the cancellation path.
 
         Deliberately does NOT acquire self._lock: this runs while the task is being
@@ -339,17 +352,15 @@ class CircuitBreaker:
         so nothing races them.
 
         ``healthy=True`` means fn() already returned, so the backend is known good
-        and the breaker closes. ``healthy=False`` means we learned nothing (or
-        learned it is down): return to OPEN with a fresh cooldown so the next
-        caller may probe again.
+        and the breaker closes unless a newer billing hold superseded this probe.
+        ``healthy=False`` means we learned nothing (or learned it is down): return
+        to OPEN with a fresh cooldown so the next caller may probe again.
         """
-        self._end_probe()
         if healthy:
-            self._state = CircuitState.CLOSED
-            self._failures = 0
-            self._opened_at = None
-            self._hard_open_reason = None
-        else:
+            self._close_probe_if_current(probe_seq)
+            return
+        self._end_probe()
+        if self._hard_open_seq == probe_seq:
             self._state = CircuitState.OPEN
             self._opened_at = monotonic()
 
@@ -462,7 +473,7 @@ class CircuitBreaker:
                 quota_error = quota_exhausted_error(exc)
             except Exception:
                 origin, quota_error = None, None
-            await self._acquire_or_abandon(is_probe, healthy=False)
+            await self._acquire_or_abandon(is_probe, healthy=False, probe_seq=probe_seq)
             if origin is not None and origin != self.name:
                 # Another breaker's provider failed inside this call: no failure counted, no
                 # hard-open. A probe learned nothing about this provider, so the billing hold
@@ -526,22 +537,18 @@ class CircuitBreaker:
                     # Non-trip failure — log but don't change breaker state
                     if is_probe:
                         # Non-trip error during probe (e.g. parse/schema error) means
-                        # the backend is reachable, so close the circuit.
+                        # the backend is reachable. Preserve any newer billing hold.
                         previous = self._state
-                        self._state = CircuitState.CLOSED
-                        self._failures = 0
-                        self._opened_at = None
-                        self._end_probe()
-                        self._hard_open_reason = None
-                        await asyncio.to_thread(
-                            partial(
-                                record_lifecycle_event,
-                                component="circuit_breaker",
-                                event=f"{previous.value}->{self._state.value}",
-                                state="transition",
-                                details={"breaker": self.name, "reason": "non_trip_error_probe_closed"},
+                        if self._close_probe_if_current(probe_seq):
+                            await asyncio.to_thread(
+                                partial(
+                                    record_lifecycle_event,
+                                    component="circuit_breaker",
+                                    event=f"{previous.value}->{self._state.value}",
+                                    state="transition",
+                                    details={"breaker": self.name, "reason": "non_trip_error_probe_closed"},
+                                )
                             )
-                        )
                     logger.info(
                         "Circuit breaker %s: non-trip failure %s (state unchanged)",
                         self.name, type(exc).__name__,
@@ -557,30 +564,25 @@ class CircuitBreaker:
             # cooldown timer so the next caller may probe again, and clear the in-flight
             # flag that would otherwise wedge the breaker permanently.
             if is_probe:
-                self._abandon_probe(healthy=False)
+                self._abandon_probe(healthy=False, probe_seq=probe_seq)
             raise
 
         # Success. fn() already returned, so a cancellation landing on the lock wait
         # settles the probe as healthy rather than discarding what we just learned.
-        await self._acquire_or_abandon(is_probe, healthy=True)
+        await self._acquire_or_abandon(is_probe, healthy=True, probe_seq=probe_seq)
         try:
             if is_probe:
-                # HALF_OPEN -> CLOSED on successful probe
                 previous = self._state
-                self._state = CircuitState.CLOSED
-                self._failures = 0
-                self._opened_at = None
-                self._end_probe()
-                self._hard_open_reason = None
-                await asyncio.to_thread(
-                    partial(
-                        record_lifecycle_event,
-                        component="circuit_breaker",
-                        event=f"{previous.value}->{self._state.value}",
-                        state="transition",
-                        details={"breaker": self.name},
+                if self._close_probe_if_current(probe_seq):
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="circuit_breaker",
+                            event=f"{previous.value}->{self._state.value}",
+                            state="transition",
+                            details={"breaker": self.name},
+                        )
                     )
-                )
             elif self._state == CircuitState.CLOSED:
                 # Reset consecutive failure counter on success
                 self._failures = 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import traceback
 from typing import Any
 
@@ -79,19 +80,21 @@ def record_llm_usage_event(
 _TELEMETRY_FAILURE_COUNTS_MAX = 512
 
 _TELEMETRY_FAILURE_COUNTS: dict[str, int] = {}
+_TELEMETRY_FAILURE_COUNTS_LOCK = threading.Lock()
 
 
 def _bump_failure_count(operation: str) -> int:
     """Increment the failure count for ``operation``, evicting the oldest key at capacity."""
 
-    if (
-        operation not in _TELEMETRY_FAILURE_COUNTS
-        and len(_TELEMETRY_FAILURE_COUNTS) >= _TELEMETRY_FAILURE_COUNTS_MAX
-    ):
-        _TELEMETRY_FAILURE_COUNTS.pop(next(iter(_TELEMETRY_FAILURE_COUNTS)))
-    count = _TELEMETRY_FAILURE_COUNTS.get(operation, 0) + 1
-    _TELEMETRY_FAILURE_COUNTS[operation] = count
-    return count
+    with _TELEMETRY_FAILURE_COUNTS_LOCK:
+        if (
+            operation not in _TELEMETRY_FAILURE_COUNTS
+            and len(_TELEMETRY_FAILURE_COUNTS) >= _TELEMETRY_FAILURE_COUNTS_MAX
+        ):
+            _TELEMETRY_FAILURE_COUNTS.pop(next(iter(_TELEMETRY_FAILURE_COUNTS)))
+        count = _TELEMETRY_FAILURE_COUNTS.get(operation, 0) + 1
+        _TELEMETRY_FAILURE_COUNTS[operation] = count
+        return count
 
 
 def _log_telemetry_persist_failure(operation: str, exc: Exception) -> None:
@@ -145,14 +148,19 @@ def record_mcp_event(
     explicit-erasure completeness checks.
     """
 
-    timestamp = _utc_now_iso()
-    input_size = _size_of(payload) if payload is not None else None
-    result_size = _size_of(result) if result is not None else None
-    preview_source = payload if payload is not None else result
-    payload_preview = _safe_preview_of(preview_source) if preview_source is not None else None
-    effective_namespace, effective_uuid = _mcp_event_lineage(
-        payload, namespace=namespace, node_uuid=node_uuid
-    )
+    try:
+        timestamp = _utc_now_iso()
+        input_size = _size_of(payload) if payload is not None else None
+        result_size = _size_of(result) if result is not None else None
+        preview_source = payload if payload is not None else result
+        payload_preview = _safe_preview_of(preview_source) if preview_source is not None else None
+        effective_namespace, effective_uuid = _mcp_event_lineage(
+            payload, namespace=namespace, node_uuid=node_uuid
+        )
+    except Exception as exc:
+        logger.warning("record_mcp_event:%s:%s preparation failed (%s)", kind, operation, type(exc).__name__)
+        return
+
     try:
         store.record(
             kind=kind,
@@ -195,24 +203,28 @@ def record_failure_event(
     than a NULL key plus arbitrary exception prose.
     """
 
-    scoped = bool(str(episode_uuid or "").strip())
-    details_payload = details
-    if traceback_text:
-        base_details = (
-            dict(details)
-            if isinstance(details, dict)
-            else {"details": details}
-            if details is not None
-            else {}
-        )
-        base_details["traceback"] = traceback_text
-        base_details["traceback_preview"] = traceback_text[:500]
-        details_payload = base_details
-    if details_payload is not None and not scoped:
-        details_payload = _redact_telemetry_value(details_payload)
-    details_json = None
-    if details_payload is not None:
-        details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    try:
+        scoped = bool(str(episode_uuid or "").strip())
+        details_payload = details
+        if traceback_text:
+            base_details = (
+                dict(details)
+                if isinstance(details, dict)
+                else {"details": details}
+                if details is not None
+                else {}
+            )
+            base_details["traceback"] = traceback_text
+            base_details["traceback_preview"] = traceback_text[:500]
+            details_payload = base_details
+        if details_payload is not None and not scoped:
+            details_payload = _redact_telemetry_value(details_payload)
+        details_json = None
+        if details_payload is not None:
+            details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    except Exception as exc:
+        logger.warning("record_failure_event:%s preparation failed (%s)", operation, type(exc).__name__)
+        return False
     try:
         return store.record_failure(
             recorded_at=_utc_now_iso(),
@@ -255,9 +267,11 @@ def record_episode_task_event(
     details: Any = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
-    details_json = None
-    if details is not None:
-        details_json = json.dumps(details, default=_json_default, sort_keys=True)
+    try:
+        details_json = json.dumps(details, default=_json_default, sort_keys=True) if details is not None else None
+    except Exception as exc:
+        logger.warning("record_episode_task_event:%s preparation failed (%s)", phase, type(exc).__name__)
+        return
     try:
         store.record_episode_task_event(
             recorded_at=_utc_now_iso(),
@@ -288,11 +302,16 @@ def record_lifecycle_event(
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
     """Persist a lifecycle event with addressable or explicitly operational lineage."""
-    scoped = bool(str(episode_uuid or "").strip())
-    details_payload = details if scoped else _redact_telemetry_value(details)
-    details_json = None
-    if details_payload is not None:
-        details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
+    try:
+        scoped = bool(str(episode_uuid or "").strip())
+        details_payload = details if scoped else _redact_telemetry_value(details)
+        details_json = (
+            json.dumps(details_payload, default=_json_default, sort_keys=True)
+            if details_payload is not None else None
+        )
+    except Exception as exc:
+        logger.warning("record_lifecycle_event:%s:%s preparation failed (%s)", component, event, type(exc).__name__)
+        return
     try:
         store.record_lifecycle_event(
             recorded_at=_utc_now_iso(),

@@ -72,7 +72,7 @@ DRIFTED = "DRIFTED"
 FAILED = "FAILED"
 
 #: The row belongs to a different saga type than the coordinator asked. Mirrors SKIP in the
-#: forecast vocabulary and increments no counter.
+#: forecast vocabulary. The live outcome tally counts it as SKIPPED with zero replay progress.
 SKIPPED = "SKIPPED"
 
 #: The row moved under this reconciler's claim mid-replay (a compare-and-set was refused): a stale
@@ -143,8 +143,7 @@ def summarize_outcomes(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     Every CF-20a-reachable outcome appears with an explicit count, zero included. That matters
     for a preflight read: a reader must be able to tell "this coordinator saw no drifted rows"
     apart from "this coordinator does not report drift at all", and an absent key cannot express
-    the difference. The two CF-20b ownership outcomes are omitted until they are reachable, so a
-    20a summary never implies it checked ownership.
+    the difference. The CF-20b ownership outcomes appear only when a forecast emits them.
 
     Outcomes outside the vocabulary are counted under their own key rather than dropped -- a
     reconciler emitting something unrecognised is a defect that must be visible, not swallowed.

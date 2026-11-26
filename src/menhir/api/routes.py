@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from menhir.clock import utc_now_iso
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.ingest import IdempotencyKeyConflict
@@ -902,17 +903,26 @@ async def tool_events_dirty(request: Request, project: str | None = None) -> dic
     if adapter is None or not hasattr(adapter, "list_dirty_files"):
         raise HTTPException(status_code=503, detail="tool-event diagnostics unavailable")
     dirty = await asyncio.to_thread(adapter.list_dirty_files, project=project)
+    resolved_namespace = _resolve_namespace(request, None)
     stale = await asyncio.to_thread(
-        adapter.stale_anchored_memories, project=project,
-        namespace=_resolve_namespace(request, None),
+        adapter.stale_anchored_memories, project=project, namespace=resolved_namespace,
     )
+    if hasattr(adapter, "tool_event_dirty_stats"):
+        counts = await asyncio.to_thread(
+            adapter.tool_event_dirty_stats, project=project, namespace=resolved_namespace
+        )
+    else:
+        counts = {"dirty_files": len(dirty), "stale_anchors": len(stale)}
     return {"dirty_files": dirty, "stale_anchors": stale,
-            "counts": {"dirty_files": len(dirty), "stale_anchors": len(stale)}}
+            "counts": counts}
 
 
 @router.get("/tool-events/stale")
-async def tool_events_stale(request: Request, project: str | None = None,
-                            limit: int = 200) -> dict:
+async def tool_events_stale(
+    request: Request,
+    project: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 200,
+) -> dict:
     """Readonly: return stale anchored memories without the full dirty-file diagnostic."""
     _require_tier("readonly")
     runtime_ctx = _require_runtime_context(request)
@@ -937,8 +947,7 @@ async def record_stale_anchor_verification(request: Request,
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "record_stale_anchor_verification"):
         raise HTTPException(status_code=503, detail="stale-anchor verification unavailable")
-    from datetime import datetime, timezone
-    verified_at = body.verified_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    verified_at = body.verified_at or utc_now_iso().replace("+00:00", "Z")
     try:
         result = await asyncio.to_thread(
             adapter.record_stale_anchor_verification,
@@ -958,9 +967,11 @@ async def record_stale_anchor_verification(request: Request,
 
 @router.get("/tool-events/stale-verifications")
 async def list_stale_anchor_verifications(
-    request: Request, memory_uuid: str | None = None,
-    project: str | None = None, path: str | None = None,
-    limit: int = 50,
+    request: Request,
+    memory_uuid: str | None = None,
+    project: str | None = None,
+    path: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 50,
 ) -> dict:
     """Return stored stale-anchor verification receipts, optionally filtered."""
     _require_tier("readonly")

@@ -87,6 +87,11 @@ class TelemetryRecallReceiptsMixin:
                         (token,),
                     ).fetchone()
             else:
+                # Claim the newest unrated receipt under a write transaction.  Without this,
+                # concurrent implicit ratings can both select the same row before either update
+                # commits, so the later score overwrites the first and an older receipt remains
+                # unrated.
+                conn.execute("BEGIN IMMEDIATE")
                 target = conn.execute(
                     """
                     SELECT id, token, operation FROM recall_receipts

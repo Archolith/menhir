@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import menhir.infrastructure.providers as providers
 from menhir.config import MemorySettings
 from menhir.infrastructure.providers import (
     OpenAIStyleChatBackend,
@@ -116,6 +122,88 @@ def test_provider_config_for_graphiti_reranker_explicit_model_override() -> None
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("selector", "override_field", "expected_kind", "expected_base_url"),
+    [
+        (
+            ProviderConfig.for_graphiti_llm,
+            None,
+            ProviderKind.LOCAL,
+            "http://localhost:1234/v1",
+        ),
+        (
+            ProviderConfig.for_graphiti_embedder,
+            "graphiti_embed_provider",
+            ProviderKind.OPENAI,
+            "https://api.openai.com/v1",
+        ),
+        (
+            ProviderConfig.for_graphiti_reranker,
+            "graphiti_reranker_provider",
+            ProviderKind.OPENAI,
+            "https://api.openai.com/v1",
+        ),
+    ],
+)
+def test_graphiti_selectors_ignore_invalid_chat_provider_when_override_is_valid(
+    selector: Callable[[MemorySettings], ProviderConfig],
+    override_field: str | None,
+    expected_kind: ProviderKind,
+    expected_base_url: str,
+) -> None:
+    settings = MemorySettings(
+        chat_provider="not-a-provider",
+        graphiti_provider="local",
+        graphiti_embed_provider="openai" if override_field == "graphiti_embed_provider" else "",
+        graphiti_reranker_provider="openai" if override_field == "graphiti_reranker_provider" else "",
+        local_llm_base_url="http://localhost:1234/v1",
+        openai_api_key="openai-key",
+        openai_chat_model="gpt-5-mini",
+    )
+
+    config = selector(settings)
+
+    assert config.kind is expected_kind
+    assert config.base_url == expected_base_url
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ProviderConfig.for_graphiti_llm,
+        ProviderConfig.for_graphiti_embedder,
+        ProviderConfig.for_graphiti_reranker,
+    ],
+)
+def test_graphiti_selectors_reject_invalid_chat_provider_fallback(
+    selector: Callable[[MemorySettings], ProviderConfig],
+) -> None:
+    settings = MemorySettings(
+        chat_provider="not-a-provider",
+        graphiti_provider="  ",
+        graphiti_embed_provider="  ",
+        graphiti_reranker_provider="  ",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported LLM provider"):
+        selector(settings)
+
+
+@pytest.mark.unit
+def test_graphiti_whitespace_overrides_keep_existing_chat_fallback() -> None:
+    settings = MemorySettings(
+        chat_provider="openai",
+        graphiti_provider="local",
+        graphiti_embed_provider="  ",
+        graphiti_reranker_provider="  ",
+    )
+
+    assert ProviderConfig.for_graphiti_embedder(settings).kind is ProviderKind.OPENAI
+    assert ProviderConfig.for_graphiti_reranker(settings).kind is ProviderKind.OPENAI
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_openai_style_backend_uses_openai_client() -> None:
     settings = MemorySettings()
@@ -159,5 +247,45 @@ async def test_openai_style_backend_uses_openai_client() -> None:
     ]
     assert mock_create.call_args.kwargs["model"] == "test-model"
     assert mock_create.call_args.kwargs["max_tokens"] == 64
+
+
+@pytest.mark.unit
+def test_same_key_concurrent_calls_construct_one_client(monkeypatch) -> None:
+    monkeypatch.setattr(providers, "_openai_client_cache", {})
+    start = threading.Barrier(2, timeout=5)
+    constructed = []
+
+    def build_client(**kwargs) -> SimpleNamespace:
+        time.sleep(0.025)  # Let a competing lookup reach the cache during construction.
+        create = AsyncMock(
+            return_value=SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+            )
+        )
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        constructed.append(client)
+        return client
+
+    backend = build_chat_backend(
+        MemorySettings(),
+        dependencies=ProviderRuntimeDependencies(openai_client_factory=build_client),
+    )
+
+    def run_call() -> str:
+        start.wait()
+        return asyncio.run(backend.create_chat_completion(
+            system_prompt="", user_prompt="", operation="fixture", max_tokens=1, temperature=0,
+        ))
+
+    with (
+        patch.object(providers, "start_llm_usage_call"),
+        patch.object(providers, "complete_llm_usage_call"),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        jobs = [pool.submit(run_call) for _ in range(2)]
+        results = [job.result(timeout=5) for job in jobs]
+    assert results == ["ok", "ok"]
+    assert len(constructed) == 1
+    assert constructed[0].chat.completions.create.await_count == 2
 
 

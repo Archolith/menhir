@@ -74,6 +74,14 @@ class TestOAuthPreflightEnabled:
         assert all(c["status"] == "pass" for c in result["checks"])
 
     @pytest.mark.unit
+    def test_scope_check_reports_configured_tiers_when_admin_is_disabled(self):
+        result = build_oauth_preflight(_complete_config(admin_scopes=()))
+        scope_check = next(check for check in result["checks"] if check["name"] == "oauth_scopes_configured")
+
+        assert scope_check["status"] == "pass"
+        assert scope_check["message"].startswith("Read/write scopes configured")
+
+    @pytest.mark.unit
     def test_missing_resource_public_base_url_returns_fail(self):
         config = OAuthConfig(enabled=True)
         result = build_oauth_preflight(config)
@@ -258,10 +266,14 @@ class TestOAuthPreflightChecks:
         _check_no_secrets(result)
 
     @pytest.mark.unit
-    def test_jwks_uri_http_non_loopback_warns(self):
-        config = _complete_config(
-            jwks_uri="http://auth.example.com/.well-known/jwks.json",
-        )
+    @pytest.mark.parametrize("jwks_uri", [
+        "http://auth.example.com/.well-known/jwks.json",
+        "auth.example.com/.well-known/jwks.json",
+        "file:///keys/jwks.json",
+        "https://auth.example.com:no-port/jwks.json",
+    ])
+    def test_jwks_uri_with_unsupported_scheme_or_invalid_authority_warns(self, jwks_uri):
+        config = _complete_config(jwks_uri=jwks_uri)
         result = build_oauth_preflight(config)
         assert any(
             c["name"] == "oauth_jwks_uri_scheme" and c["status"] == "warn"

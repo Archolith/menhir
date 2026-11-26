@@ -51,6 +51,17 @@ def test_candidate_uuid_is_mapped_and_composed_without_open_text_receipt():
     assert source not in repr(result.receipt)
 
 
+def test_null_episode_falls_back_to_claimed_episode_uuid():
+    source = "I have 3 coins."
+    result = adapt_research_candidate(
+        _candidate(source, episode=None), [_episode("episode-1", source)]
+    )
+
+    assert result.proposal is not None
+    assert result.proposal.episode_uuid == "episode-1"
+    assert result.receipt.parse_status == "admitted"
+
+
 def test_parser_rejection_is_quote_free_and_never_reaches_composer():
     source = "I have 3 coins. I have 3 coins."
     result = adapt_research_candidate(

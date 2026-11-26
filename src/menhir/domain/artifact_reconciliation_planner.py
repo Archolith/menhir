@@ -280,7 +280,9 @@ def compute_plan_digest(
             ]
             for e in entries
         ),
-        "actions": [a.as_dict() for a in sorted(actions, key=lambda a: a.sort_key)],
+        "actions": [
+            a.digest_dict() for a in sorted(actions, key=lambda a: a.sort_key)
+        ],
     }
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True

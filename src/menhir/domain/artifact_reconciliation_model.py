@@ -183,6 +183,7 @@ class ArtifactSourceSnapshot:
     title: str | None = None
     status: str | None = None
     schema_version: int | None = None
+    last_reconciled_at: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -246,6 +247,7 @@ class ReconciliationAction:
     conflict_kind: str | None = None
     reason: str | None = None
     detail: tuple[str, ...] = ()
+    last_reconciled_at: str | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -270,7 +272,9 @@ class ReconciliationAction:
             "artifact_type": self.artifact_type,
             "lane": self.lane,
             "integrity": self.integrity,
-            "expected_integrity": self.expected_integrity,
+            "expected_integrity": (
+                None if self.kind == ActionKind.MARK_SOURCE_UNRESOLVED else self.expected_integrity
+            ),
             "version": self.version,
             "version_kind": self.version_kind,
             "size_bytes": self.size_bytes,
@@ -283,6 +287,18 @@ class ReconciliationAction:
             "detail": list(self.detail),
         }
         return {k: v for k, v in payload.items() if v not in (None, [], ())}
+
+    def digest_dict(self) -> dict[str, Any]:
+        """Internal projection used by the approved-plan digest.
+
+        The public action payload deliberately has no place for an optimistic
+        lock token, but the approved plan must still cover the exact source
+        state the marker was derived from.
+        """
+        payload = self.as_dict()
+        if self.kind == ActionKind.MARK_SOURCE_UNRESOLVED and self.last_reconciled_at is not None:
+            payload["last_reconciled_at"] = self.last_reconciled_at
+        return payload
 
 
 @dataclass(frozen=True)

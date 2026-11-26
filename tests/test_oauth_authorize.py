@@ -22,6 +22,7 @@ from menhir.api.client_policy import (
     OAuthClientRegistration,
 )
 from menhir.api.oauth_authorize import router as oauth_authorize_router
+from menhir.api.oauth_authorize_clients import _RedirectError, _validate_pkce_and_response
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 
 pytestmark = pytest.mark.unit
@@ -60,6 +61,17 @@ def _pkce() -> tuple[str, str]:
         .decode()
     )
     return verifier, challenge
+
+
+def test_pkce_helper_accepts_generated_s256_challenge():
+    _, challenge = _pkce()
+    _validate_pkce_and_response("code", challenge, "S256")
+
+
+def test_pkce_helper_rejects_invalid_s256_format():
+    with pytest.raises(_RedirectError) as exc_info:
+        _validate_pkce_and_response("code", "invalid-format", "S256")
+    assert exc_info.value.error == "invalid_request"
 
 
 def _register_client(

@@ -47,6 +47,63 @@
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.18. No dependency changes in this commit.
 
+## 2026-11-26 - Backfill, corpus audit, and OAuth fixes
+
+- Counted eligible embedding backfill rows across all dry-run pages and capped previews at five.
+- Matched Git rename paths to tracked paths when a corpus scan starts below the repository root.
+- Bypassed the default embedding cache for requests with explicit vector dimensions.
+- Validated the required S256 challenge before OAuth consent and preserved registered callback query encoding.
+- Reported which scope tiers are configured in OAuth operator preflight.
+- Warned in OAuth preflight when a JWKS URL is malformed or uses an unsupported scheme.
+- Documented how saga summaries count skipped and ownership outcomes.
+
+## 2026-11-25 - Logging, timeline, telemetry and provider fixes
+
+- Honored `MENHIR_LOG_LEVEL` in the shared logging entry point when callers omit a level.
+- Documented the 200-event read cap and replay order in `infrastructure/audit_trail.py`.
+- Serialized the duplicate check and insert in `infrastructure/telemetry/event_store_failures.py`.
+- Carried the requested date window across next and previous cursors in timeline recall.
+- Returned empty text for synchronous chat completions with no choices.
+- Preserved newer circuit-breaker billing holds when an older probe settles.
+- Resolved explicit Graphiti providers without parsing an unused chat provider fallback.
+- Logged and handled SQLite startup failures when saving Recall Lab and Extraction Lab history.
+- Preserved subsecond precision in server-generated stale-anchor verification receipts.
+- Reported measured zero-millisecond lifecycle averages as zero.
+- Kept the telemetry feature dashboard available when timestamps with and without offsets are mixed.
+- Directed unmerge operators to the supported read-only `--inventory` option.
+- Dropped malformed telemetry events without letting serialization errors escape into the caller.
+- Serialized telemetry log counter updates and eviction across threads.
+- Listed reversible merges beyond the first 100,000 committed journal operations.
+- Bounded both stale-anchor diagnostic list endpoints while retaining zero-result requests.
+- Honored legacy default namespaces in scalar activation and kept projection repairs scoped.
+- Bounded recent SQLite telemetry reads to 500 rows.
+- Reused one chat client when concurrent calls first reach the same cache key.
+- Refused to mark a source unresolved when its audited state had changed.
+- Confirmed saga writer ownership before dispatching the first guarded graph mutation.
+- Indexed recent telemetry events by timestamp so SQLite can read them in order.
+- Removed a quadratic scan when rebuilding mixed-hit embedding batches.
+- Shared one lazily constructed synchronous chat client across concurrent callers.
+- Validated normalized research derivation receipts and accepted a valid episode UUID when the index is null.
+- Made implicit recall ratings claim distinct receipts under concurrent requests.
+- Rejected conflicting LME repair modes and reported matched updates.
+- Rolled back LME timestamp repairs when an episode changes after preflight and restored originally missing timestamps on revert.
+- Preserved the occurrence time of telemetry events queued for a background writer.
+- Scoped LME timestamp verification to the repair namespace and refused writes on control or repaired-row mismatches.
+- Preserved argument boundaries when the OAuth smoke CLI starts a local server.
+- Mapped LME session times by question and preserved hyphens in session IDs.
+- Rolled back LME scalar timestamp changes when the number of matched rows differs from the plan.
+- Refused ambiguous benchmark namespace suffixes and reported empty proposals for each affected comparison arm.
+- Corrected the Auth0 diagnostic routes and surfaced malformed or failed responses.
+- Rejected nonpositive PIDs as proof that a recorded writer stopped.
+- Removed URI credentials from telemetry previews and kept serialization failures inside the affected recorders.
+- Reported complete dirty-file and stale-anchor totals while keeping the diagnostic lists bounded.
+- Closed the CIMD cache connection if SQLite schema setup fails.
+- Guarded episode embedding backfills with the full content observed before the model call.
+- Loaded Menhir's configured environment file in the unmerge CLI while preserving shell precedence.
+- Failed the Auth0 smoke check on partial credentials or missing responses and reported optional skipped checks.
+- Rejected duplicate OAuth permission scopes and non-finite OAuth settings at startup.
+- Cleaned new OAuth display names and validated client registration metadata before storage.
+
 ## 2026-11-25 - Menhir fixes for recall, artifact tools, and telemetry
 
 - Corrected the output descriptions in `mcp/tools/ops/list_artifacts.py` and `get_artifact.py`.

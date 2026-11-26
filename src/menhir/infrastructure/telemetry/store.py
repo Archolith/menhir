@@ -138,6 +138,12 @@ class McpTelemetryStore(
                 )
                 conn.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS idx_mcp_events_started_at
+                    ON mcp_events (started_at DESC)
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS failure_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         recorded_at TEXT NOT NULL,

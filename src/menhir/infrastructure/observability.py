@@ -589,7 +589,8 @@ class _CachingEmbeddingsEndpoint:
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         # Extract input texts from the OpenAI embeddings contract
         input_val = kwargs.get("input") or (args[0] if args else None)
-        if input_val is None or self._cache is None:
+        # Cache keys describe default-size vectors only.
+        if input_val is None or self._cache is None or kwargs.get("dimensions") is not None:
             return await self._inner.create(*args, **kwargs)
 
         # Normalize to list
@@ -666,7 +667,7 @@ class _CachingEmbeddingsEndpoint:
             return upstream_result
 
         # If we had no cache hits, just return upstream directly (preserves exact contract)
-        if not any(i in cached_vectors for i in range(len(texts)) if i not in miss_indices):
+        if len(miss_indices) == len(texts):
             return upstream_result
 
         # Rebuild merged response

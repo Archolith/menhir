@@ -22,6 +22,7 @@ Both subordinates are Owned Records (`model.owned_record`): own label, never
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from uuid import uuid4
@@ -294,7 +295,8 @@ class WorkArtifactRepository:
                    s.version_kind        AS version_kind,
                    s.corpus_lane         AS corpus_lane,
                    s.resolution_status   AS resolution_status,
-                   s.schema_version      AS schema_version
+                   s.schema_version      AS schema_version,
+                   toString(s.last_reconciled_at) AS last_reconciled_at
             ORDER BY s.locator_path, a.artifact_uuid
             """,
             {"repository": repository, "namespace": _safe_namespace_filter(namespace)},
@@ -316,6 +318,7 @@ class WorkArtifactRepository:
                 title=row.get("title"),
                 status=row.get("status"),
                 schema_version=row.get("schema_version"),
+                last_reconciled_at=row.get("last_reconciled_at"),
             )
             for row in rows
             if row.get("artifact_uuid")
@@ -889,36 +892,68 @@ class WorkArtifactRepository:
         )
 
     def mark_artifact_source_unresolved(
-        self, *, source_uuid: str, reason: str, observed_commit: str | None = None
+        self,
+        *,
+        source_uuid: str,
+        reason: str,
+        expected_artifact_uuid: str | None,
+        expected_locator: Mapping[str, str | None],
+        expected_integrity: str | None,
+        expected_last_reconciled_at: str | None,
+        observed_commit: str | None = None,
     ) -> dict[str, Any]:
-        """Record that a source could not be found. Never a delete.
+        """Mark a missing source after verifying the state observed during the audit."""
 
-        The locator, the artifact, and every relationship stay exactly as they
-        were, so the state is reversible: if the file reappears, the next audit
-        refreshes it back to resolved rather than minting a second identity for
-        the same document.
-        """
         rows = self.neo4j.execute(
             """
             MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource {source_uuid: $source_uuid})
-            SET s.resolution_status = $unresolved,
-                s.resolution_reason = $reason,
-                s.observed_commit = coalesce($observed_commit, s.observed_commit),
-                s.last_reconciled_at = $now,
-                s.schema_version = $schema_version
-            RETURN a.artifact_uuid AS artifact_uuid
+            // Lock the source before reading the audit premises. The temporary
+            // property is removed in this transaction.
+            SET s._reconcile_unresolved_lock = $lock_token
+            WITH a, s,
+                 (a.artifact_uuid = $expected_artifact_uuid
+                  AND EXISTS { MATCH (a)-[:EMBODIED_IN]->(s) }
+                  AND coalesce(s.locator_repository, '') = $expected_repository
+                  AND coalesce(s.medium, $default_medium) = $expected_medium
+                  AND (s.locator_path = $expected_path
+                       OR (s.locator_path IS NULL AND $expected_path IS NULL))
+                  AND (s.integrity = $expected_integrity
+                       OR (s.integrity IS NULL AND $expected_integrity IS NULL))
+                  AND (toString(s.last_reconciled_at) = $expected_last_reconciled_at
+                       OR (s.last_reconciled_at IS NULL AND $expected_last_reconciled_at IS NULL))
+                  AND coalesce(s.resolution_status, '') IN ['', $resolved]) AS fresh
+            FOREACH (_ IN CASE WHEN fresh THEN [1] ELSE [] END |
+                SET s.resolution_status = $unresolved,
+                    s.resolution_reason = $reason,
+                    s.observed_commit = coalesce($observed_commit, s.observed_commit),
+                    s.last_reconciled_at = $now,
+                    s.schema_version = $schema_version
+            )
+            REMOVE s._reconcile_unresolved_lock
+            RETURN a.artifact_uuid AS artifact_uuid, fresh
             """,
             {
                 "source_uuid": source_uuid,
-                "unresolved": ResolutionStatus.UNRESOLVED,
                 "reason": reason,
                 "observed_commit": observed_commit,
+                "unresolved": ResolutionStatus.UNRESOLVED,
+                "resolved": ResolutionStatus.RESOLVED,
                 "now": datetime.now(timezone.utc).isoformat(),
                 "schema_version": ARTIFACT_SOURCE_SCHEMA_VERSION,
+                "lock_token": str(uuid4()),
+                "expected_artifact_uuid": expected_artifact_uuid,
+                "expected_repository": expected_locator.get("repository") or "",
+                "expected_path": expected_locator.get("path"),
+                "expected_medium": expected_locator.get("medium") or ArtifactMedium.MARKDOWN,
+                "default_medium": ArtifactMedium.MARKDOWN,
+                "expected_integrity": expected_integrity,
+                "expected_last_reconciled_at": expected_last_reconciled_at,
             },
         )
         if not rows:
             return {"applied": False, "reason": "source_not_found"}
+        if not rows[0].get("fresh"):
+            return {"applied": False, "reason": "stale_source_snapshot"}
         return {"applied": True, "artifact_uuid": rows[0].get("artifact_uuid")}
 
     def register_work_artifact(

@@ -119,7 +119,7 @@ class AuditChannel:
 
     # -- read ---------------------------------------------------------------------------------
     def read(self, corr_id: str, *, limit: int = 200, store: Any = telemetry_store) -> list[dict[str, Any]]:
-        """Every event for one unit of work, oldest-first (replay order)."""
+        """Newest events for one unit of work, oldest-first (limit clamped to 1-200)."""
         rows = store.fetch_recent_lifecycle_events(
             limit=max(1, min(limit, 200)), component=self.component, episode_uuid=corr_id
         )

@@ -29,6 +29,19 @@ from menhir.domain.recall_visibility import memory_retired_cypher
 
 logger = logging.getLogger(__name__)
 
+_DIRTY_FILES_MATCH = """
+MATCH (f:Entity {structure_role: 'file'})
+WHERE f.structure_dirty = true AND ($project IS NULL OR f.structure_project = $project)
+"""
+_STALE_ANCHORS_MATCH = f"""
+MATCH (sem:Entity)-[a:ANCHORED_TO]->(f:Entity {{structure_role: 'file'}})
+WHERE f.structure_dirty = true
+  AND a.created_at IS NOT NULL AND f.dirty_at > a.created_at
+  AND NOT {memory_retired_cypher("sem")}
+  AND ($project IS NULL OR f.structure_project = $project)
+  AND {tenant_scope_cypher("sem")}
+"""
+
 
 def _parse_iso_utc(text: str) -> datetime | None:
     """Parse an ISO-8601 UTC timestamp string, returning None on failure."""
@@ -237,9 +250,8 @@ class ToolEventRepository:
     def list_dirty_files(self, *, project: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
         """Files currently marked dirty by an event — minimal recall/diagnostic visibility."""
         rows = self._neo4j.execute(
-            """
-            MATCH (f:Entity {structure_role: 'file'})
-            WHERE f.structure_dirty = true AND ($project IS NULL OR f.structure_project = $project)
+            f"""
+            {_DIRTY_FILES_MATCH}
             RETURN f.structure_project AS project, f.structure_path AS path,
                    toString(f.dirty_at) AS dirty_at, f.last_event_op AS operation,
                    f.last_event_source_client AS source_client
@@ -283,12 +295,7 @@ class ToolEventRepository:
         """
         rows = self._neo4j.execute(
             f"""
-            MATCH (sem:Entity)-[a:ANCHORED_TO]->(f:Entity {{structure_role: 'file'}})
-            WHERE f.structure_dirty = true
-                  AND a.created_at IS NOT NULL AND f.dirty_at > a.created_at
-                  AND NOT {memory_retired_cypher("sem")}
-                  AND ($project IS NULL OR f.structure_project = $project)
-                  AND {tenant_scope_cypher("sem")}
+            {_STALE_ANCHORS_MATCH}
             RETURN sem.uuid AS memory_uuid, sem.name AS name,
                    f.structure_project AS project, f.structure_path AS path,
                    toString(f.dirty_at) AS dirty_at, toString(a.created_at) AS anchored_at,
@@ -581,9 +588,25 @@ class ToolEventRepository:
             result[key] = row
         return result
 
-    def dirty_stats(self, *, project: str | None = None) -> dict[str, Any]:
-        """Counts for a diagnostic response: dirty files + stale anchored memories."""
-        return {
-            "dirty_files": len(self.list_dirty_files(project=project, limit=10000)),
-            "stale_anchors": len(self.stale_anchored_memories(project=project, limit=10000)),
-        }
+    def dirty_stats(
+        self, *, project: str | None = None, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """Return complete counts for the dirty-file diagnostic without list-limit truncation."""
+        rows = self._neo4j.execute(
+            f"""
+            CALL () {{
+                {_DIRTY_FILES_MATCH}
+                RETURN count(f) AS dirty_files
+            }}
+            CALL () {{
+                {_STALE_ANCHORS_MATCH}
+                RETURN count(*) AS stale_anchors
+            }}
+            RETURN dirty_files, stale_anchors
+            """,
+            params={
+                "project": project,
+                **tenant_scope_params(namespace),
+            },
+        )
+        return dict(rows[0]) if rows else {"dirty_files": 0, "stale_anchors": 0}

@@ -38,8 +38,13 @@ import lme_ground_truth as gt  # noqa: E402
 
 #: '2023/05/25 (Thu) 20:21' -- the weekday is decorative and ignored.
 _DATE_RE = re.compile(r"(\d{4})/(\d{2})/(\d{2})\s*\([^)]*\)\s*(\d{2}):(\d{2})")
+_EPISODE_SESSION_RE = re.compile(
+    r"episode-(?:.+?-)?(answer_.+)-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
 
 INGEST_CUTOFF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+NAMESPACE_PREFIX = "lme-scalar-ku-"
 
 
 def parse_haystack_date(raw: str) -> datetime | None:
@@ -60,18 +65,16 @@ def session_of(name: str) -> str | None:
         episode-lme-cc5ded98-answer_a5b68517_1-7ab...     (current: ingest.py namespace-qualifies
                                                            session ids, so the ns is in the name)
 
-    Scanning for the `answer_`-prefixed component handles both instead of pinning an index.
+    The UUID suffix delimits the full session ID, including any internal hyphens.
     """
-    for part in str(name or "").split("-"):
-        if part.startswith("answer_"):
-            return part
-    return None
+    match = _EPISODE_SESSION_RE.fullmatch(name or "")
+    return match.group(1) if match else None
 
 
-def build_session_times() -> dict[str, datetime]:
-    """session_id -> authoritative start time, from the benchmark fixture."""
-    out: dict[str, datetime] = {}
-    for record in gt.load().values():
+def build_session_times() -> dict[tuple[str, str], datetime]:
+    """Index authoritative start times by question ID and session ID."""
+    out: dict[tuple[str, str], datetime] = {}
+    for question_id, record in gt.load().items():
         ids = record.get("haystack_session_ids") or []
         dates = record.get("haystack_dates") or []
         if len(ids) != len(dates):
@@ -81,7 +84,10 @@ def build_session_times() -> dict[str, datetime]:
         for sid, raw in zip(ids, dates):
             parsed = parse_haystack_date(raw)
             if parsed is not None:
-                out[str(sid)] = parsed
+                key = (question_id, str(sid))
+                if key in out and out[key] != parsed:
+                    raise ValueError(f"conflicting fixture dates for {question_id}/{sid}")
+                out[key] = parsed
     return out
 
 
@@ -89,9 +95,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
     ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
+    ap.add_argument("--prefix", default=NAMESPACE_PREFIX)
     args = ap.parse_args()
 
-    session_times = build_session_times()
+    try:
+        session_times = build_session_times()
+    except ValueError as exc:
+        print(f"invalid fixture: {exc}", file=sys.stderr)
+        return 2
     print(f"fixture: {len(gt.load())} questions -> {len(session_times)} session timestamps\n")
     if not session_times:
         print("no fixture data; cannot verify", file=sys.stderr)
@@ -104,15 +115,18 @@ def main() -> int:
 
     with driver.session() as session:
         rows = session.run(
-            "MATCH (e:Episodic) RETURN e.uuid AS uuid, e.name AS name, "
-            "e.group_id AS ns, e.valid_at AS valid_at").data()
+            "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $p "
+            "RETURN e.uuid AS uuid, e.name AS name, e.group_id AS ns, "
+            "e.valid_at AS valid_at, e.valid_at_ingest_original AS original, "
+            "e.valid_at_ingest_was_missing AS was_missing",
+            {"p": args.prefix}).data()
 
     for row in rows:
         sid = session_of(row["name"])
         if sid is None:
             tally["no session id in name"] += 1
             continue
-        fixture_time = session_times.get(sid)
+        fixture_time = session_times.get((gt.question_id(row["ns"]), sid))
         if fixture_time is None:
             tally["session id absent from fixture"] += 1
             unmapped_sessions[sid] += 1
@@ -120,14 +134,28 @@ def main() -> int:
 
         stored = row["valid_at"]
         stored_dt = stored.to_native() if hasattr(stored, "to_native") else stored
+        if stored_dt is not None and stored_dt.tzinfo is None:
+            stored_dt = stored_dt.replace(tzinfo=timezone.utc)
+
+        agrees = stored_dt is not None and abs((stored_dt - fixture_time).total_seconds()) < 60
+        if row.get("original") is not None or row.get("was_missing") is True:
+            if agrees:
+                tally["repaired row, fixture AGREES"] += 1
+            else:
+                tally["repaired row, fixture DISAGREES"] += 1
+                if len(disagreements) < 10:
+                    repaired_value = (
+                        stored_dt.strftime("%Y-%m-%d %H:%M") if stored_dt is not None else "<null>"
+                    )
+                    disagreements.append(
+                        f"  {row['ns'][-8:]} {sid:<22} repaired={repaired_value} "
+                        f"fixture={fixture_time:%Y-%m-%d %H:%M}")
+            continue
         if stored_dt is None:
             tally["stored valid_at is null"] += 1
             continue
-        if stored_dt.tzinfo is None:
-            stored_dt = stored_dt.replace(tzinfo=timezone.utc)
 
         looks_ingested = stored_dt >= INGEST_CUTOFF
-        agrees = abs((stored_dt - fixture_time).total_seconds()) < 60
 
         if looks_ingested:
             tally["INGEST-STAMPED -> repairable"] += 1
@@ -145,15 +173,14 @@ def main() -> int:
     for label, n in tally.most_common():
         print(f"  {n:>5}  {label}")
     if disagreements:
-        print("\nDISAGREEMENTS on episodes that already looked correct "
-              "-- if this list is non-empty the mapping is WRONG, do not repair:")
+        print("\nDISAGREEMENTS on control or repaired episodes. Check the mapping before applying repairs:")
         for line in disagreements:
             print(line)
     if unmapped_sessions:
         print(f"\nsession ids not in fixture ({len(unmapped_sessions)} distinct):")
         for sid, n in unmapped_sessions.most_common(8):
             print(f"  {n:>4}  {sid}")
-    return 0
+    return 1 if disagreements else 0
 
 
 if __name__ == "__main__":

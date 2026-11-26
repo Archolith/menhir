@@ -195,10 +195,14 @@ unresolved old source plus a newly registered duplicate.
 ### GET /api/tool-events/dirty
 
 Returns `{dirty_files: [...], stale_anchors: [...], counts: {dirty_files: N, stale_anchors: M}}`.
+Each list includes up to 200 entries. The counts cover all matches for the requested project
+and the caller's stale-anchor namespace scope.
 
 ### GET /api/tool-events/stale
 
 Returns only stale anchored memories. Supports `project` and `limit` query parameters.
+`limit` accepts integers from 0 through 500 and defaults to 200. Set `limit=0` to return no rows.
+Requests outside the range return HTTP 422.
 
 ```json
 {"stale_anchors": [{"memory_uuid": "...", "name": "...", "project": "menhir",
@@ -481,6 +485,9 @@ List receipts:
 ```bash
 GET /api/tool-events/stale-verifications?memory_uuid=m1
 ```
+
+`limit` accepts integers from 0 through 500 and defaults to 50. Set `limit=0` to return no rows.
+Requests outside the range return HTTP 422.
 
 ### CLI helper
 

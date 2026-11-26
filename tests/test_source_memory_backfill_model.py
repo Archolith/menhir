@@ -185,7 +185,8 @@ class _FakeRepo:
                if r["uuid"] not in self.embedded and (after_uuid is None or r["uuid"] > after_uuid)]
         return out[:limit]
 
-    def set_episode_content_embedding(self, uuid, embedding, model):
+    def set_episode_content_embedding(self, uuid, embedding, model, *, expected_content=None):
+        assert expected_content == next(row["content"] for row in self.rows if row["uuid"] == uuid)
         if uuid in self.refuse:
             return False
         self.embedded[uuid] = model

@@ -26,14 +26,22 @@ import pytest
 
 from menhir.infrastructure import neo4j as n4
 from menhir.infrastructure import operation_owner as oo
-from menhir.services.saga_writer_heartbeat import WriterHeartbeat
+from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services import saga_writer_heartbeat as hb
+from menhir.services.saga_writer_heartbeat import (
+    SagaOwnershipLost,
+    WriterHeartbeat,
+    owned_mutation,
+)
 
 
 class _Journal:
     def __init__(self, result=True):
         self.result = result
+        self.calls: list[tuple[str, int | None, str | None]] = []
 
     def renew_owner_heartbeat(self, op_id, *, seconds=None, owner_token=None):
+        self.calls.append((op_id, seconds, owner_token))
         return self.result
 
 
@@ -73,8 +81,6 @@ def test_the_naive_window_only_bound_would_not_satisfy_the_invariant():
 @pytest.mark.unit
 def test_the_renewal_divisor_is_shared_not_duplicated():
     """The TTL formula and the renewal interval must agree; separate copies is how this broke."""
-    from menhir.services import saga_writer_heartbeat as hb
-
     assert hb._RENEW_DIVISOR is oo.RENEW_DIVISOR
 
 
@@ -142,12 +148,56 @@ def test_a_successful_renewal_extends_the_local_headroom():
 @pytest.mark.unit
 def test_owned_mutation_supplies_the_kinds_window_as_headroom():
     """Wiring: the headroom must be the kind's OWN window, not a shared default."""
-    from menhir.services.saga_writer_heartbeat import owned_mutation
-
     with owned_mutation(_Journal(), "op-1", operation_kind="METRIC_WRITE") as beat:
         assert beat is not None
         assert beat._required_headroom_s == oo.mutation_window_for_kind("METRIC_WRITE")
         assert beat._required_headroom_s > oo.mutation_window_for_kind("ENTITY_MERGE")
+
+
+@pytest.mark.unit
+def test_owned_mutation_renews_before_yield_with_the_shared_expiry(monkeypatch):
+    now = 100.0
+
+    class SlowJournal(_Journal):
+        def renew_owner_heartbeat(self, op_id, *, seconds=None, owner_token=None):
+            nonlocal now
+            now += 20.0
+            return super().renew_owner_heartbeat(op_id, seconds=seconds, owner_token=owner_token)
+
+    journal = SlowJournal()
+    lease = oo.lease_seconds_for_kind("METRIC_WRITE")
+    monkeypatch.setattr(hb, "monotonic", lambda: now)
+
+    with owned_mutation(
+        journal, "op-1", operation_kind="METRIC_WRITE", owner_token="writer:1"
+    ) as beat:
+        assert journal.calls == [("op-1", lease, "writer:1")]
+        assert beat.remaining_lease_s() == lease - 20.0
+
+
+@pytest.mark.unit
+def test_owned_mutation_refuses_a_stale_token_from_the_sqlite_journal(tmp_path):
+    journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
+    op_id = journal.prepare(
+        operation_kind="ENTITY_MERGE", request_json="{}", owner_token="current:1",
+    )
+
+    with pytest.raises(SagaOwnershipLost, match="no longer owned"):
+        with owned_mutation(journal, op_id, operation_kind="ENTITY_MERGE", owner_token="stale:1"):
+            pytest.fail("A writer with a stale token was allowed to enter the mutation scope.")
+
+    assert journal.get(op_id)["owner_token"] == "current:1"
+
+
+@pytest.mark.unit
+def test_owned_mutation_refuses_to_start_when_initial_renewal_raises():
+    class UnavailableJournal(_Journal):
+        def renew_owner_heartbeat(self, op_id, *, seconds=None, owner_token=None):
+            raise OSError("synthetic journal failure")
+
+    with pytest.raises(OSError, match="synthetic journal failure"):
+        with owned_mutation(UnavailableJournal(), "op-1", operation_kind="METRIC_WRITE"):
+            pytest.fail("A writer entered the mutation scope without a confirmed lease.")
 
 
 # --------------------------------------------------------------------------- real-path propagation

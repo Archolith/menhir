@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
-from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.neo4j import Neo4jRepository, Neo4jTransaction
 
 from repair_lme_scalar_source_times_model import (
     REPAIR_SOURCE,
@@ -98,37 +98,48 @@ def apply_repair(
     repair_id = hashlib.sha256(
         f"{source_times.fixture_sha256}|{namespace_prefix}|{started_at.isoformat()}".encode()
     ).hexdigest()
-    rows = repository.execute(
-        """
-        CALL () {
-          UNWIND $evidence AS row
-          MATCH (t:TurnEvidence {turn_id: row.turn_id})
-          SET t.occurred_at = datetime(row.target),
-              t.source_time_repair_id = $repair_id
-          RETURN count(t) AS evidence_updated
+
+    def apply_timestamps(tx: Neo4jTransaction) -> dict[str, int]:
+        rows = tx.execute(
+            """
+            CALL () {
+              UNWIND $evidence AS row
+              MATCH (t:TurnEvidence {turn_id: row.turn_id})
+              SET t.occurred_at = datetime(row.target),
+                  t.source_time_repair_id = $repair_id
+              RETURN count(t) AS evidence_updated
+            }
+            CALL () {
+              UNWIND $assertions AS row
+              MATCH (a:TypedAssertion {assertion_id: row.assertion_id})
+              SET a.source_time_repair_original_valid_at =
+                    coalesce(a.source_time_repair_original_valid_at, a.valid_at),
+                  a.valid_at = datetime(row.target),
+                  a.source_time_repair_id = $repair_id
+              RETURN count(a) AS assertions_updated
+            }
+            RETURN evidence_updated, assertions_updated
+            """,
+            {
+                "evidence": list(plan.evidence_updates),
+                "assertions": list(plan.assertion_updates),
+                "repair_id": repair_id,
+            },
+        )
+        applied = rows[0] if rows else {}
+        counts = {
+            "evidence_updated": int(applied.get("evidence_updated") or 0),
+            "assertions_updated": int(applied.get("assertions_updated") or 0),
         }
-        CALL () {
-          UNWIND $assertions AS row
-          MATCH (a:TypedAssertion {assertion_id: row.assertion_id})
-          SET a.source_time_repair_original_valid_at =
-                coalesce(a.source_time_repair_original_valid_at, a.valid_at),
-              a.valid_at = datetime(row.target),
-              a.source_time_repair_id = $repair_id
-          RETURN count(a) AS assertions_updated
-        }
-        RETURN evidence_updated, assertions_updated
-        """,
-        {
-            "evidence": list(plan.evidence_updates),
-            "assertions": list(plan.assertion_updates),
-            "repair_id": repair_id,
-        },
-    )
-    applied = rows[0] if rows else {}
-    if int(applied.get("evidence_updated") or 0) != len(plan.evidence_updates):
-        raise RepairRefusal("evidence update count changed between planning and apply")
-    if int(applied.get("assertions_updated") or 0) != len(plan.assertion_updates):
-        raise RepairRefusal("assertion update count changed between planning and apply")
+        if counts["evidence_updated"] != len(plan.evidence_updates):
+            raise RepairRefusal("evidence update count changed between planning and apply")
+        if counts["assertions_updated"] != len(plan.assertion_updates):
+            raise RepairRefusal("assertion update count changed between planning and apply")
+        return counts
+
+    # Count validation must happen inside the same transaction as the SETs.  A mismatch therefore
+    # raises before commit and the repository rolls back both timestamp lanes together.
+    applied = repository.execute_write(apply_timestamps)
 
     audit["status"] = "timestamps_applied"
     audit["repair_id"] = repair_id

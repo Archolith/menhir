@@ -221,7 +221,7 @@ def adapt_research_candidate(
     claimed_uuid, claimed_span, claim_error = _claimed_locator(raw_candidate)
     if claim_error is not None:
         return _reject(candidate_hash=candidate_hash, candidate_id_hash=id_hash, reason=claim_error)
-    if "episode" not in raw_candidate and claimed_uuid is not None:
+    if raw_candidate.get("episode") is None and claimed_uuid is not None:
         index = indices.get(claimed_uuid)
         if index is None:
             return _reject(

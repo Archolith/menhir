@@ -168,6 +168,22 @@ def test_tier_scopes_must_be_supported_permission_scopes():
         MemorySettings(oauth_admin_scopes=("retired:admin",))
 
 
+def test_duplicate_supported_scopes_are_rejected():
+    with pytest.raises(ValueError, match="duplicate"):
+        MemorySettings(oauth_scopes_supported=("menhir:read", "menhir:read"))
+
+
+@pytest.mark.parametrize("field", [
+    "oauth_as_code_ttl_s",
+    "oauth_as_consent_ttl_s",
+    "oauth_as_session_ttl_s",
+])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_oauth_ttls_are_rejected(field, value):
+    with pytest.raises(ValueError, match=field):
+        MemorySettings(**{field: value})
+
+
 def test_revoked_admin_scope_denies_the_operator_tier():
     """Far-end assertion: config alone proves nothing, the tier mapping is what enforces."""
     from menhir.api.oauth import tier_from_scopes
