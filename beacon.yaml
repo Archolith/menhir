@@ -36,7 +36,7 @@ audiences:
   - developers evaluating agent memory and code intelligence
 
 current_focus:
-  - the local-stdio MVP release (tracker Archolith/menhir#123)
+  - the current execution owners routed in .agent/plans/README.md (the local-stdio MVP shipped as 0.3.0)
 
 # The documents an agent can search through Beacon, in reading order: entry points, architecture
 # and decisions, reference, workflows, then current plans and research indexes. Chosen by an agent
@@ -87,7 +87,7 @@ canonical_docs:
   - path: .agent/plans/README.md
     role: reference
   - path: .agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md
-    role: implementation_plan
+    role: reference
   - path: .agent/plans/menhir-research-execution-ladder.md
     role: implementation_plan
   - path: .agent/reference/README.md
