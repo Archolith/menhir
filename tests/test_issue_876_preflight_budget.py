@@ -132,3 +132,27 @@ def test_typed_exception_with_empty_message_keeps_type_based_grade(type_name, ex
 def test_blank_plain_message_and_untyped_blank_exception_are_retryable():
     assert classify_enrichment_failure("  ") == "retryable"
     assert classify_enrichment_failure(_blank_exc("SomeOtherError")) == "retryable"
+
+
+def test_every_production_compose_call_passes_the_preflight_budget():
+    """An unbudgeted call sends a body preflight never measured; tests at budget 0 can't see it."""
+    import ast
+    from pathlib import Path as _Path
+
+    import menhir
+
+    root = _Path(menhir.__file__).resolve().parent
+    unbudgeted = []
+    for path in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name != "compose_episode_body":
+                continue
+            budgeted = len(node.args) >= 2 or any(
+                kw.arg == "max_estimated_tokens" for kw in node.keywords
+            )
+            if not budgeted:
+                unbudgeted.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert unbudgeted == []
