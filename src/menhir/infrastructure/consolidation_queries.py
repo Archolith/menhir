@@ -121,7 +121,8 @@ def bridge_cypher(
     ``bridge_skipped`` (true when the node had more than ``MAX_BRIDGE_NEIGHBOURS`` eligible
     neighbours, so nothing was bridged). Neighbours are collected only up to the cap plus one.
 
-    Each neighbour is write-locked (in uuid order, so two bridgers cannot deadlock) and re-checked
+    Each neighbour is write-locked (in uuid order; a deadlock with another locker is detected by
+    Neo4j and retried) and re-checked
     before the pair MERGE: under read-committed a concurrent bridger of the same pair would
     otherwise create it twice. A pair already joined by any adjacency edge gets no new edge, and
     the MERGE is undirected between two bound nodes, so at most one RELATES_TO per unordered pair.
@@ -1185,17 +1186,14 @@ class ConsolidationRepository:
               AND {automatic_lifecycle_protection_cypher("target")}
             MATCH (lockm:Entity)
             WHERE lockm.conflict_group_id = $group_id
-              AND {tenant_scope_cypher("lockm")}
             SET lockm._conflict_group_lock = true
             REMOVE lockm._conflict_group_lock
             WITH DISTINCT target
             // Re-check under the lock: a concurrent review may have moved it already.
             WHERE target.conflict_group_id = $group_id
               AND target.conflict_status = $from_status
-            // A member of another namespace is neither counted nor touched.
             OPTIONAL MATCH (o:Entity)
             WHERE o.conflict_group_id = $group_id AND o.uuid <> $uuid
-              AND {tenant_scope_cypher("o")}
             WITH target, collect(o) AS others
             // The verdict covers only the partners that were reviewed. A member that joined
             // since then has not been compared, so the removal waits for the next run.
@@ -1203,8 +1201,7 @@ class ConsolidationRepository:
                OR all(x IN others WHERE x.uuid IN $reviewed_uuids)
             SET target.conflict_group_id = null,
                 target.conflict_status = $resolution_status
-            // Dissolve on the in-namespace member count; the members written below are the
-            // writable ones among them.
+            // Dissolve on the true member count, not only the members this caller may write.
             WITH size(others) < 2 AS dissolved, [x IN others | x.uuid] AS remaining_uuids
             OPTIONAL MATCH (m:Entity)
             WHERE dissolved
@@ -1229,15 +1226,17 @@ class ConsolidationRepository:
         )
         if not rows:
             # Advisory diagnosis of the refusal, so the caller can log why nothing was removed.
+            # The refusal counts every member, as the removal does; only this namespace's uuids
+            # are named.
             unreviewed: list[str] = []
+            any_unreviewed = False
             if reviewed_uuids is not None:
                 unreviewed_rows = self.neo4j.execute(
                     f"""
                     MATCH (o:Entity)
                     WHERE o.conflict_group_id = $group_id AND o.uuid <> $uuid
                       AND NOT o.uuid IN $reviewed_uuids
-                      AND {tenant_scope_cypher("o")}
-                    RETURN o.uuid AS uuid
+                    RETURN o.uuid AS uuid, {tenant_scope_cypher("o")} AS visible
                     ORDER BY o.uuid
                     """,
                     params={
@@ -1247,12 +1246,15 @@ class ConsolidationRepository:
                         **tenant_scope_params(ns or None),
                     },
                 )
-                unreviewed = [str(r["uuid"]) for r in unreviewed_rows if r.get("uuid")]
+                any_unreviewed = bool(unreviewed_rows)
+                unreviewed = [
+                    str(r["uuid"]) for r in unreviewed_rows if r.get("uuid") and r.get("visible")
+                ]
             return {
                 "removed": False,
                 "dissolved": False,
                 "remaining_uuids": [],
-                "reason": "unreviewed_members" if unreviewed else "member_changed",
+                "reason": "unreviewed_members" if any_unreviewed else "member_changed",
                 "unreviewed_uuids": unreviewed,
             }
         row = rows[0]
@@ -1618,7 +1620,9 @@ class ConsolidationRepository:
         namespace_params = tenant_scope_params(namespace_value)
         lock = CONFLICT_RESOLVE_LOCK
 
-        # Locks every member (in uuid order, so two lockers cannot deadlock) for the transaction.
+        # Locks every member, in uuid order, for the transaction. Lockers that take other nodes
+        # first (set_conflict's a and b, the bridge's neighbours) can still deadlock with it;
+        # Neo4j detects that and execute_write retries.
         lock_members_query = (
             f"MATCH (n:Entity) WHERE n.conflict_group_id = $group_id AND {namespace_predicate} "
             f"AND {automatic_lifecycle_protection_cypher('n')} "
@@ -1744,8 +1748,6 @@ class ConsolidationRepository:
             # execute_write may re-run this body, so every piece of state is local to it.
             tx.execute(lock_members_query, group_params)
             locked_rows = tx.execute(read_members_query, group_params)
-            # Re-check under the lock: a concurrent resolve, promotion or removal has committed.
-            remove_uuids = validated_removals(locked_rows)
             by_uuid = {str(r["uuid"]): r for r in locked_rows if r.get("uuid")}
             if set(by_uuid) != set(fence_keys):
                 # A member joined or left since the early read. The fence's ErasureMarker check
@@ -1755,6 +1757,14 @@ class ConsolidationRepository:
                     "the group's members changed since they were read: "
                     + ", ".join(sorted(set(by_uuid) ^ set(fence_keys))),
                 )
+            # Re-check under the lock. The early read passed, so a failure here is a concurrent
+            # change (a promotion), reported as a refusal rather than a bad request.
+            try:
+                remove_uuids = validated_removals(locked_rows)
+            except ConflictResolveRefused:
+                raise
+            except ValueError as exc:
+                raise ConflictResolveRefused("member_changed", str(exc)) from exc
             keep_row = by_uuid[keep_uuid]
             if str(keep_row.get("fence_key") or "default") != copy_key:
                 raise ConflictResolveRefused("fence_key_changed", f"keep {keep_uuid}")

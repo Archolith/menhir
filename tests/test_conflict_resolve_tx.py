@@ -258,6 +258,20 @@ def test_a_member_promoted_after_the_read_is_not_gone() -> None:
     assert graph.nodes["keep"]["content"] == "keep text"
 
 
+def test_a_change_seen_only_under_the_lock_is_a_refusal_not_a_bad_request() -> None:
+    """Promoted after the early read: the in-lock guard raises ConflictResolveRefused, which the
+    tool maps to "refused", not a plain ValueError ("invalid_argument")."""
+    from menhir.infrastructure.consolidation_queries import ConflictResolveRefused
+
+    graph = _Graph([_node("keep", "keep text"), _node("t1", "target one")])
+    graph.after("fence_epoch", lambda g: g.nodes["t1"].update(scope="PROMOTED"))
+
+    with pytest.raises(ConflictResolveRefused) as refused:
+        _resolve(graph)
+
+    assert refused.value.reason == "member_changed"
+
+
 def test_a_member_promoted_between_the_locked_read_and_gone_rolls_back() -> None:
     """The GONE write re-checks PROMOTED itself. Fails on main, whose GONE write has no check."""
     graph = _Graph([_node("keep", "keep text"), _node("t1", "target one")])
@@ -423,7 +437,7 @@ class _Sequenced:
 
 def test_remove_conflict_member_names_the_unreviewed_members_it_refused_on() -> None:
     """Fails on main, which returns no reason."""
-    neo4j = _Sequenced([], [{"uuid": "c"}])
+    neo4j = _Sequenced([], [{"uuid": "c", "visible": True}])
 
     out = MemoryGraphAdapter(neo4j=neo4j).remove_conflict_member(
         GROUP, "a", from_status="pending_llm_review", reviewed_uuids=["b"]
@@ -432,6 +446,18 @@ def test_remove_conflict_member_names_the_unreviewed_members_it_refused_on() -> 
     assert out["removed"] is False
     assert out["reason"] == "unreviewed_members"
     assert out["unreviewed_uuids"] == ["c"]
+
+
+def test_remove_conflict_member_refuses_on_an_unreviewed_foreign_member_without_naming_it() -> None:
+    neo4j = _Sequenced([], [{"uuid": "foreign", "visible": False}])
+
+    out = MemoryGraphAdapter(neo4j=neo4j).remove_conflict_member(
+        GROUP, "a", from_status="pending_llm_review", reviewed_uuids=["b"], namespace="ns1"
+    )
+
+    assert out["removed"] is False
+    assert out["reason"] == "unreviewed_members"
+    assert out["unreviewed_uuids"] == []
 
 
 def test_remove_conflict_member_reports_a_changed_member_when_nobody_is_unreviewed() -> None:
@@ -582,3 +608,39 @@ async def test_the_dry_run_says_unavailable_when_the_estimate_raises(error: Exce
     assert out["bridge_count_estimate"] is None
     assert out["bridge_estimate_available"] is False
     assert out["would_remove_uuids"] == ["t1", "t2"]
+
+
+@pytest.mark.asyncio
+async def test_the_dry_run_passes_a_tier_refusal_through() -> None:
+    """A 403 from the estimate is an answer, not a missing estimate."""
+    tool, backend = _dry_run_tool({})
+    backend.estimate_bridges_for_nodes = AsyncMock(side_effect=PermissionError("operator tier required"))
+
+    with pytest.raises(Exception, match="operator tier required"):
+        await tool.endpoint(group_id=GROUP, action="replace", keep_uuid="keep", dry_run=True)
+
+
+@pytest.mark.asyncio
+async def test_the_resolve_reports_the_hubs_it_did_not_bridge() -> None:
+    import json
+
+    from menhir.mcp.tools.conflict.resolve_conflict import ResolveConflictTool
+
+    backend = MagicMock()
+    groups = [{
+        "group_id": GROUP, "status": "unresolved",
+        "members": [{"uuid": "keep", "name": "k", "status": "unresolved"},
+                    {"uuid": "t1", "name": "t", "status": "unresolved"}],
+    }]
+    backend.list_conflict_groups = AsyncMock(side_effect=[groups, []])
+    backend.resolve_conflict_group = AsyncMock(return_value={
+        "resolved": 1, "removed_uuids": ["t1"], "bridged_edges": 0, "bridge_skipped_hubs": ["t1"],
+    })
+    tool = ResolveConflictTool()
+    tool.get_backend = MagicMock(return_value=backend)
+
+    out = json.loads(await tool.endpoint(
+        group_id=GROUP, action="replace", keep_uuid="keep", remove_uuid="t1"
+    ))
+
+    assert out["bridge_skipped_hubs"] == ["t1"]

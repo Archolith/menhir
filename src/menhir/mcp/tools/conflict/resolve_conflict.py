@@ -151,6 +151,7 @@ class ResolveConflictTool(BaseJsonTool):
                         "resolved": int(result.get("resolved") or 0),
                         "removed_uuids": result.get("removed_uuids") or [],
                         "bridged_edges": int(result.get("bridged_edges") or 0),
+                        "bridge_skipped_hubs": list(result.get("bridge_skipped_hubs") or []),
                         "group_cleared": refreshed is None,
                         "remaining_unresolved_in_group": _count_unresolved_members(refreshed),
                         "journal_op_id": None,
@@ -178,8 +179,13 @@ class ResolveConflictTool(BaseJsonTool):
                     try:
                         pending = estimator(would_remove, **scope)
                         bridge_estimate = await pending if inspect.isawaitable(pending) else pending
-                    except Exception as exc:
-                        logger.warning("resolve_conflict dry run: bridge estimate unavailable: %s", exc)
+                    except (PermissionError, ValueError):
+                        # A tier or namespace refusal is an answer, not a missing estimate.
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "resolve_conflict dry run: bridge estimate unavailable", exc_info=True
+                        )
                         bridge_estimate = None
                 return self.render_json(
                     {
@@ -243,6 +249,7 @@ class ResolveConflictTool(BaseJsonTool):
                 "resolved": int(result.get("resolved") or 0),
                 "removed_uuids": result.get("removed_uuids") or [],
                 "bridged_edges": int(result.get("bridged_edges") or 0),
+                "bridge_skipped_hubs": list(result.get("bridge_skipped_hubs") or []),
                 "group_cleared": refreshed is None,
                 "remaining_unresolved_in_group": _count_unresolved_members(refreshed),
                 "journal_op_id": None,

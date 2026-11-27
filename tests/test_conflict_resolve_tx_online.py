@@ -378,9 +378,10 @@ def test_remove_conflict_member_returns_its_reason(group_factory) -> None:
     assert out["unreviewed_uuids"] == [g.ids["c"]]
 
 
-def test_remove_conflict_member_neither_counts_nor_touches_another_namespace(group_factory) -> None:
-    """A foreign member sharing the group id is invisible to the removal. Fails on main, which
-    counts it as an unreviewed member and refuses."""
+def test_remove_conflict_member_refuses_on_an_unreviewed_foreign_member(group_factory) -> None:
+    """A legacy group with a member of another namespace: that pair was never reviewed, so the
+    removal is refused (the design keeps main's true-member-count refusal), the foreign member
+    is untouched and its uuid is not disclosed."""
     g = group_factory(a={}, b={})
     foreign = f"foreign-{g.gid}"
     g.repo.execute(
@@ -402,14 +403,18 @@ def test_remove_conflict_member_neither_counts_nor_touches_another_namespace(gro
             reviewed_uuids=[g.ids["b"]], namespace=g.ns,
         )
 
-        assert out["removed"] is True
-        assert out["remaining_uuids"] == [g.ids["b"]]
-        assert out["dissolved"] is True  # a group of one in this namespace is not a conflict
-        foreign_props = dict(g.repo.execute(
-            "MATCH (n:Entity {uuid: $u}) RETURN properties(n) AS p", params={"u": foreign}
-        )[0]["p"])
-        assert foreign_props["conflict_group_id"] == g.gid
-        assert foreign_props["conflict_status"] == "pending_llm_review"
+        assert out["removed"] is False
+        assert out["reason"] == "unreviewed_members"
+        assert out["unreviewed_uuids"] == []
+        rows = g.repo.execute(
+            "MATCH (n:Entity) WHERE n.uuid IN $us RETURN n.uuid AS u, n.conflict_group_id AS g, "
+            "n.conflict_status AS s",
+            params={"us": [g.ids["a"], foreign]},
+        )
+        assert {r["u"]: (r["g"], r["s"]) for r in rows} == {
+            g.ids["a"]: (g.gid, "pending_llm_review"),
+            foreign: (g.gid, "pending_llm_review"),
+        }
     finally:
         g.repo.execute(
             "MATCH (n:Entity {namespace: $ns}) DETACH DELETE n", params={"ns": f"{g.ns}-other"}
