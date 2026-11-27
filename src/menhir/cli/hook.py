@@ -16,9 +16,13 @@ from menhir.cli.output import (
     HOOK_EVENT_NAMES,
     DEFAULT_HOOK_TOKEN_BUDGET,
     REMINDER_LIMIT,
+    HookListLayout,
+    compute_list_layout,
     detect_write_signals,
     format_hook_output,
     format_save_checkpoint,
+    hook_context_max_tokens,
+    rendered_todo_uuids,
     format_temporal_line,
     format_write_nudge,
     should_run_this_turn,
@@ -123,29 +127,70 @@ def run(
         )
 
 
-def _scrub_memory_inputs(
+def _scrub_hook_lists(
     flagged: list[dict],
     todos: list[dict],
     temporal_memories: list[dict],
-    context_text: str | None,
-) -> tuple[list[dict], list[dict], list[dict], str | None]:
-    """Redact credentials from everything memory-derived before it is rendered (#577).
+    max_tokens: int,
+) -> tuple[list[dict], list[dict], list[dict], bool, HookListLayout]:
+    """Redact credentials from the list inputs and lay them out once (#577).
 
     Fails closed: if the detector fails, no memory section is emitted and the log line
-    carries no text.
+    carries no text. Returns (flagged, todos, temporal_memories, withheld, layout).
     """
     from menhir.domain.payload_scrub import PayloadScrubFailed, scrub_payload
 
     try:
-        return (
+        flagged, todos, temporal_memories = (
             scrub_payload(flagged),
             scrub_payload(todos),
             scrub_payload(temporal_memories),
-            scrub_payload(context_text),
         )
+        withheld = False
     except PayloadScrubFailed:
         print("menhir hook: credential scan failed, memory sections withheld", file=sys.stderr)
-        return [], [], [], None
+        flagged, todos, temporal_memories, withheld = [], [], [], True
+    return (
+        flagged, todos, temporal_memories, withheld,
+        compute_list_layout(flagged, todos, temporal_memories, max_tokens),
+    )
+
+
+def _scrub_hook_context(context_text: str | None, withheld: bool) -> tuple[str | None, bool]:
+    """Redact the recalled context; returns (text, withheld) with the same fail-closed contract."""
+    from menhir.domain.payload_scrub import PayloadScrubFailed, scrub_payload
+
+    if withheld:
+        return None, True
+    try:
+        return scrub_payload(context_text), False
+    except PayloadScrubFailed:
+        print("menhir hook: credential scan failed, memory sections withheld", file=sys.stderr)
+        return None, True
+
+
+def _render_hook_output(
+    flagged: list[dict],
+    todos: list[dict],
+    temporal_memories: list[dict],
+    layout: HookListLayout,
+    context_text: str | None,
+    withheld: bool,
+    query: str | None,
+    write_nudge: str | None,
+    temporal_line: str | None,
+    max_tokens: int,
+) -> str:
+    """Scrub the context, then render with the layout the recall was budgeted against."""
+    context_text, now_withheld = _scrub_hook_context(context_text, withheld)
+    if now_withheld and not withheld:
+        # The context scan failed after the lists passed: every memory section is withheld.
+        flagged, todos, temporal_memories = [], [], []
+        layout = compute_list_layout(flagged, todos, temporal_memories, max_tokens)
+    return format_hook_output(
+        flagged, context_text, query, write_nudge, temporal_line,
+        todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens, layout=layout,
+    )
 
 
 def _parse_stdin() -> tuple[str, str]:
@@ -239,6 +284,10 @@ def _run_prompt_impl(
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 
+    flagged, todos, temporal_memories, withheld, layout = _scrub_hook_lists(
+        flagged, todos, temporal_memories, max_tokens
+    )
+
     # Full path: context recall (if prompt is long enough and services available)
     context_text: str | None = None
     effective_query = prompt.strip() if len(prompt.strip()) >= MIN_PROMPT_LEN else None
@@ -251,9 +300,16 @@ def _run_prompt_impl(
                 await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
-                        max_tokens=max_tokens,
+                        # The Context allowance left after the list sections, so what comes
+                        # back already fits and is never cut mid-memory by the formatter.
+                        max_tokens=hook_context_max_tokens(
+                            flagged, todos, temporal_memories, max_tokens, layout=layout
+                        ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
+                        exclude_todo_uuids=rendered_todo_uuids(
+                            flagged, todos, temporal_memories, max_tokens, layout=layout
+                        ),
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
@@ -271,12 +327,17 @@ def _run_prompt_impl(
                 file=sys.stderr,
             )
 
-    flagged, todos, temporal_memories, context_text = _scrub_memory_inputs(
-        flagged, todos, temporal_memories, context_text
-    )
-    output = format_hook_output(
-        flagged, context_text, effective_query, write_nudge, temporal_line,
-        todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
+    output = _render_hook_output(
+        flagged=flagged,
+        todos=todos,
+        temporal_memories=temporal_memories,
+        layout=layout,
+        context_text=context_text,
+        withheld=withheld,
+        query=effective_query,
+        write_nudge=write_nudge,
+        temporal_line=temporal_line,
+        max_tokens=max_tokens,
     )
     print(wrap_hook_response(output or None, event="UserPromptSubmit"), flush=True)
 
@@ -347,6 +408,10 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 
+    flagged, todos, temporal_memories, withheld, layout = _scrub_hook_lists(
+        flagged, todos, temporal_memories, max_tokens
+    )
+
     # Context recall — always, no frequency gate
     context_text: str | None = None
     if svc.context_builder is not None:
@@ -358,9 +423,16 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                 await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
-                        max_tokens=max_tokens,
+                        # The Context allowance left after the list sections, so what comes
+                        # back already fits and is never cut mid-memory by the formatter.
+                        max_tokens=hook_context_max_tokens(
+                            flagged, todos, temporal_memories, max_tokens, layout=layout
+                        ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
+                        exclude_todo_uuids=rendered_todo_uuids(
+                            flagged, todos, temporal_memories, max_tokens, layout=layout
+                        ),
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
@@ -378,12 +450,17 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                 file=sys.stderr,
             )
 
-    flagged, todos, temporal_memories, context_text = _scrub_memory_inputs(
-        flagged, todos, temporal_memories, context_text
-    )
-    output = format_hook_output(
-        flagged, context_text, effective_query, None, temporal_line,
-        todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
+    output = _render_hook_output(
+        flagged=flagged,
+        todos=todos,
+        temporal_memories=temporal_memories,
+        layout=layout,
+        context_text=context_text,
+        withheld=withheld,
+        query=effective_query,
+        write_nudge=None,
+        temporal_line=temporal_line,
+        max_tokens=max_tokens,
     )
     print(wrap_hook_response(output or None, event="SessionStart"), flush=True)
 

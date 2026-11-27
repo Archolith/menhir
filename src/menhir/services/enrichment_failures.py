@@ -245,4 +245,8 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
     if _normalize_error_type(error, error_type) in _RETRYABLE_TYPE_NAMES:
         return "retryable"
 
+    # A blank message carries no signal: retry, but only after the type-based grades above.
+    if not error_text:
+        return "retryable"
+
     return "manual_review"

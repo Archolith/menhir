@@ -265,9 +265,10 @@ async def test_resume_pending_episodes_resets_stale_enriching_leases(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -315,9 +316,10 @@ async def test_resume_pending_episodes_marks_exhausted_stale_rows_failed(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -368,9 +370,10 @@ async def test_resume_pending_episodes_resets_orphaned_enriching_rows(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -418,9 +421,10 @@ async def test_resume_pending_episodes_skips_exhausted_pending_rows(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)

@@ -227,16 +227,16 @@ def test_only_harmful_lifecycle_paths_inherit_source_retention() -> None:
         [
             [{"updated": 1}],
             [{"updated": 1}],
-            [{"promoted": 1}],
-            [{"newly_demoted_count": 1}],
+            [{"promoted_uuids": ["entity-1"]}],
+            [{"newly_demoted_uuids": ["entity-1"]}],
         ]
     )
     repo = ConsolidationRepository(neo4j)
 
     assert repo.compress_node("entity-1", "summary") is True
     assert repo.complete_rehydration("entity-1", "content") is True
-    assert repo.promote_to_persistent(["entity-1"]) == 1
-    assert repo.set_demote_ttl(["entity-1"], 7) == 1
+    assert repo.promote_to_persistent(["entity-1"]) == ["entity-1"]
+    assert repo.set_demote_ttl(["entity-1"], 7) == ["entity-1"]
 
     compress_query, rehydrate_query, promote_query, ttl_query = [
         q for q, _ in neo4j.calls

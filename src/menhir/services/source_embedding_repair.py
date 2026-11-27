@@ -27,13 +27,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from menhir.domain.secret_scrub import embed_input_text
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.telemetry import record_failure_event
 
 logger = logging.getLogger(__name__)
 
-#: Same truncation bound as the ingest step and the backfill script.
-EMBED_MAX_CHARS = 8000
 #: Per-call bound. Longer than the ingest step's 10s: nothing waits on this job, and the failures
 #: it repairs were timeouts under load.
 EMBED_TIMEOUT_S = 30.0
@@ -99,9 +98,12 @@ async def repair_source_embeddings(
                 skipped += 1
                 continue
             calls += 1
+            # Redact like the ingest step, before truncation; ``content`` stays the stored value
+            # the write is conditioned on.
+            embed_text = embed_input_text(content)
             try:
                 embedding = await await_with_backoff_aware_timeout(
-                    embed(content[:EMBED_MAX_CHARS]), timeout_s=EMBED_TIMEOUT_S
+                    embed(embed_text), timeout_s=EMBED_TIMEOUT_S
                 )
             except Exception as exc:  # timeout or embedder error: count it, keep going
                 failed += 1

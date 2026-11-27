@@ -152,6 +152,16 @@ def prepare_memory_text(raw: str, *, policy: str | None = None) -> ScrubbedText:
     return ScrubbedText(text, kinds, _MINT)
 
 
+#: Episode content is truncated before embedding so a pathological payload cannot blow the
+#: embedder's window; 8,000 chars is far beyond any real turn.
+EMBED_MAX_CHARS = 8000
+
+
+def embed_input_text(text: str) -> str:
+    """The text an episode embedder receives: redacted first, then truncated."""
+    return prepare_memory_text(text, policy=non_refusing_policy())[:EMBED_MAX_CHARS]
+
+
 def ensure_scrubbed(raw: str | None, *, policy: str | None = None) -> ScrubbedText | None:
     """Repository-boundary guard: a plain ``str`` is scrubbed here, never stored as is."""
     if raw is None:

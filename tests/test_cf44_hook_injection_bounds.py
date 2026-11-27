@@ -29,8 +29,12 @@ look identical if you only test "the file did not parse".
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -232,14 +236,61 @@ def test_the_cli_default_and_the_budget_default_are_one_constant() -> None:
     assert DEFAULT_HOOK_TOKEN_BUDGET > 0
 
 
-def test_the_hook_passes_its_budget_to_the_formatter() -> None:
+class _FloodAdapter:
+    def fetch_flagged_memories(self, limit=10, workspace=None):
+        return _pinned(10)
+
+    def list_todos(self, status="open", limit=5, namespace=None):
+        return _todos(5)
+
+    def list_temporal_in_window(self, window_days=30, namespace=None, limit=5):
+        return _reminders(40)
+
+
+class _FloodBuilder:
+    async def build_context(self, query, **kwargs):
+        text = "\n".join(f"- [0.9] recalled memory line {i} " + "q" * 60 for i in range(400))
+        return SimpleNamespace(context=text)
+
+
+class _FakeStdin(io.StringIO):
+    def isatty(self) -> bool:
+        return False
+
+
+@pytest.mark.parametrize("event", ["prompt", "postcompact"])
+def test_the_hook_passes_its_budget_to_the_formatter(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], event: str
+) -> None:
     """TRAP T17 again. `format_hook_output` accepting `max_tokens` proves nothing about the two
     hook paths passing it -- and not passing it is indistinguishable from the defect."""
-    import inspect
+    from menhir.cli import hook as hook_module
+    from menhir.services.context_builder import estimate_tokens
 
-    from menhir.cli import hook
+    max_tokens = 300
+    spy = Mock(wraps=format_hook_output)
+    monkeypatch.setattr(hook_module, "format_hook_output", spy)
+    svc = SimpleNamespace(graph_adapter=_FloodAdapter(), context_builder=_FloodBuilder())
+    monkeypatch.setattr("menhir.cli.bootstrap.build_hook_services", lambda settings=None: svc)
+    monkeypatch.delenv("MENHIR_SECRET_POLICY", raising=False)
+    stdin = '{"source": "compact"}' if event == "postcompact" else "{}"
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(stdin))
 
-    assert inspect.getsource(hook).count("max_tokens=max_tokens,\n    )") == 2
+    if event == "postcompact":
+        hook_module._run_postcompact_impl(max_tokens=max_tokens, workspace=None)
+    else:
+        hook_module._run_prompt_impl(
+            query="a sufficiently long prompt about the parser", max_tokens=max_tokens,
+            frequency=0, workspace=None,
+        )
+
+    (call,) = spy.call_args_list
+    assert call.kwargs["max_tokens"] == max_tokens
+    envelope = json.loads(capsys.readouterr().out)
+    injected = envelope["hookSpecificOutput"]["additionalContext"]
+    assert "### Reminders" in injected and "### Context" in injected
+    # Section headers, the context notice and fences sit outside the budget by design.
+    assert estimate_tokens(injected)[0] <= max_tokens + 100
 
 
 # ---------------------------------------------------------------------------

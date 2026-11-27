@@ -1366,15 +1366,15 @@ class StubMemoryGraphAdapter:
     def count_persistent_edges(self, node_uuid: str) -> int:
         return self.persistent_edge_counts.get(node_uuid, 0)
 
-    def promote_to_persistent(self, node_uuids: list[str]) -> int:
+    def promote_to_persistent(self, node_uuids: list[str]) -> list[str]:
         self.promoted_nodes.extend(node_uuids)
-        return len(node_uuids)
+        return list(node_uuids)
 
     def delete_session_nodes(self, node_uuids: list[str]) -> int:
         self.deleted_session_nodes.extend(node_uuids)
         return len(node_uuids)
 
-    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> int:
+    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> list[str]:
         """Stub for F5 demote-with-TTL: record call and return demoted count."""
         self.set_demote_ttl_calls.append({
             "node_uuids": node_uuids,
@@ -1383,7 +1383,7 @@ class StubMemoryGraphAdapter:
         # Track newly demoted (for test assertions)
         newly_demoted = [u for u in node_uuids if u not in self.demoted_uuids]
         self.demoted_uuids.extend(newly_demoted)
-        return len(newly_demoted)
+        return newly_demoted
 
     def fetch_ttl_expired_session_uuids(self, session_id: str | None = None) -> list[dict[str, object]]:
         """Stub for F5: return programmed expired uuids."""

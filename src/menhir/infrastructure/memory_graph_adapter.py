@@ -1359,13 +1359,13 @@ class MemoryGraphAdapter:
     def count_persistent_edges(self, node_uuid: str) -> int:
         return self._consolidation.count_persistent_edges(node_uuid)
 
-    def promote_to_persistent(self, node_uuids: list[str]) -> int:
+    def promote_to_persistent(self, node_uuids: list[str]) -> list[str]:
         return self._consolidation.promote_to_persistent(node_uuids)
 
     def delete_session_nodes(self, node_uuids: list[str]) -> int:
         return self._consolidation.delete_session_nodes(node_uuids)
 
-    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> int:
+    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> list[str]:
         return self._consolidation.set_demote_ttl(node_uuids, ttl_days)
 
     def fetch_ttl_expired_session_uuids(self, session_id: str | None = None) -> list[dict[str, Any]]:
@@ -1857,22 +1857,6 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, str]]:
         """List document entities for a project."""
         return self._structure.query_documents(project, path_filter, document_type)
-
-    def link_episode_to_documents(
-        self,
-        episode_uuid: str,
-        entity_names: list[str],
-        project: str,
-        max_links: int = 5,
-    ) -> int:
-        """Link an episode to wiki/reference documents by name match."""
-        return self._structure.link_episode_to_documents(
-            episode_uuid, entity_names, project, max_links
-        )
-
-    def get_linked_documents(self, episode_uuids: list[str]) -> list[dict[str, str]]:
-        """Get documents linked to episodes via RELATES_TO."""
-        return self._structure.get_linked_documents(episode_uuids)
 
     def list_structure_projects(self) -> list[dict[str, str]]:
         return self._structure.list_projects()

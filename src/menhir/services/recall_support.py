@@ -374,6 +374,8 @@ class RecallSupportMixin:
         eligible_uuids: list[str],
         context_node_ids: list[str] | None,
         namespace: str | None = None,
+        *,
+        degradation_notes: list[str] | None = None,
     ) -> tuple[dict[str, float], dict[tuple[str, str], list[str]]]:
         """Fetch and normalize adjacency scores; return (adjacency_map, edge_index).
 
@@ -384,6 +386,9 @@ class RecallSupportMixin:
         edges only (SSOT-04) -- otherwise context/structural edges from a foreign
         namespace could influence ranking even though the initial candidate fetch was
         already namespace-scoped.
+
+        ``degradation_notes``, when given, receives a caller-facing note if the adjacency fetch
+        fails, so ranking without adjacency is not reported as a normal recall (#923).
         """
         eligible_uuid_set = set(eligible_uuids)
         try:
@@ -398,6 +403,9 @@ class RecallSupportMixin:
                 "Recall adjacency fetch failed for %d candidates; continuing without adjacency",
                 len(eligible_uuids),
             )
+            if degradation_notes is not None:
+                degradation_notes.append(
+                    "Graph adjacency unavailable; results were ranked without adjacency scores.")
             return {}, {}
         adjacency_map: dict[str, float] = {}
         edge_index: dict[tuple[str, str], list[str]] = {}

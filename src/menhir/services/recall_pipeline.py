@@ -8,7 +8,7 @@ import math
 from dataclasses import replace
 from functools import partial
 from time import perf_counter
-from typing import Any
+from typing import Any, NamedTuple
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
@@ -121,6 +121,99 @@ def _valid_at_sort_key(raw: object) -> float:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.timestamp()
+
+
+_LANE_INJECTED_SOURCES = frozenset({CandidateSource.SCALAR_AUTHORITY, CandidateSource.OBSERVATION})
+
+
+def _lane_injected_first(candidates: list[Any], top_n: int) -> list[Any]:
+    """Up to half of the cross-encoder head (``top_n // 2``) goes to injected candidates,
+    authority first, then observation/history, so the head scores them instead of flooring them
+    behind ``rerank_top_n`` search hits. The rest keep their order (#922)."""
+    injected = sorted(
+        (c for c in candidates if c.source in _LANE_INJECTED_SOURCES),
+        key=lambda c: c.source != CandidateSource.SCALAR_AUTHORITY,
+    )[:max(0, top_n) // 2]
+    head = {id(c) for c in injected}
+    return injected + [c for c in candidates if id(c) not in head]
+
+
+class _LaneSnapshot(NamedTuple):
+    """What an injection lane mutates, so a failed lane can be undone. Dicts are copied: a View
+    that won search is upgraded in place."""
+
+    candidate_inputs: list[Any]
+    metadata_by_uuid: dict[str, Any]
+    authority_len: int
+
+    @classmethod
+    def take(
+        cls, candidate_inputs: list[Any], metadata_by_uuid: dict[str, Any], authority_layer: list[Any],
+    ) -> "_LaneSnapshot":
+        return cls([dict(c) for c in candidate_inputs], dict(metadata_by_uuid), len(authority_layer))
+
+    def restore(
+        self, candidate_inputs: list[Any], metadata_by_uuid: dict[str, Any], authority_layer: list[Any],
+    ) -> None:
+        candidate_inputs[:] = self.candidate_inputs
+        metadata_by_uuid.clear()
+        metadata_by_uuid.update(self.metadata_by_uuid)
+        del authority_layer[self.authority_len:]
+
+
+def _protected_leads(scored: list[Any], n: int) -> set[str]:
+    """Leading authority candidates the result cut must keep: at most ``max(1, n // 2)``, by
+    rank, so injected Views can never push out every search result (#922)."""
+    if n <= 0:
+        return set()
+    return set([m.uuid for m in scored if m.is_scalar_authority][:max(1, n // 2)])
+
+
+def _cut_keeping(scored: list[Any], n: int, keep: set[str]) -> list[Any]:
+    """``scored[:n]``, except ranked entries in ``keep`` past the cut displace the lowest-ranked
+    others. Rank order is preserved and the count is still ``n`` (#922)."""
+    must = [m.uuid for m in scored if m.uuid in keep][:max(0, n)]
+    rest = [m.uuid for m in scored if m.uuid not in keep][:max(0, n - len(must))]
+    chosen = set(must) | set(rest)
+    return [m for m in scored if m.uuid in chosen]
+
+
+# Cap on anchor rows per stale-label query; the memory_uuids filter already narrows it to the results.
+_STALE_ANCHOR_ROW_CAP = 200
+
+_ASOF_UUID_PREFIX = "scalar-asof:"
+_EXPIRY_UUID_PREFIX = "scalar-expiry:"
+
+
+def _slot_uuid_suffix(subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any) -> str:
+    return f":{subj}:{attr}:{scope}:{value_kind}:{unit}"
+
+
+def _asof_candidate_uuid(
+    namespace: str, as_of: str, subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any,
+) -> str:
+    return (f"{_ASOF_UUID_PREFIX}{namespace}:{as_of}"
+            f"{_slot_uuid_suffix(subj, attr, scope, value_kind, unit)}")
+
+
+def _expiry_candidate_uuid(
+    namespace: str, subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any,
+) -> str:
+    return (f"{_EXPIRY_UUID_PREFIX}{namespace}"
+            f"{_slot_uuid_suffix(subj, attr, scope, value_kind, unit)}")
+
+
+def _verdict_candidate_uuid(verdict: Any, candidate_uuids: set[str]) -> str | None:
+    """The ranked candidate a verdict stands for: its View, or for as-of / expiry verdicts (no
+    View) the synthetic ``scalar-asof:`` / ``scalar-expiry:`` candidate of the same slot."""
+    if verdict.view_uuid:
+        return verdict.view_uuid
+    prefix = {"as_of": _ASOF_UUID_PREFIX, "expired": _EXPIRY_UUID_PREFIX}.get(verdict.kind)
+    if prefix is None:
+        return None
+    suffix = _slot_uuid_suffix(
+        verdict.subject_uuid, verdict.attribute, verdict.scope, verdict.value_kind, verdict.unit)
+    return next((u for u in candidate_uuids if u.startswith(prefix) and u.endswith(suffix)), None)
 
 
 def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
@@ -864,6 +957,8 @@ async def _run_recall(
         getattr(service, "counting_recall_authority_only", True)
         and getattr(service, "counting_enabled", False))
     _occurrence_obs_ids: set[str] = set()
+    observation_lane_note: str | None = None
+    history_lane_note: str | None = None
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -885,6 +980,11 @@ async def _run_recall(
         from menhir.infrastructure.audit_trail import RECALL as _authority_audit
         if service.scalar_view_authority_enabled:
             _authority_audit.begin()
+        # #923: the lane commits in two atomic stages, observations then authority. A failure
+        # part-way restores the snapshot taken before the failing stage, so the caller never gets a
+        # partial authority set (dicts are copied: a View that won search is upgraded in place).
+        _lane_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
+        _obs_stage_done = False
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
             obs_hits = await asyncio.to_thread(
@@ -1019,6 +1119,8 @@ async def _run_recall(
                     )
             logger.debug("observation injection query=%r added=%d (k=10)", query[:60], obs_added)
             _obs_slots_for_history = obs_slots  # share with scalar_history lane below
+            _lane_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
+            _obs_stage_done = True
 
             # Phase 4a.4: for each SURFACED slot, DETERMINISTICALLY inject the current scalar_state
             # View by slot-keyed lookup (NOT embedding rank), so the authoritative CURRENT value
@@ -1229,8 +1331,8 @@ async def _run_recall(
                     # the answer to "as of <date>". Founds-gated like the current authority.
                     st = _asof_state_for(subj, (attr, scp, vk, un))
                     if st is not None:
-                        auuid = (f"scalar-asof:{stamped_namespace(namespace)}:{_as_of_str}:{subj}:"
-                                 f"{attr}:{scp}:{vk}:{un}")
+                        auuid = _asof_candidate_uuid(
+                            stamped_namespace(namespace), _as_of_str, subj, attr, scp, vk, un)
                         if auuid not in existing_uuids:
                             existing_uuids.add(auuid)
                             a_founded = False
@@ -1317,8 +1419,8 @@ async def _run_recall(
                     if _intent in (QueryIntent.CURRENT_STATE, QueryIntent.AMBIGUOUS):
                         exp = _expiry_for(subj, (attr, scp, vk, un))
                         if exp is not None:
-                            euuid = (f"scalar-expiry:{stamped_namespace(namespace)}:{subj}:{attr}:"
-                                     f"{scp}:{vk}:{un}")
+                            euuid = _expiry_candidate_uuid(
+                                stamped_namespace(namespace), subj, attr, scp, vk, un)
                             if euuid not in existing_uuids:
                                 existing_uuids.add(euuid)
                                 e_founded = False
@@ -1537,6 +1639,11 @@ async def _run_recall(
                              "authority_annotations": auth_added,
                              "intent": _intent.value, "query": query[:120]})
         except Exception as exc:
+            _lane_snapshot.restore(candidate_inputs, metadata_by_uuid, authority_layer)
+            if not _obs_stage_done:
+                _obs_slots_for_history = set()
+                _obs_slot_best_cosine.clear()
+                _occurrence_obs_ids.clear()
             if _circuit_open_cause(exc) is not None:
                 # #642: expected while the embed breaker refuses; recall already carries its note.
                 logger.info("observation injection skipped: embedding unavailable (%s)", exc)
@@ -1544,6 +1651,15 @@ async def _run_recall(
                 logger.exception(
                     "observation injection failed query=%r; leaving recall unchanged", query[:60]
                 )
+                observation_lane_note = (
+                    "Scalar authority lane failed; current-value verdicts were omitted."
+                    if _obs_stage_done else
+                    "Scalar observation lane failed; observation and authority results were omitted.")
+                if service.scalar_view_authority_enabled:
+                    _authority_audit.audit(
+                        "observation_lane", "rolled_back", namespace=stamped_namespace(namespace),
+                        details={"error": exc.__class__.__name__, "query": query[:120],
+                                 "stage": "authority" if _obs_stage_done else "observation"})
         _t_phases["observation_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Scalar history advisory lane (flag-gated) ---
@@ -1562,6 +1678,8 @@ async def _run_recall(
     #
     if service.scalar_history_enabled and namespace is not None and _obs_slots_for_history:
         _t = perf_counter()
+        # #923: atomic like the observation lane; a failure on any slot drops every addition.
+        _history_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
         try:
             from menhir.domain.scalar_view_authority import QueryIntent
             from menhir.domain.scalar_view_suppression import authority_query_intent
@@ -1682,11 +1800,14 @@ async def _run_recall(
                 _sh_added += 1
             logger.debug(
                 "scalar-history advisory lane query=%r added=%d", query[:60], _sh_added)
-        except Exception:
+        except Exception as exc:
+            _history_snapshot.restore(candidate_inputs, metadata_by_uuid, authority_layer)
             logger.exception(
                 "scalar-history advisory lane failed query=%r; leaving recall unchanged",
                 query[:60],
             )
+            if _circuit_open_cause(exc) is None:  # #642: the breaker note already says it
+                history_lane_note = "Scalar history lane failed; history verdicts were omitted."
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Counted authority only (unit R, flag-gated): a counted slot's occurrences leave recall ---
@@ -1720,8 +1841,10 @@ async def _run_recall(
     # --- Adjacency ---
     _t = perf_counter()
     eligible_uuids = [str(c["uuid"]) for c in candidate_inputs]
+    adjacency_notes: list[str] = []
     adjacency_map, edge_index = (
-        await service._compute_adjacency(eligible_uuids, context_node_ids, namespace)
+        await service._compute_adjacency(
+            eligible_uuids, context_node_ids, namespace, degradation_notes=adjacency_notes)
         if eligible_uuids else ({}, {})
     )
     _t_phases["adjacency"] = int((perf_counter() - _t) * 1000)
@@ -1784,7 +1907,10 @@ async def _run_recall(
         _t_phases["source_memories"] = source_memory_ms
     # Read after every lane ran so refusals during this recall are reflected.
     breaker_note = embed_breaker_note(service.graphiti_client)
-    shared_note = " | ".join(n for n in (limit_note, breaker_note, source_memory_note) if n) or None
+    shared_note = " | ".join(n for n in (
+        limit_note, breaker_note, source_memory_note, observation_lane_note, history_lane_note,
+        *adjacency_notes,
+    ) if n) or None
 
     if not candidates:
         if visible_pending_rows:
@@ -1901,7 +2027,7 @@ async def _run_recall(
                     c.uuid, getattr(c, "name", None),
                     (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
                 )
-                for c in candidates
+                for c in _lane_injected_first(candidates, tuning.rerank_top_n)
             ],
         )
         if rerank_results is not None:
@@ -1969,7 +2095,26 @@ async def _run_recall(
     )
     capped = result_limit < limit and len(pending_fallback) + len(scored) > result_limit
     pending_fallback = pending_fallback[:result_limit]
-    top_results = pending_fallback + scored[:max(0, result_limit - len(pending_fallback))]
+    scored_room = max(0, result_limit - len(pending_fallback))
+    if rerank is not None:
+        # #922: the cross-encoder must not cut a leading authority candidate; it displaces the
+        # lowest-ranked other result. Leads are capped so search results keep at least half.
+        # Advisory and history Views compete on rank.
+        kept = _cut_keeping(scored, scored_room, _protected_leads(scored, scored_room))
+        top_results = pending_fallback + kept
+        # A verdict whose ranked candidate the cut removed is dropped, not reported as returned.
+        # Consumers (context_builder, the packet query, API/MCP payloads) treat every verdict as
+        # present evidence, so a marker would need each of them to learn it. Verdicts with no
+        # ranked candidate (counted Views, unit R) are unaffected.
+        ranked_uuids = {m.uuid for m in scored}
+        cut_uuids = ranked_uuids - {m.uuid for m in kept}
+        if cut_uuids:
+            authority_layer[:] = [
+                v for v in authority_layer
+                if _verdict_candidate_uuid(v, ranked_uuids) not in cut_uuids
+            ]
+    else:
+        top_results = pending_fallback + scored[:scored_room]
     warden_status.unchecked_pending = len(pending_fallback)
 
     # Signal when all candidates were below the similarity floor
@@ -2070,8 +2215,10 @@ async def _run_recall(
         stale_rows = await asyncio.to_thread(
             service.graph_adapter.stale_anchored_memories,
             project=file_context_project,
-            limit=200,
+            limit=_STALE_ANCHOR_ROW_CAP,
             namespace=namespace,
+            # #923: rows for the returned memories, not the 200 most recently dirtied anchors.
+            memory_uuids=[sm.uuid for sm in top_results],
         )
         stale_by_uuid: dict[str, dict[str, Any]] = {
             str(r["memory_uuid"]): r

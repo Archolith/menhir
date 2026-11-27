@@ -81,7 +81,7 @@ class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
         state = str(row.get("processing_state") or "") if row else ""
         if requeue and state == "PENDING":
             queued = await backend.enqueue_pending_episode(normalized_uuid)
-            queue_result = "queued" if queued else "already_queued"
+            queue_result = "queued" if queued else "not_queued_pending_queue_recovery"
         elif requeue:
             queue_result = f"skipped_state_{state.lower() or 'missing'}"
         return (
