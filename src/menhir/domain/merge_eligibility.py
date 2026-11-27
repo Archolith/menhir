@@ -17,6 +17,8 @@ Hard vetoes:
   - same uuid (a node cannot absorb itself)
   - ineligible role: structural, path-shaped, View/instrumentation, or canonical-self node
   - namespace mismatch (never merge identities across silos)
+  - previously unmerged: either node's ``restored_from_merge`` names the other (an operator split
+    them; the journal half of this veto is checked by MergeCoordinator, which owns the journal)
   - COMPRESSED or GONE freshness (must be rehydrated through the lifecycle path first)
   - PROMOTED scope (operator-curated ground truth is merge-immune)
   - any scope other than SESSION or PERSISTENT (CANDIDATE, null, blank, unknown)
@@ -49,6 +51,7 @@ USER_FLAGGED = "USER_FLAGGED"
 SOURCE_RETENTION_PROTECTED = "SOURCE_RETENTION_PROTECTED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
 MEMORY_RETIRED = "MEMORY_RETIRED"
+PREVIOUSLY_UNMERGED = "PREVIOUSLY_UNMERGED"
 
 #: Freshness values that hard-veto a merge. Retained because the reason code and its telemetry
 #: are named for them, and because the veto message reports which value offended.
@@ -155,6 +158,8 @@ class NodeSignals:
     conflict_status: str | None
     source_retention_protected: bool = False
     memory_retired: bool = False
+    #: Survivor uuid stamped by an unmerge restore (``restore_merge_snapshot``); None if never restored.
+    restored_from_merge: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +202,15 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
             survivor_namespace=normalize_namespace(survivor.namespace),
             absorbed_namespace=normalize_namespace(absorbed.namespace),
         )
+
+    # 4b. An operator unmerge split this pair (#939). The restore stamps the restored node with
+    #     the survivor it came out of; re-merging the pair would undo the operator's decision.
+    unmerged_from = [
+        n.uuid for n, other in ((survivor, absorbed), (absorbed, survivor))
+        if n.restored_from_merge and str(n.restored_from_merge) == other.uuid
+    ]
+    if unmerged_from:
+        return _veto(PREVIOUSLY_UNMERGED, restored=unmerged_from, source="node")
 
     # 5. Only ACTIVE or unstamped may merge (Option A). COMPRESSED/GONE must be rehydrated first.
     #    An allowlist, not a veto list: the comment here used to say "null/ACTIVE allowed" while

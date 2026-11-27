@@ -94,18 +94,38 @@ class CorrelationRepository:
         similarity: float,
         source: str = "correlation-detected",
     ) -> bool:
-        """Create a RELATES_TO edge between two entities if none exists.
+        """Create a RELATES_TO edge between two entities if none exists, in either direction.
 
-        Idempotent — MERGE avoids duplicate edges.  Returns True when the edge exists
-        afterwards; False when either entity is missing or the two are in different tenants,
-        which this refuses: the candidate search is scoped by group_id, and an entity whose
-        namespace disagrees with its group can still pair across tenants.
+        Returns True only when this call CREATED the edge (#871). An existing RELATES_TO between
+        the pair, whichever way it points, is updated in place (similarity and weight only rise,
+        last_traversed is touched) and returns False, so a re-check never counts a new edge.
+        False also when either entity is missing or the two are in different tenants, which this
+        refuses: the candidate search is scoped by group_id, and an entity whose namespace
+        disagrees with its group can still pair across tenants.
+
+        A new edge always points from the lower uuid to the higher, so checking the pair the
+        other way round matches it instead of creating a reverse edge.
         """
+        low_uuid, high_uuid = sorted((str(source_uuid), str(target_uuid)))
         rows = self._neo4j.execute(
             """
-            MATCH (a:Entity {uuid: $source_uuid})
-            MATCH (b:Entity {uuid: $target_uuid})
+            MATCH (a:Entity {uuid: $low_uuid})
+            MATCH (b:Entity {uuid: $high_uuid})
             WHERE __SAME_TENANT__
+            WITH a, b, [(a)-[e:RELATES_TO]-(b) | e] AS existing
+            FOREACH (e IN existing |
+                SET e.similarity = CASE
+                        WHEN $similarity > e.similarity THEN $similarity
+                        ELSE e.similarity
+                    END,
+                    e.weight = CASE
+                        WHEN $similarity > e.weight THEN $similarity
+                        ELSE e.weight
+                    END,
+                    e.last_traversed = datetime()
+            )
+            WITH a, b, existing
+            WHERE size(existing) = 0
             MERGE (a)-[r:RELATES_TO]->(b)
             ON CREATE SET
                 r.type = 'correlation',
@@ -115,21 +135,11 @@ class CorrelationRepository:
                 r.weight = $similarity,
                 r.created_at = datetime(),
                 r.last_traversed = datetime()
-            ON MATCH SET
-                r.similarity = CASE
-                    WHEN $similarity > r.similarity THEN $similarity
-                    ELSE r.similarity
-                END,
-                r.weight = CASE
-                    WHEN $similarity > r.weight THEN $similarity
-                    ELSE r.weight
-                END,
-                r.last_traversed = datetime()
             RETURN r.type AS edge_type
             """.replace("__SAME_TENANT__", same_tenant_cypher("a", "b")),
             params={
-                "source_uuid": source_uuid,
-                "target_uuid": target_uuid,
+                "low_uuid": low_uuid,
+                "high_uuid": high_uuid,
                 "similarity": similarity,
                 "source": source,
             },
@@ -203,7 +213,8 @@ class CorrelationRepository:
                    coalesce(n.user_flagged, false) AS user_flagged,
                    {memory_retired_cypher("n")} AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
-                   n.conflict_status AS conflict_status
+                   n.conflict_status AS conflict_status,
+                   n.restored_from_merge AS restored_from_merge
             """,
             params={
                 "s": survivor_uuid,
@@ -234,6 +245,10 @@ class CorrelationRepository:
                 ),
                 source_retention_protected=bool(r.get("source_retention_protected", False)),
                 memory_retired=bool(r.get("memory_retired", False)),
+                restored_from_merge=(
+                    str(r["restored_from_merge"])
+                    if r.get("restored_from_merge") is not None else None
+                ),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))

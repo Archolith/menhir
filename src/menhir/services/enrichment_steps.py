@@ -1319,7 +1319,7 @@ async def stamp_and_finalize(
     try:
         from menhir.services.correlation_service import CorrelationService
         correlation_service = CorrelationService(
-            correlation_repo=ctx.graph_adapter._correlation,
+            correlation_repo=ctx.graph_adapter,
             graphiti_client=ctx.graphiti_client,
             llm=ctx.llm,  # Part 2: Pass LLM for judge-gated merge
         )
@@ -1339,7 +1339,8 @@ async def stamp_and_finalize(
             )
             # One conflict per node is queued; later pairs are fallbacks for a pair that is
             # suppressed or cannot be written.
-            # A node absorbed by a merge is gone; its conflict pairs are moot.
+            # A node absorbed by a merge is gone; its conflict pairs are moot. The scan stops at
+            # the merge, so only conflicts found on earlier hits can be in the results.
             results = corr_result.results or []
             if not any(r.action == "merged" for r in results):
                 conflict_pairs.extend(

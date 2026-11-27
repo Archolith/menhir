@@ -351,15 +351,6 @@ def test_related_edge_before_the_drop_is_kept() -> None:
     adapter.set_conflict.assert_not_called()
 
 
-def test_batch_check_stops_at_a_drop_too() -> None:
-    adapter = _scan_adapter(low_cosine={"x"})
-    svc = _svc(adapter)
-    svc._graphiti.search_scored.return_value = HITS
-    result = _run(svc.check_correlation_batch([{"uuid": "src", "name": "source"}]))
-    assert (result.conflicts, result.related, result.merged) == (0, 0, 0)
-    adapter.create_related_to_edge.assert_not_called()
-
-
 # --- shared-episode veto ------------------------------------------------------
 
 

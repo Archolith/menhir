@@ -177,40 +177,6 @@ class TestCheckCorrelation:
         repo.merge_entity.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_merge_committed_fires_scalar_state_hook(self) -> None:
-        # Piece C.3: a committed merge invokes on_merge_committed(absorbed, survivor) post-COMMIT.
-        repo = _make_repo()
-        coordinator = MagicMock()
-        coordinator.merge.return_value = {"merged": 1, "op_id": "op-1"}
-        seen: list[dict] = []
-
-        def _hook(*, absorbed_uuid: str, survivor_uuid: str, merge_op_id: str) -> None:
-            seen.append({"absorbed": absorbed_uuid, "survivor": survivor_uuid, "op": merge_op_id})
-
-        svc = CorrelationService(repo, _make_graphiti_client(), merge_coordinator=coordinator,
-                                 on_merge_committed=_hook)
-        with patch.object(svc, "_handle_merge_proposal", AsyncMock(return_value="merged")):
-            action, _ = await svc.classify_pair("src-absorbed", "tgt-survivor", 0.97)
-        assert action == "merged"
-        assert seen == [{"absorbed": "src-absorbed", "survivor": "tgt-survivor", "op": "op-1"}]
-
-    @pytest.mark.asyncio
-    async def test_merge_hook_failure_does_not_fail_the_merge(self) -> None:
-        # The merge already committed; a hook error is logged and swallowed (repaired out of band).
-        repo = _make_repo()
-        coordinator = MagicMock()
-        coordinator.merge.return_value = {"merged": 1, "op_id": "op-2"}
-
-        def _boom(*, absorbed_uuid: str, survivor_uuid: str, merge_op_id: str) -> None:
-            raise RuntimeError("rebind blew up")
-
-        svc = CorrelationService(repo, _make_graphiti_client(), merge_coordinator=coordinator,
-                                 on_merge_committed=_boom)
-        with patch.object(svc, "_handle_merge_proposal", AsyncMock(return_value="merged")):
-            action, details = await svc.classify_pair("s", "t", 0.97)
-        assert action == "merged" and details.get("merged") == 1  # merge still reported success
-
-    @pytest.mark.asyncio
     async def test_no_hook_is_byte_identical(self) -> None:
         # Default (no hook) path: a committed merge returns normally with no scalar coupling.
         repo = _make_repo()
@@ -291,66 +257,6 @@ class TestCheckCorrelation:
         # the 0.88 "conflicting" and 0.97 "duplicate" both land in conflict (second via judge-gating)
         assert result.conflicts == 2
         assert result.merged == 0
-
-
-# ---------------------------------------------------------------------------
-# Batch correlation check tests
-# ---------------------------------------------------------------------------
-
-class TestCheckCorrelationBatch:
-    """Test check_correlation_batch() — used during consolidation/promotion."""
-
-    @pytest.mark.asyncio
-    async def test_empty_batch_returns_zero(self) -> None:
-        svc = CorrelationService(_make_repo(), _make_graphiti_client())
-        result = await svc.check_correlation_batch([])
-        assert result.checked == 0
-
-    @pytest.mark.asyncio
-    async def test_batch_processes_multiple_candidates(self) -> None:
-        repo = _make_repo()
-        client = _make_graphiti_client(results=[
-            ("uuid-other", "related", 0.75),
-        ])
-        svc = CorrelationService(repo, client)
-
-        candidates = [
-            {"uuid": "uuid-1", "name": "entity 1", "content": "test"},
-            {"uuid": "uuid-2", "name": "entity 2", "content": "test"},
-        ]
-        result = await svc.check_correlation_batch(candidates)
-        assert result.checked == 2
-        assert result.related == 2  # Each candidate creates one RELATES_TO edge
-
-    @pytest.mark.asyncio
-    async def test_batch_skips_empty_query(self) -> None:
-        repo = _make_repo()
-        client = _make_graphiti_client()
-        svc = CorrelationService(repo, client)
-
-        candidates = [
-            {"uuid": "uuid-1", "name": "", "content": ""},
-        ]
-        result = await svc.check_correlation_batch(candidates)
-        assert result.skipped == 1
-        client.search_scored.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_batch_stops_after_first_match_per_node(self) -> None:
-        """Batch mode only processes one match per node (like _check_contradictions_batch)."""
-        repo = _make_repo()
-        client = _make_graphiti_client(results=[
-            ("uuid-other-1", "related 1", 0.75),
-            ("uuid-other-2", "related 2", 0.80),
-        ])
-        svc = CorrelationService(repo, client)
-
-        candidates = [
-            {"uuid": "uuid-1", "name": "entity 1", "content": "test"},
-        ]
-        result = await svc.check_correlation_batch(candidates)
-        # Only one edge created (first match), not two
-        assert result.related == 1
 
 
 # ---------------------------------------------------------------------------

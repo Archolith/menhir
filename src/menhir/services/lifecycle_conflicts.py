@@ -98,7 +98,8 @@ class LifecycleConflictMixin:
             .limit()
             .build()
         )
-        params: dict[str, Any] = {"limit": max(1, min(limit, 2000))}
+        page_size = max(1, min(limit, 2000))
+        params: dict[str, Any] = {"limit": page_size}
         if cursor is not None:
             params["cursor"] = cursor
         if ns:
@@ -111,7 +112,8 @@ class LifecycleConflictMixin:
             "scanned": len(candidates),
             "new_conflicts": new_conflicts,
             "next_cursor": next_cursor,
-            "done": len(candidates) < limit,
+            # The clamped page size, not the caller's limit: a limit above the cap would never be done.
+            "done": len(candidates) < page_size,
         }
 
     async def confirm_pending_conflicts(

@@ -1357,13 +1357,13 @@ class MemoryGraphAdapter:
     def count_persistent_edges(self, node_uuid: str) -> int:
         return self._consolidation.count_persistent_edges(node_uuid)
 
-    def promote_to_persistent(self, node_uuids: list[str]) -> int:
+    def promote_to_persistent(self, node_uuids: list[str]) -> list[str]:
         return self._consolidation.promote_to_persistent(node_uuids)
 
     def delete_session_nodes(self, node_uuids: list[str]) -> int:
         return self._consolidation.delete_session_nodes(node_uuids)
 
-    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> int:
+    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> list[str]:
         return self._consolidation.set_demote_ttl(node_uuids, ttl_days)
 
     def fetch_ttl_expired_session_uuids(self, session_id: str | None = None) -> list[dict[str, Any]]:

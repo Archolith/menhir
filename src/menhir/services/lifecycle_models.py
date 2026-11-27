@@ -29,12 +29,14 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
 SHARPNESS_PROMOTE_THRESHOLD = 0.5       # M5: raised from 0.3
 PERSISTENT_EDGE_PROMOTE_THRESHOLD = 3   # M5: raised from 2
-SIMILARITY_CONFLICT_THRESHOLD = 0.85
+# One conflict threshold (#871): the lifecycle name is the correlation constant, not a copy.
+SIMILARITY_CONFLICT_THRESHOLD = CORRELATION_CONFLICT_THRESHOLD
 ORPHAN_MAX_AGE_HOURS = 4.0
 CONSOLIDATION_BATCH_SIZE = 10
 

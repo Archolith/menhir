@@ -18,8 +18,6 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.infrastructure.llm import LLMAdapter
-from menhir.infrastructure.graph_operations_model import SagaWritesPausedError
-from menhir.infrastructure.observability import LlmUsageControlSignal
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient, UnavailableLLMAdapter
@@ -285,8 +283,10 @@ class LifecycleConsolidationMixin:
             promote_uuids.extend(str(node["uuid"]) for node in batch if str(node["uuid"]) not in failed)
 
         # Phase 4: Execute transitions and demote
-        promoted = await asyncio.to_thread(self.graph_adapter.promote_to_persistent, promote_uuids)
-        for uuid in promote_uuids:
+        # Audit rows follow what the mutation changed (#919), not what was requested: a requested
+        # uuid may have been absorbed by a merge above, left SESSION, or be lifecycle-protected.
+        promoted_uuids = await asyncio.to_thread(self.graph_adapter.promote_to_persistent, promote_uuids)
+        for uuid in promoted_uuids:
             record_memory_revision(
                 node_uuid=uuid,
                 field="scope",
@@ -294,8 +294,11 @@ class LifecycleConsolidationMixin:
                 new_value=NodeScope.PERSISTENT,
                 changed_by="consolidation",
             )
-        demoted = await asyncio.to_thread(self.graph_adapter.set_demote_ttl, demote_uuids, DEMOTE_TTL_DAYS)
-        for uuid in demote_uuids:
+        # Only newly demoted nodes: one already in its grace window keeps its TTL and gets no new row.
+        demoted_uuids = await asyncio.to_thread(
+            self.graph_adapter.set_demote_ttl, demote_uuids, DEMOTE_TTL_DAYS
+        )
+        for uuid in demoted_uuids:
             record_lifecycle_action(
                 action="demote",
                 node_uuid=uuid,
@@ -320,12 +323,12 @@ class LifecycleConsolidationMixin:
         orphans = await self._cleanup_orphan_episodes(session_id)
 
         return ConsolidationResult(
-            promoted=promoted,
+            promoted=len(promoted_uuids),
             deleted=deleted,
             conflicts_detected=conflicts_detected,
             skipped_pending=skipped_pending,
             orphan_episodes_cleaned=orphans,
-            demoted=demoted,
+            demoted=len(demoted_uuids),
             merge_errors=len(merge_error_log),
         )
 
@@ -440,8 +443,9 @@ class LifecycleConsolidationMixin:
         Returns count of conflicts detected.
 
         Pair classification (routing, vetoes, judge-gated merge) is delegated to
-        CorrelationService.classify_pair (SSOT-03) -- this method retains only
-        lifecycle-specific bookkeeping: namespace-scoped search, the
+        CorrelationService.classify_pair (SSOT-03), and the per-node loop to the shared
+        ``correlation_service_checks.scan_node`` (#871) -- this method retains only
+        lifecycle-specific bookkeeping: the node's namespace (``default`` when unset), the
         pending_llm_review conflict-queue write, telemetry suppression
         (cooldown) checks, and one-conflict-per-node capping.
 
@@ -456,8 +460,27 @@ class LifecycleConsolidationMixin:
         duplicate is still not merged unless MENHIR_AUTO_MERGE_MODE is "on"; classify_pair then
         returns ``none`` with a reason and the node's scan ends without a conflict.
         """
+        from menhir.services.correlation_service_checks import scan_node
+
         correlation_service = self._build_correlation_service()
         conflicts = 0
+
+        async def _queue_conflict(cr: Any) -> bool:
+            # final_action == "conflict" (native conflict-range score, or a merge proposal blocked
+            # by veto/judge falling through to conflict). One conflict per node; a suppressed pair
+            # keeps the scan going.
+            nonlocal conflicts
+            recorded = await self.record_conflict_pair(cr.source_uuid, cr.target_uuid)
+            if recorded is None:
+                return False
+            canonical_group_id, updated = recorded
+            if updated > 0:
+                conflicts += 1
+                logger.info(
+                    "Conflict detected: %s <-> %s (similarity=%.3f, group=%s)",
+                    cr.source_uuid, cr.target_uuid, cr.similarity, canonical_group_id,
+                )
+            return True
 
         for node in candidates:
             uuid = str(node["uuid"])
@@ -466,76 +489,15 @@ class LifecycleConsolidationMixin:
                 continue
 
             group_ids = namespace_to_group_ids(str(node.get("namespace") or "default"))
-            similar: list[tuple[str, str, float]] = []
-            try:
-                similar = await self.graphiti_client.search_scored(
-                    query, num_results=5, group_ids=group_ids
-                )
-            except Exception:  # skip node: contradiction check is best-effort
-                logger.warning("Contradiction search failed for node=%s", uuid, exc_info=True)
-                if errors is not None:
-                    # #1008: like a classify_pair failure, never promote unchecked; the next pass retries.
-                    errors.append(uuid)
-                continue
-
-            for other_uuid, other_name, score in similar:
-                if other_uuid == uuid:
-                    continue
-
-                try:
-                    final_action, details = await correlation_service.classify_pair(
-                        uuid, other_uuid, score,
-                    )
-                except (LlmUsageControlSignal, SagaWritesPausedError):
-                    raise
-                except Exception as exc:
-                    # #938: only a caller that collects errors gets containment; others keep raising.
-                    if errors is None:
-                        raise
-                    logger.warning(
-                        "classify_pair failed for %s <-> %s (%s); candidate left for the next pass",
-                        uuid, other_uuid, type(exc).__name__, exc_info=True,
-                    )
-                    errors.append(uuid)
-                    break
-
-                if final_action == "none" and details is not None:
-                    # Dropped where this loop used to queue or merge and stop. Going on would reach
-                    # hits it never classified; test_drop_ends_the_node_scan exercises that.
-                    break
-
-                if final_action in ("none", "related"):
-                    # "related" already created its RELATES_TO edge inside
-                    # classify_pair — don't break, keep checking remaining pairs.
-                    continue
-
-                if final_action == "merged":
-                    logger.info(
-                        "Correlation: MERGED %s absorbed into %s (sim=%.3f, judge-confirmed)",
-                        uuid, other_uuid, score,
-                    )
-                    # Skip conflict flag and continue to next node
-                    break
-
-                # final_action == "conflict" (native conflict-range score, or a
-                # merge proposal blocked by veto/judge falling through to conflict)
-
-                recorded = await self.record_conflict_pair(uuid, other_uuid)
-                if recorded is None:
-                    # Already reviewed and suppressed: keep checking remaining pairs.
-                    continue
-                canonical_group_id, updated = recorded
-                if updated > 0:
-                    conflicts += 1
-                    logger.info(
-                        "Conflict detected: %s <-> %s (similarity=%.3f, group=%s)",
-                        uuid,
-                        other_uuid,
-                        score,
-                        canonical_group_id,
-                    )
-                # Only flag one conflict per node to avoid explosion
-                break
+            # The shared scan (#871): a merge ends it, a drop ends it (going on would reach hits
+            # this loop never classified; test_drop_ends_the_node_scan), a queued conflict ends it.
+            # A failed search or classify_pair is recorded in `errors` and never promoted
+            # unchecked (#938, #1008); without `errors` a classify_pair failure raises.
+            await scan_node(
+                correlation_service.classify_pair, self.graphiti_client, uuid, query,
+                group_ids=group_ids, num_results=5, stop_on_drop=True,
+                on_conflict=_queue_conflict, errors=errors,
+            )
 
         return conflicts
 
