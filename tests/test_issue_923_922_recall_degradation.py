@@ -431,7 +431,7 @@ async def test_many_leading_views_cannot_push_out_the_search_results(
     assert 1 <= sum(u.startswith("sv-") for u in ids) <= 7 // 2
     reported = {v.view_uuid for v in (res.authority_layer or ()) if v.view_uuid}
     assert reported and reported <= set(ids)
-    # F1045-2: the head is at most half injected, so real hits are still scored.
+    # The head is at most half injected, so real hits are still scored.
     head = scorer.calls[0]
     assert len(head) == 8
     assert sum(p.startswith("Search") for p in head) >= 4
