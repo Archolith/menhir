@@ -303,6 +303,26 @@ def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) ->
         )
 
 
+def _receipt_self_bound(receipt: Any) -> bool:
+    """Whether this extraction's receipt bound a self tier (explicit or inferred)."""
+    return bool(
+        receipt is not None
+        and (
+            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+        )
+    )
+
+
+def _receipt_raw_nonempty(receipt: Any, episode_key: str) -> bool:
+    """Whether the receipt is for this episode and the LLM returned raw entities or edges."""
+    return bool(
+        receipt is not None
+        and receipt.episode_key == episode_key
+        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
+    )
+
+
 def link_extraction_outcome(
     receipt: Any, episode_key: str, *, persisted: bool
 ) -> dict[str, Any]:
@@ -312,21 +332,11 @@ def link_extraction_outcome(
     with raw content is policy-empty or a collapse; anything else is a plain empty extraction.
     ``self_bound`` records that this extraction bound a self tier, for finalize-from-link.
     """
-    self_bound = bool(
-        receipt is not None
-        and (
-            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
-            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
-        )
-    )
+    self_bound = _receipt_self_bound(receipt)
     reason = None
     if persisted:
         outcome = LINK_OUTCOME_EXTRACTED
-    elif (
-        receipt is not None
-        and receipt.episode_key == episode_key
-        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
-    ):
+    elif _receipt_raw_nonempty(receipt, episode_key):
         reason = policy_empty_reason(receipt)
         outcome = LINK_OUTCOME_POLICY_EMPTY if reason is not None else LINK_OUTCOME_COLLAPSED
     else:
@@ -1198,11 +1208,7 @@ async def stamp_and_finalize(
     # then dropped. Read + clear here regardless of which branch we take below.
     receipt = get_extraction_receipt()
     clear_extraction_receipt()
-    raw_extraction_nonempty = (
-        receipt is not None
-        and receipt.episode_key == ctx.episode_uuid
-        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
-    )
+    raw_extraction_nonempty = _receipt_raw_nonempty(receipt, ctx.episode_uuid)
 
     # Replaces the old ownership read: owner, claim instant, ENRICHING, no marker, epoch unmoved.
     _fence_check(ctx)
@@ -1211,11 +1217,7 @@ async def stamp_and_finalize(
     self_bound = (
         bool(getattr(graphiti_result, "self_bound", False))
         if from_link
-        else receipt is not None
-        and (
-            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
-            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
-        )
+        else _receipt_self_bound(receipt)
     )
     if self_bound and resolve_inferred_mode(
         getattr(ctx, "inferred_self_mode", None)

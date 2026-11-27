@@ -1261,15 +1261,14 @@ class EpisodeLifecycleRepository:
                   MATCH (d)-[x]-()
                   WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)
               }}
-            WITH n, d, CASE WHEN d IS NULL THEN 0 ELSE 1 END AS deleting
             REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome,
                    n.resolved_policy_empty_reason, n.resolved_self_bound
-            WITH n, d, deleting
+            WITH n, d
             OPTIONAL MATCH (d)-[rc:READ_CONTEXT]->()
-            WITH n, d, deleting, collect(rc) AS read_context
+            WITH n, d, collect(rc) AS read_context
             FOREACH (r IN read_context | DELETE r)
             FOREACH (x IN CASE WHEN d IS NULL THEN [] ELSE [d] END | DELETE x)
-            RETURN count(n) AS cleared, sum(deleting) AS twins_deleted
+            RETURN count(n) AS cleared
             """,
             params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
         )

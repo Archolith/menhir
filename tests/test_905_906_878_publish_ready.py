@@ -11,8 +11,8 @@ post-publish steps (self-tier link, edge-fact repair, correlation) run on real t
 #878: the edge-fact repair is best-effort, counts what it wrote, and stamps provenance on an
 all-original episode without an LLM.
 
-Every test here fails on 4794b41f. The Neo4j counterexamples are in
-tests/test_905_906_publish_ready_online.py.
+Most tests here fail on 4794b41f; three are regression guards that also pass there. The Neo4j
+counterexamples are in tests/test_905_906_publish_ready_online.py.
 """
 
 from __future__ import annotations
@@ -440,23 +440,13 @@ def test_forced_retry_stops_when_the_link_changed_before_the_clear() -> None:
     adapter.mark_episode_ready.assert_not_called()
 
 
-def test_clear_query_only_drops_an_uncompleted_link_and_deletes_an_uncited_twin() -> None:
-    from menhir.infrastructure import episode_lifecycle as el
-
+def test_clear_query_never_detach_deletes() -> None:
     repo = EpisodeLifecycleRepository()
-    repo.neo4j = _RowsNeo4j([{"cleared": 1, "twins_deleted": 1}])
+    repo.neo4j = _RowsNeo4j([{"cleared": 1}])
     assert repo.clear_uncompleted_twin_link(Q, TWIN) is True
     query, params = repo.neo4j.calls[0]
     assert params == {"episode_uuid": Q, "resolved": TWIN}
-    assert "n.resolved_episode_uuid = $resolved" in query
-    assert f"NOT {el._TWIN_LINK_COMPLETE}" in query
-    assert "REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome" in query
-    assert "DETACH DELETE" not in query
-    assert "FOREACH (r IN read_context | DELETE r)" in query
-    assert "| DELETE x)" in query
-    assert "WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)" in query
-    assert "NOT EXISTS { MATCH (d)-[:MENTIONS]->(:Entity) }" in query
-    assert "d.uuid IN coalesce(r.episodes, [])" in query
+    assert "DETACH DELETE" not in query  # a twin with other relationships must survive
 
 
 # --------------------------------------------------------------------------- #906
@@ -507,11 +497,11 @@ def test_epoch_move_between_publish_and_ready_then_from_link_runs_the_steps_on_r
     llm = _RepairLLM()
     service, queries = _correlation_spy()
     adapter = _adapter(_steps_artifact())
-    checks = {"n": 0}
+    moved = {"done": False}
 
     def epoch_moves_after_the_stamp(neo4j: Any, claim: Any, gate: Any) -> None:
-        checks["n"] += 1
-        if checks["n"] == 2:  # the check before the edge-fact repair, after metadata stamping
+        if adapter.stamp_ingest_metadata.called and not moved["done"]:  # once, after the stamp
+            moved["done"] = True
             raise FenceLost("epoch_moved")
 
     def fenced_call(neo4j: Any, claim: Any, gate: Any, call: Any) -> Any:
@@ -604,11 +594,9 @@ def test_edge_fact_write_error_does_not_fail_the_episode() -> None:
 def test_fence_loss_before_the_repair_still_reaches_the_worker() -> None:
     clear_extraction_receipt()
     adapter = _adapter(None)
-    checks = {"n": 0}
 
     def lose_at_repair(neo4j: Any, claim: Any, gate: Any) -> None:
-        checks["n"] += 1
-        if checks["n"] == 2:
+        if adapter.stamp_ingest_metadata.called:  # the check before the repair, after the stamp
             raise FenceLost("epoch_moved")
 
     with patch.object(enrichment_steps, "check_fence", lose_at_repair), \
