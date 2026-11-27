@@ -242,6 +242,14 @@ class RetrievalTuningConfig:
     # memory before more from the same session (domain/source_memory_spread.py). On by default
     # since #168 freeze; kept as a per-request knob.
     source_memory_spread: bool = True
+    # Top-1 session neighbor window (#1057): when > 0 and spread filled effective_limit across
+    # distinct sessions, fetch up to +-N adjacent queue episodes in the #1 hit's session_id
+    # (Cypher-bounded LIMIT N before/after) so cross-turn coreference survives 50+ session
+    # haystacks. Default 0 (opt-in until measured on full o500).
+    source_memory_session_window: int = 0
+    # Per-neighbor content cap when source_memory_session_window > 0 (tighter than
+    # source_memory_max_chars to bound token overhead per #434/#478).
+    source_memory_neighbor_max_chars: int = 800
     # Put each fact edge's statement time (its reference_time) on recall temporal facts as
     # said_at, rendered as "said <time>". Presentation only. On by default since #168 freeze;
     # kept as a per-request knob.
@@ -283,4 +291,14 @@ class RetrievalTuningConfig:
             raise ValueError(
                 "source_memory_max_chars must be in [100, 4000], "
                 f"got {self.source_memory_max_chars!r}"
+            )
+        if not 0 <= self.source_memory_session_window <= 5:
+            raise ValueError(
+                "source_memory_session_window must be in [0, 5], "
+                f"got {self.source_memory_session_window!r}"
+            )
+        if not 100 <= self.source_memory_neighbor_max_chars <= 4000:
+            raise ValueError(
+                "source_memory_neighbor_max_chars must be in [100, 4000], "
+                f"got {self.source_memory_neighbor_max_chars!r}"
             )
