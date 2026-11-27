@@ -264,6 +264,7 @@ class ToolEventRepository:
 
     def stale_anchored_memories(
         self, *, project: str | None = None, limit: int = 200, namespace: str | None = None,
+        memory_uuids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Memories anchored to a file that changed AFTER they were anchored — the stale-reference
         signal. `(sem)-[a:ANCHORED_TO]->(f:file)` where `f.structure_dirty` and
@@ -292,10 +293,15 @@ class ToolEventRepository:
 
         (The bad predicate is described rather than quoted on purpose: the ratchet scans source
         text and cannot tell a docstring from a query, so quoting it re-trips the guard.)
+
+        ``memory_uuids`` (opt-in, ``None`` = every memory) restricts the rows to those memories.
+        Recall passes the uuids it returns, so a memory outside the most recently dirtied
+        ``limit`` rows is still labeled stale (#923).
         """
         rows = self._neo4j.execute(
             f"""
             {_STALE_ANCHORS_MATCH}
+              AND ($memory_uuids IS NULL OR sem.uuid IN $memory_uuids)
             RETURN sem.uuid AS memory_uuid, sem.name AS name,
                    f.structure_project AS project, f.structure_path AS path,
                    toString(f.dirty_at) AS dirty_at, toString(a.created_at) AS anchored_at,
@@ -306,6 +312,7 @@ class ToolEventRepository:
             params={
                 "project": project,
                 "limit": int(limit),
+                "memory_uuids": None if memory_uuids is None else [str(u) for u in memory_uuids],
                 **tenant_scope_params(namespace),
             },
         )
