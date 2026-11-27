@@ -122,12 +122,9 @@ class ConsolidationRepository:
     #: relationship exactly once regardless of type, so it fixes the rate and halves the scan
     #: without narrowing what can be reinforced.
     #:
-    #: STILL UNTYPED, deliberately. A typed pattern would let the per-type `uuid` relationship
-    #: indexes turn this from an all-relationship scan into an index seek (42,100 -> 351 dbHits at
-    #: N=50 on a 21k-edge graph), but `edge_index` is populated by `fetch_adjacency_pairs`, which
-    #: is also untyped -- so naming a type list here and not there would silently stop reinforcing
-    #: every edge outside the list. See CF-247: the graph has 35+ relationship types, and deciding
-    #: which of them earn traversal reinforcement is a contract question, not an optimization.
+    #: TYPED, with `adjacency_edge_pattern()`: the same list `fetch_adjacency_pairs` emits for
+    #: `edge_index`, so recall reinforces exactly the edges it ranked and the per-type `uuid`
+    #: indexes give an index seek instead of an all-relationship scan. See CF-247.
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         """Increment traversal weight for an edge while capping at the v1 max."""
 
@@ -136,7 +133,7 @@ class ConsolidationRepository:
             MATCH ()-[r:{adjacency_edge_pattern()}]->()
             WHERE r.uuid = $edge_uuid
             SET r.weight = CASE
-                    WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
+                    WHEN coalesce(toFloat(r.weight), 1.0) + 0.1 < 5.0
                     THEN coalesce(toFloat(r.weight), 1.0) + 0.1
                     ELSE 5.0
                 END,
@@ -163,7 +160,7 @@ class ConsolidationRepository:
             MATCH ()-[r:{adjacency_edge_pattern()}]->()
             WHERE r.uuid IN $edge_uuids
             SET r.weight = CASE
-                    WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
+                    WHEN coalesce(toFloat(r.weight), 1.0) + 0.1 < 5.0
                     THEN coalesce(toFloat(r.weight), 1.0) + 0.1
                     ELSE 5.0
                 END,
@@ -308,6 +305,8 @@ class ConsolidationRepository:
         node_uuid: str,
         compressed_summary: str,
         *,
+        read_content: str | None,
+        min_days_since_accessed: float,
         read_epoch: int | None = None,
         fence_key: str | None = None,
     ) -> bool:
@@ -316,19 +315,35 @@ class ConsolidationRepository:
         G-copy (CF-338): the summary is derived from the content the decay sweep read, so the
         write is refused if an erase touched the namespace since ``read_epoch`` (read with that
         content by ``fetch_decay_candidates``), and never lands on a node an erase scrubbed.
+
+        ``read_content`` is the raw ``n.content`` the candidate row carried. Under the node lock
+        the write re-checks that the node still qualifies and still holds that content, then
+        stores it as ``original_content`` (the body this compression replaced).
         """
 
-        query = (Cypher()
-            .match("(n:Entity {uuid: $node_uuid})")
-            .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'",
-                   "NOT coalesce(n.rederive_pending, false)",
-                   harmful_automatic_mutation_allowed_cypher("n"))
-            .set(("n.original_content = coalesce(n.original_content, n.content)",
-                  "n.content = $compressed_summary",
-                  "n.freshness = 'COMPRESSED'"))
-            .return_raw("count(n) AS updated")
-            .build())
-        params = {"node_uuid": node_uuid, "compressed_summary": compressed_summary}
+        # The MATCH reads without a lock and Neo4j does not re-check a WHERE after a write waits
+        # for one: take the node's write lock, then decide.
+        query = f"""
+            MATCH (n:Entity {{uuid: $node_uuid}})
+            SET n._decay_compress_lock = true
+            REMOVE n._decay_compress_lock
+            WITH n
+            WHERE n.scope = 'PERSISTENT' AND n.freshness = 'ACTIVE'
+              AND NOT coalesce(n.rederive_pending, false)
+              AND {harmful_automatic_mutation_allowed_cypher("n")}
+              AND coalesce(n.content, '') = coalesce($read_content, '')
+              AND {memory_recency_cypher()} < datetime() - duration({{days: $min_days}})
+            SET n.original_content = $read_content,
+                n.content = $compressed_summary,
+                n.freshness = 'COMPRESSED'
+            RETURN count(n) AS updated
+            """
+        params = {
+            "node_uuid": node_uuid,
+            "compressed_summary": compressed_summary,
+            "read_content": read_content,
+            "min_days": min_days_since_accessed,
+        }
         return self._updated_unless_fenced(node_uuid, lambda: execute_copy_fenced(
             self.neo4j, fence_key, read_epoch, [node_uuid],
             lambda tx: tx.execute(query, params), key_from_uuid=node_uuid,
@@ -350,41 +365,75 @@ class ConsolidationRepository:
             if row.get("uuid")
         }
 
+    def fetch_rehydration_state(self, node_uuid: str) -> dict[str, object]:
+        """The ``content`` and ``original_content`` a rehydrate reads; both null when rederive_pending."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {uuid: $node_uuid})
+            RETURN CASE WHEN coalesce(n.rederive_pending, false) THEN null ELSE n.content END AS content,
+                   CASE WHEN coalesce(n.rederive_pending, false) THEN null
+                        ELSE n.original_content END AS original_content
+            """,
+            params={"node_uuid": node_uuid},
+        )
+        return dict(rows[0]) if rows else {"content": None, "original_content": None}
+
     def complete_rehydration(
         self,
         node_uuid: str,
         updated_content: str | None = None,
         *,
+        read_summary: str | None,
+        read_base: str | None,
         source_uuids: tuple[str, ...] = (),
         read_epoch: int | None = None,
     ) -> bool:
         """Transition a PERSISTENT COMPRESSED node back to ACTIVE.
 
-        With ``updated_content`` (an LLM merge of the archived original and new context) the
-        write runs under G-copy with the node and ``source_uuids`` (the context's episode) as
+        With ``updated_content`` (an LLM merge of the compression's replaced body and new context)
+        the write runs under G-copy with the node and ``source_uuids`` (the context's episode) as
         sources, and never lands on a node an erase scrubbed (CF-338). Without ``read_epoch`` the
         epoch comparison is skipped: the source markers, ``erasing_ops`` and ``rederive_pending``
         still refuse a copy of erased text.
-        """
-        params: dict[str, object] = {"node_uuid": node_uuid}
-        set_lines = [
-            "n.freshness = 'ACTIVE'",
-            "n.last_accessed = datetime()",
-            "n.rehydration_count = coalesce(toInteger(n.rehydration_count), 0) + 1",
-        ]
-        if updated_content is not None:
-            params["updated_content"] = updated_content
-            set_lines.insert(0, "n.content = $updated_content")
 
-        query = (Cypher()
-            .match("(n:Entity {uuid: $node_uuid})")
-            .where("n.scope = 'PERSISTENT'", "n.freshness = 'COMPRESSED'",
-                   automatic_lifecycle_protection_cypher("n"))
-            .where_if(updated_content is not None, "NOT coalesce(n.rederive_pending, false)")
-            .set(set_lines)
-            .return_raw("count(n) AS updated")
-            .build())
-        if updated_content is None:
+        Without ``updated_content`` the node's own ``original_content`` is restored when it has
+        one; otherwise the node only flips state. ``read_summary`` and ``read_base`` are the
+        ``content`` and ``original_content`` the caller read: the write refuses if either moved.
+        """
+        restore = updated_content is None and bool(read_base)
+        copies_text = updated_content is not None or restore
+        params: dict[str, object] = {
+            "node_uuid": node_uuid,
+            "read_summary": read_summary,
+            "read_base": read_base,
+            "updated_content": updated_content,
+            "restore": restore,
+            "copies_text": copies_text,
+        }
+
+        # Lock, then decide: the MATCH reads without a lock and Neo4j does not re-check a WHERE
+        # after a write waits for one.
+        query = f"""
+            MATCH (n:Entity {{uuid: $node_uuid}})
+            SET n._decay_compress_lock = true
+            REMOVE n._decay_compress_lock
+            WITH n
+            WHERE n.scope = 'PERSISTENT' AND n.freshness = 'COMPRESSED'
+              AND {automatic_lifecycle_protection_cypher("n")}
+              AND coalesce(n.content, '') = coalesce($read_summary, '')
+              AND coalesce(n.original_content, '') = coalesce($read_base, '')
+              AND (NOT $copies_text OR NOT coalesce(n.rederive_pending, false))
+            SET n.content = CASE
+                    WHEN $updated_content IS NOT NULL THEN $updated_content
+                    WHEN $restore THEN n.original_content
+                    ELSE n.content
+                END,
+                n.freshness = 'ACTIVE',
+                n.last_accessed = datetime(),
+                n.rehydration_count = coalesce(toInteger(n.rehydration_count), 0) + 1
+            RETURN count(n) AS updated
+            """
+        if not copies_text:
             # A state flip; no text is copied.
             rows = self.neo4j.execute(query, params=params)
             return bool(rows and int(rows[0].get("updated", 0)) > 0)
@@ -502,8 +551,8 @@ class ConsolidationRepository:
     def count_persistent_edges(self, node_uuid: str) -> int:
         """Count edges from a node to PERSISTENT or PROMOTED semantic nodes.
 
-        Excludes ANCHORED_TO edges and structural neighbors (structure_role
-        IS NOT NULL) so cross-domain anchor links don't inflate the promotion
+        Excludes ANCHORED_TO edges, GONE neighbors and structural neighbors
+        (structure_role IS NOT NULL) so cross-domain anchor links don't inflate the promotion
         threshold during session consolidation.
         """
 
@@ -514,6 +563,7 @@ class ConsolidationRepository:
               AND other.scope IN ['PERSISTENT', 'PROMOTED']
               AND NOT type(r) = 'ANCHORED_TO'
               AND other.structure_role IS NULL
+              AND coalesce(other.freshness, '') <> 'GONE'
             RETURN count(DISTINCT other) AS persistent_neighbors
             """,
             params={"node_uuid": node_uuid},

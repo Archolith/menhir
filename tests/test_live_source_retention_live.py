@@ -105,6 +105,7 @@ def test_flag_unflag_reflag_is_live_and_beneficial_rehydration_is_allowed(
 ) -> None:
     adapter = MemoryGraphAdapter(neo4j=live_repo)
     lifecycle = ConsolidationRepository(live_repo)
+    live_repo.execute("MATCH (n:Entity {uuid:$u}) SET n.created_at = datetime('2020-01-01')", params={"u": tagged_graph["target"]})
     for source in (tagged_graph["source_a"], tagged_graph["source_b"]):
         assert (
             adapter.record_retention_sources(
@@ -115,13 +116,13 @@ def test_flag_unflag_reflag_is_live_and_beneficial_rehydration_is_allowed(
             == 1
         )
 
-    assert lifecycle.compress_node(tagged_graph["target"], "summary") is False
+    assert lifecycle.compress_node(tagged_graph["target"], "summary", read_content="full", min_days_since_accessed=0) is False
     assert adapter.unflag_memory(tagged_graph["source_b"]) is True
-    assert lifecycle.compress_node(tagged_graph["target"], "summary") is True
+    assert lifecycle.compress_node(tagged_graph["target"], "summary", read_content="full", min_days_since_accessed=0) is True
 
     assert adapter.flag_memory(tagged_graph["source_a"]) is True
-    assert lifecycle.complete_rehydration(tagged_graph["target"], "full again") is True
-    assert lifecycle.compress_node(tagged_graph["target"], "summary again") is False
+    assert lifecycle.complete_rehydration(tagged_graph["target"], "full again", read_summary="summary", read_base="full") is True
+    assert lifecycle.compress_node(tagged_graph["target"], "summary again", read_content="full again", min_days_since_accessed=0) is False
 
     row = live_repo.execute(
         "MATCH (n:Entity {uuid:$uuid}) RETURN coalesce(n.user_flagged, false) AS direct",

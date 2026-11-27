@@ -261,8 +261,8 @@ def test_only_harmful_lifecycle_paths_inherit_source_retention() -> None:
     )
     repo = ConsolidationRepository(neo4j)
 
-    assert repo.compress_node("entity-1", "summary") is True
-    assert repo.complete_rehydration("entity-1", "content") is True
+    assert repo.compress_node("entity-1", "summary", read_content="body", min_days_since_accessed=7.0) is True
+    assert repo.complete_rehydration("entity-1", "content", read_summary="s", read_base=None) is True
     assert repo.promote_to_persistent(["entity-1"]) == ["entity-1"]
     assert repo.set_demote_ttl(["entity-1"], 7) == ["entity-1"]
 

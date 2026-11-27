@@ -1237,11 +1237,15 @@ class MemoryGraphAdapter:
         node_uuid: str,
         compressed_summary: str,
         *,
+        read_content: str | None,
+        min_days_since_accessed: float,
         read_epoch: int | None = None,
         fence_key: str | None = None,
     ) -> bool:
         return self._consolidation.compress_node(
-            node_uuid, compressed_summary, read_epoch=read_epoch, fence_key=fence_key
+            node_uuid, compressed_summary, read_content=read_content,
+            min_days_since_accessed=min_days_since_accessed,
+            read_epoch=read_epoch, fence_key=fence_key,
         )
 
     def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
@@ -1250,16 +1254,22 @@ class MemoryGraphAdapter:
     def fetch_node_freshness(self, node_uuids: list[str]) -> dict[str, str]:
         return self._consolidation.fetch_node_freshness(node_uuids)
 
+    def fetch_rehydration_state(self, node_uuid: str) -> dict[str, object]:
+        return self._consolidation.fetch_rehydration_state(node_uuid)
+
     def complete_rehydration(
         self,
         node_uuid: str,
         updated_content: str | None = None,
         *,
+        read_summary: str | None,
+        read_base: str | None,
         source_uuids: tuple[str, ...] = (),
         read_epoch: int | None = None,
     ) -> bool:
         return self._consolidation.complete_rehydration(
-            node_uuid, updated_content, source_uuids=source_uuids, read_epoch=read_epoch
+            node_uuid, updated_content, read_summary=read_summary, read_base=read_base,
+            source_uuids=source_uuids, read_epoch=read_epoch,
         )
 
     def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:

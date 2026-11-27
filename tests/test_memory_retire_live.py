@@ -608,7 +608,7 @@ def test_retired_persistent_entity_is_frozen_against_decay_compression_and_bridg
     assert env.retire(bridge)["status"] == "retired"
 
     assert not ({squash, bridge} & candidates())
-    assert adapter.compress_node(squash, "SUMMARY") is False
+    assert adapter.compress_node(squash, "SUMMARY", read_content="to-compress content", min_days_since_accessed=30) is False
     assert adapter.bridge_and_delete(bridge) == {"edges_bridged": 0, "deleted": 0}
     # Nothing moved: content, freshness and existence are unchanged.
     assert env.props(squash) == props_squash
@@ -619,7 +619,7 @@ def test_retired_persistent_entity_is_frozen_against_decay_compression_and_bridg
     assert env.restore(squash)["status"] == "restored"
     assert env.restore(bridge)["status"] == "restored"
     assert {squash, bridge} <= candidates()
-    assert adapter.compress_node(squash, "SUMMARY") is True
+    assert adapter.compress_node(squash, "SUMMARY", read_content="to-compress content", min_days_since_accessed=30) is True
     row = env.repo.execute(
         "MATCH (n:Entity {uuid:$u}) RETURN n.freshness AS f, n.content AS c", {"u": squash})[0]
     assert (row["f"], row["c"]) == ("COMPRESSED", "SUMMARY")

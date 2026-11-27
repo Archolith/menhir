@@ -19,6 +19,36 @@ class TelemetryRecallArchiveMixin:
 
         return bool(suppressed_node_uuids(self.db_path, [node_uuid]))
 
+    def get_decay_original_content(self, node_uuid: str, summary: str) -> str | None:
+        """The body the most recent compression replaced, for a node holding ``summary``.
+
+        Latest ``changed_by='decay'`` content revision whose ``new_value`` equals the node's
+        current content; same erasure veto as ``get_original_content``. None when no row matches.
+        """
+        if not node_uuid or not summary:
+            return None
+        self._ensure_ready()
+        if self._erasure_suppresses(node_uuid):
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT old_value FROM memory_revisions
+                    WHERE node_uuid = ? AND field = 'content'
+                      AND changed_by = 'decay' AND new_value = ?
+                    ORDER BY recorded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (node_uuid, summary),
+                ).fetchone()
+            return row[0] if row else None
+        except sqlite3.Error:
+            logger.warning(
+                "Failed to fetch decay original content for node=%s", node_uuid, exc_info=True
+            )
+            return None
+
     def get_original_content(self, node_uuid: str) -> str | None:
         """Retrieve the original (pre-compression) content for a node from the revision archive.
 

@@ -682,6 +682,12 @@ class StubMemoryGraphAdapter:
                 freshness_map[node_uuid] = metadata_by_uuid[node_uuid]
         return freshness_map
 
+    def fetch_rehydration_state(self, node_uuid: str) -> dict[str, object]:
+        for row in self.candidate_metadata:
+            if str(row.get("uuid")) == node_uuid:
+                return {"content": row.get("content"), "original_content": row.get("original_content")}
+        return {"content": None, "original_content": None}
+
     def complete_rehydration(
         self, node_uuid: str, updated_content: str | None = None, **_fence: object
     ) -> bool:

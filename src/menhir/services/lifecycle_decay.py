@@ -158,8 +158,17 @@ class LifecycleDecayMixin:
 
         source_uuid = source_episode_uuid or source_node_uuid
         context_text = str(new_context or "").strip()
+        # What the write must still find on the node: the summary and the stored base it read.
+        state = await asyncio.to_thread(self.graph_adapter.fetch_rehydration_state, node_uuid)
+        read_summary = state.get("content")
+        read_base = state.get("original_content")
         if not context_text:
-            updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid)
+            updated = await asyncio.to_thread(
+                self.graph_adapter.complete_rehydration,
+                node_uuid,
+                read_summary=read_summary,
+                read_base=read_base,
+            )
             if updated:
                 await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
                 record_lifecycle_action(
@@ -184,10 +193,16 @@ class LifecycleDecayMixin:
             )
             return False
 
-        # Archive-first recovery: attempt to retrieve the original (pre-compression)
-        # content from the revision sidecar before falling back to node content.
-        # This prevents photocopy-loss from repeated compress/rehydrate cycles.
-        archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
+        # Base: the body the last compression replaced. The node keeps it as original_content;
+        # for nodes compressed before that, the latest decay revision for this summary, then the
+        # oldest archived body. Using the oldest first would drop text merged by an earlier cycle.
+        archived_content = str(read_base or "").strip() or None
+        if archived_content is None and read_summary:
+            archived_content = await asyncio.to_thread(
+                telemetry_store.get_decay_original_content, node_uuid, str(read_summary)
+            )
+        if archived_content is None:
+            archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
         existing_content = archived_content or str(
             node.get("content") or node.get("summary") or node.get("name") or ""
         ).strip()
@@ -226,6 +241,8 @@ class LifecycleDecayMixin:
             self.graph_adapter.complete_rehydration,
             node_uuid,
             merged,
+            read_summary=read_summary,
+            read_base=read_base,
             source_uuids=tuple(u for u in (source_uuid,) if u),
         )
         if updated:
@@ -335,6 +352,8 @@ class LifecycleDecayMixin:
                     self.graph_adapter.compress_node,
                     uuid,
                     summary,
+                    read_content=candidate.get("content"),
+                    min_days_since_accessed=_DEFAULT_COMPRESS_DAYS,
                     read_epoch=int(candidate.get("fence_epoch") or 0),
                     fence_key=str(candidate.get("fence_key") or "") or None,
                 ):

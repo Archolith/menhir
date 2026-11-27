@@ -62,10 +62,11 @@ def test_cf338_compress_from_a_pre_erase_read_is_refused(test_neo4j_repo, tmp_pa
     ids = _seed_holder(repo, ns, canary, freshness="ACTIVE")
     adapter, coord, db = _adapter_and_coordinator(repo, tmp_path)
     read_epoch = _epoch(repo, ns)
+    read_content = _props(repo, ids["x"])["content"]
 
     assert coord.erase_memory(ids["y"])["reason"] == "erased"
-    ok = adapter.compress_node(ids["x"], f"summary: Y said {canary}", read_epoch=read_epoch,
-                               fence_key=ns)
+    ok = adapter.compress_node(ids["x"], f"summary: Y said {canary}", read_content=read_content,
+                               min_days_since_accessed=0, read_epoch=read_epoch, fence_key=ns)
 
     assert ok is False
     assert all_hits(repo, db, canary) == []
@@ -91,9 +92,9 @@ def test_cf338_compress_epoch_check_alone_refuses_a_stale_summary(test_neo4j_rep
     read_epoch = _epoch(repo, ns)
     coord.erase_memory(other)
 
-    assert adapter.compress_node(x, "x gist", read_epoch=read_epoch, fence_key=ns) is False
+    assert adapter.compress_node(x, "x gist", read_content="x body", min_days_since_accessed=0, read_epoch=read_epoch, fence_key=ns) is False
     # The positive control: a fresh read compresses.
-    assert adapter.compress_node(x, "x gist", read_epoch=_epoch(repo, ns), fence_key=ns) is True
+    assert adapter.compress_node(x, "x gist", read_content="x body", min_days_since_accessed=0, read_epoch=_epoch(repo, ns), fence_key=ns) is True
     assert _props(repo, x)["freshness"] == "COMPRESSED"
 
 
@@ -136,7 +137,8 @@ def test_cf338_rehydration_of_a_scrubbed_node_is_refused(test_neo4j_repo, tmp_pa
     adapter, coord, db = _adapter_and_coordinator(repo, tmp_path)
 
     coord.erase_memory(ids["y"])
-    ok = adapter.complete_rehydration(ids["x"], f"merged: Y said {canary}")
+    p = _props(repo, ids["x"])
+    ok = adapter.complete_rehydration(ids["x"], f"merged: Y said {canary}", read_summary=p.get("content"), read_base=p.get("original_content"))
 
     assert ok is False
     assert all_hits(repo, db, canary) == []
@@ -161,10 +163,10 @@ def test_cf338_rehydration_merging_an_erased_episode_is_refused(test_neo4j_repo,
     adapter, coord, db = _adapter_and_coordinator(repo, tmp_path)
 
     assert coord.erase_memory(ep)["reason"] == "erased"
-    ok = adapter.complete_rehydration(x, f"x body + {canary}", source_uuids=(ep,))
+    ok = adapter.complete_rehydration(x, f"x body + {canary}", read_summary="gist", read_base="x body", source_uuids=(ep,))
 
     assert ok is False
     assert all_hits(repo, db, canary) == []
     # A state-only rehydration (no copied text) still works.
-    assert adapter.complete_rehydration(x) is True
+    assert adapter.complete_rehydration(x, read_summary="gist", read_base="x body") is True
     assert _props(repo, x)["freshness"] == "ACTIVE"
