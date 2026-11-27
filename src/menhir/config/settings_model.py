@@ -33,7 +33,7 @@ ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_appl
 
 
 #: MENHIR_LOOPBACK_PROFILE values (#439); menhir.mcp.local_profile gives them meaning.
-LOOPBACK_PROFILES: tuple[str, ...] = ("default", "operator")
+LOOPBACK_PROFILES: tuple[str, ...] = ("default", "lean", "operator")
 
 
 def _normalize_loopback_profile(raw: str | None) -> str:
@@ -473,7 +473,9 @@ class MemorySettings:
     client_tools: dict[str, frozenset[str]] = field(default_factory=dict)
 
     # MENHIR_LOOPBACK_PROFILE -- the MCP tools an unauthenticated local agent gets (#439):
-    # "default" is the core and curate profiles without add_candidate; "operator" is every tool.
+    # "default" is the core and curate profiles without add_candidate;
+    # "lean" is the 10-tool coding-agent subset (cuts tool-schema token overhead);
+    # "operator" is every tool.
     loopback_profile: str = "default"
 
     # MENHIR_KNOWN_CLIENTS -- comma-separated client names that are RECOGNIZED but carry no
