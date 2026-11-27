@@ -6,9 +6,8 @@ import asyncio
 import json
 import logging
 import math
-import os
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +15,8 @@ from menhir.domain.assertion_operations import is_counting_occurrence, is_value_
 from menhir.domain.recall import (
     QueryPreset,
     RecallResult,
+    ScalarAuthorityContributor,
+    ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
 )
@@ -31,28 +32,14 @@ if TYPE_CHECKING:
     from menhir.services.recall_service import RecallService
 
 
-def _read_linked_doc_previews(docs: list[dict]) -> list[str]:
-    """Read the first 200 characters of each linked document. BLOCKING BY DESIGN.
-
-    Runs inside ``asyncio.to_thread`` (CF-74): it does a stat and an open per document, and it
-    sat on the event loop until then -- directly beside an adapter call that was already
-    correctly threaded. Behaviour is otherwise unchanged: the same 200-character prefix, the
-    same ``errors="replace"``, and the same per-document swallow so one unreadable file cannot
-    lose the rest of the section.
-    """
-    lines: list[str] = []
-    for doc in docs:
-        root_path = doc.get("root_path", "")
-        if root_path and os.path.isfile(root_path):
-            try:
-                with open(root_path, "r", encoding="utf-8", errors="replace") as handle:
-                    content = handle.read(200)
-                doc_type = doc.get("doc_type", "generic")
-                tag = f" [{doc_type}]" if doc_type != "generic" else ""
-                lines.append(f"- [[{doc['name']}]]{tag}: {content}")
-            except Exception:
-                logger.debug("Failed to read wiki doc %s", root_path, exc_info=True)
-    return lines
+#: Opening of every stale-anchor advisory line. The hook trims packed context between entries and
+#: keys on this prefix to keep an advisory attached to the memory it qualifies.
+STALE_ADVISORY_PREFIX = "  ⚠️ Stale file anchor:"
+#: Separates entries in packed context; the hook cuts only at this boundary.
+ENTRY_SEPARATOR = "\n\n"
+#: Opening of the warning appended to a memory that needs review.
+REVIEW_REQUIRED_PREFIX = "Review required:"
+_BLANK_LINES = re.compile(r"\n(?:[ \t]*\n)+")
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -154,13 +141,15 @@ def _deduplicate(memories: list[ScoredMemory]) -> list[ScoredMemory]:
     for m in unique:
         words_m = words_map[m.uuid]
         redundant = False
-        for k in kept:
+        for position, k in enumerate(kept):
             # Only dedup if both have same view_kind (or both are None)
             same_state = (m.status, m.artifact_status, m.superseded_by) == (
                 k.status, k.artifact_status, k.superseded_by,
             )
             if m.view_kind == k.view_kind and same_state and _jaccard(words_m, words_map[k.uuid]) > 0.8:
                 redundant = True
+                if m.final_score > k.final_score:
+                    kept[position] = m  # keep the highest scorer, as the docstring promises
                 break
         if not redundant:
             kept.append(m)
@@ -188,7 +177,7 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
         belief_role = temporal_fact.temporal_role.replace("_", " ")
         if temporal_fact.temporal_role == "ended":
             belief_role = f"current belief, ended {invalid_at}"
-        said = f" | said {temporal_fact.said_at}" if getattr(temporal_fact, "said_at", None) else ""
+        said = f" | said {temporal_fact.said_at}" if temporal_fact.said_at else ""
         lines.append(f"  - {happened}{said} | {fact} | belief: {belief_role}")
     return lines
 
@@ -198,7 +187,7 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _occurrence_contributor_line(contributor: Any) -> str:
+def _occurrence_contributor_line(contributor: ScalarAuthorityContributor) -> str:
     """Occurrence line: the event date when grounded, else only when it was mentioned (never 'valid')."""
     line = f"  - {contributor.relation}: {contributor.stated_span}"
     if contributor.source_sentence:
@@ -216,7 +205,7 @@ def _fmt_count(n: Any) -> str:
     return str(n)
 
 
-def _count_match_lines(verdict: Any) -> list[str]:
+def _count_match_lines(verdict: ScalarAuthorityVerdict) -> list[str]:
     """Unit 4R match audit lines (per-action sums, item names) for a lower-bound counted View.
 
     Malformed JSON or wrong types skip the corresponding line silently."""
@@ -318,8 +307,13 @@ class ContextBuilderService:
         include_scores: bool = False,
         include_warden_status: bool = False,
         namespace: str | None = None,
+        exclude_todo_uuids: Collection[str] = (),
     ) -> ContextResult:
-        """Recall memories and pack them into a token-budget-limited string."""
+        """Recall memories and pack them into a token-budget-limited string.
+
+        ``exclude_todo_uuids`` names TODOs the caller already shows (the hook lists open TODOs
+        itself), so "Related open TODOs" does not repeat them.
+        """
 
         # Rich context always keeps historical source-time evidence. This does not add
         # invalidated candidates; it only prevents a recalled older fact from losing the
@@ -353,9 +347,12 @@ class ContextBuilderService:
                 matching_todos = await asyncio.to_thread(
                     self.graph_adapter.list_todos_matching_query,
                     query,
-                    limit=3,
+                    limit=3 + len(exclude_todo_uuids),
                     namespace=namespace,
                 )
+                matching_todos = [
+                    t for t in matching_todos if t.get("uuid") not in exclude_todo_uuids
+                ][:3]
                 if matching_todos:
                     todo_lines = []
                     for t in matching_todos:
@@ -470,7 +467,7 @@ class ContextBuilderService:
                     f"  - {contributor.relation}: {contributor.stated_span} "
                     f"(valid {contributor.valid_at or 'unknown'})"
                 )
-            for approx in getattr(verdict, "newer_approximate", ()) or ():
+            for approx in verdict.newer_approximate:
                 authority_lines.append(
                     f'  newer, approximate: about {approx.value} ("{approx.quote}", '
                     f"{approx.valid_at or 'unknown'})"
@@ -515,8 +512,10 @@ class ContextBuilderService:
         # showed a Timeline-first brief buries the answer, which is usually the top-relevance,
         # often-undated memory). Identical to the off path.
         for idx, mem in enumerate(memories, start=1):
-            name = mem.name
-            content = mem.content or ""
+            # A blank line separates entries in the packed context; the hook trims there, so a
+            # memory's own blank lines are collapsed or a cut could drop its advisory (#873).
+            name = _BLANK_LINES.sub("\n", mem.name or "")
+            content = _BLANK_LINES.sub("\n", mem.content or "")
 
             # Build verdict markers: append inline after name when features that produce
             # them are active. Markers only activate when their gates are on (warden_label
@@ -527,7 +526,7 @@ class ContextBuilderService:
             )
             if lifecycle_note:
                 markers.append(lifecycle_note)
-            if getattr(mem, "is_scalar_authority", False):
+            if mem.is_scalar_authority:
                 markers.append("current authority")
             if mem.is_superseded_view:
                 markers.append("superseded view")
@@ -535,7 +534,7 @@ class ContextBuilderService:
                 markers.append(f"flagged: {mem.warden_label.value}")
             if mem.breakdown.conflict_bonus == 1.0:
                 markers.append("unresolved conflict")
-            provenance_marker = provenance_label(getattr(mem, "provenance", None))
+            provenance_marker = provenance_label(mem.provenance)
             if provenance_marker:
                 markers.append(provenance_marker)
 
@@ -552,14 +551,16 @@ class ContextBuilderService:
             if mem.needs_review:
                 # Pack the warning atomically with its memory under the token budget.
                 line += (
-                    "\n  Review required: " + (mem.review_reason or "source state changed")
+                    f"\n  {REVIEW_REQUIRED_PREFIX} " + (mem.review_reason or "source state changed")
                     + ". Verify the source before asserting this memory as current truth."
                 )
 
-            tokens = _tokens_for(line)
             if mem.verifier_evidence:
                 line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
-                tokens = _tokens_for(line)
+            # Collapse blank lines across the whole entry (temporal facts, review reason and
+            # verifier evidence included), so the hook's cut at blank lines cannot split it.
+            line = _BLANK_LINES.sub("\n", line)
+            tokens = _tokens_for(line)
 
             # Stale-anchor advisory: atomic with the memory line.
             # If the memory is stale, check memory + advisory combined budget.
@@ -573,25 +574,25 @@ class ContextBuilderService:
                     v_outcome = str(verification.get("outcome") or "")
                     if v_outcome == "still_valid":
                         advisory_line = (
-                            f"  ⚠️ Stale file anchor: {stale_path} changed after "
+                            f"{STALE_ADVISORY_PREFIX} {stale_path} changed after "
                             f"this memory, but it was later verified against the "
                             f"current file. Use with normal caution."
                         )
                     elif v_outcome == "outdated":
                         advisory_line = (
-                            f"  ⚠️ Stale file anchor: {stale_path} — this memory "
+                            f"{STALE_ADVISORY_PREFIX} {stale_path} — this memory "
                             f"was verified against the current file and appears "
                             f"outdated. Do not rely on it. Update or supersede it."
                         )
                     else:
                         advisory_line = (
-                            f"  ⚠️ Stale file anchor: {stale_path} changed after "
+                            f"{STALE_ADVISORY_PREFIX} {stale_path} changed after "
                             f"this memory was anchored. Before relying, inspect "
                             f"the current file. If outdated, update or supersede it."
                         )
                 else:
                     advisory_line = (
-                        f"  ⚠️ Stale file anchor: {stale_path} changed after this "
+                        f"{STALE_ADVISORY_PREFIX} {stale_path} changed after this "
                         f"memory was anchored. Before relying on this memory, inspect "
                         f"the current file. If outdated, update or supersede it."
                     )
@@ -643,7 +644,7 @@ class ContextBuilderService:
                 lines.append(f"Memory note: {recall_result.note}")
             if hint_line is not None:
                 lines.append(hint_line)
-            running_tokens = _tokens_for("\n\n".join(lines))
+            running_tokens = _tokens_for(ENTRY_SEPARATOR.join(lines))
         else:
             if hint_line is not None:
                 lines.insert(hint_at, hint_line)
@@ -655,45 +656,10 @@ class ContextBuilderService:
                     lines.append(note_line)
                     running_tokens += note_tokens
 
-        context = "\n\n".join(lines)
+        context = ENTRY_SEPARATOR.join(lines)
         if todo_section:
             context += todo_section
             running_tokens += todo_tokens
-
-        # Fetch linked wiki/reference documents and include their context (best-effort)
-        wiki_section = ""
-        wiki_tokens = 0
-        if self.graph_adapter is not None and memory_ids:
-            try:
-                linked_docs = await asyncio.to_thread(
-                    self.graph_adapter.get_linked_documents, memory_ids[:10]
-                )
-                if linked_docs:
-                    # CF-74: the stat+read below is blocking filesystem I/O on the recall request
-                    # path. The graph call directly above is already threaded; this ran on the
-                    # event loop in the same block, up to five times, and a linked doc on a slow
-                    # or network mount stalled every other request in the process.
-                    wiki_lines = await asyncio.to_thread(
-                        _read_linked_doc_previews, linked_docs[:5]  # cap at 5 docs
-                    )
-                    if wiki_lines:
-                        wiki_section = "\n\n=== Wiki Context ===\n" + "\n".join(
-                            wiki_lines
-                        )
-                        wiki_tokens, _ = estimate_tokens(wiki_section)
-                        # 30% max for wiki, but only if we have budget
-                        wiki_budget = math.floor(effective_budget * 0.3)
-                        if wiki_tokens > wiki_budget:
-                            # truncate
-                            wiki_section = (
-                                wiki_lines[0]
-                                + f"\n...(truncated, {len(wiki_lines)} docs)"
-                            )
-                            wiki_tokens = estimate_tokens(wiki_section)[0]
-                        context += wiki_section
-                        running_tokens += wiki_tokens
-            except Exception:
-                logger.debug("wiki_section fetch failed", exc_info=True)
 
         return ContextResult(
             query=query,
