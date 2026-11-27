@@ -73,7 +73,10 @@ class RealizationLifecycleRepository:
                    w.target_json AS target_json,
                    w.generation AS generation,
                    w.target_present AS target_present,
-                   w.reason AS reason
+                   w.reason AS reason,
+                   w.review_generation=w.generation
+                     AND w.review_definition_version=w.definition_version
+                     AND w.generation > coalesce(w.applied_generation,0) AS retained_for_review
             ORDER BY w.work_key
             """,
             {"definition_id": definition_id},
@@ -109,7 +112,10 @@ class RealizationLifecycleRepository:
                 raise ProjectionLifecycleCorruptionError(
                     "projection target snapshot resolved to a different definition"
                 )
-            if token.definition_version != int(row["current_definition_version"]):
+            current_version = int(row["current_definition_version"])
+            if token.definition_version != current_version and not (
+                row.get("retained_for_review") is True and token.definition_version < current_version
+            ):
                 raise ProjectionLifecycleCorruptionError(
                     "projection target version disagrees with shared-current definition"
                 )

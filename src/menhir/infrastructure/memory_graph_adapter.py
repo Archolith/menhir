@@ -15,10 +15,14 @@ import logging
 import random
 import time
 import uuid as uuidlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from menhir.infrastructure.view_models import ViewKind
+
+if TYPE_CHECKING:
+    from menhir.extensions import RuntimeExtensions
 
 from menhir.infrastructure.episode_repository import (
     EpisodeRepository,
@@ -93,6 +97,11 @@ class MemoryGraphAdapter:
     embedding_dimensions: int | None = field(default=None, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
     counting_match_enabled: bool = field(default=True, kw_only=True)
+    extensions: RuntimeExtensions | None = field(default=None, kw_only=True, repr=False)
+
+    @property
+    def view_kinds(self) -> Mapping[str, ViewKind] | None:
+        return self.extensions.view_kinds if self.extensions else None
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -101,7 +110,7 @@ class MemoryGraphAdapter:
         from menhir.infrastructure.temporal_repository import TemporalRepository
         from menhir.infrastructure.candidate_repository import CandidateRepository
         from menhir.infrastructure.artifact_repository import ArtifactRepository
-        from menhir.infrastructure.view_repository import ViewRepository
+        from menhir.infrastructure.view_repository import build_view_repository
         from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
         from menhir.infrastructure.personal_memory_queries import PersonalMemoryRepository
         from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
@@ -119,7 +128,10 @@ class MemoryGraphAdapter:
         # answering different questions -- see domain/work_artifact.py.
         self._artifacts = ArtifactRepository(self.neo4j)
         self._work_artifacts = WorkArtifactRepository(self.neo4j)
-        self._views = ViewRepository(self.neo4j)
+        from menhir.extensions import resolve_graph_extensions
+
+        self.extensions = resolve_graph_extensions(self.extensions, bind=True)
+        self._views = build_view_repository(self.neo4j, extensions=self.extensions)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
         from menhir.infrastructure.build_report_queries import BuildReportQueries

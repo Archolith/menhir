@@ -136,6 +136,11 @@ class _Corpus:
         self.by_name: dict[str, list[tuple[Path, str | None, str]]] = {}
         for ident in self.by_id:
             self.by_name.setdefault(ident[2], []).append(ident)
+        factory_types: dict[str, set[str | None]] = {}
+        for (_, cls, name), fn in self.by_id.items():
+            if cls is None and isinstance(fn, ast.FunctionDef):
+                returns = _ref_name(fn.returns) if fn.returns is not None else None
+                factory_types.setdefault(name, set()).add(returns)
         self.classes: dict[str, list[tuple[Path, ast.ClassDef]]] = {}
         #: (path, class) -> {attribute: class name} from ``self.attr = ClassName(...)``.
         self.attr_types: dict[tuple[Path, str], dict[str, str]] = {}
@@ -158,6 +163,9 @@ class _Corpus:
                 for node in ast.walk(stmt):
                     if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
                         ctor = _call_name(node.value)
+                        candidates = factory_types.get(ctor, set())
+                        if len(candidates) == 1:
+                            ctor = next(iter(candidates)) or ctor
                         for target in node.targets:
                             if (isinstance(target, ast.Attribute)
                                     and isinstance(target.value, ast.Name)
@@ -444,6 +452,28 @@ def test_census_follows_writers_transitively() -> None:
     handler = corpus.trees[Path("fixture.py")].body[-1]
     calls = _on_loop_calls(handler, corpus, Path("fixture.py"), None)
     assert [name for _, name in calls] == ["outer"]
+
+
+def test_census_follows_writer_through_repository_factory() -> None:
+    src = (
+        "class Writer:\n"
+        "    def record(self, graph):\n"
+        "        graph.execute('MERGE (f:EvidenceNamespaceFence {namespace_key: $k})')\n"
+        "class Unrelated:\n"
+        "    def record(self, value):\n"
+        "        return value\n"
+        "def build_writer() -> Writer:\n"
+        "    return Writer()\n"
+        "class Adapter:\n"
+        "    def __init__(self):\n"
+        "        self.repository = build_writer()\n"
+        "    def record_audit(self, graph):\n"
+        "        self.repository.record(graph)\n"
+    )
+    corpus = _Corpus.__new__(_Corpus)
+    corpus.trees = {Path("fixture.py"): ast.parse(src)}
+    corpus.flagged_constants = corpus._flag_constants()
+    assert "record_audit" in corpus._derive_writers()
 
 
 def test_census_catches_the_602_on_loop_publication_intent(corpus: _Corpus) -> None:

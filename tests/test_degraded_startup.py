@@ -228,6 +228,56 @@ class TestBuildMemoryServicesCapabilities:
         assert built.ingest_service.enrichment_enabled() is False
         assert built.capabilities is caps
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("registered", [False, True])
+    async def test_runtime_scheduler_only_binds_explicit_projection_registrations(
+        self, monkeypatch: pytest.MonkeyPatch, registered: bool,
+    ) -> None:
+        from menhir.core import runtime as runtime_mod
+        from menhir.infrastructure import projection_lifecycle_repository
+        from menhir.services.projection_reconciliation import ProjectionWorkerRegistration
+        from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+
+        graph = object()
+        queues = []
+
+        def bind_queue(neo4j, *, commit_timeout_s):
+            queues.append((neo4j, commit_timeout_s))
+            return object()
+
+        def materialize(_tx, _token):
+            return "hash"
+
+        registrations = (
+            (ProjectionWorkerRegistration(SCALAR_STATE_PROJECTION, materialize),)
+            if registered else ()
+        )
+        monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", lambda **kwargs: graph)
+        monkeypatch.setattr(projection_lifecycle_repository, "ProjectionLifecycleRepository", bind_queue)
+        monkeypatch.setattr(runtime_mod._state, "scheduler", None)
+        monkeypatch.setattr(runtime_mod.MaintenanceScheduler, "start", AsyncMock())
+        monkeypatch.setattr(runtime_mod.MaintenanceScheduler, "status_snapshot", lambda _self: {"running": True})
+
+        built = build_memory_services(
+            settings=MemorySettings(artifact_reconcile_mode="off", structure_watcher_enabled=False),
+            capabilities=_caps(graphiti_llm_ready=False, embedder_ready=False, reranker_ready=False),
+            projection_registrations=registrations,
+        )
+        scheduler = await runtime_mod._start_scheduler(built)
+
+        names = [name for lane in scheduler._projection_lanes for name in lane._jobs]
+        expected = [f"reconcile_projection:{SCALAR_STATE_PROJECTION.definition_id}"] if registered else []
+        assert names == expected
+        assert queues == ([(graph, 30.0)] if registered else [])
+
+    def test_read_only_build_rejects_projection_workers(self) -> None:
+        from menhir.services.projection_reconciliation import ProjectionWorkerRegistration
+        from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+
+        registration = ProjectionWorkerRegistration(SCALAR_STATE_PROJECTION, lambda _tx, _token: "hash")
+        with pytest.raises(ValueError, match="require a writable runtime"):
+            build_memory_services(read_only=True, projection_registrations=(registration,))
+
 
 # ---------------------------------------------------------------------------
 # runtime._initialize_services degraded boot behavior

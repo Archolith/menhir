@@ -81,7 +81,7 @@ async def _drive_initialize_services(
             "menhir.services.cross_encoder_rerank.start_model_fetch", lambda *a, **k: None
         )
         monkeypatch.setattr(
-            "menhir.infrastructure.memory_graph_adapter.MemoryGraphAdapter", _ReadonlyAdapter
+            "menhir.core.bootstrap.MemoryGraphAdapter", _ReadonlyAdapter
         )
 
         await runtime_mod._initialize_services(candidate_readonly=candidate_readonly)

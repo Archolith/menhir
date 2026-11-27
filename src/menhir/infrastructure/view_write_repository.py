@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+from menhir.domain.namespace import normalize_namespace
+from menhir.infrastructure.neo4j import Neo4jTransaction, SAGA_MUTATION_TIMEOUT_S
 from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 from menhir.infrastructure.view_models import (
     _COUNT_TOKEN,
@@ -77,6 +80,13 @@ class ViewWriteRepositoryMixin:
         self.neo4j = neo4j
         self.KINDS = resolve_view_kinds(self.KINDS, kinds)
 
+    def _execute_view_mutation(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        # An explicit transaction inherits its owner's timeout. Neo4j only
+        # accepts the per-query timeout on the auto-commit path.
+        if isinstance(self.neo4j, Neo4jTransaction):
+            return self.neo4j.execute(query, params)
+        return self.neo4j.execute(query, params, timeout_s=SAGA_MUTATION_TIMEOUT_S)
+
     # ------------------------------------------------------------------ keys / surfaces (compat)
 
     @staticmethod
@@ -99,6 +109,22 @@ class ViewWriteRepositoryMixin:
         else:
             subj_seg = subject.strip().lower()
         return f"{ns}::{subj_seg}::{discriminator.strip().lower()}"
+
+    def _kind_key(
+        self, kind: ViewKind, namespace: str | None, subject: str, payload: dict[str, Any],
+        *, subject_uuid: str | None = None,
+    ) -> str:
+        discriminator = kind.key_discriminator(payload)
+        if kind.name in ViewWriteRepositoryMixin.KINDS:
+            return self._key(namespace, subject, discriminator, subject_uuid=subject_uuid)
+        identity = (subject_uuid if subject_uuid is not None else subject).strip().lower()
+        if subject_uuid is not None and not identity:
+            raise ValueError("subject_uuid must be non-blank when provided")
+        # Built-in keys always contain the legacy separator. Extension keys
+        # have their own format and include the kind and each identity field.
+        parts = [kind.name, normalize_namespace(namespace), identity, discriminator.strip().lower()]
+        digest = hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return f"extension:{digest}"
 
     @staticmethod
     def retrieval_text(subject: str, counter: str, value: float) -> str:
@@ -223,7 +249,7 @@ class ViewWriteRepositoryMixin:
         reason) — stamped onto the node but kept OUT of the signature (never trigger supersession)
         and OUT of the embedding/surface (never rank). A receipt, not a confidence signal."""
         kind = self.KINDS[kind_name]
-        key = self._key(namespace, subject, kind.key_discriminator(payload), subject_uuid=subject_uuid)
+        key = self._kind_key(kind, namespace, subject, payload, subject_uuid=subject_uuid)
         # Normalize provenance ONCE, before the surface is rendered, so the supporting-event count
         # quoted in the summary is the count actually stored on the node (plan D1: sorted, dedup).
         # Contributor anchors are normalized to the kind the gate below can accept BEFORE the
@@ -375,7 +401,7 @@ class ViewWriteRepositoryMixin:
                 )
             elif view_class is ViewClass.FACT:
                 namespace_key = normalize_namespace(namespace)
-                touched = self.neo4j.execute(
+                touched = self._execute_view_mutation(
                     """
                     MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
                     ON CREATE SET f.generation = 0, f.created_at = datetime($now)
@@ -396,7 +422,6 @@ class ViewWriteRepositoryMixin:
                         "now": now,
                         "refresh": dict(refresh_props or {}),
                     },
-                    timeout_s=SAGA_MUTATION_TIMEOUT_S,
                 )
                 if not touched:
                     # The version we read was superseded or retired after the read: the same
@@ -406,11 +431,10 @@ class ViewWriteRepositoryMixin:
                     )
                 prov = {}
             else:
-                self.neo4j.execute(
+                self._execute_view_mutation(
                     f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=datetime($now), n += $refresh "
                     "RETURN n.uuid",
                     {"u": current["uuid"], "now": now, "refresh": dict(refresh_props or {})},
-                    timeout_s=SAGA_MUTATION_TIMEOUT_S,  # CF-211
                 )
                 prov = {}
             return {"uuid": current["uuid"], "view_key": key, "kind": kind,
@@ -571,9 +595,7 @@ class ViewWriteRepositoryMixin:
                   "old": old_uuid, **guard_params}
         if kind == "scalar_state":
             try:
-                write_rows = self.neo4j.execute(
-                    create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
-                )
+                write_rows = self._execute_view_mutation(create_and_supersede, params)
             except _Neo4jConstraintError:
                 # A genuinely CONCURRENT writer won the current-key for this slot between our read and
                 # CREATE. Our node rolled back; converge on the committed winner instead of forking a
@@ -600,9 +622,7 @@ class ViewWriteRepositoryMixin:
                             "winner_sig": winner_sig}
                 raise
         else:
-            write_rows = self.neo4j.execute(
-                create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
-            )
+            write_rows = self._execute_view_mutation(create_and_supersede, params)
         if not write_rows:
             reason = self._diagnose_refusal(
                 label=label, key=key, old_uuid=old_uuid, eps=eps,
@@ -658,7 +678,7 @@ class ViewWriteRepositoryMixin:
         generic = ("FACT View write refused: every declared contributor UUID must resolve to live "
                    ":Episodic or :TurnEvidence evidence")
         try:
-            rows = self.neo4j.execute(
+            rows = self._execute_view_mutation(
                 f"""
                 OPTIONAL MATCH (actual:{label})
                 WHERE (actual.view_key = $key OR actual.qs_key = $key)
@@ -682,7 +702,6 @@ class ViewWriteRepositoryMixin:
                 """,
                 {"key": key, "namespace_key": namespace_key, "eps": eps,
                  **tenant_scope_params(namespace_key)},
-                timeout_s=SAGA_MUTATION_TIMEOUT_S,
             )
         except Exception:  # noqa: BLE001 - diagnosis is best-effort; never mask the refusal
             logger.debug("View refusal diagnosis failed for key=%s", key, exc_info=True)

@@ -112,9 +112,46 @@ def test_record_dispatches_through_injected_external_kind() -> None:
 
     call = writer.call_args.kwargs
     assert call["kind"] == kind.name
-    assert call["key"] == "::alice::finding"
+    assert call["key"].startswith("extension:")
+    assert call["key"] == repo._kind_key(kind, None, "Alice", {"slot": "finding"})
     assert call["name"] == "Alice external test"
     assert call["summary"] == "resolved"
     assert call["sig"] == "resolved"
     assert call["extra_props"] == {"view_value": "resolved"}
     assert result["view_value"] == "resolved"
+
+
+@pytest.mark.online
+def test_registered_kind_cannot_supersede_builtin_with_same_discriminator(test_neo4j_repo) -> None:
+    kind = ExternalTestKind()
+    repo = ViewRepository(test_neo4j_repo, kinds=_registry_with(kind))
+    target = {"subject": "a project", "namespace": "extension-test"}
+    builtin = repo.record_timeline(**target, entries=[{"when": "2026-11-26", "what": "built-in record"}])
+    external = repo.record(kind.name, **target, slot="timeline", value="extension record")
+
+    assert builtin["view_key"] == "extension-test::a project::timeline"
+    assert builtin["view_key"] != external["view_key"]
+    assert external["superseded"] is False
+    assert repo.fetch_timeline(**target)["uuid"] == builtin["uuid"]
+    assert repo.fetch_current(kind.name, **target, slot="timeline")["value"] == "extension record"
+
+
+@pytest.mark.online
+def test_extension_view_default_aliases_share_one_current_key(test_neo4j_repo) -> None:
+    kind = ExternalTestKind()
+    repo = ViewRepository(test_neo4j_repo, kinds=_registry_with(kind))
+    target = {"subject": "a project", "slot": "extension"}
+    implicit = repo.record(kind.name, **target, value="first")
+    assert repo.fetch_current(kind.name, **target, namespace="default")["value"] == "first"
+
+    explicit = repo.record(kind.name, **target, namespace="default", value="second")
+    assert explicit["view_key"] == implicit["view_key"]
+    assert explicit["superseded"] is True
+    empty = repo.record(kind.name, **target, namespace="", value="third")
+    assert empty["view_key"] == implicit["view_key"]
+    assert empty["superseded"] is True
+    assert repo.fetch_current(kind.name, **target, namespace="default")["value"] == "third"
+    assert test_neo4j_repo.execute(
+        "MATCH (n:Entity {view_kind:$kind, view_current:true}) RETURN count(n) AS count",
+        {"kind": kind.name},
+    ) == [{"count": 1}]

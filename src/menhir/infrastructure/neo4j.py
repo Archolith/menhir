@@ -404,7 +404,7 @@ class Neo4jRepository:
                 _record_and_backoff(exc, attempt, label="transient error")
         raise last_exc  # type: ignore[misc]
 
-    def execute_write(self, work: Callable[[Neo4jTransaction], _T]) -> _T:
+    def execute_write(self, work: Callable[[Neo4jTransaction], _T], *, timeout_s: float | None = None) -> _T:
         """Run replay-safe graph work in one explicit write transaction.
 
         This deliberately does not use ``session.execute_write``. Managed transaction functions may
@@ -416,9 +416,11 @@ class Neo4jRepository:
         back. ``ServiceUnavailable`` and ``SessionExpired`` are never retried here. The callback must
         contain graph-local work only; all mutations performed through the supplied adapter commit or
         roll back with the lifecycle fence.
+        An explicit timeout bounds each attempt, including graph locks held by the callback.
         """
         if not callable(work):
             raise TypeError("execute_write requires a callable transaction body")
+        options = {"timeout": timeout_s} if timeout_s is not None else {}
 
         last_exc: Exception | None = None
         for attempt in range(_TRANSIENT_RETRIES):
@@ -430,7 +432,7 @@ class Neo4jRepository:
                 )
             try:
                 with self._get_driver().session(database=self.database) as session:
-                    tx = session.begin_transaction()
+                    tx = session.begin_transaction(**options)
                     try:
                         result = work(Neo4jTransaction(tx))
                         tx.commit()

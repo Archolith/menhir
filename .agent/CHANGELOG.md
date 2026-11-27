@@ -4,6 +4,63 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-27 - Verify projection extension upgrades and removal (#725)
+
+- Teach the fence-lock writer census to follow typed repository factories, including the admission audit View writer.
+- Exercise an old worker holding a batch during a definition upgrade. Verify that a host without the extension preserves pending work and Views, and that the upgraded worker applies explicit migration and retirement while retaining undecided work.
+
+## 2026-11-27 - Coordinate extension runtime startup and shutdown (#725)
+
+- Bind the HTTP runtime extension registry after preflight succeeds, allowing failed startup to be retried with an explicit registry.
+- Include active projection lanes in scheduler status and pause or resume results. Drain scheduler jobs before closing graph clients.
+- Use a single extension View key for omitted, empty, and explicit default namespaces.
+
+## 2026-11-27 - Address the extension design review (#725)
+
+- Give extension Views kind-scoped keys and keep deployed built-in keys compatible.
+- Run each installed projection definition and version under its own lease and job loop. A stalled materializer or a backend holding the general maintenance lock can leave its own work pending while other projection lanes keep running.
+- Bind one registry for the life of the process. Validate synchronous materializers and required View read fields during registration, and document the host and author responsibilities for scope.
+
+## 2026-11-26 - Share extension registration across graph surfaces (#725)
+
+- Use one graph adapter factory and one View repository factory across Menhir's product paths. HTTP, hook and Explorer hosts can pass the same validated registry.
+- Hook and Explorer inherit a starting or running backend's registry in the same process. Conflicting registries are refused before those surfaces open graph resources. Stdio continues to use its HTTP backend.
+
+## 2026-11-26 - Add a decision timeline usefulness test (#725)
+
+- Project the sourced D5 decision history through the example extension and provide a timed comparison with finding the approval in the issue thread.
+
+## 2026-11-26 - Register a project decision timeline through HTTP startup (#725)
+
+- Validate host-supplied projection extensions before constructing the server. The HTTP runtime shares the registered View kinds with its scheduler materializers.
+- Add a synthetic decision timeline whose source changes and projection work are atomic. Erasing a source removes its historical Views before the scheduler rebuilds the surviving timeline.
+- Let the shared View writer run inside an existing Neo4j transaction while preserving statement timeouts for standalone writes.
+
+## 2026-11-26 - Resolve retained projection work explicitly (#725)
+
+- Let an extension requeue an exact retained generation under the current version or queue its removal. The worker still materializes and certifies the new generation.
+- Reject stale, quarantined, and already-resolved generations. Concurrent decisions on one generation can advance it once.
+
+## 2026-11-26 - Preserve pending projection work across version changes (#725)
+
+- Keep the exact pending generations from the outgoing definition version available for review. Requeue settled targets under the new version.
+- Refuse ordinary target updates that would replace retained work. Report retained targets as stale and keep them out of worker queues.
+
+## 2026-11-26 - Schedule registered projection workers (#725)
+
+- Give each explicitly registered projection definition a separate maintenance job with a 100-item batch. An empty registration set adds no jobs.
+- Use the scheduler lease and the Neo4j revocation check to stop dispatch and retry after ownership loss. Already-started transactions still use the work-generation fence.
+
+## 2026-11-26 - Internal projection execution lane (#725)
+
+- Bind each reconciliation lane to a host-supplied materializer for one definition and version. The scalar reconciliation prototype uses the same lane.
+- Filter worker queue reads by the installed and shared-current version before the batch limit. Mismatched work remains pending for review.
+
+## 2026-11-26 - Extension roadmap Phase 0 inventory (#725, #727)
+
+- Recorded the runtime adapter constructors and the distinct projection queue and View repair paths.
+- Updated the roadmap for approved extension and remote SDK decisions and merged scoped queue fixes.
+
 ## 2026-11-25 - Record Graphiti prompt_name in LLM usage telemetry (#91)
 
 - `src/menhir/infrastructure/observability.py`: add request-scoped `set_llm_operation_label` /

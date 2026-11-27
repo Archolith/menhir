@@ -16,6 +16,7 @@ from menhir.services import MaintenanceScheduler
 if TYPE_CHECKING:
     from menhir.core.bootstrap import BuildArtifacts
     from menhir.domain.session import MemorySession
+    from menhir.extensions import RuntimeExtensions
 
 
 @dataclass
@@ -26,6 +27,7 @@ class RuntimeState:
     session: object | None = None
     scheduler: MaintenanceScheduler | None = None
     init_task: asyncio.Task[tuple[object, object]] | None = None
+    init_extensions: RuntimeExtensions | None = None
     startup_runtime_task: asyncio.Task[None] | None = None
     orphan_recovery_task: asyncio.Task[None] | None = None
     shutdown_task: asyncio.Task[None] | None = None
@@ -38,6 +40,7 @@ class RuntimeState:
         self.session = None
         self.scheduler = None
         self.init_task = None
+        self.init_extensions = None
         self.startup_runtime_task = None
         self.orphan_recovery_task = None
         self.shutdown_task = None
