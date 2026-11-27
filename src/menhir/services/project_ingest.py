@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,7 +39,12 @@ class ProjectIngestBackend(Protocol):
         user_id: str,
         session_id: str,
         source: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]: ...
+
+
+def _scan_idempotency_key(narrative: str) -> str:
+    return "project-scan:" + hashlib.sha256(narrative.encode("utf-8")).hexdigest()
 
 
 class ProjectEpisodeStatus(str, Enum):
@@ -47,8 +53,8 @@ class ProjectEpisodeStatus(str, Enum):
     NOT_REQUESTED = "not_requested"
     QUEUED = "queued"
     FAILED = "failed"
-    DEFERRED = "deferred"
     ERROR = "error"
+    OUTCOME_UNKNOWN = "outcome_unknown"
     NO_NARRATIVE = "no_narrative"
 
 
@@ -205,17 +211,38 @@ async def execute_project_ingest(
                     user_id=user_id,
                     session_id=session_id,
                     source="project-scan",
+                    # Scan-derived: a re-run of the same scan after a timeout whose durable
+                    # write did land replays the existing episode instead of adding a second.
+                    idempotency_key=_scan_idempotency_key(narrative),
                     **scope,
                 ),
                 timeout=queue_timeout_s,
             )
             episode_id = queued.get("episode_id")
-            episode = ProjectEpisodeOutcome(
-                ProjectEpisodeStatus.QUEUED if episode_id else ProjectEpisodeStatus.FAILED,
-                episode_id=str(episode_id) if episode_id else None,
-            )
+            if (
+                episode_id
+                and queued.get("idempotent_replay")
+                and str(queued.get("processing_state") or "").upper() == "FAILED"
+            ):
+                # The same narrative replays the earlier episode, which failed: QUEUED would
+                # hide that nothing will extract it until it is retried.
+                episode = ProjectEpisodeOutcome(
+                    ProjectEpisodeStatus.FAILED,
+                    episode_id=str(episode_id),
+                    error=(
+                        f"the earlier scan's episode {episode_id} failed; re-scanning replays it. "
+                        f"Retry it with force_reenrich(episode_uuid={episode_id})"
+                    ),
+                )
+            else:
+                episode = ProjectEpisodeOutcome(
+                    ProjectEpisodeStatus.QUEUED if episode_id else ProjectEpisodeStatus.FAILED,
+                    episode_id=str(episode_id) if episode_id else None,
+                )
         except asyncio.TimeoutError:
-            episode = ProjectEpisodeOutcome(ProjectEpisodeStatus.DEFERRED)
+            # The durable write runs in a thread that cancellation does not stop, so the
+            # episode may already be saved: not "deferred".
+            episode = ProjectEpisodeOutcome(ProjectEpisodeStatus.OUTCOME_UNKNOWN)
         except Exception as exc:
             episode = ProjectEpisodeOutcome(
                 ProjectEpisodeStatus.ERROR,

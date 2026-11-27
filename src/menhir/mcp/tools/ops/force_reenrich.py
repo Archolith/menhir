@@ -108,11 +108,18 @@ class ForceReenrichTool(BaseTextTool):
         queued = await backend.enqueue_pending_episode(normalized_uuid)
 
         if not wait:
+            result = (
+                "submitted — use get_enrichment_status to track"
+                if queued
+                else "reset ok, not queued here (already queued, or this process has no "
+                "enrichment consumer); pending queue recovery will pick it up — "
+                "use get_enrichment_status to track"
+            )
             return (
                 f"episode_uuid: {normalized_uuid}\n"
                 f"reset: ok\n"
                 f"queued: {queued}\n"
-                f"result: submitted — use get_enrichment_status to track"
+                f"result: {result}"
             )
 
         row, history, timed_out = await _collect_episode_status(

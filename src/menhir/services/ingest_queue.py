@@ -189,11 +189,12 @@ class IngestQueueMixin:
                 )
         return allowed
 
-    async def _ensure_enrichment_worker(self) -> None:
+    async def _ensure_enrichment_worker(self) -> bool:
+        """Start the worker pool; return False when this process has no consumer for the queue."""
         if not self._enrichment_enabled:
-            return
+            return False
         if not self._enrichment_gate_passes():
-            return
+            return False
         self._queue()
         # Prune finished loops, then top up to the configured concurrency. Each loop is an
         # independent consumer of the shared queue; per-episode claims are atomic, so N
@@ -206,10 +207,12 @@ class IngestQueueMixin:
                     name=f"menhir-enrichment-{len(self._worker_tasks)}",
                 )
             )
+        return True
 
-    async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
+    async def _enqueue_pending_episode(self, episode_uuid: str) -> bool:
+        """Put the id on the in-memory queue; False when it was already queued (#879)."""
         if episode_uuid in self._queued_episode_ids:
-            return
+            return False
         queue = self._queue()
         self._queued_episode_ids.add(episode_uuid)
         try:
@@ -227,6 +230,7 @@ class IngestQueueMixin:
         queue_depth = queue.qsize()
         if queue_depth > self._queue_warning_depth:
             logger.warning("Pending enrichment queue backlog depth=%s", queue_depth)
+        return True
 
     async def _recover_stale_episode_leases(self, limit: int = 100) -> tuple[int, int]:
         """Reset expired ENRICHING leases and enqueue all retryable episodes."""
@@ -265,8 +269,11 @@ class IngestQueueMixin:
             max_attempts=self._max_enrichment_attempts,
             limit=limit,
         )
+        enqueued = 0
         for episode_uuid in episode_ids:
-            await self._enqueue_pending_episode(episode_uuid)
+            # Count only ids this sweep actually put on the queue.
+            if await self._enqueue_pending_episode(episode_uuid):
+                enqueued += 1
         if orphaned_resets > 0:
             logger.warning(
                 "Recovered %d orphaned ENRICHING rows for worker=%s",
@@ -291,7 +298,7 @@ class IngestQueueMixin:
                 transient_exhausted,
                 self._worker_id,
             )
-        return stale_resets + orphaned_resets, len(episode_ids)
+        return stale_resets + orphaned_resets, enqueued
 
     async def _check_session_budget(
         self, episode_uuid: str, session_id: str | None
@@ -375,6 +382,14 @@ class IngestQueueMixin:
             details={"limit": limit},
         )
         await self._ensure_enrichment_worker()
+        if not self._enrichment_gate_passes():
+            record_lifecycle_event(
+                component="ingest_queue",
+                event="resume_pending_episodes_service",
+                state="skipped",
+                details={"limit": limit, "reason": "no_scheduler_lease"},
+            )
+            return 0
         _, queued = await self._recover_stale_episode_leases(limit=limit)
         record_lifecycle_event(
             component="ingest_queue",
@@ -402,11 +417,13 @@ class IngestQueueMixin:
         row = self.graph_adapter.fetch_episode_processing(episode_uuid)
         if row is None or row.get("processing_state") != ProcessingState.PENDING:
             return False
-        await self._ensure_enrichment_worker()
+        # No consumer in this process: an in-memory enqueue nothing drains is not a success. The
+        # durable row stays, so the lease holder's recovery picks it up (#879).
+        if not await self._ensure_enrichment_worker():
+            return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        await self._enqueue_pending_episode(episode_uuid)
-        return True
+        return await self._enqueue_pending_episode(episode_uuid)
 
     async def requeue_failed_episode(self, episode_uuid: str) -> bool:
         """Enqueue one already-failed episode for an explicit retry attempt."""
@@ -416,11 +433,13 @@ class IngestQueueMixin:
         row = self.graph_adapter.fetch_episode_processing(episode_uuid)
         if row is None or row.get("processing_state") != ProcessingState.FAILED:
             return False
-        await self._ensure_enrichment_worker()
+        # No consumer in this process: an in-memory enqueue nothing drains is not a success. The
+        # durable row stays, so the lease holder's recovery picks it up (#879).
+        if not await self._ensure_enrichment_worker():
+            return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        await self._enqueue_pending_episode(episode_uuid)
-        return True
+        return await self._enqueue_pending_episode(episode_uuid)
 
     async def shutdown(self) -> int:
         """Stop the in-process worker and release leases owned by this runtime."""

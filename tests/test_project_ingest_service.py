@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -77,6 +78,7 @@ def test_project_ingest_scans_and_queues_the_narrative(tmp_path) -> None:
         user_id="user-1",
         session_id="session-1",
         source="project-scan",
+        idempotency_key="project-scan:" + hashlib.sha256(b"Project narrative").hexdigest(),
     )
 
 
@@ -110,7 +112,7 @@ def test_project_ingest_reports_queue_timeout_without_failing_scan(tmp_path) -> 
     outcome = _execute(backend, str(tmp_path), queue_timeout_s=0.001)
 
     assert outcome.error is None
-    assert outcome.episode.status is ProjectEpisodeStatus.DEFERRED
+    assert outcome.episode.status is ProjectEpisodeStatus.OUTCOME_UNKNOWN
 
 
 @pytest.mark.unit
