@@ -15,6 +15,7 @@ from menhir.services.enrichment_steps import (
     compose_episode_body,
 )
 from menhir.services.ingest_limits import (
+    CHARS_PER_ESTIMATED_TOKEN,
     MAX_DIFF_CHARS,
     MAX_EPISODE_CHARS,
     validate_memory_payload,
@@ -24,7 +25,7 @@ LIMIT = MemorySettings.graphiti_episode_max_estimated_tokens
 
 
 def test_intake_content_limit_is_the_default_preflight_budget():
-    assert MAX_EPISODE_CHARS == 4 * LIMIT
+    assert MAX_EPISODE_CHARS == CHARS_PER_ESTIMATED_TOKEN * LIMIT
 
 
 @pytest.mark.parametrize("content_len", [MAX_EPISODE_CHARS, MAX_EPISODE_CHARS - 10, 40_000, 10, 0])
@@ -54,10 +55,9 @@ def test_small_diff_kept_intact_under_budget():
     assert body.endswith("--- git diff ---\n+x")
 
 
-@pytest.mark.parametrize("message", ["", "   ", "\n\t"])
+@pytest.mark.parametrize("message", ["", "   ", "\n\t", None])
 def test_blank_failure_message_is_retryable(message):
     assert classify_enrichment_failure(message) == "retryable"
-    assert classify_enrichment_failure(None) == "retryable"
 
 
 # --- review follow-ups: redaction growth, configured budget, blank typed errors -------------
@@ -129,8 +129,7 @@ def test_typed_exception_with_empty_message_keeps_type_based_grade(type_name, ex
     assert classify_enrichment_failure("", error_type=type_name) == expected
 
 
-def test_blank_plain_message_and_untyped_blank_exception_are_retryable():
-    assert classify_enrichment_failure("  ") == "retryable"
+def test_untyped_blank_exception_is_retryable():
     assert classify_enrichment_failure(_blank_exc("SomeOtherError")) == "retryable"
 
 

@@ -76,7 +76,7 @@ from menhir.services.enrichment_failures import (
     persisted_failure_text,
 )
 from menhir.services.ingest_gate import IngestGate
-from menhir.services.ingest_limits import MAX_DIFF_CHARS
+from menhir.services.ingest_limits import CHARS_PER_ESTIMATED_TOKEN, MAX_DIFF_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,8 @@ def compose_episode_body(claimed: dict[str, object], max_estimated_tokens: int |
 
     With ``max_estimated_tokens`` the diff is truncated (or dropped) so the composed body fits the
     preflight budget, so an episode intake accepted is never parked only because of its diff.
+    Production callers must pass the budget; test_every_production_compose_call_passes_the_preflight_budget
+    enforces it.
     """
 
     content = str(claimed.get("content") or "")
@@ -196,8 +198,7 @@ def compose_episode_body(claimed: dict[str, object], max_estimated_tokens: int |
     marker = "\n... [diff truncated]"
     keep = MAX_DIFF_CHARS
     if max_estimated_tokens is not None and max_estimated_tokens > 0:
-        # estimate_episode_tokens() is (len + 3) // 4, so len <= 4 * limit passes.
-        keep = min(keep, 4 * max_estimated_tokens - len(header) - len(marker))
+        keep = min(keep, CHARS_PER_ESTIMATED_TOKEN * max_estimated_tokens - len(header) - len(marker))
         if keep <= 0:
             return prepare_memory_text(content, policy=non_refusing_policy())
     if len(diff_text) > keep:
@@ -245,7 +246,7 @@ def estimate_episode_tokens(episode_body: str) -> int:
     rendered = str(episode_body or "")
     if not rendered:
         return 0
-    return max(1, (len(rendered) + 3) // 4)
+    return max(1, (len(rendered) + CHARS_PER_ESTIMATED_TOKEN - 1) // CHARS_PER_ESTIMATED_TOKEN)
 
 
 def build_episode_preflight_rejection(
