@@ -39,8 +39,7 @@ def create_app(
     registry = None
     if extensions:
         registry = extensions if isinstance(extensions, RuntimeExtensions) else RuntimeExtensions(extensions)
-    if registry:
-        resolve_graph_extensions(registry)
+    registry = resolve_graph_extensions(registry)
     settings = settings or MemorySettings.from_env()
     startup_scope = settings.startup_scope
     if registry and (

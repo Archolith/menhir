@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -106,6 +108,22 @@ class ViewWriteRepositoryMixin:
         else:
             subj_seg = subject.strip().lower()
         return f"{ns}::{subj_seg}::{discriminator.strip().lower()}"
+
+    def _kind_key(
+        self, kind: ViewKind, namespace: str | None, subject: str, payload: dict[str, Any],
+        *, subject_uuid: str | None = None,
+    ) -> str:
+        discriminator = kind.key_discriminator(payload)
+        if kind.name in ViewWriteRepositoryMixin.KINDS:
+            return self._key(namespace, subject, discriminator, subject_uuid=subject_uuid)
+        identity = (subject_uuid if subject_uuid is not None else subject).strip().lower()
+        if subject_uuid is not None and not identity:
+            raise ValueError("subject_uuid must be non-blank when provided")
+        # Built-in keys always contain the legacy separator. Extension keys
+        # have their own format and include the kind and each identity field.
+        parts = [kind.name, (namespace or "").strip(), identity, discriminator.strip().lower()]
+        digest = hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return f"extension:{digest}"
 
     @staticmethod
     def retrieval_text(subject: str, counter: str, value: float) -> str:
@@ -230,7 +248,7 @@ class ViewWriteRepositoryMixin:
         reason) — stamped onto the node but kept OUT of the signature (never trigger supersession)
         and OUT of the embedding/surface (never rank). A receipt, not a confidence signal."""
         kind = self.KINDS[kind_name]
-        key = self._key(namespace, subject, kind.key_discriminator(payload), subject_uuid=subject_uuid)
+        key = self._kind_key(kind, namespace, subject, payload, subject_uuid=subject_uuid)
         # Normalize provenance ONCE, before the surface is rendered, so the supporting-event count
         # quoted in the summary is the count actually stored on the node (plan D1: sorted, dedup).
         # Contributor anchors are normalized to the kind the gate below can accept BEFORE the

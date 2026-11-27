@@ -111,8 +111,8 @@ def _install(
             assert namespace == "default"
             return list(rows)
 
-    def build_views(tx, *, kinds):
-        assert kinds is expected_kinds
+    def build_views(tx, *, extensions):
+        assert (extensions.view_kinds if extensions else None) is expected_kinds
         return _Views(tx)
 
     monkeypatch.setattr(materializer_module, "build_view_repository", build_views)

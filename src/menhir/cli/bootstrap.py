@@ -42,7 +42,7 @@ def build_hook_services(
     """
     from menhir.core.bootstrap import build_graph_adapter, resolve_graph_extensions
 
-    registry = resolve_graph_extensions(extensions)
+    registry = resolve_graph_extensions(extensions, bind=True)
     settings = settings or MemorySettings.from_env()
 
     neo4j = Neo4jRepository(

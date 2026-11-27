@@ -327,7 +327,7 @@ async def test_projection_lane_stops_dispatching_after_lease_takeover(
     try:
         await asyncio.wait_for(started.wait(), timeout=5)
         scheduler.lease_store.force_acquire(
-            lease_name=scheduler.lease_name, owner_id="next-owner", owner_pid=os.getpid(),
+            lease_name=scheduler._projection_lanes[0].lease_name, owner_id="next-owner", owner_pid=os.getpid(),
             lease_duration_s=30,
         )
         status = await _wait_for_job(scheduler, definition.definition_id)
@@ -340,6 +340,64 @@ async def test_projection_lane_stops_dispatching_after_lease_takeover(
         await scheduler.stop()
     assert queue.pending_tokens == [second]
     assert refused.is_set()
+
+
+@pytest.mark.asyncio
+async def test_blocked_projection_lane_does_not_delay_another_definition(tmp_path: Path) -> None:
+    queue = _FakeLifecycle()
+    stalled = replace(SCALAR_STATE_PROJECTION, definition_id="extension.stalled")
+    healthy = replace(SCALAR_STATE_PROJECTION, definition_id="extension.healthy")
+    target = scalar_projection_target(_row())
+    (pending,) = queue.dirty_targets(stalled, [target], reason="test")
+    queue.dirty_targets(healthy, [target], reason="test")
+    entered, release = threading.Event(), threading.Event()
+
+    def stalled_materializer(_tx: Any, _token: ProjectionWorkToken) -> str:
+        entered.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("test never released the stalled lane")
+        return "released"
+
+    scheduler = _projection_scheduler(
+        tmp_path,
+        ProjectionReconciler(queue, stalled, materializer=stalled_materializer),
+        ProjectionReconciler(queue, healthy, materializer=_Materializer()),
+    )
+    await scheduler.start()
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        assert (await _wait_for_job(scheduler, healthy.definition_id))["last_result"]["applied"] == 1
+        assert queue.pending_tokens == [pending]
+    finally:
+        release.set()
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("older_installed", [False, True])
+async def test_projection_lease_is_independent_of_older_host_and_exclusive_for_the_version(
+    tmp_path: Path, older_installed: bool,
+) -> None:
+    queue = _FakeLifecycle()
+    older = SCALAR_STATE_PROJECTION
+    current = replace(older, version=older.version + 1)
+    queue.dirty_targets(current, [scalar_projection_target(_row())], reason="only newer host can drain")
+    first_workers = (ProjectionReconciler(queue, older, materializer=_Materializer()),) if older_installed else ()
+    first = _projection_scheduler(tmp_path, *first_workers)
+    capable = _projection_scheduler(tmp_path, ProjectionReconciler(queue, current, materializer=_Materializer()))
+    duplicate = _projection_scheduler(tmp_path, ProjectionReconciler(queue, current, materializer=_Materializer()))
+    assert await first.start()
+    try:
+        assert not await capable.start()
+        assert not await duplicate.start()
+        assert (await _wait_for_job(capable, current.definition_id))["last_result"]["applied"] == 1
+        lane = f"reconcile_projection:{current.definition_id}"
+        assert capable.status_snapshot()["projection_leases"][lane]["acquired"]
+        assert duplicate.status_snapshot()["projection_leases"][lane]["standby"]
+        assert duplicate.status_snapshot()["jobs"][lane]["runs"] == 0
+    finally:
+        await asyncio.gather(first.stop(), capable.stop(), duplicate.stop())
+    assert queue.pending_tokens == []
 
 
 @pytest.mark.online

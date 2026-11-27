@@ -425,6 +425,8 @@ class _ProjectionLifecycleReadsMixin:
                 derivation_id=str(certified[0]["derivation_id"]),
             )
 
+        if self._commit_timeout_s is not None:
+            return self._neo4j.execute_write(work, timeout_s=self._commit_timeout_s)
         return self._neo4j.execute_write(work)
 
     def assess_freshness(

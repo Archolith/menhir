@@ -10,7 +10,7 @@ from menhir.config import MemorySettings
 from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
-from menhir.extensions import RuntimeExtensions
+from menhir.extensions import RuntimeExtensions, resolve_graph_extensions
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -145,20 +145,6 @@ class BuildArtifacts:
     projection_registrations: tuple[ProjectionWorkerRegistration, ...] = ()
 
 
-def resolve_graph_extensions(extensions: RuntimeExtensions | None = None) -> RuntimeExtensions | None:
-    """Use the active or starting runtime's registry when assembling another graph surface."""
-    from menhir.core.runtime_support import _state
-
-    if extensions is not None and not isinstance(extensions, RuntimeExtensions):
-        raise TypeError("graph surfaces require a validated RuntimeExtensions registry")
-    extensions = extensions or None
-    active = _state.extensions
-    starting = isinstance(_state.init_task, asyncio.Task) and not _state.init_task.done()
-    if extensions is not None and extensions is not active and (starting or _state.built is not None):
-        raise ValueError("the process already has a different runtime extension registry")
-    return active if starting or _state.built is not None else extensions
-
-
 def build_graph_adapter(
     neo4j: Neo4jRepository,
     settings: MemorySettings,
@@ -166,7 +152,7 @@ def build_graph_adapter(
     extensions: RuntimeExtensions | None = None,
     embedding_dimensions: int | None = None,
 ) -> MemoryGraphAdapter:
-    registry = resolve_graph_extensions(extensions)
+    registry = resolve_graph_extensions(extensions, bind=True)
     return MemoryGraphAdapter(
         neo4j=neo4j,
         counting_enabled=bool(
@@ -174,7 +160,7 @@ def build_graph_adapter(
             and getattr(settings, "personal_memory_scalar_state_enabled", False)
         ),
         **({"embedding_dimensions": embedding_dimensions} if embedding_dimensions is not None else {}),
-        **({"view_kinds": registry.view_kinds} if registry is not None else {}),
+        **({"extensions": registry} if registry else {}),
     )
 
 
@@ -188,7 +174,7 @@ def build_memory_services(
     extensions: RuntimeExtensions | None = None,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
-    resolve_graph_extensions(extensions)
+    extensions = resolve_graph_extensions(extensions, bind=True)
     if extensions:
         if projection_registrations:
             raise ValueError("supply runtime extensions or direct worker registrations")

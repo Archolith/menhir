@@ -95,8 +95,7 @@ class ScalarStateProjectionMaterializer:
 
     def __call__(self, tx: Any, token: ProjectionWorkToken) -> str:
         _require_scalar_target(token)
-        kinds = self._extensions.view_kinds if self._extensions is not None else None
-        views = build_view_repository(tx, kinds=kinds)
+        views = build_view_repository(tx, extensions=self._extensions)
         hashes = ScalarStateProjectionHashSource(tx)
 
         # Detect a corrupt duplicate-current surface before choosing a winner or mutating it.

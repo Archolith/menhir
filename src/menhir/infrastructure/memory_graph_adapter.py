@@ -18,8 +18,11 @@ import uuid as uuidlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from menhir.infrastructure.view_models import ViewKind
+
+if TYPE_CHECKING:
+    from menhir.extensions import RuntimeExtensions
 
 from menhir.infrastructure.episode_repository import (
     EpisodeRepository,
@@ -94,7 +97,11 @@ class MemoryGraphAdapter:
     embedding_dimensions: int | None = field(default=None, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
     counting_match_enabled: bool = field(default=True, kw_only=True)
-    view_kinds: Mapping[str, ViewKind] | None = field(default=None, kw_only=True, repr=False)
+    extensions: RuntimeExtensions | None = field(default=None, kw_only=True, repr=False)
+
+    @property
+    def view_kinds(self) -> Mapping[str, ViewKind] | None:
+        return self.extensions.view_kinds if self.extensions else None
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -121,7 +128,10 @@ class MemoryGraphAdapter:
         # answering different questions -- see domain/work_artifact.py.
         self._artifacts = ArtifactRepository(self.neo4j)
         self._work_artifacts = WorkArtifactRepository(self.neo4j)
-        self._views = build_view_repository(self.neo4j, kinds=self.view_kinds)
+        from menhir.extensions import resolve_graph_extensions
+
+        self.extensions = resolve_graph_extensions(self.extensions, bind=True)
+        self._views = build_view_repository(self.neo4j, extensions=self.extensions)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
         from menhir.infrastructure.build_report_queries import BuildReportQueries

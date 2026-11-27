@@ -56,13 +56,15 @@ from menhir.infrastructure.view_models import (
 
 class ViewQueryRepositoryMixin:
     def fetch_current(
-        self, kind_name: str, *, subject: str, namespace: str, **key_fields: Any,
+        self, kind_name: str, *, subject: str, namespace: str, subject_uuid: str | None = None,
+        **key_fields: Any,
     ) -> dict[str, Any] | None:
         """Inspect the current View for a registered kind and an explicit namespace."""
         if not isinstance(namespace, str) or not namespace.strip() or namespace_group_id_error(namespace):
             raise ValueError("fetch_current requires a valid explicit namespace")
         kind = self.KINDS[kind_name]
-        return self._fetch_current(kind_name, self._key(namespace, subject, kind.key_discriminator(key_fields)))
+        key = self._kind_key(kind, namespace, subject, key_fields, subject_uuid=subject_uuid)
+        return self._fetch_current(kind_name, key)
 
     def fetch_counter(self, *, subject: str, counter: str, namespace: str | None = None
                       ) -> dict[str, Any] | None:

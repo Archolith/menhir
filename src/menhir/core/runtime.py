@@ -14,7 +14,7 @@ from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.bootstrap import build_graph_adapter
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
-from menhir.extensions import RuntimeExtensions
+from menhir.extensions import RuntimeExtensions, resolve_graph_extensions
 from menhir.infrastructure.telemetry import (
     enable_llm_usage_telemetry,
     enable_operator_warning_persistence,
@@ -377,10 +377,11 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     projection_workers = ()
     registrations = getattr(built, "projection_registrations", ())
     if registrations:
+        from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
         from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
         from menhir.services.projection_reconciliation import ProjectionReconciler
 
-        queue = ProjectionLifecycleRepository(built.neo4j)
+        queue = ProjectionLifecycleRepository(built.neo4j, commit_timeout_s=SAGA_MUTATION_TIMEOUT_S)
         projection_workers = tuple(
             ProjectionReconciler(queue, item.definition, materializer=item.materializer)
             for item in registrations
@@ -494,7 +495,12 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         scalar_approximate_enabled=bool(
             getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
     )
-    await scheduler.start()
+    try:
+        await scheduler.start()
+    except BaseException:
+        with suppress(Exception):
+            await scheduler.stop()
+        raise
     snapshot = scheduler.status_snapshot()
     if not snapshot.get("running"):
         lease = snapshot.get("lease") or {}
@@ -865,6 +871,7 @@ async def _get_services(
     candidate_readonly: bool = False,
     extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
+    registry = resolve_graph_extensions(extensions, bind=True)
     if extensions is None and _state.built is not None and _state.session is not None:
         return _state.built, _state.session
 
@@ -872,19 +879,16 @@ async def _get_services(
         has_runtime = _state.built is not None and _state.session is not None
         init_task = _state.init_task
         initializing = isinstance(init_task, asyncio.Task) and not init_task.done()
-        if (has_runtime or initializing) and extensions is not None and extensions is not _state.extensions:
-            raise ValueError("the process already has a different runtime extension registry")
         if has_runtime and not initializing:
             return _state.built, _state.session
         if not initializing:
             init_task = asyncio.create_task(
                 _initialize_services(
                     settings, candidate_readonly=candidate_readonly,
-                    **({"extensions": extensions} if extensions is not None else {}),
+                    **({"extensions": registry} if registry else {}),
                 )
             )
             _state.init_task = init_task
-            _state.extensions = extensions
 
     assert isinstance(init_task, asyncio.Task)
     try:
@@ -893,8 +897,6 @@ async def _get_services(
         async with _init_lock:
             if _state.init_task is init_task:
                 _state.init_task = None
-                if _state.built is None:
-                    _state.extensions = None
         raise
 
     async with _init_lock:

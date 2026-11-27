@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from examples.decision_timeline import EXTENSION, Decision, DecisionTimeline
+from menhir import extensions as extension_module
 from menhir.api import server
 from menhir.config import MemorySettings
 from menhir.core import bootstrap, runtime
@@ -18,6 +19,11 @@ from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
 from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+
+
+@pytest.fixture(autouse=True)
+def isolated_process_registry(monkeypatch) -> None:
+    monkeypatch.setattr(extension_module, "_process_registry", extension_module._UNBOUND)
 
 
 @pytest.mark.online
@@ -81,6 +87,14 @@ def test_duplicate_extension_fails_before_server_resources(monkeypatch) -> None:
         server.create_app(extensions=(replace(
             EXTENSION, definition=replace(EXTENSION.definition, definition_id=SCALAR_STATE_PROJECTION.definition_id),
         ),))
+    async def async_materialize(_views, _token):
+        return "hash"
+
+    with pytest.raises(TypeError, match="must be synchronous"):
+        server.create_app(extensions=(replace(EXTENSION, materialize=async_materialize),))
+    monkeypatch.setattr(EXTENSION.view_kind, "read_fields", "")
+    with pytest.raises(ValueError, match="requires non-blank read_fields"):
+        server.create_app(extensions=(EXTENSION,))
 
 
 @pytest.mark.asyncio
@@ -134,7 +148,7 @@ async def test_registered_decision_timeline_corrects_erases_and_recovers_on_rest
         assert app.state.candidate_service.graph_adapter is ctx.built.graph_adapter
         lane = f"reconcile_projection:{EXTENSION.definition.definition_id}"
         assert scheduler is not None and lane in scheduler.status_snapshot()["jobs"]
-        scheduler._jobs[lane].interval_s = 0
+        scheduler._projection_lanes[0]._jobs[lane].interval_s = 0
         timeline = DecisionTimeline(ctx.built.neo4j, ctx.built.graph_adapter._views)
         await asyncio.to_thread(timeline.initialize)
         for namespace, decision in (

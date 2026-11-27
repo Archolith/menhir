@@ -241,8 +241,8 @@ class TestBuildMemoryServicesCapabilities:
         graph = object()
         queues = []
 
-        def bind_queue(neo4j):
-            queues.append(neo4j)
+        def bind_queue(neo4j, *, commit_timeout_s):
+            queues.append((neo4j, commit_timeout_s))
             return object()
 
         def materialize(_tx, _token):
@@ -265,10 +265,10 @@ class TestBuildMemoryServicesCapabilities:
         )
         scheduler = await runtime_mod._start_scheduler(built)
 
-        names = [name for name in scheduler._jobs if name.startswith("reconcile_projection:")]
+        names = [name for lane in scheduler._projection_lanes for name in lane._jobs]
         expected = [f"reconcile_projection:{SCALAR_STATE_PROJECTION.definition_id}"] if registered else []
         assert names == expected
-        assert queues == ([graph] if registered else [])
+        assert queues == ([(graph, 30.0)] if registered else [])
 
     def test_read_only_build_rejects_projection_workers(self) -> None:
         from menhir.services.projection_reconciliation import ProjectionWorkerRegistration

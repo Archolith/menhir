@@ -3,25 +3,28 @@
 from __future__ import annotations
 
 import ast
-import asyncio
-from contextlib import suppress
 from pathlib import Path
 
 import pytest
 
 from examples.decision_timeline import EXTENSION
+from menhir import extensions as extension_module
 from menhir.api import server
 from menhir.cli import bootstrap as hook_bootstrap
 from menhir.config import MemorySettings
 from menhir.core import bootstrap
-from menhir.core.runtime_support import _state
 from menhir.explorer.app import create_app
 from menhir.extensions import RuntimeExtensions
 
 
-@pytest.mark.parametrize("runtime", ["standalone", "starting", "running"])
+@pytest.fixture(autouse=True)
+def isolated_process_registry(monkeypatch) -> None:
+    monkeypatch.setattr(extension_module, "_process_registry", extension_module._UNBOUND)
+
+
+@pytest.mark.parametrize("first", ["hook", "explorer"])
 @pytest.mark.asyncio
-async def test_hook_and_explorer_share_explicit_or_active_registry(monkeypatch, runtime: str) -> None:
+async def test_hook_and_explorer_share_the_first_registry(monkeypatch, first: str) -> None:
     registry = RuntimeExtensions((EXTENSION,))
     graph = object()
     monkeypatch.setattr(hook_bootstrap, "Neo4jRepository", lambda **_kwargs: graph)
@@ -30,33 +33,17 @@ async def test_hook_and_explorer_share_explicit_or_active_registry(monkeypatch, 
         raise RuntimeError("graph-only test")
 
     monkeypatch.setattr(bootstrap.GraphitiClient, "from_settings", unavailable)
-    pending = None
-    if runtime == "starting":
-        pending = asyncio.create_task(asyncio.Event().wait())
-        monkeypatch.setattr(_state, "init_task", pending)
-    if runtime == "running":
-        monkeypatch.setattr(_state, "built", object())
-    if runtime != "standalone":
-        monkeypatch.setattr(_state, "extensions", registry)
     settings = MemorySettings(backend_url="")
-    extensions = registry if runtime == "standalone" else None
-    try:
-        hook = hook_bootstrap.build_hook_services(settings, extensions=extensions)
-        app = create_app(settings=settings, repo=graph, extensions=extensions)
-        async with app.router.lifespan_context(app):
-            explorer = app.state.candidate_service.graph_adapter
-            for adapter in (hook.graph_adapter, explorer):
-                assert adapter.view_kinds is registry.view_kinds
-                assert adapter._views.KINDS == registry.view_kinds
-    finally:
-        if pending is not None:
-            pending.cancel()
-            with suppress(asyncio.CancelledError):
-                await pending
-    if runtime == "standalone":
-        builtin = bootstrap.build_graph_adapter(graph, settings, extensions=RuntimeExtensions(()))
-        assert builtin.view_kinds is None
-        assert EXTENSION.view_kind.name not in builtin._views.KINDS
+    hook = hook_bootstrap.build_hook_services(settings, extensions=registry) if first == "hook" else None
+    app = create_app(settings=settings, repo=graph, extensions=registry if first == "explorer" else None)
+    async with app.router.lifespan_context(app):
+        if hook is None:
+            hook = hook_bootstrap.build_hook_services(settings)
+        explorer = app.state.candidate_service.graph_adapter
+        for adapter in (hook.graph_adapter, explorer):
+            assert adapter.view_kinds is registry.view_kinds
+            assert adapter._views.KINDS == registry.view_kinds
+    assert bootstrap.build_graph_adapter(graph, settings).view_kinds is registry.view_kinds
 
 
 @pytest.mark.parametrize("registered", [False, True])
@@ -64,10 +51,13 @@ async def test_hook_and_explorer_share_explicit_or_active_registry(monkeypatch, 
 async def test_other_graph_surfaces_reject_conflicting_active_registry_before_connecting(
     monkeypatch, registered: bool,
 ) -> None:
-    monkeypatch.setattr(_state, "built", object())
-    monkeypatch.setattr(_state, "extensions", RuntimeExtensions((EXTENSION,)) if registered else None)
-    requested = RuntimeExtensions((EXTENSION,))
     settings = MemorySettings(backend_url="")
+    first_registry = RuntimeExtensions((EXTENSION,)) if registered else RuntimeExtensions(())
+    first_adapter = bootstrap.build_graph_adapter(object(), settings, extensions=first_registry)
+    if not registered:
+        assert first_adapter.view_kinds is None
+        assert EXTENSION.view_kind.name not in first_adapter._views.KINDS
+    requested = RuntimeExtensions((EXTENSION,))
 
     def unexpected(*_args, **_kwargs):
         pytest.fail("conflicting graph surface should fail before constructing a repository")
@@ -79,6 +69,8 @@ async def test_other_graph_surfaces_reject_conflicting_active_registry_before_co
         server.create_app(settings=settings, extensions=requested)
     with pytest.raises(ValueError, match="different runtime extension registry"):
         hook_bootstrap.build_hook_services(settings, extensions=requested)
+    with pytest.raises(ValueError, match="different runtime extension registry"):
+        requested.view_repository(object())
     app = create_app(settings=settings, extensions=requested)
     with pytest.raises(ValueError, match="different runtime extension registry"):
         async with app.router.lifespan_context(app):

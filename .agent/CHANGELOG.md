@@ -4,6 +4,12 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-27 - Address the extension design review (#725)
+
+- Give extension Views kind-scoped keys and keep deployed built-in keys compatible.
+- Run each installed projection definition and version under its own lease and job loop. A stalled materializer or a backend holding the general maintenance lock can leave its own work pending while other projection lanes keep running.
+- Bind one registry for the life of the process. Validate synchronous materializers and required View read fields during registration, and document the host and author responsibilities for scope.
+
 ## 2026-11-26 - Share extension registration across graph surfaces (#725)
 
 - Use one graph adapter factory and one View repository factory across Menhir's product paths. HTTP, hook and Explorer hosts can pass the same validated registry.

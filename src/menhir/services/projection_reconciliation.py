@@ -79,6 +79,10 @@ class ProjectionReconciler:
     def definition_id(self) -> str:
         return self._definition.definition_id
 
+    @property
+    def definition_version(self) -> int:
+        return self._definition.version
+
     def commit_tokens(
         self, tokens: Iterable[ProjectionWorkToken], *, operation_id: str,
     ) -> tuple[ProjectionReconciliation, ...]:
