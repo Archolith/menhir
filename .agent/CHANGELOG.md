@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Preserve pending projection work across version changes (#725)
+
+- Keep the exact pending generations from the outgoing definition version available for review. Requeue settled targets under the new version.
+- Refuse ordinary target updates that would replace retained work. Report retained targets as stale and keep them out of worker queues.
+
 ## 2026-11-26 - Schedule registered projection workers (#725)
 
 - Give each explicitly registered projection definition a separate maintenance job with a 100-item batch. An empty registration set adds no jobs.

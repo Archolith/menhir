@@ -15,6 +15,7 @@ from menhir.domain.projection_lifecycle import (
     ProjectionLifecycleCorruptionError,
     ProjectionWorkToken,
     StaleProjectionDefinitionError,
+    StaleProjectionWorkError,
 )
 from menhir.infrastructure.neo4j import Neo4jTransaction
 from menhir.infrastructure.projection_lifecycle_repository_encoding import (
@@ -50,10 +51,12 @@ class _ProjectionLifecycleWritesMixin:
         *,
         semantic_hash: str,
     ) -> ProjectionDefinitionPublication:
-        """Publish one shared-current semantic version and invalidate all known targets atomically.
+        """Publish a version, requeue settled targets, and retain older pending work atomically.
 
         Replaying the exact same version/hash is idempotent. Reusing a version with a different
         semantic hash fails closed, and an older publisher can never move the shared version back.
+        Pending generations keep their version and await an explicit migration or retirement.
+        The invalidated count covers settled generations requeued under the new version.
         """
 
         if not isinstance(definition, ProjectionDefinition):
@@ -107,8 +110,14 @@ class _ProjectionLifecycleWritesMixin:
                     d.published_at=datetime()
                 WITH d
                 OPTIONAL MATCH (w:ProjectionWorkState {definition_id:$definition_id})
+                WHERE w.definition_version=$previous_version
                 WITH d, collect(w) AS works
-                FOREACH (w IN works |
+                FOREACH (w IN [item IN works WHERE item.generation > coalesce(item.applied_generation,0)] |
+                    SET w.review_definition_version=w.definition_version,
+                        w.review_generation=w.generation
+                )
+                WITH [item IN works WHERE item.generation = coalesce(item.applied_generation,0)] AS settled
+                FOREACH (w IN settled |
                     SET w.definition_version=$definition_version,
                         w.generation=coalesce(w.generation,0)+1,
                         w.reason='definition_published',
@@ -120,10 +129,11 @@ class _ProjectionLifecycleWritesMixin:
                         w.certified_receipt_key=null,
                         w.certified_at=null
                 )
-                RETURN size(works) AS invalidated_targets
+                RETURN size(settled) AS invalidated_targets
                 """,
                 {
                     "definition_id": definition.definition_id,
+                    "previous_version": current_version,
                     "definition_version": definition.version,
                     "semantic_hash": semantic_hash,
                 },
@@ -202,29 +212,35 @@ class _ProjectionLifecycleWritesMixin:
                             w.generation=0,
                             w.applied_generation=0,
                             w.created_at=datetime()
-            SET w.target_json=CASE
+            WITH w, row, coalesce(w.review_generation=w.generation
+                             AND w.review_definition_version=w.definition_version
+                             AND w.generation > coalesce(w.applied_generation,0), false) AS retained
+            FOREACH (item IN CASE WHEN retained THEN [] ELSE [w] END |
+              SET item.target_json=CASE
                     WHEN w.definition_id=$definition_id AND w.quarantine_generation=w.generation
                     THEN row.target_json
                     ELSE w.target_json
                 END,
-                w.definition_version=$definition_version,
-                w.generation=coalesce(w.generation,0)+1,
-                w.target_present=$target_present,
-                w.reason=$reason,
-                w.dirty_at=datetime(),
-                w.certified_definition_version=null,
-                w.certified_generation=null,
-                w.certified_projection_hash=null,
-                w.certified_derivation_id=null,
-                w.certified_receipt_key=null,
-                w.certified_at=null
+                item.definition_version=$definition_version,
+                item.generation=coalesce(item.generation,0)+1,
+                item.target_present=$target_present,
+                item.reason=$reason,
+                item.dirty_at=datetime(),
+                item.certified_definition_version=null,
+                item.certified_generation=null,
+                item.certified_projection_hash=null,
+                item.certified_derivation_id=null,
+                item.certified_receipt_key=null,
+                item.certified_at=null
+            )
             RETURN w.work_key AS work_key,
                    w.definition_id AS definition_id,
                    w.definition_version AS definition_version,
                    w.target_json AS target_json,
                    w.generation AS generation,
                    w.target_present AS target_present,
-                   w.reason AS reason
+                   w.reason AS reason,
+                   retained AS retained_for_review
             """,
             {
                 "definition_id": definition_id,
@@ -238,6 +254,8 @@ class _ProjectionLifecycleWritesMixin:
             raise ProjectionLifecycleCorruptionError(
                 "dirty target write did not return every requested work row"
             )
+        if any(row.get("retained_for_review") for row in rows):
+            raise StaleProjectionWorkError("an older pending projection generation requires version review")
         tokens = tuple(_work_token_from_row(dict(row)) for row in rows)
         expected = {_target_json(target) for target in targets}
         actual = {_target_json(token.target) for token in tokens}
@@ -348,14 +366,20 @@ class _ProjectionLifecycleWritesMixin:
                        w.target_json AS target_json,
                        w.generation AS generation,
                        w.target_present AS target_present,
-                       w.reason AS reason
+                       w.reason AS reason,
+                       w.review_generation=w.generation
+                         AND w.review_definition_version=w.definition_version
+                         AND w.generation > coalesce(w.applied_generation,0) AS retained_for_review
                 """,
                 {"definition_id": definition.definition_id},
             )
             existing: dict[str, ProjectionWorkToken] = {}
             for row in existing_rows:
                 token = _work_token_from_row(dict(row))
-                if token.definition_version != definition.version:
+                if token.definition_version != definition.version and not (
+                    row.get("retained_for_review") is True
+                    and token.definition_version < definition.version
+                ):
                     raise ProjectionLifecycleCorruptionError(
                         "target index contains work from a non-current definition version"
                     )

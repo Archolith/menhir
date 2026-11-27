@@ -50,6 +50,7 @@ class _ProjectionLifecycleReadsMixin:
         instead of treating a bad first page as an empty or permanently stuck queue.
         A version-scoped worker reads only work matching its installed version and
         the shared-current definition. Work outside that scope stays pending.
+        Diagnostic reads without a version also show retained work that requires review.
         Queue emptiness is never a freshness certificate.
         """
 
@@ -85,7 +86,9 @@ class _ProjectionLifecycleReadsMixin:
             raise ProjectionLifecycleCorruptionError(
                 "projection work references an invalid definition version"
             ) from exc
-        if token.definition_version != current_version:
+        if token.definition_version != current_version and not (
+            row.get("retained_for_review") is True and token.definition_version < current_version
+        ):
             raise ProjectionLifecycleCorruptionError(
                 "projection work version disagrees with shared-current definition"
             )
@@ -105,7 +108,9 @@ class _ProjectionLifecycleReadsMixin:
                    w.target_json AS target_json,
                    w.generation AS generation,
                    w.target_present AS target_present,
-                   w.reason AS reason
+                   w.reason AS reason,
+                   w.review_generation=w.generation
+                     AND w.review_definition_version=w.definition_version AS retained_for_review
             ORDER BY w.dirty_at ASC, w.work_key ASC
             LIMIT $limit
             """,
@@ -147,7 +152,9 @@ class _ProjectionLifecycleReadsMixin:
                        w.target_json AS target_json,
                        w.generation AS generation,
                        w.target_present AS target_present,
-                       w.reason AS reason
+                       w.reason AS reason,
+                       w.review_generation=w.generation
+                         AND w.review_definition_version=work_version AS retained_for_review
                 ORDER BY w.dirty_at ASC, w.work_key ASC
                 LIMIT $limit
                 """,
@@ -192,6 +199,8 @@ class _ProjectionLifecycleReadsMixin:
 
         The coordination-epoch write acquires the row lock BEFORE the CAS
         predicates are evaluated, so a concurrent re-dirty cannot be hidden.
+        Publication may retain a generation without changing its identity. Honor
+        a new review hold if the scan did not see it when validating the row.
         """
         params = {
             "work_key": row["work_key"],
@@ -199,6 +208,7 @@ class _ProjectionLifecycleReadsMixin:
             "definition_version": row.get("definition_version"),
             "generation": row.get("generation"),
             "target_json": row.get("target_json"),
+            "retained_when_read": row.get("retained_for_review") is True,
             "reason": reason[:500],
         }
 
@@ -219,6 +229,8 @@ class _ProjectionLifecycleReadsMixin:
                   AND (w.target_json=$target_json
                        OR (w.target_json IS NULL AND $target_json IS NULL))
                   AND w.generation > coalesce(w.applied_generation,0)
+                  AND ($retained_when_read OR NOT coalesce(w.review_generation=w.generation
+                                      AND w.review_definition_version=w.definition_version, false))
                 SET w.quarantine_generation=$generation,
                     w.quarantine_definition_version=$definition_version,
                     w.quarantine_reason=$reason,
@@ -445,6 +457,8 @@ class _ProjectionLifecycleReadsMixin:
                    w.generation AS work_generation,
                    coalesce(w.applied_generation,0) AS applied_generation,
                    w.target_present AS target_present,
+                   w.review_generation=w.generation
+                     AND w.review_definition_version=w.definition_version AS retained_for_review,
                    w.certified_definition_version AS certified_definition_version,
                    w.certified_generation AS certified_generation,
                    w.certified_projection_hash AS certified_projection_hash,
@@ -503,7 +517,12 @@ class _ProjectionLifecycleReadsMixin:
         work_version = int(row.get("work_definition_version", 0) or 0)
         work_generation = int(row.get("work_generation", 0) or 0)
         applied_generation = int(row.get("applied_generation", 0) or 0)
-        if work_version != current_version:
+        retained = (
+            row.get("retained_for_review") is True
+            and 0 < work_version < current_version
+            and applied_generation < work_generation
+        )
+        if work_version != current_version and not retained:
             raise ProjectionLifecycleCorruptionError(
                 "freshness work version disagrees with shared-current definition"
             )
@@ -546,6 +565,12 @@ class _ProjectionLifecycleReadsMixin:
             current_projection_hash=current_projection_hash,
             derivation_id=derivation_id,
         )
+        if retained:
+            return ProjectionFreshnessAssessment(
+                state="stale",
+                reason="version_review_required",
+                **base,
+            )
         if current_projection_hash is None:
             return ProjectionFreshnessAssessment(
                 state="unavailable",

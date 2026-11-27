@@ -102,7 +102,8 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 
 - [x] Scope pending reads before the limit and have scalar reconciliation use that API. [#730](https://github.com/Archolith/menhir/pull/730)
 - [x] Quarantine corrupt generations on scoped reads and keep freshness checks fail-closed. [#731](https://github.com/Archolith/menhir/pull/731)
-- [ ] Define migration or retirement for pending work owned by an older extension version under #725 D5.
+- [x] Keep older pending generations for review at version publication. Ordinary target writes cannot replace them and workers cannot certify them.
+- [ ] Add explicit migration and retirement for retained work under #725 D5.
 - [ ] Prove multi-process fencing, generation replacement, absent-current targets, retry, crash mid-commit and namespace deletion behavior with **online Neo4j counterexamples**.
 - [ ] Separate publishing a definition from allowing a worker to execute it.
 
@@ -123,7 +124,7 @@ The internal assembly seam accepts host-supplied definition/materializer pairs a
 
 Each scheduling step runs under the existing maintenance lease. Neo4j checks revocation before starting each statement or transaction attempt, including retries. An already-dispatched transaction can finish under the work-generation fence after lease loss. Jobs still run serially through the shared scheduler, so a slow materializer can delay the next lane.
 
-The current publication API restamps existing work to the new version, and the versionless scoped scan still treats inconsistent stored versions as corruption. Extension upgrades need publication and review paths that preserve older work under D5.
+Version publication retains the exact outgoing pending generation and requeues settled targets. Versionless diagnostic reads can see valid retained work, and freshness reports it as stale with `version_review_required`. The explicit migration and retirement operations remain open. Verify the publication contract across any mixed-version deployments before enabling extension upgrades.
 
 ### A4 — Derived provenance, dependency invalidation and erasure (P0 correctness prerequisite)
 **Owner:** #576 M2–M4.

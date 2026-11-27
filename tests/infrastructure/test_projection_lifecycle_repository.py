@@ -1174,7 +1174,9 @@ def test_quarantined_work_reactivates_when_new_generation_is_dirtied(
 
 
 @pytest.mark.online
-def test_projection_lifecycle_live_definition_bump_invalidates_old_worker(test_neo4j_repo) -> None:
+def test_projection_lifecycle_live_definition_bump_preserves_pending_work(test_neo4j_repo) -> None:
+    from menhir.infrastructure.realization_coverage_repository import RealizationLifecycleRepository
+
     lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
     lifecycle.activate()
     v1 = _definition(1)
@@ -1184,12 +1186,21 @@ def test_projection_lifecycle_live_definition_bump_invalidates_old_worker(test_n
 
     v2 = _definition(2)
     publication = lifecycle.publish_definition(v2, semantic_hash="live-semantic-v2")
-    assert publication.invalidated_targets == 1
-
-    pending = lifecycle.pending()
-    assert len(pending) == 1
-    assert pending[0].definition_version == 2
-    assert pending[0].generation == old.generation + 1
+    assert publication.changed
+    assert publication.invalidated_targets == 0
+    assert not lifecycle.publish_definition(v2, semantic_hash="live-semantic-v2").changed
+    assert lifecycle.pending() == (old,)
+    assert lifecycle.pending(definition_id=v2.definition_id) == (old,)
+    lifecycle._quarantine_pending_generation(
+        _work_row(lifecycle, target, version=1, generation=old.generation),
+        reason="scan raced publication",
+    )
+    assert lifecycle.quarantined_pending_count(definition_id=v2.definition_id) == 0
+    assert RealizationLifecycleRepository(test_neo4j_repo).targets_for_definition(v2.definition_id) == (old,)
+    freshness = lifecycle.assess_freshness(
+        definition_id=v2.definition_id, target=target, current_projection_hash="old-hash",
+    )
+    assert freshness.stale and freshness.reason == "version_review_required"
 
     with pytest.raises(StaleProjectionDefinitionError):
         lifecycle.commit(
@@ -1197,6 +1208,33 @@ def test_projection_lifecycle_live_definition_bump_invalidates_old_worker(test_n
             derivation_id="old-worker",
             materialize=lambda _tx, _token: "old-hash",
         )
+    assert lifecycle.pending(definition_id=v2.definition_id, definition_version=1) == ()
+    assert lifecycle.pending(definition_id=v2.definition_id, definition_version=2) == ()
+
+    healthy = _target("new-v2-target")
+    with pytest.raises(StaleProjectionWorkError, match="requires version review"):
+        lifecycle.dirty_targets(v2, [target, healthy], reason="re-dirty")
+    with pytest.raises(StaleProjectionWorkError, match="requires version review"):
+        lifecycle.retire_targets(v2, [target], reason="retire")
+    with pytest.raises(StaleProjectionWorkError, match="requires version review"):
+        lifecycle.reconcile_all_targets(v2, [healthy])
+    assert lifecycle.pending() == (old,)
+
+    (new,) = lifecycle.reconcile_all_targets(v2, [target, healthy])
+    assert new.target == healthy
+    assert lifecycle.pending(definition_id=v2.definition_id, definition_version=2, limit=1) == (new,)
+
+    v3 = _definition(3)
+    assert lifecycle.publish_definition(v3, semantic_hash="live-semantic-v3").invalidated_targets == 0
+    assert set(lifecycle.pending(definition_id=v3.definition_id)) == {old, new}
+    assert lifecycle.pending(definition_id=v3.definition_id, definition_version=3) == ()
+
+    test_neo4j_repo.execute(
+        "MATCH (w:ProjectionWorkState {work_key:$key}) SET w.target_json='{'",
+        {"key": old.work_key},
+    )
+    assert lifecycle.pending(definition_id=v3.definition_id) == (new,)
+    assert lifecycle.quarantined_pending_count(definition_id=v3.definition_id) == 1
 
 
 @pytest.mark.online
