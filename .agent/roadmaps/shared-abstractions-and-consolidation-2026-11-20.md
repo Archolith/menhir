@@ -56,7 +56,8 @@ The first **go/no-go point** is an externally authored projection that can regis
 
 - [x] Inventory the projection callers and the five runtime adapter construction sites. See the Phase 0 census below.
 - [x] Record the owner's D1 and D6 approvals in [#725](https://github.com/Archolith/menhir/issues/725). Hosts explicitly register trusted in-process extensions. The initial SDK uses the remote `BackendClient`.
-- [ ] Resolve D2 and D5 before A3. They determine who drains work and how workers handle work from older definition versions. D3, D4, and D7 still govern schemas, compatibility, and packaging respectively.
+- [x] Record D2 and D5 in [#725](https://github.com/Archolith/menhir/issues/725). Menhir runs one scheduler lane per registered definition. Extensions explicitly migrate or retire older work. Without either action, that work stays pending for review.
+- [ ] Resolve D3, D4, and D7 for schemas, compatibility, and packaging.
 - [ ] Freeze comparable scalar-state, scalar-history, counting, general recall, namespace erasure and View write snapshots. Add one end-to-end public-example baseline with an *unknown extension* gracefully absent.
 - [ ] Keep #726 responsible for measuring physical/source/research/wheel LOC and repeated-semantic-mechanism count.
 
@@ -110,12 +111,16 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 ### A3 — One runtime extension/dispatched materializer path (P1 critical path)
 **Owner:** #725 phases 2–4 + #576 M3.
 
-- [ ] Introduce a generic reconciler/dispatcher that pairs a `ProjectionDefinition` with its authorized materializer; no wildcard dispatch for unknown definitions.
+- [x] Introduce an [internal reconciler](../../src/menhir/services/projection_reconciliation.py) that binds a `ProjectionDefinition` and version to its host-supplied materializer. The scalar reconciliation prototype uses it. Recovery filters by definition and version before the batch limit, and certification uses the existing transactional fence.
 - [ ] Centralize runtime repository/adapter creation or inject one resolved per-process view-kind map through all constructors, not only one bootstrap path.
 - [ ] Add default-off scheduler lane per **supported** definition, bounded batches, fenced owner and explicit repair-handler registry.
 - [ ] Test no-extensions identical startup; two different extensions in one process; A has extension/B lacks it; removing/upgrading extension leaves prior work safe; two concurrent hosts; tenant-scope isolation.
 
 **Exit:** a separately installed extension registers **and executes** without patching Menhir; all S1–S7 safety invariants from #725 pass.
+
+The internal lane consumes existing work. Runtime registration, queue producers, and scheduler wiring are still open. The focused suite passed 83 cases, including a disposable Neo4j test that confirmed a stale worker leaves the queue untouched and an installed worker can drain matching jobs around older work.
+
+The current publication API restamps existing work to the new version, and the versionless scoped scan still treats inconsistent stored versions as corruption. Extension upgrades need publication and review paths that preserve older work under D5.
 
 ### A4 — Derived provenance, dependency invalidation and erasure (P0 correctness prerequisite)
 **Owner:** #576 M2–M4.

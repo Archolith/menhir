@@ -37,22 +37,39 @@ class _ProjectionLifecycleReadsMixin:
     """Pending queue reads, atomic fence/materialize/receipt/certify commits, freshness."""
 
     def pending(
-        self, *, definition_id: str | None = None, limit: int = 100
+        self,
+        *,
+        definition_id: str | None = None,
+        definition_version: int | None = None,
+        limit: int = 100,
     ) -> tuple[ProjectionWorkToken, ...]:
         """Return dirty work. Workers must request their own definition.
 
         An unscoped diagnostic read remains strict and raises on corruption.
-        Scoped worker reads quarantine malformed generations and continue scanning
+        Scoped reads quarantine malformed generations within their scope and continue scanning
         instead of treating a bad first page as an empty or permanently stuck queue.
+        A version-scoped worker reads only work matching its installed version and
+        the shared-current definition. Work outside that scope stays pending.
         Queue emptiness is never a freshness certificate.
         """
 
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be an integer >= 1")
+        if definition_version is not None:
+            if (
+                not isinstance(definition_version, int)
+                or isinstance(definition_version, bool)
+                or definition_version < 1
+            ):
+                raise ValueError("definition_version must be an integer >= 1")
+            if definition_id is None:
+                raise ValueError("definition_version requires a definition_id")
         if definition_id is None:
             return self._pending_unscoped(limit=limit)
         definition_id = _require_nonblank("definition_id", definition_id)
-        return self._pending_scoped(definition_id=definition_id, limit=limit)
+        return self._pending_scoped(
+            definition_id=definition_id, definition_version=definition_version, limit=limit,
+        )
 
     @staticmethod
     def _pending_token(row: dict[str, Any]) -> ProjectionWorkToken:
@@ -97,7 +114,7 @@ class _ProjectionLifecycleReadsMixin:
         return tuple(self._pending_token(dict(row)) for row in rows)
 
     def _pending_scoped(
-        self, *, definition_id: str, limit: int
+        self, *, definition_id: str, definition_version: int | None, limit: int
     ) -> tuple[ProjectionWorkToken, ...]:
         """Scan whole pages, skipping and quarantining exact corrupt generations.
 
@@ -114,15 +131,19 @@ class _ProjectionLifecycleReadsMixin:
                 """
                 MATCH (w:ProjectionWorkState)
                 WHERE w.definition_id = $definition_id
+                  AND ($definition_version IS NULL OR w.definition_version = $definition_version)
                   AND w.generation > coalesce(w.applied_generation,0)
                   AND (w.quarantine_generation IS NULL
                        OR w.quarantine_generation <> w.generation)
                   AND (w.work_key IS NULL OR NOT w.work_key IN $seen_keys)
                 OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:w.definition_id})
+                WITH w, w.definition_version AS work_version, d.current_version AS current_version
+                WHERE $definition_version IS NULL
+                   OR (work_version = $definition_version AND current_version = $definition_version)
                 RETURN w.work_key AS work_key,
                        w.definition_id AS definition_id,
-                       w.definition_version AS definition_version,
-                       d.current_version AS current_definition_version,
+                       work_version AS definition_version,
+                       current_version AS current_definition_version,
                        w.target_json AS target_json,
                        w.generation AS generation,
                        w.target_present AS target_present,
@@ -132,6 +153,7 @@ class _ProjectionLifecycleReadsMixin:
                 """,
                 {
                     "definition_id": definition_id,
+                    "definition_version": definition_version,
                     "seen_keys": seen_keys.copy(),
                     "limit": page_size,
                 },

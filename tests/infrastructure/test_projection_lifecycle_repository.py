@@ -12,6 +12,7 @@ from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
 from menhir.domain.projection_lifecycle import (
     ProjectionLifecycleCorruptionError,
     ProjectionWorkAlreadyCompletedError,
+    ProjectionWorkToken,
     StaleProjectionDefinitionError,
     StaleProjectionWorkError,
 )
@@ -380,6 +381,22 @@ def test_pending_rejects_invalid_definition_filter(definition_id: object) -> Non
         ProjectionLifecycleRepository(ScriptedNeo4j()).pending(
             definition_id=definition_id,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("definition_version", [0, True, "2"])
+def test_pending_rejects_invalid_version_filter(definition_version: object) -> None:
+    with pytest.raises(ValueError, match="definition_version must be an integer"):
+        ProjectionLifecycleRepository(ScriptedNeo4j()).pending(
+            definition_id="scalar-state",
+            definition_version=definition_version,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.unit
+def test_pending_requires_definition_for_version_filter() -> None:
+    with pytest.raises(ValueError, match="requires a definition_id"):
+        ProjectionLifecycleRepository(ScriptedNeo4j()).pending(definition_version=2)
 
 
 @pytest.mark.unit
@@ -1013,6 +1030,53 @@ def test_projection_pending_scoped_query_skips_many_older_foreign_jobs(
     assert lifecycle.pending(definition_id=other.definition_id, limit=1)[0].definition_id == (
         other.definition_id
     )
+
+
+@pytest.mark.online
+def test_version_scoped_worker_leaves_mismatched_generations_pending(test_neo4j_repo) -> None:
+    from menhir.services.projection_reconciliation import ProjectionReconciler
+
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    current = _definition(2)
+    lifecycle.publish_definition(current, semantic_hash="version-scope-v2")
+    (older,) = lifecycle.dirty_targets(current, [_target("older")], reason="older")
+    (ready,) = lifecycle.dirty_targets(current, [_target("ready")], reason="ready")
+    # Model retained old work without using the existing bulk-restamping publisher.
+    test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState {work_key:$key})
+        SET w.definition_version=1, w.dirty_at=datetime('2000-01-01T00:00:00Z')
+        """,
+        {"key": older.work_key},
+    )
+
+    def materialize(tx: Neo4jTransaction, token: ProjectionWorkToken) -> str:
+        tx.execute(
+            "CREATE (:ProjectionLifecycleTestView {work_key:$key})",
+            {"key": token.work_key},
+        )
+        return "version-scoped-hash"
+
+    stale_worker = ProjectionReconciler(lifecycle, _definition(1), materializer=materialize)
+    current_worker = ProjectionReconciler(lifecycle, current, materializer=materialize)
+    assert stale_worker.drain_pending(operation_id="stale", limit=1) == ()
+    (committed,) = current_worker.drain_pending(operation_id="current", limit=1)
+    assert committed.token == ready
+    assert committed.certificate.projection_hash == "version-scoped-hash"
+    assert current_worker.drain_pending(operation_id="repeat", limit=1) == ()
+    assert test_neo4j_repo.execute(
+        "MATCH (v:ProjectionLifecycleTestView) RETURN v.work_key AS key",
+    ) == [{"key": ready.work_key}]
+    assert test_neo4j_repo.execute(
+        """
+        MATCH (w:ProjectionWorkState {work_key:$key})
+        RETURN w.definition_version AS version, w.generation AS generation,
+               coalesce(w.applied_generation,0) AS applied,
+               w.quarantine_generation AS quarantine
+        """,
+        {"key": older.work_key},
+    ) == [{"version": 1, "generation": older.generation, "applied": 0, "quarantine": None}]
 
 
 @pytest.mark.online

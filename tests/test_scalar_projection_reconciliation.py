@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -8,6 +10,7 @@ from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessCertificate,
     ProjectionWorkToken,
 )
+from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
 from menhir.services.scalar_projection_reconciliation import ScalarProjectionReconciler
 
@@ -55,10 +58,10 @@ class _FakeLifecycle:
             derivation_id=derivation_id,
         )
 
-    def pending(self, *, definition_id: str | None = None, limit: int = 100):
+    def pending(self, *, definition_id: str, definition_version: int, limit: int = 100):
         tokens = (
             token for token in self.pending_tokens
-            if definition_id is None or token.definition_id == definition_id
+            if token.definition_id == definition_id and token.definition_version == definition_version
         )
         return tuple(list(tokens)[:limit])
 
@@ -157,4 +160,33 @@ def test_derivation_id_is_stable_for_same_operation_and_generation() -> None:
     lifecycle.pending_tokens.append(token)
     second = reconciler.commit_tokens([token], operation_id="same-op")[0]
 
-    assert first.certificate.derivation_id == second.certificate.derivation_id
+    original = f"scalar-reconcile-v1\0same-op\0{token.work_key}\0{token.generation}".encode()
+    assert first.certificate.derivation_id == second.certificate.derivation_id == hashlib.sha256(original).hexdigest()
+
+
+def test_registered_lanes_use_their_own_materializers_and_leave_unsupported_work_pending() -> None:
+    lifecycle = _FakeLifecycle()
+    scalar_materializer = _Materializer()
+    other_materializer = _Materializer()
+    scalar_lane = ScalarProjectionReconciler(lifecycle, materializer=scalar_materializer)
+    other_definition = replace(SCALAR_STATE_PROJECTION, definition_id="other.projection", version=2)
+    other_lane = ProjectionReconciler(lifecycle, other_definition, materializer=other_materializer)
+
+    scalar = scalar_lane.dirty_assertions([_row()])[0]
+    previous = replace(other_definition, version=1)
+    (old,) = lifecycle.dirty_targets(previous, [scalar.target], reason="previous_version")
+    (other,) = lifecycle.dirty_targets(other_definition, [scalar.target], reason="registered")
+    (unknown,) = lifecycle.dirty_targets(
+        replace(other_definition, definition_id="unknown.projection"), [scalar.target], reason="unregistered",
+    )
+    with pytest.raises(ValueError, match="another projection version"):
+        other_lane.commit_tokens([old], operation_id="wrong-version")
+    with pytest.raises(ValueError, match="another projection definition"):
+        other_lane.commit_tokens([unknown], operation_id="wrong-definition")
+    assert lifecycle.commit_calls == []
+
+    assert [item.token for item in scalar_lane.drain_pending(operation_id="scalar")] == [scalar]
+    assert [item.token for item in other_lane.drain_pending(operation_id="other", limit=1)] == [other]
+    assert scalar_materializer.tokens == [scalar]
+    assert other_materializer.tokens == [other]
+    assert lifecycle.pending_tokens == [old, unknown]
