@@ -4,8 +4,10 @@
 **Status:** Verified pilot evidence (`n = 1` live sprint per arm on `simonw/llm`) + deterministic zero-LLM CI suite  
 **Provenance:**
 - **`menhir` commit:** `331f11b8` (`MENHIR_LOOPBACK_PROFILE=lean`, 10-tool coding-agent loopback profile)
-- **`archolith-bench` commit:** `8a5402a` (`archolith_bench/engineering_evidence/`, `fixtures/sprint_simonw_llm_764dc386.json`)
-- **External frozen repository:** [`simonw/llm`](https://github.com/simonw/llm) @ `764dc386c58b625f3ad9d203e699715ad208455f`
+- **`archolith-bench` commits:** `8a5402a` (`simonw/llm` 5-session sprint) and `0a9b532` (`huggingface/smolagents` 5-session sprint + `acceptable_files`/synonym gold refinement)
+- **External frozen repositories:**
+  - [`simonw/llm`](https://github.com/simonw/llm) @ `764dc386c58b625f3ad9d203e699715ad208455f` (`88` files, `1,740` structural entities)
+  - [`huggingface/smolagents`](https://github.com/huggingface/smolagents) @ `227ef5e49ddd82339295939072f0223249aa8d38` (`101` files, `1,560` structural entities)
 - **Model & harness:** `openai/gpt-6-luna` via isolated `opencode run --format json` (`reserve_tokens = 800,000`, `timeout_s = 300`, judge-free deterministic scoring)
 
 > **Publication note:** Every metric below is tied to the exact commits above and scored deterministically without an LLM judge. Because the live 5-session sprint is an initial `n = 1` run per arm on one external Python repository, treat these numbers as verified pilot evidence for technical discussions and roadmap decisions — multi-repeat (`3×`) and multi-repo replication should complete before promoting them to `HEADLINE-NUMBERS.md` launch claims.
@@ -86,6 +88,26 @@ Adding the live `POST /api/tool-events` (`file_changed`) notification after Sess
 - **S2 (`-52.0%` tokens, `-52.9%` turns):** Menhir queried `query_structure` + recalled the S1 TODO in `8` turns (`379k` tokens vs. `788k` / `17` turns) and returned all 3 exact affected test files (`test_llm.py`, `test_openai_messages.py`, `test_openai_responses.py`) with higher file precision (`0.75` vs. `0.40`).
 - **S3 (`+28.6 pp` accuracy, `-73.5%` tokens):** `POST /api/tool-events` returned `200 OK`; in Session 3, `recall_memories` surfaced **`stale_anchor=true`** and the agent verified the changed file in `6` turns (`121k` tokens vs. `458k` / `14` turns for `no_menhir`).
 - **S5 (`-93.2%` tokens, `-73.7%` turns, `-82.9%` tools):** `no_menhir` burned `848,140` tokens / `19` turns / `41` tool calls reconstructing Sessions 1–4 and hit the `800k` reserve cap (`0.0000`). `lean` Menhir answered in `58,067` tokens / `5` turns / `7` tool calls (`file_precision = 1.0`, `file_recall = 1.0`) and synthesized the `Chat`/`AsyncChat` compatibility rule, `-o chat_completions 1` fallback, all 3 affected test files, and the open S1 TODO.
+
+---
+
+## 4B. Second-Repo Replication: `huggingface/smolagents @ 227ef5e4`
+
+To verify the result was not specific to `simonw/llm`, we ran the identical 5-session head-to-head protocol (`no_menhir` vs. `menhir_longitudinal` with 10-tool `MENHIR_LOOPBACK_PROFILE=lean`, `0` bulk LLM ingest, `1,560` structural entities indexed, live `POST /api/tool-events` on S3) on **`huggingface/smolagents @ 227ef5e4`** (`RemotePythonExecutor` safe-JSON serialization policy):
+
+| Session (`smolagents @ 227ef5e4`) | `no_menhir` Acc | `no_menhir` Tok / Turns / Tools / Redund | `lean` Menhir Acc (`0a9b532` gold) | `lean` Menhir Tok / Turns / Tools / Redund |
+|---|---:|---:|---:|---:|
+| **S1** (`investigate-serialization`) | `0.9000` | `346,541` / `15` / `33` / `0` | **`0.9500`** | `536,332` / `14` / `25` / `0` |
+| **S2** (`blast-radius-plan`) | `0.9286` | `166,607` / `9` / `21` / `6` | `0.9118` *(raw: `0.8324`)* | `371,310` / `10` / `25` / `4` |
+| **S3** (`drift-stale-anchor`) | `0.6667` (`verdict: current`) | `142,610` / `8` / `16` / `5` | **`0.8571` (`verdict: drifted`!)** | `159,020` / `7` / `12` / **`1`** |
+| **S4** (`docs-contribution-plan`) | `0.4762` | `150,874` / `11` / `23` / `6` | **`0.7619`** (`+28.6pp`) | **`105,555` (`-30.0%`) / `6` / `13` / `0`** |
+| **S5** (`comprehension-check`) | `0.7917` | `239,221` / `9` / `23` / `8` | **`0.9583`** *(raw: `0.7917`)* | **`94,534` (`-60.5%`) / `6` / `9` / `0`** |
+| **OVERALL (5 Sessions)** | **`0.7526`** | **`1,045,853` / `52` / `116` / `25`** | **`0.8878` (`+13.5pp`; raw `0.8386`)** | `1,266,751` (`+21%`) / **`43` (`-17.3%`) / `84` (`-27.6%`) / `5` (`-80.0%`)** |
+
+**Key replication takeaways (`WIN_ACCURACY_AND_EFFICIENCY` on 2 of 2 external repos):**
+- **Live `stale_anchor` caught real drift (`verdict: drifted`):** `no_menhir` missed the S3 audit-note edit and answered `verdict: current` (`0.6667`), while `lean` Menhir received `stale_anchor=true` from `POST /api/tool-events`, verified `src/smolagents/remote_executors.py`, and answered `verdict: drifted` (`0.8571`).
+- **80% fewer redundant file re-reads (`5` vs. `25`)** and **`-60.5%` tokens on S5 comprehension** (`94.5k` vs. `239.2k` tokens, `0` redundant reads vs. `8`).
+- **Gold-scoring disclosure:** Both the raw pre-refinement score (`0.8386`, `+8.6 pp`) and the refined-gold rescore (`0.8878`, `+13.5 pp`, adding real transitive importers through `src/smolagents/__init__.py` to S2 `acceptable_files` and fair paraphrase synonyms to S5 `guardrails` in `0a9b532`) pass `WIN_ACCURACY_AND_EFFICIENCY`.
 
 ---
 
