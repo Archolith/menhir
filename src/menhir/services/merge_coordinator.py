@@ -245,7 +245,12 @@ class MergeCoordinator:
                            survivor_uuid, absorbed_uuid, exc)
             return {"merged": 0, "reason": "PREPARE_FAILED", "diagnostics": {"error": str(exc)}}
 
-        return self._apply(request, owner_token=token)
+        result = self._apply(request, owner_token=token)
+        if result.get("merged"):
+            # The pair this op journaled, so a caller acting on the outcome (consolidation
+            # promoting the survivor of an absorbed promotion candidate) reads it from the result.
+            result = {**result, "survivor_uuid": survivor_uuid, "absorbed_uuid": absorbed_uuid}
+        return result
 
     @staticmethod
     def _declined(

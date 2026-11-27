@@ -274,13 +274,24 @@ class LifecycleConsolidationMixin:
         # Phase 3: Contradiction detection for promotion candidates
         conflicts_detected = 0
         merge_error_log: list[str] = []
+        # absorbed promotion candidate -> the survivor that now holds its content (F1046-1).
+        absorbed_into: dict[str, str] = {}
         for i in range(0, len(promote_candidates_for_conflict_check), CONSOLIDATION_BATCH_SIZE):
             batch = promote_candidates_for_conflict_check[i:i + CONSOLIDATION_BATCH_SIZE]
-            batch_conflicts = await self._check_contradictions_batch(batch, merge_error_log)
+            batch_conflicts = await self._check_contradictions_batch(
+                batch, merge_error_log, absorbed_into=absorbed_into,
+            )
             conflicts_detected += batch_conflicts
             # A candidate whose check raised is not promoted unchecked; the next pass retries it.
             failed = set(merge_error_log)
             promote_uuids.extend(str(node["uuid"]) for node in batch if str(node["uuid"]) not in failed)
+        # A promotion candidate absorbed by a merge is gone, so promoting its uuid matches nothing.
+        # Its content now lives in the survivor: promote that instead, or a SESSION survivor (whose
+        # TTL the merge only cleared) could be demoted and TTL-deleted later, taking it along.
+        # promote_to_persistent skips a survivor that is already PERSISTENT or protected.
+        for survivor_uuid in absorbed_into.values():
+            if survivor_uuid not in promote_uuids:
+                promote_uuids.append(survivor_uuid)
 
         # Phase 4: Execute transitions and demote
         # Audit rows follow what the mutation changed (#919), not what was requested: a requested
@@ -437,10 +448,13 @@ class LifecycleConsolidationMixin:
         self,
         candidates: list[dict[str, Any]],
         errors: list[str] | None = None,
+        *,
+        absorbed_into: dict[str, str] | None = None,
     ) -> int:
         """Check a batch of promotion candidates for contradictions with existing PERSISTENT nodes.
 
-        Returns count of conflicts detected.
+        Returns count of conflicts detected. When ``absorbed_into`` is given, each candidate a
+        merge absorbed is mapped to the survivor uuid the merge result reports.
 
         Pair classification (routing, vetoes, judge-gated merge) is delegated to
         CorrelationService.classify_pair (SSOT-03), and the per-node loop to the shared
@@ -493,11 +507,16 @@ class LifecycleConsolidationMixin:
             # this loop never classified; test_drop_ends_the_node_scan), a queued conflict ends it.
             # A failed search or classify_pair is recorded in `errors` and never promoted
             # unchecked (#938, #1008); without `errors` a classify_pair failure raises.
-            await scan_node(
+            scan = await scan_node(
                 correlation_service.classify_pair, self.graphiti_client, uuid, query,
                 group_ids=group_ids, num_results=5, stop_on_drop=True,
                 on_conflict=_queue_conflict, errors=errors,
             )
+            if absorbed_into is not None:
+                for cr in scan.results or []:
+                    survivor_uuid = (cr.details or {}).get("survivor_uuid")
+                    if cr.action == "merged" and survivor_uuid:
+                        absorbed_into[uuid] = str(survivor_uuid)
 
         return conflicts
 

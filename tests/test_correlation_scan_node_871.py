@@ -245,9 +245,11 @@ def test_the_edge_query_matches_either_direction_and_creates_only_when_absent() 
     repo, neo4j = _edge_repo([])
     assert repo.create_related_to_edge("uuid-1", "uuid-2", similarity=0.75) is False
     cypher = neo4j.execute.call_args.args[0]
-    assert "[(a)-[e:RELATES_TO]-(b) | e]" in cypher, "an existing edge either way round must match"
+    assert "[(a)-[e:RELATES_TO]-(b) WHERE e.type = 'correlation' | e]" in cypher, (
+        "an existing correlation edge either way round must match"
+    )
     # The directed MERGE is reached only when no edge exists either way round.
-    assert cypher.index("WHERE size(existing) = 0") < cypher.index("MERGE (a)-[r:RELATES_TO]->(b)")
+    assert cypher.index("WHERE size(existing) = 0") < cypher.index("MERGE (a)-[r:RELATES_TO {type: 'correlation'}]->(b)")
 
 
 @pytest.mark.asyncio

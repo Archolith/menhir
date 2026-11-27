@@ -96,15 +96,21 @@ class CorrelationRepository:
     ) -> bool:
         """Create a RELATES_TO edge between two entities if none exists, in either direction.
 
-        Returns True only when this call CREATED the edge (#871). An existing RELATES_TO between
-        the pair, whichever way it points, is updated in place (similarity and weight only rise,
-        last_traversed is touched) and returns False, so a re-check never counts a new edge.
+        Only correlation edges (``type = 'correlation'``, the marker every edge this method has
+        ever created carries) count. Graphiti fact edges are RELATES_TO too; one between the pair
+        is neither an existing correlation edge nor ever modified here.
+
+        Returns True only when this call CREATED the edge (#871). An existing correlation edge
+        between the pair, whichever way it points, is updated in place (similarity and weight only
+        rise, last_traversed is touched) and returns False, so a re-check never counts a new edge.
         False also when either entity is missing or the two are in different tenants, which this
         refuses: the candidate search is scoped by group_id, and an entity whose namespace
         disagrees with its group can still pair across tenants.
 
         A new edge always points from the lower uuid to the higher, so checking the pair the
-        other way round matches it instead of creating a reverse edge.
+        other way round matches it instead of creating a reverse edge. Both nodes are write-locked
+        (lower uuid first, so two callers cannot deadlock) before the existence check, which makes
+        check-then-create atomic: a concurrent call on the same pair waits, then sees the edge.
         """
         low_uuid, high_uuid = sorted((str(source_uuid), str(target_uuid)))
         rows = self._neo4j.execute(
@@ -112,7 +118,9 @@ class CorrelationRepository:
             MATCH (a:Entity {uuid: $low_uuid})
             MATCH (b:Entity {uuid: $high_uuid})
             WHERE __SAME_TENANT__
-            WITH a, b, [(a)-[e:RELATES_TO]-(b) | e] AS existing
+            SET a._correlation_lock = true, b._correlation_lock = true
+            REMOVE a._correlation_lock, b._correlation_lock
+            WITH a, b, [(a)-[e:RELATES_TO]-(b) WHERE e.type = 'correlation' | e] AS existing
             FOREACH (e IN existing |
                 SET e.similarity = CASE
                         WHEN $similarity > e.similarity THEN $similarity
@@ -126,9 +134,8 @@ class CorrelationRepository:
             )
             WITH a, b, existing
             WHERE size(existing) = 0
-            MERGE (a)-[r:RELATES_TO]->(b)
+            MERGE (a)-[r:RELATES_TO {type: 'correlation'}]->(b)
             ON CREATE SET
-                r.type = 'correlation',
                 r.similarity = $similarity,
                 r.source = $source,
                 r.scope = 'PERSISTENT',
@@ -214,7 +221,8 @@ class CorrelationRepository:
                    {memory_retired_cypher("n")} AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status,
-                   n.restored_from_merge AS restored_from_merge
+                   n.restored_from_merge AS restored_from_merge,
+                   coalesce(n.merged_from, []) AS merged_from
             """,
             params={
                 "s": survivor_uuid,
@@ -249,6 +257,7 @@ class CorrelationRepository:
                     str(r["restored_from_merge"])
                     if r.get("restored_from_merge") is not None else None
                 ),
+                merged_from=tuple(str(u) for u in (r.get("merged_from") or [])),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))

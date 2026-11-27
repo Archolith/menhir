@@ -17,8 +17,9 @@ Hard vetoes:
   - same uuid (a node cannot absorb itself)
   - ineligible role: structural, path-shaped, View/instrumentation, or canonical-self node
   - namespace mismatch (never merge identities across silos)
-  - previously unmerged: either node's ``restored_from_merge`` names the other (an operator split
-    them; the journal half of this veto is checked by MergeCoordinator, which owns the journal)
+  - previously unmerged: either node's ``restored_from_merge`` names the other, or a node in the
+    other's ``merged_from`` lineage (an operator split them; the journal half of this veto is
+    checked by MergeCoordinator, which owns the journal, and is pair-exact)
   - COMPRESSED or GONE freshness (must be rehydrated through the lifecycle path first)
   - PROMOTED scope (operator-curated ground truth is merge-immune)
   - any scope other than SESSION or PERSISTENT (CANDIDATE, null, blank, unknown)
@@ -160,6 +161,8 @@ class NodeSignals:
     memory_retired: bool = False
     #: Survivor uuid stamped by an unmerge restore (``restore_merge_snapshot``); None if never restored.
     restored_from_merge: str | None = None
+    #: Every uuid this node has absorbed, transitively (a merge appends the absorbed node's own lineage).
+    merged_from: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -204,10 +207,13 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
         )
 
     # 4b. An operator unmerge split this pair (#939). The restore stamps the restored node with
-    #     the survivor it came out of; re-merging the pair would undo the operator's decision.
+    #     the survivor it came out of; re-merging the pair would undo the operator's decision. The
+    #     other node's merged_from lineage counts too: once that survivor has itself been absorbed,
+    #     its content lives in the node that absorbed it (F1046-2).
     unmerged_from = [
         n.uuid for n, other in ((survivor, absorbed), (absorbed, survivor))
-        if n.restored_from_merge and str(n.restored_from_merge) == other.uuid
+        if n.restored_from_merge
+        and str(n.restored_from_merge) in (other.uuid, *other.merged_from)
     ]
     if unmerged_from:
         return _veto(PREVIOUSLY_UNMERGED, restored=unmerged_from, source="node")
