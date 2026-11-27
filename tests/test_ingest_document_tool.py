@@ -225,7 +225,8 @@ def test_episode_queue_timeout(tmp_path, monkeypatch) -> None:
     with patch("menhir.mcp.tools.ingest.ingest_document.get_mcp_session", return_value=_mock_session()):
         result = asyncio.run(tool.endpoint(path=str(doc)))
 
-    assert "deferred" in result
+    assert "outcome unknown" in result
+    assert "deferred" not in result
 
 
 # ---------------------------------------------------------------------------
