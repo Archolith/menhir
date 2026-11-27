@@ -198,7 +198,7 @@ async def test_follower_that_later_gains_lease_recovers_skipped_pending(monkeypa
         await asyncio.gather(*service._worker_tasks, return_exceptions=True)
 
 
-# ---- F1042-2: enqueue / requeue without a consumer ---------------------------------------------
+# ---- enqueue / requeue without a consumer ----------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -255,7 +255,7 @@ async def test_force_reenrich_reports_not_queued_without_consumer(monkeypatch) -
     assert "result: submitted" not in out
 
 
-# ---- F1042-1: scan replaying a FAILED episode --------------------------------------------------
+# ---- scan replaying a FAILED episode -----------------------------------------------------------
 
 
 def _replay(state):
