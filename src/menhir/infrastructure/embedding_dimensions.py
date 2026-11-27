@@ -70,6 +70,22 @@ def expected_graphiti_embedding_dimension(settings: MemorySettings) -> int | Non
     return infer_embedding_dimension_for_model(provider.embed_model)
 
 
+def configured_embedding_dimension(embed_model: str) -> int:
+    """The dimension the service's Graphiti embedder yields: the table value, else Graphiti's default."""
+    known = infer_embedding_dimension_for_model(embed_model)
+    if known is not None:
+        return known
+    from graphiti_core.embedder.client import EMBEDDING_DIM
+
+    return int(EMBEDDING_DIM)
+
+
+def fit_embedding_dimension(vector: Any, dim: int) -> list[float] | None:
+    """Truncate like Graphiti's embedder (``embedding[:embedding_dim]``); None if still not ``dim``."""
+    fitted = [float(v) for v in list(vector)[:dim]]
+    return fitted if len(fitted) == dim else None
+
+
 #: Process-lifetime memo for the startup sweep (CF-173).
 #:
 #: `embedding_dimension_health` runs seven unbounded scans, two of them over EVERY relationship in
