@@ -6,6 +6,7 @@ session promotion, and conflict governance operations here.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -61,6 +62,11 @@ def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
         f"AND {destructive_retention_allowed_cypher(variable)} "
         f"AND NOT {memory_retired_cypher(variable)}"
     )
+
+
+def summary_sha256(text: str) -> str:
+    """Marker binding a stored ``original_content`` to the summary of the compression that wrote it."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _content_overlap_ratio(left: str | None, right: str | None) -> float:
@@ -119,12 +125,10 @@ class ConsolidationRepository:
     #: Confirmed by execution against Neo4j 5, not by reading: weight 1.0 -> 1.2 and
     #: `count(r)` -> 2. `test_edge_weight_cap_contract` could not catch it because it greps this
     #: source for the string "0.1" rather than running the query. `()-[r]->()` matches each
-    #: relationship exactly once regardless of type, so it fixes the rate and halves the scan
-    #: without narrowing what can be reinforced.
+    #: relationship exactly once, so it fixes the rate and halves the scan.
     #:
     #: TYPED, with `adjacency_edge_pattern()`: the same list `fetch_adjacency_pairs` emits for
-    #: `edge_index`, so recall reinforces exactly the edges it ranked and the per-type `uuid`
-    #: indexes give an index seek instead of an all-relationship scan. See CF-247.
+    #: `edge_index`, so recall reinforces exactly the edges it ranked. See CF-247.
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         """Increment traversal weight for an edge while capping at the v1 max."""
 
@@ -307,6 +311,7 @@ class ConsolidationRepository:
         *,
         read_content: str | None,
         min_days_since_accessed: float,
+        read_summary: str | None = None,
         read_epoch: int | None = None,
         fence_key: str | None = None,
     ) -> bool:
@@ -316,10 +321,14 @@ class ConsolidationRepository:
         write is refused if an erase touched the namespace since ``read_epoch`` (read with that
         content by ``fetch_decay_candidates``), and never lands on a node an erase scrubbed.
 
-        ``read_content`` is the raw ``n.content`` the candidate row carried. Under the node lock
-        the write re-checks that the node still qualifies and still holds that content, then
-        stores it as ``original_content`` (the body this compression replaced).
+        ``read_content`` and ``read_summary`` are the raw ``n.content`` and ``n.summary`` the
+        candidate row carried; the text summarised is the content, or the summary when the content
+        is blank. Under the node lock the write re-checks that the node still qualifies and still
+        holds what was read, then stores the summarised text as ``original_content`` together with
+        a digest of the new summary that binds it to this compression.
         """
+
+        source_text = read_content or read_summary or None
 
         # The MATCH reads without a lock and Neo4j does not re-check a WHERE after a write waits
         # for one: take the node's write lock, then decide.
@@ -332,16 +341,22 @@ class ConsolidationRepository:
               AND NOT coalesce(n.rederive_pending, false)
               AND {harmful_automatic_mutation_allowed_cypher("n")}
               AND coalesce(n.content, '') = coalesce($read_content, '')
+              AND (coalesce($read_content, '') <> ''
+                   OR coalesce(n.summary, '') = coalesce($read_summary, ''))
               AND {memory_recency_cypher()} < datetime() - duration({{days: $min_days}})
-            SET n.original_content = $read_content,
+            SET n.original_content = $source_text,
                 n.content = $compressed_summary,
+                n.compressed_summary_sha256 = $summary_sha,
                 n.freshness = 'COMPRESSED'
             RETURN count(n) AS updated
             """
         params = {
             "node_uuid": node_uuid,
             "compressed_summary": compressed_summary,
+            "summary_sha": summary_sha256(compressed_summary),
             "read_content": read_content,
+            "read_summary": read_summary,
+            "source_text": source_text,
             "min_days": min_days_since_accessed,
         }
         return self._updated_unless_fenced(node_uuid, lambda: execute_copy_fenced(
@@ -366,17 +381,33 @@ class ConsolidationRepository:
         }
 
     def fetch_rehydration_state(self, node_uuid: str) -> dict[str, object]:
-        """The ``content`` and ``original_content`` a rehydrate reads; both null when rederive_pending."""
+        """What a rehydrate reads from the node, in one statement.
+
+        ``content``, ``original_content`` and the summary digest are null when the node is
+        ``rederive_pending``; the fence key and epoch are read with them.
+        """
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {uuid: $node_uuid})
+            f"""
+            MATCH (n:Entity {{uuid: $node_uuid}})
             RETURN CASE WHEN coalesce(n.rederive_pending, false) THEN null ELSE n.content END AS content,
                    CASE WHEN coalesce(n.rederive_pending, false) THEN null
-                        ELSE n.original_content END AS original_content
+                        ELSE n.original_content END AS original_content,
+                   CASE WHEN coalesce(n.rederive_pending, false) THEN null
+                        ELSE n.compressed_summary_sha256 END AS compressed_summary_sha256,
+                   coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
+                   size(coalesce(n.absorbed_from, [])) AS absorbed_count,
+                   {fence_key_cypher("n")} AS fence_key,
+                   head(COLLECT {{ MATCH (f:EvidenceNamespaceFence)
+                                   WHERE f.namespace_key = {fence_key_cypher("n")}
+                                   RETURN coalesce(f.erasure_epoch, 0) }}) AS fence_epoch
             """,
             params={"node_uuid": node_uuid},
         )
-        return dict(rows[0]) if rows else {"content": None, "original_content": None}
+        if not rows:
+            return {"content": None, "original_content": None, "compressed_summary_sha256": None,
+                    "rehydration_count": 0, "absorbed_count": 0, "fence_key": None,
+                    "fence_epoch": None}
+        return dict(rows[0])
 
     def complete_rehydration(
         self,
@@ -390,25 +421,22 @@ class ConsolidationRepository:
     ) -> bool:
         """Transition a PERSISTENT COMPRESSED node back to ACTIVE.
 
-        With ``updated_content`` (an LLM merge of the compression's replaced body and new context)
-        the write runs under G-copy with the node and ``source_uuids`` (the context's episode) as
-        sources, and never lands on a node an erase scrubbed (CF-338). Without ``read_epoch`` the
-        epoch comparison is skipped: the source markers, ``erasing_ops`` and ``rederive_pending``
-        still refuse a copy of erased text.
+        With ``updated_content`` (an LLM merge of the compression's replaced body and new context,
+        or that body restored as it was) the write runs under G-copy with the node and
+        ``source_uuids`` (the context's episode) as sources, and never lands on a node an erase
+        scrubbed (CF-338). Without ``read_epoch`` the epoch comparison is skipped: the source
+        markers, ``erasing_ops`` and ``rederive_pending`` still refuse a copy of erased text.
+        ``read_summary`` and ``read_base`` are the ``content`` and ``original_content`` the caller
+        read: a text-copying write refuses if either moved.
 
-        Without ``updated_content`` the node's own ``original_content`` is restored when it has
-        one; otherwise the node only flips state. ``read_summary`` and ``read_base`` are the
-        ``content`` and ``original_content`` the caller read: the write refuses if either moved.
+        Without ``updated_content`` the node only flips state.
         """
-        restore = updated_content is None and bool(read_base)
-        copies_text = updated_content is not None or restore
+        copies_text = updated_content is not None
         params: dict[str, object] = {
             "node_uuid": node_uuid,
             "read_summary": read_summary,
             "read_base": read_base,
             "updated_content": updated_content,
-            "restore": restore,
-            "copies_text": copies_text,
         }
 
         # Lock, then decide: the MATCH reads without a lock and Neo4j does not re-check a WHERE
@@ -420,14 +448,11 @@ class ConsolidationRepository:
             WITH n
             WHERE n.scope = 'PERSISTENT' AND n.freshness = 'COMPRESSED'
               AND {automatic_lifecycle_protection_cypher("n")}
-              AND coalesce(n.content, '') = coalesce($read_summary, '')
-              AND coalesce(n.original_content, '') = coalesce($read_base, '')
-              AND (NOT $copies_text OR NOT coalesce(n.rederive_pending, false))
-            SET n.content = CASE
-                    WHEN $updated_content IS NOT NULL THEN $updated_content
-                    WHEN $restore THEN n.original_content
-                    ELSE n.content
-                END,
+              AND ($updated_content IS NULL OR (
+                    coalesce(n.content, '') = coalesce($read_summary, '')
+                    AND coalesce(n.original_content, '') = coalesce($read_base, '')
+                    AND NOT coalesce(n.rederive_pending, false)))
+            SET n.content = coalesce($updated_content, n.content),
                 n.freshness = 'ACTIVE',
                 n.last_accessed = datetime(),
                 n.rehydration_count = coalesce(toInteger(n.rehydration_count), 0) + 1
@@ -1453,7 +1478,21 @@ class ConsolidationRepository:
                     .where("n.uuid = $uuid", namespace_predicate,
                            automatic_lifecycle_protection_cypher("n"))
                     .set(("n.content = $content",
-                          "n.original_content = coalesce(n.original_content, $original)",
+                          # A COMPRESSED keep holds its replaced body in original_content: the
+                          # block goes there too (once) and the digest follows the new content,
+                          # but only over a base already trusted (marker = digest of the content
+                          # read). Otherwise the base stays and the marker is removed.
+                          "n.original_content = CASE WHEN n.freshness = 'COMPRESSED' "
+                          "AND n.original_content IS NOT NULL "
+                          "THEN CASE WHEN n.compressed_summary_sha256 = $keep_sha "
+                          "AND NOT $target IN coalesce(n.absorbed_from, []) "
+                          "THEN n.original_content + $block ELSE n.original_content END "
+                          "ELSE coalesce(n.original_content, $original) END",
+                          "n.compressed_summary_sha256 = CASE WHEN n.freshness = 'COMPRESSED' "
+                          "THEN CASE WHEN n.original_content IS NOT NULL "
+                          "AND n.compressed_summary_sha256 = $keep_sha "
+                          "THEN $content_sha ELSE null END "
+                          "ELSE n.compressed_summary_sha256 END",
                           # The erase's selector for this block (idempotent on a retried tx).
                           "n.absorbed_from = CASE WHEN $target IN coalesce(n.absorbed_from, []) "
                           "THEN n.absorbed_from ELSE coalesce(n.absorbed_from, []) + $target END"))
@@ -1462,6 +1501,9 @@ class ConsolidationRepository:
                     "uuid": keep_uuid,
                     "content": merged,
                     "original": keep_content,
+                    "block": merged[len(keep_content):],
+                    "content_sha": summary_sha256(merged),
+                    "keep_sha": summary_sha256(keep_content),
                     "target": target_uuid,
                     **namespace_params,
                 }

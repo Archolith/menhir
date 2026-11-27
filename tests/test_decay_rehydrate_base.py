@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from menhir.infrastructure.consolidation_queries import summary_sha256
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_memory_revision, telemetry_store
 from menhir.services.lifecycle_models import _DEFAULT_COMPRESS_DAYS
@@ -165,3 +166,133 @@ async def test_decay_compress_passes_the_content_it_read_and_the_recency_window(
     assert calls["a-1"]["read_content"] == "x" * 240
     assert calls["a-2"]["read_content"] is None
     assert calls["a-1"]["min_days_since_accessed"] == _DEFAULT_COMPRESS_DAYS
+    assert calls["a-1"]["read_summary"] is None
+    assert calls["a-2"]["read_summary"] == "y" * 240
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_trusts_a_stored_base_only_with_a_matching_marker(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path
+) -> None:
+    """After an absorb or a rehydrate the stored base may belong to an older compression: it is
+    used only while its marker equals the digest of the current summary."""
+    record_memory_revision(node_uuid="n-1", field="content", old_value="archived body",
+                           new_value="summary 2", changed_by="decay")
+    marked = _compressed_node(original_content="stored body", rehydration_count=3,
+                              compressed_summary_sha256=summary_sha256("summary 2"))
+    stub_memory_graph_adapter.candidate_metadata = [marked]
+    llm = _FakeLLM(merge_return="merged")
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, llm)
+    await svc.rehydrate_node("n-1", new_context="Y", source_episode_uuid="ep-1")
+    assert llm.merge_calls == [("stored body", "Y")]
+
+    stale = _compressed_node(original_content="stored body", rehydration_count=3,
+                             compressed_summary_sha256=summary_sha256("another summary"))
+    stub_memory_graph_adapter.candidate_metadata = [stale]
+    llm2 = _FakeLLM(merge_return="merged")
+    svc2 = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, llm2)
+    await svc2.rehydrate_node("n-1", new_context="Y", source_episode_uuid="ep-1")
+    assert llm2.merge_calls == [("archived body", "Y")]
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_ignores_an_unmarked_base_of_a_node_already_rehydrated(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path
+) -> None:
+    """An unmarked original_content is a legacy body only while the node was never rehydrated."""
+    stub_memory_graph_adapter.candidate_metadata = [
+        _compressed_node(original_content="stale body", rehydration_count=2)
+    ]
+    llm = _FakeLLM(merge_return="merged")
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, llm)
+
+    await svc.rehydrate_node("n-1", new_context="Y", source_episode_uuid="ep-1")
+
+    assert llm.merge_calls == [("summary 2", "Y")]
+
+
+@pytest.mark.asyncio
+async def test_contextless_rehydrate_restores_the_base_and_records_the_revision(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path, monkeypatch
+) -> None:
+    stub_memory_graph_adapter.candidate_metadata = [
+        _compressed_node(original_content="the body", fence_epoch=7,
+                         compressed_summary_sha256=summary_sha256("summary 2"))
+    ]
+    seen: list[tuple[object, dict[str, object]]] = []
+
+    def record(node_uuid, updated_content=None, **kwargs):
+        seen.append((updated_content, kwargs))
+        return True
+
+    monkeypatch.setattr(stub_memory_graph_adapter, "complete_rehydration", record)
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, _FakeLLM())
+
+    assert await svc.rehydrate_node("n-1") is True
+
+    assert seen[0][0] == "the body"
+    assert seen[0][1]["read_epoch"] == 7
+    assert telemetry_store.get_original_content("n-1") == "summary 2"
+
+
+@pytest.mark.asyncio
+async def test_contextless_rehydrate_without_a_known_base_only_flips_state(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path, monkeypatch
+) -> None:
+    stub_memory_graph_adapter.candidate_metadata = [
+        _compressed_node(original_content="stale body", rehydration_count=2, fence_epoch=7)
+    ]
+    seen: list[tuple[object, dict[str, object]]] = []
+
+    def record(node_uuid, updated_content=None, **kwargs):
+        seen.append((updated_content, kwargs))
+        return True
+
+    monkeypatch.setattr(stub_memory_graph_adapter, "complete_rehydration", record)
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, _FakeLLM())
+
+    assert await svc.rehydrate_node("n-1") is True
+
+    assert seen[0][0] is None
+    assert seen[0][1]["read_epoch"] is None
+    assert telemetry_store.get_original_content("n-1") is None
+
+
+@pytest.mark.asyncio
+async def test_contextless_rehydrate_of_a_legacy_node_that_absorbed_only_flips_state(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path, monkeypatch
+) -> None:
+    """Under the old code an absorb never reached original_content, so an unmarked base of a
+    node with absorbed blocks lacks them and is not restored."""
+    stub_memory_graph_adapter.candidate_metadata = [
+        _compressed_node(original_content="old body", rehydration_count=0, absorbed_count=1)
+    ]
+    seen: list[object] = []
+
+    def record(node_uuid, updated_content=None, **kwargs):
+        seen.append(updated_content)
+        return True
+
+    monkeypatch.setattr(stub_memory_graph_adapter, "complete_rehydration", record)
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, _FakeLLM())
+
+    assert await svc.rehydrate_node("n-1") is True
+
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_contextful_fallback_merges_the_summary_the_write_will_check(
+    stub_memory_graph_adapter, stub_graphiti_client, tmp_path
+) -> None:
+    """With no base anywhere, the merge input is the summary read with the state (not the
+    metadata row's summary), the same value passed as read_summary."""
+    stub_memory_graph_adapter.candidate_metadata = [
+        _compressed_node(summary="metadata summary")
+    ]
+    llm = _FakeLLM(merge_return="merged")
+    svc = _service(stub_memory_graph_adapter, stub_graphiti_client, tmp_path, llm)
+
+    await svc.rehydrate_node("n-1", new_context="Y", source_episode_uuid="ep-1")
+
+    assert llm.merge_calls == [("summary 2", "Y")]

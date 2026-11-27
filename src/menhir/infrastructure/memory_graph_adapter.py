@@ -1239,12 +1239,13 @@ class MemoryGraphAdapter:
         *,
         read_content: str | None,
         min_days_since_accessed: float,
+        read_summary: str | None = None,
         read_epoch: int | None = None,
         fence_key: str | None = None,
     ) -> bool:
         return self._consolidation.compress_node(
             node_uuid, compressed_summary, read_content=read_content,
-            min_days_since_accessed=min_days_since_accessed,
+            min_days_since_accessed=min_days_since_accessed, read_summary=read_summary,
             read_epoch=read_epoch, fence_key=fence_key,
         )
 

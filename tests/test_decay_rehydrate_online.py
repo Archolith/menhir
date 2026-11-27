@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from menhir.infrastructure.consolidation_queries import ConsolidationRepository
+from menhir.infrastructure.consolidation_queries import ConsolidationRepository, summary_sha256
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.services.lifecycle_service import LifecycleService
@@ -92,15 +92,27 @@ def test_a_content_change_between_the_read_and_the_compress_refuses_it(test_neo4
     assert _props(test_neo4j_repo, uid)["content"] == "a newer body"
 
 
-def test_compress_of_a_node_that_read_blank_content_keeps_no_fake_original(test_neo4j_repo) -> None:
+def test_compress_writes_the_marker_that_binds_the_base_to_the_summary(test_neo4j_repo) -> None:
+    uid, _ = _seed(test_neo4j_repo)
+    assert _compress(test_neo4j_repo, uid, "gist", "the body") is True
+    assert _props(test_neo4j_repo, uid)["compressed_summary_sha256"] == summary_sha256("gist")
+
+
+def test_compress_of_a_node_that_read_blank_content_summarises_the_summary(test_neo4j_repo) -> None:
     uid, ns = _u(), f"decay-{_u()}"
     test_neo4j_repo.execute(
         "CREATE (:Entity {uuid:$u, name:'n', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
         "freshness:'ACTIVE', summary:'only a summary', created_at:datetime('2020-01-01')})",
         params={"u": uid, "ns": ns},
     )
-    assert _compress(test_neo4j_repo, uid, "gist", None) is True
-    assert "original_content" not in _props(test_neo4j_repo, uid)
+    repo = ConsolidationRepository(test_neo4j_repo)
+
+    assert repo.compress_node(uid, "gist", read_content=None, read_summary="a stale summary",
+                              min_days_since_accessed=_MIN_DAYS, fence_key=None) is False
+    assert repo.compress_node(uid, "gist", read_content=None, read_summary="only a summary",
+                              min_days_since_accessed=_MIN_DAYS, fence_key=None) is True
+
+    assert _props(test_neo4j_repo, uid)["original_content"] == "only a summary"
 
 
 @pytest.mark.asyncio
@@ -164,7 +176,8 @@ def test_a_rederive_pending_node_is_not_restored(test_neo4j_repo) -> None:
     repo = ConsolidationRepository(test_neo4j_repo)
 
     assert repo.complete_rehydration(
-        uid, read_summary="gist", read_base="the full original body") is False
+        uid, "the full original body", read_summary="gist",
+        read_base="the full original body") is False
     assert repo.complete_rehydration(
         uid, "merged text", read_summary="gist", read_base="the full original body") is False
 
@@ -176,18 +189,17 @@ def test_a_rederive_pending_node_is_not_restored(test_neo4j_repo) -> None:
 async def test_an_erased_node_is_not_restored_through_the_service(
     test_neo4j_repo, stub_graphiti_client, tmp_path
 ) -> None:
-    """The metadata read withholds a rederive_pending node's text, so nothing is restored."""
+    """The state read withholds a rederive_pending node's text even while original_content is
+    still on the node, so no restore is attempted and the content stays the summary."""
     uid, _ = _seed(test_neo4j_repo, content="erased body")
     assert _compress(test_neo4j_repo, uid, "gist", "erased body") is True
-    test_neo4j_repo.execute(
-        "MATCH (e:Entity {uuid:$u}) SET e.rederive_pending = true, e.original_content = null",
-        params={"u": uid},
-    )
+    test_neo4j_repo.execute("MATCH (e:Entity {uuid:$u}) SET e.rederive_pending = true",
+                            params={"u": uid})
     svc = _service(test_neo4j_repo, stub_graphiti_client, tmp_path, _FakeLLM())
 
     await svc.rehydrate_node(uid)
 
-    assert "erased body" not in str(_props(test_neo4j_repo, uid).values())
+    assert _props(test_neo4j_repo, uid)["content"] == "gist"
 
 
 def test_rehydrate_refuses_when_the_summary_or_base_moved_since_the_read(test_neo4j_repo) -> None:
@@ -197,10 +209,106 @@ def test_rehydrate_refuses_when_the_summary_or_base_moved_since_the_read(test_ne
 
     assert repo.complete_rehydration(uid, "merged", read_summary="stale", read_base="body") is False
     assert repo.complete_rehydration(uid, "merged", read_summary="gist", read_base="stale") is False
-    assert repo.complete_rehydration(uid, read_summary="stale", read_base="body") is False
+    assert repo.complete_rehydration(uid, "body", read_summary="stale", read_base="body") is False
     assert _props(test_neo4j_repo, uid)["freshness"] == "COMPRESSED"
 
     assert repo.complete_rehydration(uid, "merged", read_summary="gist", read_base="body") is True
+
+
+def test_a_state_flip_does_not_compare_the_read_text(test_neo4j_repo) -> None:
+    """No text is copied, so a moved summary or base does not refuse the flip."""
+    uid, _ = _seed(test_neo4j_repo, content="body")
+    assert _compress(test_neo4j_repo, uid, "gist", "body") is True
+
+    assert ConsolidationRepository(test_neo4j_repo).complete_rehydration(
+        uid, read_summary="stale", read_base="stale") is True
+
+    p = _props(test_neo4j_repo, uid)
+    assert (p["freshness"], p["content"]) == ("ACTIVE", "gist")
+
+
+def test_an_absorb_into_a_compressed_keep_extends_its_base_and_marker(test_neo4j_repo) -> None:
+    """The keep's replaced body gets the absorbed block too, and the marker follows the new
+    content, so a later rehydrate restores the block."""
+    ns, keep, gone, group = f"decay-{_u()}", _u(), _u(), _u()
+    test_neo4j_repo.execute(
+        "CREATE (:Entity {uuid:$k, name:'keep', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'COMPRESSED', content:'gist', original_content:'the body', "
+        "compressed_summary_sha256:$sha, conflict_group_id:$cg, "
+        "created_at:datetime('2020-01-01')}), "
+        "(:Entity {uuid:$g, name:'gone', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'ACTIVE', content:'other text', conflict_group_id:$cg, "
+        "created_at:datetime('2020-01-01')})",
+        params={"k": keep, "g": gone, "ns": ns, "cg": group, "sha": summary_sha256("gist")},
+    )
+
+    ConsolidationRepository(test_neo4j_repo).resolve_conflict_group(
+        group, "replace", keep_uuid=keep, remove_uuid=gone, namespace=ns,
+    )
+
+    p = _props(test_neo4j_repo, keep)
+    assert p["freshness"] == "COMPRESSED"
+    assert p["original_content"].startswith("the body") and "other text" in p["original_content"]
+    assert p["compressed_summary_sha256"] == summary_sha256(p["content"])
+    assert p["content"].startswith("gist") and "other text" in p["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_marked_keep_restores_the_absorbed_block(
+    test_neo4j_repo, stub_graphiti_client, tmp_path
+) -> None:
+    keep, gone, group, ns = _u(), _u(), _u(), f"decay-{_u()}"
+    test_neo4j_repo.execute(
+        "CREATE (:Entity {uuid:$k, name:'keep', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'COMPRESSED', content:'gist', original_content:'the body', "
+        "compressed_summary_sha256:$sha, conflict_group_id:$cg, created_at:datetime('2020-01-01')}), "
+        "(:Entity {uuid:$g, name:'gone', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'ACTIVE', content:'other text', conflict_group_id:$cg, "
+        "created_at:datetime('2020-01-01')})",
+        params={"k": keep, "g": gone, "ns": ns, "cg": group, "sha": summary_sha256("gist")},
+    )
+    ConsolidationRepository(test_neo4j_repo).resolve_conflict_group(
+        group, "replace", keep_uuid=keep, remove_uuid=gone, namespace=ns,
+    )
+    svc = _service(test_neo4j_repo, stub_graphiti_client, tmp_path, _FakeLLM())
+
+    assert await svc.rehydrate_node(keep) is True
+
+    p = _props(test_neo4j_repo, keep)
+    assert p["freshness"] == "ACTIVE"
+    assert p["content"].startswith("the body") and "other text" in p["content"]
+
+
+@pytest.mark.asyncio
+async def test_an_unmarked_keep_absorbs_without_blessing_its_base(
+    test_neo4j_repo, stub_graphiti_client, tmp_path
+) -> None:
+    """A legacy, multi-cycle keep: its stored base is stale, so the absorb leaves the base alone,
+    leaves the marker null, and a contextless rehydrate is a flip keeping summary plus block."""
+    keep, gone, group, ns = _u(), _u(), _u(), f"decay-{_u()}"
+    test_neo4j_repo.execute(
+        "CREATE (:Entity {uuid:$k, name:'keep', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'COMPRESSED', content:'gist', original_content:'stale first body', "
+        "rehydration_count:1, conflict_group_id:$cg, created_at:datetime('2020-01-01')}), "
+        "(:Entity {uuid:$g, name:'gone', group_id:$ns, namespace:$ns, scope:'PERSISTENT', "
+        "freshness:'ACTIVE', content:'other text', conflict_group_id:$cg, "
+        "created_at:datetime('2020-01-01')})",
+        params={"k": keep, "g": gone, "ns": ns, "cg": group},
+    )
+    ConsolidationRepository(test_neo4j_repo).resolve_conflict_group(
+        group, "replace", keep_uuid=keep, remove_uuid=gone, namespace=ns,
+    )
+    p = _props(test_neo4j_repo, keep)
+    assert p["original_content"] == "stale first body"
+    assert p.get("compressed_summary_sha256") is None
+    merged = p["content"]
+    svc = _service(test_neo4j_repo, stub_graphiti_client, tmp_path, _FakeLLM())
+
+    assert await svc.rehydrate_node(keep) is True
+
+    p = _props(test_neo4j_repo, keep)
+    assert (p["freshness"], p["content"]) == ("ACTIVE", merged)
+    assert "other text" in merged
 
 
 def test_the_ratchet_never_passes_the_cap(test_neo4j_repo) -> None:
@@ -229,3 +337,53 @@ def test_a_gone_neighbour_is_not_counted_as_persistent(test_neo4j_repo) -> None:
     )
 
     assert ConsolidationRepository(test_neo4j_repo).count_persistent_edges("pc") == 1
+
+
+def _write_blocked_then_refused(repo: Any, uid: str, attempt: Any) -> bool:
+    """Run ``attempt`` while a second session holds an uncommitted content write on the node.
+
+    The attempt must be waiting on the node when the writer commits; returns what it returned.
+    """
+    import threading
+    import time
+
+    result: list[bool] = []
+    driver = repo._get_driver()
+    with driver.session(database=repo.database) as session:
+        tx = session.begin_transaction()
+        tx.run("MATCH (n:Entity {uuid:$u}) SET n.content = 'changed'", u=uid).consume()
+        worker = threading.Thread(target=lambda: result.append(attempt()))
+        worker.start()
+        time.sleep(1.0)
+        assert worker.is_alive(), "the write did not wait for the node lock"
+        tx.commit()
+    worker.join(timeout=30)
+    assert not worker.is_alive()
+    return result[0]
+
+
+def test_a_compress_waiting_on_a_content_write_refuses_after_it_commits(test_neo4j_repo) -> None:
+    """Neo4j does not re-check a WHERE after a write waits for a lock: the lock-then-recheck
+    prefix is what makes the compress see the committed content."""
+    uid, _ = _seed(test_neo4j_repo)
+
+    refused = _write_blocked_then_refused(
+        test_neo4j_repo, uid, lambda: _compress(test_neo4j_repo, uid, "gist", "the body"))
+
+    assert refused is False
+    p = _props(test_neo4j_repo, uid)
+    assert (p["freshness"], p["content"]) == ("ACTIVE", "changed")
+
+
+def test_a_rehydrate_waiting_on_a_content_write_refuses_after_it_commits(test_neo4j_repo) -> None:
+    uid, _ = _seed(test_neo4j_repo, content="the body")
+    assert _compress(test_neo4j_repo, uid, "gist", "the body") is True
+
+    refused = _write_blocked_then_refused(
+        test_neo4j_repo, uid,
+        lambda: ConsolidationRepository(test_neo4j_repo).complete_rehydration(
+            uid, "the body", read_summary="gist", read_base="the body"))
+
+    assert refused is False
+    p = _props(test_neo4j_repo, uid)
+    assert (p["freshness"], p["content"]) == ("COMPRESSED", "changed")

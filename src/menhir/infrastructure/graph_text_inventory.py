@@ -145,8 +145,8 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
 #: The memory text an Entity can hold today that the structural allowlist does not cover, named
 #: for documentation and tests; the authoritative rule is "not in ENTITY_STRUCTURAL_PROPERTIES".
 ENTITY_KNOWN_TEXT_PROPERTIES: tuple[str, ...] = (
-    "summary", "content", "original_content", "view_name", "view_summary", "attributes",
-    "content_embedding", "merge_audit", "candidate_notes",
+    "summary", "content", "original_content", "compressed_summary_sha256", "view_name",
+    "view_summary", "attributes", "content_embedding", "merge_audit", "candidate_notes",
 )
 
 GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (

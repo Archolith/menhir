@@ -665,7 +665,7 @@ def test_compress_node_returns_true_when_node_updated() -> None:
     assert result is True
     assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
     assert neo4j.calls[0]["params"]["compressed_summary"] == "short summary"
-    assert "SET n.original_content = $read_content" in neo4j.calls[0]["query"]
+    assert "SET n.original_content = $source_text" in neo4j.calls[0]["query"]
 
 
 @pytest.mark.unit
@@ -916,7 +916,7 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
     assert absorption_call["params"]["uuid"] == "keep-1"
     assert "Absorbed from superseded memory (remove-1)" in absorption_call["params"]["content"]
     assert absorption_call["params"]["original"] == "Keep text"
-    assert "n.original_content = coalesce(n.original_content, $original)" in absorption_call["query"]
+    assert "ELSE coalesce(n.original_content, $original) END" in absorption_call["query"]
     gone_call = neo4j.calls[5]
     assert gone_call["params"] == {
         "group_id": "group-1",
