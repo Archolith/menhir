@@ -19,6 +19,7 @@ from menhir.cli.output import (
     detect_write_signals,
     format_hook_output,
     format_save_checkpoint,
+    hook_context_max_tokens,
     format_temporal_line,
     format_write_nudge,
     should_run_this_turn,
@@ -251,9 +252,14 @@ def _run_prompt_impl(
                 await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
-                        max_tokens=max_tokens,
+                        # The Context allowance left after the list sections, so what comes
+                        # back already fits and is never cut mid-memory by the formatter.
+                        max_tokens=hook_context_max_tokens(
+                            flagged, todos, temporal_memories, max_tokens
+                        ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
+                        exclude_todo_uuids={t["uuid"] for t in todos if t.get("uuid")},
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
@@ -358,9 +364,14 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                 await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
-                        max_tokens=max_tokens,
+                        # The Context allowance left after the list sections, so what comes
+                        # back already fits and is never cut mid-memory by the formatter.
+                        max_tokens=hook_context_max_tokens(
+                            flagged, todos, temporal_memories, max_tokens
+                        ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
+                        exclude_todo_uuids={t["uuid"] for t in todos if t.get("uuid")},
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited

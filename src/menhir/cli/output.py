@@ -11,7 +11,7 @@ from pathlib import Path
 
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
-from menhir.services.context_builder import estimate_tokens
+from menhir.services.context_builder import STALE_ADVISORY_PREFIX, estimate_tokens
 
 MAX_SUMMARY = 120
 MAX_CONTEXT_CHARS = 8000
@@ -329,37 +329,25 @@ def _trim_to_tokens(text: str, budget: int) -> tuple[str, bool]:
     return "", True
 
 
-def format_hook_output(
-    flagged: list[dict],
-    context_text: str | None = None,
-    query: str | None = None,
-    write_nudge: str | None = None,
-    temporal_line: str | None = None,
-    todos: list[dict] | None = None,
-    temporal_memories: list[dict] | None = None,
-    max_tokens: int = DEFAULT_HOOK_TOKEN_BUDGET,
-) -> str:
-    """Build the recalled-memories block for hook injection, bounded by `max_tokens`.
-
-    EVERYTHING GRAPH-DERIVED IS BUDGETED. `temporal_line` and `write_nudge` are not: both are
-    generated locally from the clock and the current prompt, are a single line each, and carry no
-    stored text, so no amount of graph content can inflate them. That is the bound this function
-    actually offers, stated rather than implied.
-    """
-    sections: list[str] = []
-
+def _effective_budget(max_tokens: int) -> int:
     # Mirror context_builder: the heuristic estimator under-counts real tokens, so it spends half
     # the nominal budget rather than pretending its count is exact.
-    effective_budget = max(
+    return max(
         0,
         max_tokens if _ESTIMATION_MODE == "tokenizer" else math.floor(max_tokens * 0.5),
     )
+
+
+def _render_list_sections(
+    flagged: list[dict],
+    todos: list[dict] | None,
+    temporal_memories: list[dict] | None,
+    effective_budget: int,
+) -> tuple[list[str], int, int]:
+    """Render Reminders / TODOs / Pinned. Returns (lines, remaining list allowance, context floor)."""
     context_floor = math.floor(effective_budget * CONTEXT_RESERVE_FRACTION)
     list_allowance = effective_budget - context_floor
-
-    # Temporal context (client-id-specific current time + elapsed)
-    if temporal_line:
-        sections.append(temporal_line)
+    sections: list[str] = []
 
     # The three graph-derived list sections, built in display order.
     reminder_lines: list[str] = []
@@ -418,24 +406,124 @@ def format_hook_output(
             used += marker_cost
         sections.extend(emitted)
         remaining = max(0, remaining - used)
+    return sections, remaining, context_floor
+
+
+def _context_budget(
+    flagged: list[dict],
+    todos: list[dict] | None,
+    temporal_memories: list[dict] | None,
+    max_tokens: int,
+) -> int:
+    """Token allowance (estimator units) the Context section gets after the list sections."""
+    effective_budget = _effective_budget(max_tokens)
+    _, remaining, context_floor = _render_list_sections(
+        flagged, todos, temporal_memories, effective_budget
+    )
+    list_allowance = effective_budget - context_floor
+    # Context takes the whole surplus the list sections left. The floor has TWO independent
+    # guarantees and removing either alone leaves it standing: the allowance the lists draw
+    # from is `effective_budget - context_floor`, and the max() below re-imposes the floor on
+    # the result. Verified by mutation -- neither single removal fails a test, and the compound
+    # removal does.
+    return max(context_floor, effective_budget - (list_allowance - remaining))
+
+
+def hook_context_max_tokens(
+    flagged: list[dict],
+    todos: list[dict] | None,
+    temporal_memories: list[dict] | None,
+    max_tokens: int,
+) -> int:
+    """The ``max_tokens`` to hand ``build_context`` so its output already fits the Context allowance.
+
+    ``build_context`` halves its budget under the heuristic estimator, and so does the hook, so
+    the allowance is expressed in nominal tokens here to land on the same effective budget.
+    """
+    budget = _context_budget(flagged, todos, temporal_memories, max_tokens)
+    return budget if _ESTIMATION_MODE == "tokenizer" else budget * 2
+
+
+def _context_blocks(text: str) -> list[str]:
+    """Split packed context into blocks that must stay or go together.
+
+    ``build_context`` separates entries with a blank line, and a stale-anchor advisory is its own
+    entry directly after the memory it qualifies. The advisory is glued to that memory here so a
+    cut can never keep the memory and drop the warning.
+    """
+    blocks: list[str] = []
+    for part in text.split("\n\n"):
+        if blocks and part.startswith(STALE_ADVISORY_PREFIX):
+            blocks[-1] += "\n\n" + part
+        else:
+            blocks.append(part)
+    return blocks
+
+
+def _trim_context(text: str, budget: int, max_chars: int) -> tuple[str, bool]:
+    """Shrink packed context to `budget` tokens and `max_chars`, cutting only between entries.
+
+    A memory is never separated from its advisory. A single leading entry too large to fit is
+    char-trimmed only when it carries no advisory or review text that the cut could drop.
+    """
+    if budget <= 0:
+        return "", bool(text)
+    blocks = _context_blocks(text)
+    kept: list[str] = []
+    for block in blocks:
+        candidate = "\n\n".join([*kept, block])
+        if len(candidate) > max_chars or estimate_tokens(candidate)[0] > budget:
+            break
+        kept.append(block)
+    if len(kept) == len(blocks):
+        return "\n\n".join(kept), False
+    if not kept:
+        first = blocks[0]
+        if STALE_ADVISORY_PREFIX in first or "Review required:" in first:
+            return "", True
+        trimmed, _ = _trim_to_tokens(first[:max_chars], budget)
+        return trimmed, True
+    return "\n\n".join(kept), True
+
+
+def format_hook_output(
+    flagged: list[dict],
+    context_text: str | None = None,
+    query: str | None = None,
+    write_nudge: str | None = None,
+    temporal_line: str | None = None,
+    todos: list[dict] | None = None,
+    temporal_memories: list[dict] | None = None,
+    max_tokens: int = DEFAULT_HOOK_TOKEN_BUDGET,
+) -> str:
+    """Build the recalled-memories block for hook injection, bounded by `max_tokens`.
+
+    EVERYTHING GRAPH-DERIVED IS BUDGETED. `temporal_line` and `write_nudge` are not: both are
+    generated locally from the clock and the current prompt, are a single line each, and carry no
+    stored text, so no amount of graph content can inflate them. That is the bound this function
+    actually offers, stated rather than implied.
+    """
+    sections: list[str] = []
+
+    effective_budget = _effective_budget(max_tokens)
+
+    # Temporal context (client-id-specific current time + elapsed)
+    if temporal_line:
+        sections.append(temporal_line)
+
+    list_lines, _, _ = _render_list_sections(flagged, todos, temporal_memories, effective_budget)
+    sections.extend(list_lines)
 
     # Context section (pre-formatted by ContextBuilderService)
     if context_text and context_text.strip():
         body = context_text.strip()
         # A fence the content can close is not a fence.
         body = body.replace("```", "'''")
-        truncated = False
-        if len(body) > MAX_CONTEXT_CHARS:
-            body = body[:MAX_CONTEXT_CHARS].rstrip()
-            truncated = True
-        # Context takes the whole surplus the list sections left. The floor has TWO independent
-        # guarantees and removing either alone leaves it standing: the allowance the lists draw
-        # from is `effective_budget - context_floor`, and the max() below re-imposes the floor on
-        # the result. Verified by mutation -- neither single removal fails a test, and the compound
-        # removal does.
-        context_budget = max(context_floor, effective_budget - (list_allowance - remaining))
-        body, budget_truncated = _trim_to_tokens(body, context_budget)
-        if truncated or budget_truncated:
+        context_budget = _context_budget(flagged, todos, temporal_memories, max_tokens)
+        # build_context was handed this same allowance, so this normally keeps everything. When it
+        # does cut (a different estimate, a larger scrubbed list), it cuts between entries.
+        body, truncated = _trim_context(body, context_budget, MAX_CONTEXT_CHARS)
+        if truncated:
             body = body + "\n...[context truncated]"
         header = f"### Context (query={_escape_inline(query)})" if query else "### Context"
         sections.append(header)
