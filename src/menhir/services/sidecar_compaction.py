@@ -37,6 +37,12 @@ def _ensure_compacted_column(conn: sqlite3.Connection) -> bool:
     return True
 
 
+def _is_busy_error(exc: sqlite3.OperationalError) -> bool:
+    """True only for lock contention; disk-full, I/O and corruption errors are real failures."""
+    text = str(exc).lower()
+    return "locked" in text or "busy" in text
+
+
 def run_sidecar_compaction(*, db_path: Path | str | None = None) -> dict[str, Any]:
     """VACUUM, then wal_checkpoint(TRUNCATE); stamp ``sidecar_compacted_at`` only if both succeed.
 
@@ -50,11 +56,13 @@ def run_sidecar_compaction(*, db_path: Path | str | None = None) -> dict[str, An
     conn = connect_telemetry_db(path)
     try:
         conn.isolation_level = None  # autocommit: VACUUM cannot run inside a transaction
-        has_journal = _ensure_compacted_column(conn)
         try:
+            has_journal = _ensure_compacted_column(conn)
             conn.execute("VACUUM")
             row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         except sqlite3.OperationalError as exc:
+            if not _is_busy_error(exc):
+                raise
             logger.warning("sidecar compaction busy, will retry: %s", exc)
             return {"status": RETRY, "reason": f"busy: {exc}", "started_at": started_at}
         if row is None or int(row[0]) != 0:
