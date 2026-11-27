@@ -139,7 +139,10 @@ def test_normal_decay_never_selects_or_deletes_derived_views() -> None:
     repo.fetch_decay_candidates(
         "ACTIVE", min_days_since_accessed=30, max_edge_count=2
     )
-    repo.bridge_and_delete("view-1")
+    repo.bridge_and_delete(
+        "view-1", min_days=30, max_edge_count=2, max_sharpness=0.1, read_type="SEMANTIC",
+        read_edge_count=0, read_sharpness=0.05, read_recency="2024-01-01T00:00:00Z",
+        requires_target_date=False, read_rel_count=0, read_rel_signatures=[])
 
     for query, _ in neo4j.calls:
         assert "NOT coalesce(n.is_view, false)" in query

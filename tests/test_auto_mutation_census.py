@@ -58,7 +58,7 @@ ALLOWED = {
     ("bridge_and_delete", f"{_DC}._mutate_and_verify"): (
         "internal", "only reached from _run via the DECAY_DELETE kind; _run_decay gates delete_decayed_node"),
     ("bridge_and_delete", f"{_ADAPTER}.bridge_and_delete"): (
-        "delegate", "adapter forwards to the repository; its only caller is _run_decay"),
+        "delegate", "adapter forwards to the repository; its only caller is DeleteCoordinator._mutate_and_verify"),
     ("delete_session_nodes", f"{_ADAPTER}.delete_session_nodes"): (
         "delegate", "adapter forwards to the repository; nothing else calls it"),
     ("cleanup_orphan_episodes",

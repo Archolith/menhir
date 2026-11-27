@@ -801,7 +801,7 @@ the source of truth for "done". `op_id` and `request_json` are immutable once PR
 | Column | Notes |
 |--------|-------|
 | `op_id` | Primary key. |
-| `operation_kind` | Closed enum: `METRIC_WRITE`, `METRIC_MIGRATE`, `METRIC_REVERSE`, `ENTITY_MERGE`, `ENTITY_UNMERGE`, `LEGACY_ENTITY_UNMERGE`, `ENTITY_DELETE`, `SESSION_TTL_DELETE`. |
+| `operation_kind` | Closed enum: `METRIC_WRITE`, `METRIC_MIGRATE`, `METRIC_REVERSE`, `ENTITY_MERGE`, `ENTITY_UNMERGE`, `LEGACY_ENTITY_UNMERGE`, `ENTITY_DELETE`, `SESSION_TTL_DELETE`, `DECAY_DELETE`, `EXPLICIT_ERASURE`. |
 | `target_uuid` / `target_key` | `target_key` is the order-independent pair key for merge/unmerge; the partial unique index fences it while `PREPARED`/`NEEDS_REVIEW`. Deletes pass `target_key=NULL`. |
 | `before_snapshot_json` | The complete lossless recovery snapshot, committed BEFORE any destruction (invariant 3). |
 | `expected_after_sha256` | Postcondition fingerprint frozen at PREPARE; only an exact match may COMMIT (invariant 5). |

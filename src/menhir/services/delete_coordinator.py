@@ -1,14 +1,15 @@
 """Journaled physical-delete coordinators (plan Phase 6): ENTITY_DELETE, SESSION_TTL_DELETE, DECAY_DELETE.
 
-Both delete paths were destructive with no durable before-record:
+Every delete path was destructive with no durable before-record:
 
 * an explicit operator delete ran a bare DETACH DELETE -- once gone, gone;
 * the session TTL sweep recorded its audit BEFORE deleting, from the CANDIDATE list. Its delete then
   re-filtered on ``scope = 'SESSION'``, so a node promoted in the race window was NOT deleted -- yet
-  the audit already claimed it was. It logged its intent and called that a record.
+  the audit already claimed it was. It logged its intent and called that a record;
+* the decay sweep's bridge-and-delete re-checked almost nothing and left no record.
 
 The missing durable-before-delete record is exactly why ~24 nodes destroyed by the degree-zero orphan
-cleanup on 2026-07-12 were unrecoverable. Both paths now journal a COMPLETE snapshot as PREPARED
+cleanup on 2026-07-12 were unrecoverable. All three kinds now journal a COMPLETE snapshot as PREPARED
 before anything is destroyed, take the exact deleted-uuid list FROM THE MUTATION, and verify absence
 before COMMITTED. The audit records what happened, not what was intended.
 
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain import merge_snapshot as ms
+from menhir.domain.memory_types import get_policy
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services import auto_mutation_policy as amp
@@ -56,6 +58,22 @@ logger = logging.getLogger(__name__)
 NOTHING_TO_DELETE = "NOTHING_TO_DELETE"
 PREPARE_FAILED = "PREPARE_FAILED"
 SNAPSHOT_FAILED = "SNAPSHOT_FAILED"
+POLICY_DECLINED = "POLICY_DECLINED"
+MISSING_READ_VALUES = "MISSING_READ_VALUES"
+GATE_REFUSED = "GATE_REFUSED"
+
+
+def _relationship_fingerprint(state: Mapping[str, Any]) -> tuple[int, list[str]]:
+    """Incident-relationship count and distinct ``type|direction|peer`` signatures of a snapshot.
+
+    The decay delete statement recomputes both under the node lock and refuses on a difference, so
+    the journaled snapshot still describes exactly what is destroyed.
+    """
+    rels = list(state.get("relationships") or [])
+    sigs = sorted({
+        f"{r['type']}|{r['direction']}|{r.get('peer_identity')}" for r in rels
+    })
+    return len(rels), sigs
 
 
 class DeleteDrift(RuntimeError):
@@ -136,6 +154,7 @@ class DeleteCoordinator:
         self,
         node_uuid: str,
         *,
+        candidate: Mapping[str, Any],
         min_days: float,
         max_edge_count: int,
         max_sharpness: float,
@@ -143,11 +162,21 @@ class DeleteCoordinator:
     ) -> dict[str, Any]:
         """Delete ONE COMPRESSED node the decay sweep selected, journaled, bridging its neighbours.
 
-        The caller owns the ``auto_delete_mode`` gate. Every delete predicate is re-checked on the
-        live node inside the one mutation statement, so a node rehydrated or recalled after
-        selection is skipped, not deleted. The result carries ``edges_bridged`` and
-        ``bridge_skipped_hubs`` from that statement.
+        The caller owns the ``auto_delete_mode`` gate. ``candidate`` is the row the selection read.
+        Its type's policy (per-type thresholds, TEMPORAL ``target_date``) is applied here in Python
+        before PREPARE, which is sound because the type, edge count, sharpness and recency it read
+        are bound into the one mutation statement: that statement re-checks them (and the incident
+        relationship set) on the live node under its lock, so a node rehydrated, recalled, retyped
+        or re-linked after selection is skipped, not deleted. The result carries ``edges_bridged``
+        and ``bridge_skipped_hubs`` from that statement; a decline carries a ``reason``.
         """
+        read_type = str(candidate.get("type") or "SEMANTIC")
+        policy = get_policy(read_type)
+        if not policy.should_delete(dict(candidate)):
+            return {"deleted": [], "skipped": [node_uuid], "reason": POLICY_DECLINED}
+        recency = candidate.get("recency")
+        if recency is None or candidate.get("sharpness") is None:
+            return {"deleted": [], "skipped": [node_uuid], "reason": MISSING_READ_VALUES}
         return self._run(
             kind="DECAY_DELETE",
             targets=[node_uuid],
@@ -158,6 +187,11 @@ class DeleteCoordinator:
                 "min_days": min_days,
                 "max_edge_count": max_edge_count,
                 "max_sharpness": max_sharpness,
+                "read_type": read_type,
+                "read_edge_count": int(candidate.get("edge_count") or 0),
+                "read_sharpness": float(candidate["sharpness"]),
+                "read_recency": str(recency),
+                "requires_target_date": bool(policy.uses_target_date),
             },
         )
 
@@ -198,7 +232,20 @@ class DeleteCoordinator:
         # Evidence that these deletions would leave unreferenced. Reported, NOT deleted.
         orphan_evidence = self.graph_adapter.newly_unreferenced_evidence(present)
 
+        fingerprint: dict[str, Any] | None = None
+        if decay_gate is not None:
+            count, signatures = _relationship_fingerprint(snapshots[present[0]])
+            fingerprint = {"read_rel_count": count, "read_rel_signatures": signatures}
+
         if dry_run:
+            if fingerprint is not None and not self.graph_adapter.decay_delete_gate_passes(
+                present[0], **decay_gate, **fingerprint
+            ):
+                return {
+                    "deleted": [], "skipped": present, "dry_run": True, "would_delete": [],
+                    "reason": GATE_REFUSED, "already_absent": already_absent,
+                    "newly_unreferenced_evidence": orphan_evidence,
+                }
             return {
                 "deleted": [], "skipped": [], "dry_run": True,
                 "would_delete": present,
@@ -215,8 +262,9 @@ class DeleteCoordinator:
             "require_scope": require_scope,
             "requested_at": _utc_now_iso(),
         }
-        if decay_gate is not None:
+        if decay_gate is not None and fingerprint is not None:
             request["decay_gate"] = decay_gate
+            request["relationship_count"] = fingerprint["read_rel_count"]
         snapshot_payload = {
             "schema_version": ms.SCHEMA_VERSION,
             "nodes": snapshots,
@@ -251,7 +299,7 @@ class DeleteCoordinator:
             return self._mutate_and_verify(
                 op_id=op_id, kind=kind, present=present, require_scope=require_scope,
                 already_absent=already_absent, orphan_evidence=orphan_evidence,
-                owner_token=token, decay_gate=decay_gate,
+                owner_token=token, decay_gate=decay_gate, fingerprint=fingerprint,
             )
 
     def _mutate_and_verify(
@@ -265,6 +313,7 @@ class DeleteCoordinator:
         orphan_evidence: list[str],
         owner_token: str,
         decay_gate: dict[str, Any] | None = None,
+        fingerprint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Destroy, verify absence, then transition. Runs inside the ownership heartbeat scope."""
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
@@ -273,7 +322,7 @@ class DeleteCoordinator:
             if kind == "DECAY_DELETE":
                 # One statement: lock, re-check every delete predicate, bridge, DETACH DELETE.
                 bridge_outcome = self.graph_adapter.bridge_and_delete(
-                    present[0], **(decay_gate or {})
+                    present[0], **(decay_gate or {}), **(fingerprint or {})
                 )
                 deleted = list(present) if int(bridge_outcome.get("deleted", 0) or 0) else []
             else:
@@ -324,6 +373,12 @@ class DeleteCoordinator:
         if kind == "DECAY_DELETE":
             result["edges_bridged"] = int(bridge_outcome.get("edges_bridged", 0) or 0)
             result["bridge_skipped_hubs"] = list(bridge_outcome.get("bridge_skipped_hubs") or [])
+            result["bridge_uuids"] = list(bridge_outcome.get("bridge_uuids") or [])
+            if result["bridge_uuids"]:
+                # The journal has no commit payload; each bridge also carries bridged_from = target.
+                logger.info("%s (op %s) created bridges %s", kind, op_id, result["bridge_uuids"])
+            if not deleted:
+                result["reason"] = bridge_outcome.get("reason") or GATE_REFUSED
         if settled == COMPLETED_BY_OTHER_OWNER:
             result["completed_by_other_owner"] = True
         return result
@@ -370,6 +425,8 @@ class DeleteCoordinator:
             u for u in targets if self.graph_adapter.capture_node_state(u) is not None
         ]
         if survivors:
+            # Stays NEEDS_REVIEW even for DECAY_DELETE: an owner whose heartbeat expired might still
+            # commit its statement, so a surviving node is not proof that none will run.
             return WOULD_NEEDS_REVIEW, {
                 "survivors": survivors,
                 "observed_error": (

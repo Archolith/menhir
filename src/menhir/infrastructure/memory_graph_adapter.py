@@ -1262,20 +1262,12 @@ class MemoryGraphAdapter:
             node_uuid, updated_content, source_uuids=source_uuids, read_epoch=read_epoch
         )
 
-    def bridge_and_delete(
-        self,
-        node_uuid: str,
-        *,
-        min_days: float | None = None,
-        max_edge_count: int | None = None,
-        max_sharpness: float | None = None,
-    ) -> dict[str, Any]:
-        return self._consolidation.bridge_and_delete(
-            node_uuid,
-            min_days=min_days,
-            max_edge_count=max_edge_count,
-            max_sharpness=max_sharpness,
-        )
+    def bridge_and_delete(self, node_uuid: str, **gate: Any) -> dict[str, Any]:
+        """Delegate; every gate keyword of ``ConsolidationRepository.bridge_and_delete`` is required."""
+        return self._consolidation.bridge_and_delete(node_uuid, **gate)
+
+    def decay_delete_gate_passes(self, node_uuid: str, **gate: Any) -> bool:
+        return self._consolidation.decay_delete_gate_passes(node_uuid, **gate)
 
     def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
         """Return high-level graph counts, optionally scoped to one silo (CF-33)."""

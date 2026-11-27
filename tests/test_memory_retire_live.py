@@ -24,6 +24,7 @@ import pytest
 
 from menhir.domain import merge_eligibility as me
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.cypher import memory_recency_cypher
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.recall_pipeline import _memory_admitted
 from menhir.services.recall_service import RecallService
@@ -61,6 +62,32 @@ def _norm(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)  # neo4j temporal types
+
+
+def _decay_gate(repo: Any, uuid: str) -> dict[str, Any]:
+    """Bounds plus the live node's own values as the decay read, so only the node's state decides."""
+    row = repo.execute(
+        f"""
+        MATCH (n:Entity {{uuid:$u}})
+        OPTIONAL MATCH (n)-[r]-(p)
+        RETURN coalesce(n.type, 'SEMANTIC') AS read_type,
+               coalesce(toInteger(n.edge_count), 0) AS read_edge_count,
+               toFloat(n.sharpness) AS read_sharpness,
+               toString({memory_recency_cypher("n")}) AS read_recency,
+               count(r) AS read_rel_count,
+               collect(CASE WHEN r IS NULL THEN NULL ELSE type(r) + '|'
+                   + CASE WHEN startNode(r) = n THEN 'out' ELSE 'in' END + '|'
+                   + coalesce(p.uuid, p.name, elementId(p)) END) AS sigs
+        """,
+        {"u": uuid},
+    )[0]
+    return {
+        "min_days": 30, "max_edge_count": 5, "max_sharpness": 0.5,
+        "read_type": row["read_type"], "read_edge_count": row["read_edge_count"],
+        "read_sharpness": row["read_sharpness"], "read_recency": row["read_recency"],
+        "requires_target_date": False, "read_rel_count": row["read_rel_count"],
+        "read_rel_signatures": sorted(set(row["sigs"])),
+    }
 
 
 class _Env:
@@ -609,7 +636,12 @@ def test_retired_persistent_entity_is_frozen_against_decay_compression_and_bridg
 
     assert not ({squash, bridge} & candidates())
     assert adapter.compress_node(squash, "SUMMARY") is False
-    assert adapter.bridge_and_delete(bridge) == {"edges_bridged": 0, "deleted": 0}
+    # The node is made COMPRESSED (the one state the delete gate admits) for the call only, so the
+    # retired marker is the single clause that can refuse it; it is put back to ACTIVE afterwards.
+    env.set(bridge, "n.freshness = 'COMPRESSED'")
+    assert adapter.bridge_and_delete(bridge, **_decay_gate(env.repo, bridge)) == {
+        "edges_bridged": 0, "deleted": 0}
+    env.set(bridge, "n.freshness = 'ACTIVE'")
     # Nothing moved: content, freshness and existence are unchanged.
     assert env.props(squash) == props_squash
     assert env.props(bridge) == props_bridge
@@ -623,7 +655,8 @@ def test_retired_persistent_entity_is_frozen_against_decay_compression_and_bridg
     row = env.repo.execute(
         "MATCH (n:Entity {uuid:$u}) RETURN n.freshness AS f, n.content AS c", {"u": squash})[0]
     assert (row["f"], row["c"]) == ("COMPRESSED", "SUMMARY")
-    assert adapter.bridge_and_delete(bridge)["deleted"] == 1
+    env.set(bridge, "n.freshness = 'COMPRESSED'")
+    assert adapter.bridge_and_delete(bridge, **_decay_gate(env.repo, bridge))["deleted"] == 1
     assert not env.exists(bridge)
 
 

@@ -98,7 +98,10 @@ def test_decay_bridge_and_session_delete_paths_apply_live_fact_retention_guard()
         min_days_since_accessed=30,
         max_edge_count=2,
     )
-    repo.bridge_and_delete("evidence-1")
+    repo.bridge_and_delete(
+        "evidence-1", min_days=30, max_edge_count=2, max_sharpness=0.1, read_type="SEMANTIC",
+        read_edge_count=0, read_sharpness=0.05, read_recency="2024-01-01T00:00:00Z",
+        requires_target_date=False, read_rel_count=0, read_rel_signatures=[])
     repo.delete_session_nodes(["evidence-1"])
     repo.delete_entities_returning_uuids(["evidence-1"], require_scope="SESSION")
     repo.fetch_ttl_expired_session_uuids("session-1")
