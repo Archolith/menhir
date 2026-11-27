@@ -4,6 +4,10 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Add a decision timeline usefulness test (#725)
+
+- Project the sourced D5 decision history through the example extension and provide a timed comparison with finding the approval in the issue thread.
+
 ## 2026-11-26 - Register a project decision timeline through HTTP startup (#725)
 
 - Validate host-supplied projection extensions before constructing the server. The HTTP runtime shares the registered View kinds with its scheduler materializers.

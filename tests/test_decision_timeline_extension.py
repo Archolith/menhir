@@ -16,7 +16,54 @@ from menhir.core import bootstrap, runtime
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
+from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+
+
+@pytest.mark.online
+def test_decision_timeline_d5_lookup(test_neo4j_repo) -> None:
+    """Produce the timeline arm of the D5 lookup comparison."""
+    trial = (
+        Decision(
+            "d5-open", date(2026, 11, 20),
+            "Open question: settle how to handle older pending projection work before scheduling extensions.",
+            "https://github.com/Archolith/menhir/blob/9a39ce12b46b8d337bdbaccb294c9ea8ce17a4ba"
+            "/.agent/roadmaps/shared-abstractions-and-consolidation-2026-11-20.md#L58",
+        ),
+        Decision(
+            "d5-approved", date(2026, 11, 26),
+            "Approved: the extension explicitly migrates or retires old pending work. "
+            "With neither action, the work stays pending for review.",
+            "https://github.com/Archolith/menhir/issues/725#decisions-owner-d1-and-d6-first",
+        ),
+        Decision(
+            "d5-implemented", date(2026, 11, 26),
+            "Implementation: the local lifecycle repository can migrate or retire one exact retained generation.",
+            "Local commit 8af56552 (git show 8af56552)",
+        ),
+    )
+    registry = RuntimeExtensions((EXTENSION,))
+    timeline = DecisionTimeline(test_neo4j_repo, registry.view_repository(test_neo4j_repo))
+    timeline.initialize()
+    for decision in reversed(trial):
+        timeline.put(namespace="usefulness", project="menhir", decision=decision)
+
+    queue = ProjectionLifecycleRepository(test_neo4j_repo)
+    (worker,) = registry.projection_workers()
+    reconciler = ProjectionReconciler(queue, worker.definition, materializer=worker.materializer)
+    (materialized,) = reconciler.drain_pending(operation_id="d5-lookup")
+    assert materialized.token.target.namespace == "usefulness"
+    current = timeline.current(namespace="usefulness", project="menhir")
+    assert current is not None
+    entries = current["entries"]
+    assert entries == [
+        {"id": row.decision_id, "when": row.when.isoformat(), "decision": row.decision, "source": row.source}
+        for row in trial
+    ]
+
+    print("\nMenhir #725 decision timeline")
+    for entry in entries:
+        print(f"{entry['when']} | {entry['decision']}\n  {entry['source']}")
 
 
 def test_duplicate_extension_fails_before_server_resources(monkeypatch) -> None:
