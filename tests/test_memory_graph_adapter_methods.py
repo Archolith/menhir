@@ -614,6 +614,14 @@ def test_linked_twin_artifact_returns_the_linked_twin_set() -> None:
                     "edge_uuids": ["edge-1"],
                     "namespace": "ns-1",
                     "fence_namespace_key": "ns-1",
+                    "extraction_outcome": "extracted",
+                    "policy_empty_reason": None,
+                    "self_bound": False,
+                    "completed": True,
+                    "entities": [{"uuid": "entity-1", "name": "Alice", "content": None}],
+                    "edges": [{"uuid": "edge-1", "name": "KNOWS", "fact": "Alice knows Bob",
+                               "fact_source": None, "source_node_uuid": "entity-1",
+                               "target_node_uuid": "entity-2"}],
                 }
             ],
         ]
@@ -628,6 +636,14 @@ def test_linked_twin_artifact_returns_the_linked_twin_set() -> None:
         "edge_uuids": ["edge-1"],
         "namespace": "ns-1",
         "fence_namespace_key": "ns-1",
+        "extraction_outcome": "extracted",
+        "policy_empty_reason": None,
+        "self_bound": False,
+        "completed": True,
+        "entity_details": {"entity-1": {"uuid": "entity-1", "name": "Alice", "content": None}},
+        "edge_details": {"edge-1": {"uuid": "edge-1", "name": "KNOWS", "fact": "Alice knows Bob",
+                                    "fact_source": None, "source_node_uuid": "entity-1",
+                                    "target_node_uuid": "entity-2"}},
     }
     assert neo4j.calls[0]["params"] == {"episode_uuid": "pending-1"}
 

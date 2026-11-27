@@ -144,7 +144,8 @@ def test_1007_parked_row_with_a_twin_link_is_readmitted(graph) -> None:
         MATCH (q:Episodic {uuid: $q})
         CREATE (g:Episodic {uuid: $g, name: $g, namespace: q.namespace, content: 'x',
                             test_tag: q.test_tag})
-        SET q.resolved_episode_uuid = $g
+        // A finished publish (#905): the link records a completing extraction outcome.
+        SET q.resolved_episode_uuid = $g, q.resolved_extraction_outcome = 'extracted'
         """,
         params={"q": u["parked"], "g": twin},
     )
@@ -163,3 +164,30 @@ def test_1007_parked_row_linked_to_a_missing_twin_stays_parked(graph) -> None:
 
     assert u["parked"] not in _candidates(repo, u)
     assert repo.linked_twin_artifact(u["parked"]) is None
+
+
+def test_1007_completed_link_readmits_a_terminal_park_but_not_an_exhausted_one(graph) -> None:
+    """Tier 1 is for a row the worker can still claim; an exhausted park waits for its recheck."""
+    repo, neo4j, u = graph
+    candidates = _candidates(repo, u)
+    for key, reason in (("parked", "terminal"), ("open", "exhausted")):
+        failed_at = str(candidates[u[key]]["processing_completed_at"])
+        assert repo.park_failed_episode_retry(u[key], failed_at=failed_at, reason=reason)
+        neo4j.execute(
+            """
+            MATCH (q:Episodic {uuid: $q})
+            CREATE (g:Episodic {uuid: $g, name: $g, namespace: q.namespace, content: 'x',
+                                test_tag: q.test_tag})
+            SET q.resolved_episode_uuid = $g, q.resolved_extraction_outcome = 'extracted'
+            """,
+            params={"q": u[key], "g": f"{u[key]}-twin"},
+        )
+
+    assert set(_candidates(repo, u)) == {u["parked"]}
+
+    # Once its recheck is due, the exhausted row is a tier-2 candidate like any other park.
+    neo4j.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.retry_parked_at = datetime() - duration({days: 2})",
+        params={"u": u["open"]},
+    )
+    assert set(_candidates(repo, u)) == {u["parked"], u["open"]}

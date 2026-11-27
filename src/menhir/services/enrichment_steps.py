@@ -43,7 +43,12 @@ from menhir.infrastructure.evidence_publication_intents import (
     EvidencePublicationIntentRepository,
     PublicationDispatchSuppressed,
 )
+from menhir.infrastructure.episode_lifecycle import twin_link_completed
 from menhir.infrastructure.publish_fence import (
+    LINK_OUTCOME_COLLAPSED,
+    LINK_OUTCOME_EMPTY,
+    LINK_OUTCOME_EXTRACTED,
+    LINK_OUTCOME_POLICY_EMPTY,
     ClaimFence,
     FenceLost,
     GateFence,
@@ -298,6 +303,37 @@ def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) ->
         )
 
 
+def link_extraction_outcome(
+    receipt: Any, episode_key: str, *, persisted: bool
+) -> dict[str, Any]:
+    """The outcome a publish records with its twin link (#905), decided like ``stamp_and_finalize``.
+
+    ``persisted``: the publish wrote entity nodes or edges. Otherwise a receipt for this episode
+    with raw content is policy-empty or a collapse; anything else is a plain empty extraction.
+    ``self_bound`` records that this extraction bound a self tier, for finalize-from-link.
+    """
+    self_bound = bool(
+        receipt is not None
+        and (
+            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+        )
+    )
+    reason = None
+    if persisted:
+        outcome = LINK_OUTCOME_EXTRACTED
+    elif (
+        receipt is not None
+        and receipt.episode_key == episode_key
+        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
+    ):
+        reason = policy_empty_reason(receipt)
+        outcome = LINK_OUTCOME_POLICY_EMPTY if reason is not None else LINK_OUTCOME_COLLAPSED
+    else:
+        outcome = LINK_OUTCOME_EMPTY
+    return {"outcome": outcome, "policy_empty_reason": reason, "self_bound": self_bound}
+
+
 # ---------------------------------------------------------------------------
 # Pipeline step 1 — finalize-from-link (replaces the by-name reconcile)
 # ---------------------------------------------------------------------------
@@ -309,6 +345,10 @@ async def finalize_from_link(ctx: EnrichmentContext) -> bool:
     ``resolved_episode_uuid`` skips preflight, extraction and ``add_episode`` and only needs the
     post-publish steps. The artifact set is read back from the linked twin; when the read returns
     nothing (queue node marked, or twin gone) the job stops without writing anything.
+
+    #905: a link that is not a completion (empty twin, collapsed or unrecorded outcome) is cleared
+    with its empty twin under the claim fence, and False is returned so this claim re-extracts.
+    #906: the steps run on the names, contents and facts stored on the linked artifact.
     """
 
     if not ctx.claimed.get("resolved_episode_uuid"):
@@ -322,21 +362,58 @@ async def finalize_from_link(ctx: EnrichmentContext) -> bool:
             ctx.episode_uuid,
         )
         return True
+    if not twin_link_completed(artifact):
+        resolved = str(artifact["resolved_episode_uuid"])
+        cleared = await _fenced_write_off_loop(
+            ctx,
+            lambda ex: ctx.graph_adapter.clear_uncompleted_twin_link(
+                ctx.episode_uuid, resolved, **_executor_kw(ex)
+            ),
+        )
+        logger.info(
+            "Finalize-from-link refused an uncompleted link episode_id=%s twin=%s outcome=%s "
+            "cleared=%s",
+            ctx.episode_uuid,
+            resolved,
+            artifact.get("extraction_outcome"),
+            cleared,
+        )
+        # Not cleared: the link changed under us; stop without writes like a missing twin.
+        return not cleared
     from menhir.domain.namespace import namespace_to_group_id
 
     namespace = str(ctx.claimed.get("namespace") or "default")
     group_id = namespace_to_group_id(namespace if namespace != "default" else None)
+    entity_details = artifact.get("entity_details") or {}
+    edge_details = artifact.get("edge_details") or {}
+
+    def _text(details: dict[str, Any], uuid: str, key: str) -> str:
+        return str((details.get(uuid) or {}).get(key) or "")
+
     result = SimpleNamespace(
         episode=SimpleNamespace(uuid=str(artifact["resolved_episode_uuid"])),
         nodes=[
-            SimpleNamespace(uuid=str(u), name="", content="")
+            SimpleNamespace(
+                uuid=str(u),
+                name=_text(entity_details, str(u), "name"),
+                content=_text(entity_details, str(u), "content"),
+            )
             for u in (artifact.get("entity_uuids") or [])
         ],
         edges=[
-            SimpleNamespace(uuid=str(u), fact="", name="")
+            SimpleNamespace(
+                uuid=str(u),
+                fact=_text(edge_details, str(u), "fact"),
+                name=_text(edge_details, str(u), "name"),
+                fact_source=(edge_details.get(str(u)) or {}).get("fact_source"),
+                source_node_uuid=_text(edge_details, str(u), "source_node_uuid"),
+                target_node_uuid=_text(edge_details, str(u), "target_node_uuid"),
+            )
             for u in (artifact.get("edge_uuids") or [])
         ],
         episodic_edges=[],
+        self_bound=bool(artifact.get("self_bound")),
+        policy_empty_reason=artifact.get("policy_empty_reason"),
     )
     async with ctx.ingest_gate.acquire(group_id):
         if ctx.claim_fence is not None:
@@ -794,7 +871,7 @@ async def _repair_synthetic_edge_facts(
     calls the LLM to produce a proper fact, and writes the result back
     to Neo4j with provenance tracking.
     """
-    if ctx.llm is None or not extracted_edges:
+    if not extracted_edges:
         return
 
     synthetic_edges: list[tuple[int, Any]] = []
@@ -813,6 +890,8 @@ async def _repair_synthetic_edge_facts(
                 updates.append({"uuid": uuid, "fact": fact, "fact_source": "original"})
         if updates:
             ctx.graph_adapter.update_edge_facts(updates)
+        return
+    if ctx.llm is None:
         return
 
     # Build stubs for LLM repair
@@ -866,13 +945,15 @@ async def _repair_synthetic_edge_facts(
     if updates:
         ctx.graph_adapter.update_edge_facts(updates)
 
-    repaired_count = sum(1 for j, _ in enumerate(synthetic_edges) if j < len(repaired) and repaired[j])
+    # #878: count what was written, so a rejected model answer counts as a fallback.
+    repaired_count = sum(1 for u in updates if u["fact_source"] == "llm_repaired")
+    fallback_count = sum(1 for u in updates if u["fact_source"] == "synthetic_fallback")
     logger.info(
         "Edge fact repair episode_id=%s: %d synthetic, %d repaired, %d fallback",
         ctx.episode_uuid,
         len(synthetic_edges),
         repaired_count,
-        len(synthetic_edges) - repaired_count,
+        fallback_count,
     )
 
 
@@ -1118,12 +1199,19 @@ async def stamp_and_finalize(
     # Replaces the old ownership read: owner, claim instant, ENRICHING, no marker, epoch unmoved.
     _fence_check(ctx)
 
-    if receipt is not None and resolve_inferred_mode(
+    # #906: from-link has no receipt; the publish recorded whether this extraction bound a self.
+    self_bound = (
+        bool(getattr(graphiti_result, "self_bound", False))
+        if from_link
+        else receipt is not None
+        and (
+            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+        )
+    )
+    if self_bound and resolve_inferred_mode(
         getattr(ctx, "inferred_self_mode", None)
-    ) is not SelfBindMode.OFF and (
-        getattr(getattr(receipt, "self_bind_result", None), "bound", False)
-        or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
-    ):
+    ) is not SelfBindMode.OFF:
         # Best-effort two-tier self link; never fails the episode.
         link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
         if link_self_tiers is not None:
@@ -1141,7 +1229,16 @@ async def stamp_and_finalize(
 
     if not extracted_nodes and not extracted_edges:
         empty_reason = policy_empty_reason(receipt) if raw_extraction_nonempty else None
-        if empty_reason is not None:
+        if from_link:
+            # The policy label the publish recorded with the link (#905).
+            empty_reason = getattr(graphiti_result, "policy_empty_reason", None) or None
+        if empty_reason is not None and receipt is None:
+            logger.info(
+                "Policy-empty enrichment (success, from link) episode_id=%s reason=%s",
+                ctx.episode_uuid,
+                empty_reason,
+            )
+        elif empty_reason is not None:
             # Policy-empty: the extraction produced entities but no persistable content.
             # Cases: (a) assistant turn with only self-label and no relationship, (b) every
             # usable edge was user->X echo suppressed by design, (c) any-source turn where
@@ -1312,11 +1409,20 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
-    # Best-effort LLM repair of synthetic edge facts
+    # Best-effort LLM repair of synthetic edge facts. #878: its writes are provenance only, so a
+    # write error is logged, not an enrichment failure. #906: an edge that already carries a
+    # fact_source was handled by an earlier attempt; from-link must not relabel it.
     _fence_check(ctx)
-    await _repair_synthetic_edge_facts(
-        ctx, extracted_edges, _compose_ctx_episode_body(ctx),
-    )
+    try:
+        await _repair_synthetic_edge_facts(
+            ctx,
+            [e for e in extracted_edges if not getattr(e, "fact_source", None)],
+            _compose_ctx_episode_body(ctx),
+        )
+    except Exception:
+        logger.warning(
+            "Edge fact repair failed (best-effort) episode_id=%s", ctx.episode_uuid, exc_info=True
+        )
     # Best-effort structural anchoring
     _fence_check(ctx)
     _anchor_to_structural_entities(
@@ -1729,12 +1835,17 @@ async def add_episode_with_timeout(
     if claim_fence is not None:
         # Built here so the repair-turn provider closes over the live receipt: the extraction
         # fills ``receipt.repair_turn_ids`` and the fence reads it in ``after_write``.
+        # #905: the extraction outcome is decided from the same receipt and stored with the link.
+        outcome_key = claim_fence.q_uuid
         fence_kwargs = {
             "new_episode_uuid": claim_fence.reserved_twin_uuid,
             "publish_fence": MenhirPublishFence(
                 claim_fence,
                 gate_fence if gate_fence is not None else GateFence(epoch=0),
                 repair_turn_ids_provider=lambda: receipt.repair_turn_ids,
+                extraction_outcome_provider=lambda nodes, edges: link_extraction_outcome(
+                    receipt, outcome_key, persisted=bool(nodes or edges)
+                ),
             ),
         }
     try:

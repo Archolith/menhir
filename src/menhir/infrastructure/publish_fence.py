@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -49,6 +49,21 @@ __all__ = [
     "run_fenced",
     "run_fenced_call",
 ]
+
+#: Extraction outcomes recorded with the twin link (#905). ``extracted``: the publish wrote entity
+#: nodes or edges. ``empty`` / ``policy_empty``: nothing was written and the attempt decided that was
+#: the right result (no raw extraction, or a policy-empty receipt). ``collapsed``: the model returned
+#: content that resolution dropped. A link with no outcome predates #905.
+LINK_OUTCOME_EXTRACTED = "extracted"
+LINK_OUTCOME_EMPTY = "empty"
+LINK_OUTCOME_POLICY_EMPTY = "policy_empty"
+LINK_OUTCOME_COLLAPSED = "collapsed"
+#: The outcomes that make a link a completion even when its twin MENTIONS nothing.
+LINK_COMPLETION_OUTCOMES = (LINK_OUTCOME_EXTRACTED, LINK_OUTCOME_EMPTY, LINK_OUTCOME_POLICY_EMPTY)
+
+#: ``provider(entity_node_uuids, entity_edge_uuids)`` -> ``{"outcome", "policy_empty_reason",
+#: "self_bound"}``, called inside ``after_write`` once extraction has finished.
+ExtractionOutcomeProvider = Callable[[Sequence[str], Sequence[str]], Mapping[str, Any]]
 
 #: An after_write extra: ``await extra(tx, episode_uuid=..., entity_edge_uuids=...)``. It runs its
 #: statements through ``_tx_run`` on the publish transaction and must be idempotent.
@@ -123,7 +138,10 @@ RECHECK_CYPHER = (
 
 LINK_CYPHER = (
     "MATCH (q:Episodic {uuid: $q_uuid}) MATCH (g:Episodic {uuid: $episode_uuid}) "
-    "SET q.resolved_episode_uuid = $episode_uuid, g.menhir_memory_uuid = q.uuid "
+    "SET q.resolved_episode_uuid = $episode_uuid, g.menhir_memory_uuid = q.uuid, "
+    "q.resolved_extraction_outcome = $outcome, "
+    "q.resolved_policy_empty_reason = $policy_empty_reason, "
+    "q.resolved_self_bound = $self_bound "
     "RETURN count(g) AS linked"
 )
 
@@ -259,11 +277,13 @@ class MenhirPublishFence:
         *,
         after_write_extras: Sequence[AfterWriteExtra] = (),
         repair_turn_ids_provider: Callable[[], Iterable[str]] | None = None,
+        extraction_outcome_provider: ExtractionOutcomeProvider | None = None,
     ) -> None:
         self.claim = claim
         self.gate = gate
         self.after_write_extras = tuple(after_write_extras)
         self.repair_turn_ids_provider = repair_turn_ids_provider
+        self.extraction_outcome_provider = extraction_outcome_provider
 
     def with_extras(self, *extras: AfterWriteExtra) -> MenhirPublishFence:
         """A copy with ``extras`` appended; the original is not mutated."""
@@ -272,6 +292,7 @@ class MenhirPublishFence:
             self.gate,
             after_write_extras=(*self.after_write_extras, *extras),
             repair_turn_ids_provider=self.repair_turn_ids_provider,
+            extraction_outcome_provider=self.extraction_outcome_provider,
         )
 
     async def before_write(
@@ -303,8 +324,11 @@ class MenhirPublishFence:
         entity_edge_uuids: Sequence[str],
         previous_episode_uuids: Sequence[str],
     ) -> None:
+        outcome = self._link_outcome(entity_node_uuids, entity_edge_uuids)
         linked = await _tx_run(
-            tx, LINK_CYPHER, {"q_uuid": self.claim.q_uuid, "episode_uuid": episode_uuid}
+            tx,
+            LINK_CYPHER,
+            {"q_uuid": self.claim.q_uuid, "episode_uuid": episode_uuid, **outcome},
         )
         if not linked or not int(linked[0].get("linked") or 0):
             raise PublishFenced("link_target_missing")
@@ -329,6 +353,25 @@ class MenhirPublishFence:
             await extra(
                 tx, episode_uuid=episode_uuid, entity_edge_uuids=list(entity_edge_uuids)
             )
+
+
+    def _link_outcome(
+        self, entity_node_uuids: Sequence[str], entity_edge_uuids: Sequence[str]
+    ) -> dict[str, Any]:
+        """The extraction outcome stored with the link (#905). Without a provider only a written
+        artifact is known to be a completion; an empty publish records no outcome."""
+        provider = self.extraction_outcome_provider
+        if provider is not None:
+            got = dict(provider(entity_node_uuids, entity_edge_uuids) or {})
+        elif entity_node_uuids or entity_edge_uuids:
+            got = {"outcome": LINK_OUTCOME_EXTRACTED}
+        else:
+            got = {}
+        return {
+            "outcome": got.get("outcome"),
+            "policy_empty_reason": got.get("policy_empty_reason"),
+            "self_bound": bool(got.get("self_bound")),
+        }
 
 
 # --------------------------------------------------------------------------- G-fenced
