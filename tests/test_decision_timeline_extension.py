@@ -125,10 +125,13 @@ async def test_registered_decision_timeline_corrects_erases_and_recovers_on_rest
                     return result["entries"]
                 await asyncio.sleep(0.05)
 
-    app = server.create_app(settings=settings, extensions=(EXTENSION,)).app.app
+    registry = RuntimeExtensions((EXTENSION,))
+    app = server.create_app(settings=settings, extensions=registry).app.app
     async with app.router.lifespan_context(app):
         ctx = app.state.runtime_ctx
         scheduler = ctx.scheduler
+        assert ctx.built.graph_adapter.view_kinds is registry.view_kinds
+        assert app.state.candidate_service.graph_adapter is ctx.built.graph_adapter
         lane = f"reconcile_projection:{EXTENSION.definition.definition_id}"
         assert scheduler is not None and lane in scheduler.status_snapshot()["jobs"]
         scheduler._jobs[lane].interval_s = 0
@@ -165,11 +168,11 @@ async def test_registered_decision_timeline_corrects_erases_and_recovers_on_rest
             {"namespace": alpha},
         )
 
-    views = RuntimeExtensions((EXTENSION,)).view_repository(test_neo4j_repo)
+    views = registry.view_repository(test_neo4j_repo)
     offline = DecisionTimeline(test_neo4j_repo, views)
     offline.put(namespace=alpha, project=project, decision=Decision("new", day, "Resume after restart", "#726"))
     assert len(ProjectionLifecycleRepository(test_neo4j_repo).pending()) == 1
-    restarted = server.create_app(settings=settings, extensions=(EXTENSION,)).app.app
+    restarted = server.create_app(settings=settings, extensions=registry).app.app
     async with restarted.router.lifespan_context(restarted):
         built = restarted.state.runtime_ctx.built
         recovered = DecisionTimeline(built.neo4j, built.graph_adapter._views)

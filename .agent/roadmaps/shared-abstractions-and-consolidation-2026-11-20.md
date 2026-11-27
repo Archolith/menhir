@@ -113,14 +113,14 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 **Owner:** #725 phases 2–4 + #576 M3.
 
 - [x] Introduce an [internal reconciler](../../src/menhir/services/projection_reconciliation.py) that binds a `ProjectionDefinition` and version to its host-supplied materializer. The scalar reconciliation prototype uses it. Recovery filters by definition and version before the batch limit, and certification uses the existing transactional fence.
-- [ ] Centralize runtime repository/adapter creation or inject one resolved per-process view-kind map through all constructors, not only one bootstrap path.
+- [x] Centralize product graph adapter and View repository construction. HTTP, hook and Explorer can share a validated registry. A source-level test guards the construction paths.
 - [x] Add one [maintenance job](../../src/menhir/services/maintenance_scheduler.py) per explicitly registered projection definition. Jobs run every 30 seconds and take up to 100 items per batch. An empty registration set adds no jobs.
 - [x] Test empty registration, two definitions in one scheduler, a restart with newly registered work, and lease takeover during a batch.
 - [ ] Test extension upgrades and removal across concurrent hosts and verify tenant-scope isolation and erasure for external materializers.
 
 **Exit:** a separately installed extension registers **and executes** without patching Menhir; all S1–S7 safety invariants from #725 pass.
 
-An HTTP host can pass explicit extensions to `create_app(extensions=...)`. Registration validates the batch before creating server resources, and the HTTP runtime uses the resolved View kinds for its adapter and transaction-scoped materializers. Default HTTP and stdio startup supply no extensions. Standalone stdio, CLI and Explorer registration and the cross-constructor registry proof remain open.
+An HTTP host can pass explicit extensions to `create_app(extensions=...)` or supply a prevalidated `RuntimeExtensions` registry. A host with standalone hook or Explorer surfaces can supply that same registry to `build_hook_services(extensions=...)` and Explorer's `create_app(extensions=...)`. Graph surfaces created alongside a starting or running HTTP backend inherit its registry and reject a conflicting one. Default standalone startup uses built-in kinds. The shipped MCP stdio process proxies the HTTP backend and opens no graph of its own.
 
 The [decision timeline example](../../examples/decision_timeline.py) accepts synthetic dated decisions with source references. Its explicit producer queues a rebuild in the same transaction as a source update. Source erasure removes the selected decision and the project's historical timeline Views in that namespace, then queues a rebuild. The live test boots the HTTP runtime, checks correction and erasure in one namespace without changing another, and verifies that work queued while stopped drains after restart. This example uses an operator-only View and an extension-owned source-erasure operation. Menhir-wide namespace erasure for arbitrary extension data and the public extension conformance kit remain open.
 

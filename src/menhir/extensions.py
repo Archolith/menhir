@@ -9,7 +9,7 @@ from types import MappingProxyType
 from menhir.domain.projection import ProjectionDefinition, ProjectionRegistry
 from menhir.domain.projection_lifecycle import ProjectionWorkToken
 from menhir.infrastructure.neo4j import Neo4jRepository, Neo4jTransaction
-from menhir.infrastructure.view_repository import ViewKind, ViewRepository
+from menhir.infrastructure.view_repository import ViewKind, ViewRepository, build_view_repository
 from menhir.services.projection_reconciliation import ProjectionWorkerRegistration
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
 
@@ -47,8 +47,11 @@ class RuntimeExtensions:
         self.view_kinds = MappingProxyType(kinds)
         self._extensions = tuple(extensions)
 
+    def __bool__(self) -> bool:
+        return bool(self._extensions)
+
     def view_repository(self, graph: Neo4jRepository | Neo4jTransaction) -> ViewRepository:
-        return ViewRepository(graph, kinds=self.view_kinds)
+        return build_view_repository(graph, kinds=self.view_kinds)
 
     def projection_workers(self) -> tuple[ProjectionWorkerRegistration, ...]:
         def bind(extension: ProjectionExtension) -> ProjectionWorkerRegistration:

@@ -103,7 +103,7 @@ class MemoryGraphAdapter:
         from menhir.infrastructure.temporal_repository import TemporalRepository
         from menhir.infrastructure.candidate_repository import CandidateRepository
         from menhir.infrastructure.artifact_repository import ArtifactRepository
-        from menhir.infrastructure.view_repository import ViewRepository
+        from menhir.infrastructure.view_repository import build_view_repository
         from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
         from menhir.infrastructure.personal_memory_queries import PersonalMemoryRepository
         from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
@@ -121,7 +121,7 @@ class MemoryGraphAdapter:
         # answering different questions -- see domain/work_artifact.py.
         self._artifacts = ArtifactRepository(self.neo4j)
         self._work_artifacts = WorkArtifactRepository(self.neo4j)
-        self._views = ViewRepository(self.neo4j, kinds=self.view_kinds)
+        self._views = build_view_repository(self.neo4j, kinds=self.view_kinds)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
         from menhir.infrastructure.build_report_queries import BuildReportQueries

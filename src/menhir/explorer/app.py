@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import menhir
 from menhir.config import MemorySettings
 from menhir.config.settings import is_loopback_host
+from menhir.extensions import RuntimeExtensions
 from menhir.explorer.feature_taxonomy import classify, parent_order
 from menhir.explorer.recall_lab import (
     DEFAULT_ARMS,
@@ -1351,11 +1352,15 @@ def create_app(
     recall_lab_store: object | None = None,
     extraction_lab_store: object | None = None,
     bench_run_catalog: BenchRunCatalog | None = None,
+    extensions: RuntimeExtensions | None = None,
 ) -> FastAPI:
     settings = settings or _settings_from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from menhir.core.bootstrap import build_graph_adapter, resolve_graph_extensions
+
+        registry = resolve_graph_extensions(extensions)
         owned_repo = repo is None
         app.state.settings = settings
         app.state.repo = repo or _repo_from_settings(settings)
@@ -1373,17 +1378,10 @@ def create_app(
         # CandidateService both already treat it as best-effort), so approval still
         # gets the same promotion/consistency guarantees even without live search.
         from menhir.core.bootstrap import UnavailableGraphitiClient
-        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
         from menhir.services.candidate_service import CandidateService
         from menhir.services.lifecycle_service import LifecycleService
 
-        graph_adapter = MemoryGraphAdapter(
-            neo4j=app.state.repo,
-            counting_enabled=bool(
-                getattr(settings, "personal_memory_counting_enabled", False)
-                and getattr(settings, "personal_memory_scalar_state_enabled", False)
-            ),
-        )
+        graph_adapter = build_graph_adapter(app.state.repo, settings, extensions=registry)
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=UnavailableGraphitiClient("explorer: no live Graphiti client"),

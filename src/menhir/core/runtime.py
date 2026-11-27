@@ -11,6 +11,7 @@ from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
+from menhir.core.bootstrap import build_graph_adapter
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
 from menhir.extensions import RuntimeExtensions
@@ -765,15 +766,7 @@ async def _initialize_services(
     start_model_fetch(settings, getattr(built, "recall_service", None))
 
     if candidate_readonly:
-        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
-
-        graph_adapter = MemoryGraphAdapter(
-            neo4j=built.neo4j,
-            counting_enabled=bool(
-                getattr(settings, "personal_memory_counting_enabled", False)
-                and getattr(settings, "personal_memory_scalar_state_enabled", False)
-            ),
-        )
+        graph_adapter = build_graph_adapter(built.neo4j, settings)
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
             from menhir.core.bootstrap import _duplicate_values_suffix
@@ -900,6 +893,8 @@ async def _get_services(
         async with _init_lock:
             if _state.init_task is init_task:
                 _state.init_task = None
+                if _state.built is None:
+                    _state.extensions = None
         raise
 
     async with _init_lock:
@@ -1012,7 +1007,7 @@ async def start_runtime(
 ) -> RuntimeContext:
     built, session = await _get_services(
         settings, candidate_readonly=candidate_readonly,
-        **({"extensions": extensions} if extensions is not None else {}),
+        **({"extensions": extensions} if extensions else {}),
     )
     return RuntimeContext(
         built=built,

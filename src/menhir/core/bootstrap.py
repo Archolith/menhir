@@ -145,6 +145,39 @@ class BuildArtifacts:
     projection_registrations: tuple[ProjectionWorkerRegistration, ...] = ()
 
 
+def resolve_graph_extensions(extensions: RuntimeExtensions | None = None) -> RuntimeExtensions | None:
+    """Use the active or starting runtime's registry when assembling another graph surface."""
+    from menhir.core.runtime_support import _state
+
+    if extensions is not None and not isinstance(extensions, RuntimeExtensions):
+        raise TypeError("graph surfaces require a validated RuntimeExtensions registry")
+    extensions = extensions or None
+    active = _state.extensions
+    starting = isinstance(_state.init_task, asyncio.Task) and not _state.init_task.done()
+    if extensions is not None and extensions is not active and (starting or _state.built is not None):
+        raise ValueError("the process already has a different runtime extension registry")
+    return active if starting or _state.built is not None else extensions
+
+
+def build_graph_adapter(
+    neo4j: Neo4jRepository,
+    settings: MemorySettings,
+    *,
+    extensions: RuntimeExtensions | None = None,
+    embedding_dimensions: int | None = None,
+) -> MemoryGraphAdapter:
+    registry = resolve_graph_extensions(extensions)
+    return MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=bool(
+            getattr(settings, "personal_memory_counting_enabled", False)
+            and getattr(settings, "personal_memory_scalar_state_enabled", False)
+        ),
+        **({"embedding_dimensions": embedding_dimensions} if embedding_dimensions is not None else {}),
+        **({"view_kinds": registry.view_kinds} if registry is not None else {}),
+    )
+
+
 def build_memory_services(
     settings: MemorySettings | None = None,
     *,
@@ -155,7 +188,8 @@ def build_memory_services(
     extensions: RuntimeExtensions | None = None,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
-    if extensions is not None:
+    resolve_graph_extensions(extensions)
+    if extensions:
         if projection_registrations:
             raise ValueError("supply runtime extensions or direct worker registrations")
         projection_registrations = extensions.projection_workers()
@@ -195,14 +229,11 @@ def build_memory_services(
             llm = UnavailableLLMAdapter(f"{llm_reason} ({exc})")
     else:
         llm = UnavailableLLMAdapter(llm_reason)
-    graph_adapter = MemoryGraphAdapter(
-        neo4j=neo4j,
+    graph_adapter = build_graph_adapter(
+        neo4j,
+        settings,
         embedding_dimensions=expected_graphiti_embedding_dimension(settings),
-        counting_enabled=bool(
-            settings.personal_memory_counting_enabled
-            and settings.personal_memory_scalar_state_enabled
-        ),
-        **({"view_kinds": extensions.view_kinds} if extensions is not None else {}),
+        extensions=extensions,
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(

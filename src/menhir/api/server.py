@@ -14,6 +14,7 @@ from menhir.api.mcp_remote import (
 )
 from menhir.api.oauth import OAuthTokenVerifier
 from menhir.config import MemorySettings
+from menhir.core.bootstrap import resolve_graph_extensions
 from menhir.extensions import ProjectionExtension, RuntimeExtensions
 from menhir.infrastructure.logging_config import build_logging_config, configure_logging
 
@@ -31,13 +32,18 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(
-    *, settings: MemorySettings | None = None, extensions: tuple[ProjectionExtension, ...] = (),
+    *, settings: MemorySettings | None = None,
+    extensions: tuple[ProjectionExtension, ...] | RuntimeExtensions = (),
 ) -> FastAPI:
     """Build the combined FastAPI application."""
-    registry = RuntimeExtensions(extensions) if extensions else None
+    registry = None
+    if extensions:
+        registry = extensions if isinstance(extensions, RuntimeExtensions) else RuntimeExtensions(extensions)
+    if registry:
+        resolve_graph_extensions(registry)
     settings = settings or MemorySettings.from_env()
     startup_scope = settings.startup_scope
-    if registry is not None and (
+    if registry and (
         startup_scope in BACKENDLESS_SCOPES or settings.benchmark_mode or settings.runtime_mode == "candidate-readonly"
     ):
         raise ValueError("extensions require a writable maintenance runtime")
@@ -61,7 +67,7 @@ def create_app(
             settings=settings,
             startup_scope=startup_scope,
             mcp_http_instance=mcp_http_instance,
-            extensions=registry,
+            extensions=registry or None,
         ),
     )
     app.state.settings = settings

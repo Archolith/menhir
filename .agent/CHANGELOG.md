@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Share extension registration across graph surfaces (#725)
+
+- Use one graph adapter factory and one View repository factory across Menhir's product paths. HTTP, hook and Explorer hosts can pass the same validated registry.
+- Hook and Explorer inherit a starting or running backend's registry in the same process. Conflicting registries are refused before those surfaces open graph resources. Stdio continues to use its HTTP backend.
+
 ## 2026-11-26 - Add a decision timeline usefulness test (#725)
 
 - Project the sourced D5 decision history through the example extension and provide a timed comparison with finding the approval in the issue thread.
