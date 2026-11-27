@@ -111,6 +111,8 @@ CLASSIFIED = {
     _I + "work_artifact_repository.py::WorkArtifactRepository.delete_artifact":
         ("operator", "explicit artifact delete"),
     _I + "cypher.py::Cypher._render_op": ("derived", "query builder rendering, not a call site"),
+    _I + "episode_lifecycle.py::EpisodeLifecycleRepository.clear_uncompleted_twin_link":
+        ("derived", "drops an uncited empty twin before re-extraction (#905)"),
     _I + "evidence_lifecycle_schema.py::_REPOINT_PUBLICATIONS_CYPHER":
         ("derived", "repoints evidence publications"),
     _I + "memory_queries.py::MemoryQueryRepository._DERIVED_EDGE_BODY":

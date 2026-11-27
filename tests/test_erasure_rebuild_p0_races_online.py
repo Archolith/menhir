@@ -633,8 +633,9 @@ async def test_t11_stale_retry_row_cannot_resurrect_a_sealed_queue_node(test_neo
         rig.fork.handler = publish_then_fail
         now = datetime.now(timezone.utc)
 
-        # Control: the same scheduler path DOES reconcile an unerased FAILED node, so a "not READY"
-        # outcome below cannot be an artefact of the harness.
+        # Control: the same scheduler path DOES finish an unerased FAILED node, so a "not READY"
+        # outcome below cannot be an artefact of the harness. #906: the scheduler requeues it and
+        # the worker's finalize-from-link marks it READY.
         # NOTE: both queue nodes live in the DEFAULT namespace because EPISODE_RETRY_FIELDS
         # (cypher.py:487) omits ``namespace`` and retry_process_candidate then assumes "default"
         # (scheduler_tasks.py:277); a named namespace makes record_retention_sources reject the
@@ -645,10 +646,18 @@ async def test_t11_stale_retry_row_cannot_resurrect_a_sealed_queue_node(test_neo
         crow = await failed_row(control)
         _require(crow, "control row not listed")
         action = await retry_process_candidate(rig.adapter, rig.service, crow, 10, now)
+        _require(action == "requeued", f"control was not requeued: action={action}")
+        # The requeue may already have woken the service's own worker; either one finishes it.
+        await rig.run_worker(control)
         crow_after = rig.q_row(control)
+        for _ in range(int(_WAIT_S * 20)):
+            if crow_after and crow_after["state"] == "READY":
+                break
+            await asyncio.sleep(0.05)
+            crow_after = rig.q_row(control)
         _require(
-            action == "reconciled" and crow_after and crow_after["state"] == "READY",
-            f"control did not reconcile: action={action} row={crow_after}",
+            crow_after and crow_after["state"] == "READY",
+            f"control did not reach READY through finalize-from-link: row={crow_after}",
         )
 
         q = rig.seed_q(namespace="default")

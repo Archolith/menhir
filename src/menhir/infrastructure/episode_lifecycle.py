@@ -39,6 +39,7 @@ from menhir.infrastructure.erasure_fence import (
     warn_if_on_event_loop,
     marker_absent_for_param_cypher,
 )
+from menhir.infrastructure.publish_fence import LINK_COMPLETION_OUTCOMES
 
 logger = logging.getLogger(__name__)
 
@@ -93,15 +94,42 @@ RETRY_PARK_RECHECK_S = 24 * 3600
 #: and the twin exists. Shared with the retry candidate query so the two cannot drift (#1007).
 _TWIN_LINK_SET = "n.resolved_episode_uuid IS NOT NULL"
 _TWIN_LINK_MATCH = "(g:Episodic {uuid: n.resolved_episode_uuid})"
-_HAS_TWIN_LINK = f"({_TWIN_LINK_SET} AND EXISTS {{ MATCH {_TWIN_LINK_MATCH} }})"
+#: #905: a link is a completion only when the publish recorded a completing extraction outcome or
+#: the twin MENTIONS an entity. An empty twin with a collapsed outcome, or with none (a link written
+#: before #905), is not; finalize-from-link clears it and re-extracts. Needs `n` and `g` bound.
+_TWIN_LINK_OUTCOME_OK = (
+    "coalesce(n.resolved_extraction_outcome, '') IN ["
+    + ", ".join(f"'{o}'" for o in LINK_COMPLETION_OUTCOMES)
+    + "]"
+)
+_TWIN_LINK_COMPLETE = f"({_TWIN_LINK_OUTCOME_OK} OR EXISTS {{ MATCH (g)-[:MENTIONS]->(:Entity) }})"
+_HAS_COMPLETED_TWIN_LINK = (
+    f"({_TWIN_LINK_SET} AND EXISTS {{ MATCH {_TWIN_LINK_MATCH} WHERE {_TWIN_LINK_COMPLETE} }})"
+)
 
-#: Retry candidate tier (#925, #1007). 0: not parked for this failure. 1: parked, but a twin link
-#: now exists, so finalize-from-link can close it. 2: parked and due for its recheck. 3: parked
-#: (excluded). Rows are ordered by tier first, so a recheck herd cannot crowd out tiers 0 and 1.
+
+def twin_link_completed(artifact: dict[str, Any]) -> bool:
+    """Whether a ``linked_twin_artifact`` result is a completion (#905).
+
+    The repository computes ``completed`` with the same predicate the retry candidate tier uses.
+    An artifact without the key (an adapter predating #905) counts as a completion only when it
+    names an entity or an edge.
+    """
+    if "completed" in artifact:
+        return bool(artifact.get("completed"))
+    return bool(artifact.get("entity_uuids") or artifact.get("edge_uuids"))
+
+#: Retry candidate tier (#925, #1007). 0: not parked for this failure. 1: parked, but a completed
+#: twin link now exists, so finalize-from-link can close it (#905: a collapsed link is not one).
+#: A row parked as `exhausted` has no attempt left and the worker's claim would refuse it, so it
+#: waits for the normal recheck instead of being re-admitted every tick. 2: parked and due for its
+#: recheck. 3: parked (excluded). Rows are ordered by tier first, so a recheck herd cannot crowd
+#: out tiers 0 and 1.
 _RETRY_TIER = (
     "CASE WHEN (properties(n)['retry_parked_for'] IS NULL"
     f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})) THEN 0"
-    f" WHEN {_HAS_TWIN_LINK} THEN 1"
+    f" WHEN {_HAS_COMPLETED_TWIN_LINK}"
+    " AND coalesce(properties(n)['retry_parked_reason'], '') <> 'exhausted' THEN 1"
     " WHEN properties(n)['retry_parked_at']"
     " < datetime() - duration({seconds: $park_recheck_s}) THEN 2"
     " ELSE 3 END"
@@ -1144,16 +1172,31 @@ class EpisodeLifecycleRepository:
         exist. Returns the twin's uuid, the entities it MENTIONS, the RELATES_TO edges whose
         ``episodes`` list contains the twin, and the queue node's namespace and fence key. A marked
         queue node, a node with no link, or a link to a missing twin returns None.
+
+        #905/#906: also the extraction outcome recorded with the link, ``completed`` (the retry
+        tier's predicate), and per-uuid ``entity_details`` / ``edge_details`` (name, content, fact,
+        fact_source, endpoints) so the post-publish steps can run on the stored text.
         """
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Episodic {{uuid: $episode_uuid}})
             WHERE {_TWIN_LINK_SET} AND {EPISODE_NOT_MARKED}
             MATCH {_TWIN_LINK_MATCH}
+            WITH n, g,
+                 [(g)-[:MENTIONS]->(e:Entity)
+                  | {{uuid: e.uuid, name: e.name, content: e.content}}] AS entities,
+                 [(s:Entity)-[r:RELATES_TO]->(t:Entity)
+                  WHERE g.uuid IN coalesce(r.episodes, [])
+                  | {{uuid: r.uuid, name: r.name, fact: r.fact, fact_source: r.fact_source,
+                     source_node_uuid: s.uuid, target_node_uuid: t.uuid}}] AS edges
             RETURN g.uuid AS resolved_episode_uuid,
-                   [(g)-[:MENTIONS]->(e:Entity) | e.uuid] AS entity_uuids,
-                   [(:Entity)-[r:RELATES_TO]->(:Entity)
-                    WHERE g.uuid IN coalesce(r.episodes, []) | r.uuid] AS edge_uuids,
+                   [x IN entities | x.uuid] AS entity_uuids,
+                   [x IN edges | x.uuid] AS edge_uuids,
+                   entities, edges,
+                   n.resolved_extraction_outcome AS extraction_outcome,
+                   n.resolved_policy_empty_reason AS policy_empty_reason,
+                   coalesce(n.resolved_self_bound, false) AS self_bound,
+                   {_TWIN_LINK_COMPLETE} AS completed,
                    n.namespace AS namespace,
                    {fence_key_cypher("n")} AS fence_namespace_key
             LIMIT 1
@@ -1172,7 +1215,64 @@ class EpisodeLifecycleRepository:
             "edge_uuids": list(dict.fromkeys(str(u) for u in (row.get("edge_uuids") or []) if u)),
             "namespace": row.get("namespace"),
             "fence_namespace_key": str(row.get("fence_namespace_key") or "default"),
+            "extraction_outcome": row.get("extraction_outcome"),
+            "policy_empty_reason": row.get("policy_empty_reason"),
+            "self_bound": bool(row.get("self_bound")),
+            "completed": bool(row.get("completed")),
+            "entity_details": {
+                str(x["uuid"]): dict(x) for x in (row.get("entities") or []) if x and x.get("uuid")
+            },
+            "edge_details": {
+                str(x["uuid"]): dict(x) for x in (row.get("edges") or []) if x and x.get("uuid")
+            },
         }
+
+    def clear_uncompleted_twin_link(
+        self, episode_uuid: str, resolved_episode_uuid: str, *, executor: Any = None
+    ) -> bool:
+        """Drop a link that is not a completion and delete its empty twin (#905).
+
+        A retry that must re-extract runs this first, under the claim fence (``executor``), so the
+        new publish is not refused as ``already_linked``. Only the named, still-uncompleted link is
+        cleared. The twin is deleted only when it is a Graphiti episode of this queue node alone,
+        nothing cites it (no MENTIONS, no RELATES_TO edge listing it) and its only relationships are
+        its own outgoing READ_CONTEXT edges; those edges and the node are then deleted with plain
+        DELETE. Otherwise the twin is left in place and only unlinked; it stays covered by the erase
+        closure through ``reserved_twin_uuids``. Returns True when the link was cleared.
+        """
+        rows = (executor or self.neo4j).execute(
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
+            WHERE n.resolved_episode_uuid = $resolved AND {EPISODE_NOT_MARKED}
+            OPTIONAL MATCH {_TWIN_LINK_MATCH}
+            WITH n, g
+            WHERE g IS NULL OR NOT {_TWIN_LINK_COMPLETE}
+            OPTIONAL MATCH (d:Episodic {{uuid: $resolved}})
+            WHERE d.processing_state IS NULL
+              AND coalesce(d.menhir_memory_uuid, n.uuid) = n.uuid
+              AND NOT EXISTS {{ MATCH (d)-[:MENTIONS]->(:Entity) }}
+              AND NOT EXISTS {{
+                  MATCH (:Entity)-[r:RELATES_TO]->(:Entity) WHERE d.uuid IN coalesce(r.episodes, [])
+              }}
+              AND NOT EXISTS {{
+                  MATCH (o:Episodic) WHERE o.resolved_episode_uuid = d.uuid AND o.uuid <> n.uuid
+              }}
+              AND NOT EXISTS {{
+                  MATCH (d)-[x]-()
+                  WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)
+              }}
+            REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome,
+                   n.resolved_policy_empty_reason, n.resolved_self_bound
+            WITH n, d
+            OPTIONAL MATCH (d)-[rc:READ_CONTEXT]->()
+            WITH n, d, collect(rc) AS read_context
+            FOREACH (r IN read_context | DELETE r)
+            FOREACH (x IN CASE WHEN d IS NULL THEN [] ELSE [d] END | DELETE x)
+            RETURN count(n) AS cleared
+            """,
+            params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
+        )
+        return bool(rows and int(dict(rows[0]).get("cleared") or 0) > 0)
 
     def claim_pending_episode(
         self,

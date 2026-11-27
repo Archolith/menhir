@@ -592,6 +592,14 @@ class MemoryGraphAdapter:
         """See EpisodeLifecycleRepository.linked_twin_artifact (finalize-from-link read)."""
         return self._episodes.linked_twin_artifact(episode_uuid)
 
+    def clear_uncompleted_twin_link(
+        self, episode_uuid: str, resolved_episode_uuid: str, *, executor: Any = None
+    ) -> bool:
+        """See EpisodeLifecycleRepository.clear_uncompleted_twin_link (#905)."""
+        return self._episodes.clear_uncompleted_twin_link(
+            episode_uuid, resolved_episode_uuid, executor=executor
+        )
+
     def claim_pending_episode(
         self,
         episode_uuid: str,
