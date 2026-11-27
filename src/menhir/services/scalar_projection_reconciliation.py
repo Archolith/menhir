@@ -15,15 +15,17 @@ caller may do that only after the returned token is certified.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
-from menhir.domain.projection_lifecycle import (
-    ProjectionFreshnessCertificate,
-    ProjectionWorkToken,
+from menhir.domain.projection_lifecycle import ProjectionWorkToken
+from menhir.services.projection_reconciliation import (
+    ProjectionCommitQueue,
+    ProjectionMaterializer,
+    ProjectionReconciliation,
+    ProjectionReconciler,
 )
 from menhir.services.scalar_projection_definition import (
     SCALAR_STATE_PROJECTION,
@@ -46,13 +48,7 @@ _TARGET_FIELDS = (
 )
 
 
-class _ScalarMaterializer(Protocol):
-    """Transaction-scoped callback used by lifecycle certification."""
-
-    def __call__(self, tx: Any, token: ProjectionWorkToken) -> str: ...
-
-
-class _ProjectionLifecycle(Protocol):
+class _ProjectionLifecycle(ProjectionCommitQueue, Protocol):
     """Minimal lifecycle capability required by scalar reconciliation."""
 
     def dirty_targets(
@@ -62,25 +58,6 @@ class _ProjectionLifecycle(Protocol):
         *,
         reason: str,
     ) -> tuple[ProjectionWorkToken, ...]: ...
-
-    def commit(
-        self,
-        token: ProjectionWorkToken,
-        *,
-        derivation_id: str,
-        materialize: _ScalarMaterializer,
-    ) -> ProjectionFreshnessCertificate: ...
-
-    def pending(
-        self, *, definition_id: str | None = None, limit: int = 100
-    ) -> tuple[ProjectionWorkToken, ...]: ...
-
-
-def _require_token(name: str, value: object) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a non-blank string")
-    return value.strip()
-
 
 def _target_row(assertion: object) -> dict[str, Any]:
     """Expose only the projection-identity fields from a row or live TypedAssertion object."""
@@ -101,31 +78,9 @@ def _unique_targets(assertions: Iterable[object]) -> tuple[ProjectionTarget, ...
     return tuple(targets[key] for key in sorted(targets))
 
 
-def _derivation_id(operation_id: str, token: ProjectionWorkToken) -> str:
-    material = (
-        f"scalar-reconcile-v1\0{operation_id}\0{token.work_key}\0{token.generation}"
-    ).encode("utf-8")
-    return hashlib.sha256(material).hexdigest()
-
-
 @dataclass(frozen=True)
-class ScalarProjectionReconciliation:
-    """One exact lifecycle generation successfully materialized and certified."""
-
-    token: ProjectionWorkToken
-    certificate: ProjectionFreshnessCertificate
-
-    def __post_init__(self) -> None:
-        if self.certificate.definition_id != self.token.definition_id:
-            raise ValueError("certificate definition does not match work token")
-        if self.certificate.definition_version != self.token.definition_version:
-            raise ValueError("certificate definition version does not match work token")
-        if self.certificate.target != self.token.target:
-            raise ValueError("certificate target does not match work token")
-        if self.certificate.generation != self.token.generation:
-            raise ValueError("certificate generation does not match work token")
-        if self.certificate.target_present != self.token.target_present:
-            raise ValueError("certificate membership does not match work token")
+class ScalarProjectionReconciliation(ProjectionReconciliation):
+    """One exact scalar generation successfully materialized and certified."""
 
 
 class ScalarProjectionReconciler:
@@ -140,10 +95,15 @@ class ScalarProjectionReconciler:
         self,
         lifecycle: _ProjectionLifecycle,
         *,
-        materializer: _ScalarMaterializer,
+        materializer: ProjectionMaterializer,
     ) -> None:
         self._lifecycle = lifecycle
-        self._materializer = materializer
+        self._reconciler = ProjectionReconciler(
+            lifecycle,
+            SCALAR_STATE_PROJECTION,
+            materializer=materializer,
+            derivation_prefix="scalar-reconcile-v1",
+        )
 
     def dirty_assertions(
         self,
@@ -153,14 +113,15 @@ class ScalarProjectionReconciler:
     ) -> tuple[ProjectionWorkToken, ...]:
         """Advance work generations for the unique scalar slots touched by assertions."""
 
-        reason = _require_token("reason", reason)
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("reason must be a non-blank string")
         targets = _unique_targets(assertions)
         if not targets:
             return ()
         return self._lifecycle.dirty_targets(
             SCALAR_STATE_PROJECTION,
             targets,
-            reason=reason,
+            reason=reason.strip(),
         )
 
     def commit_tokens(
@@ -171,22 +132,8 @@ class ScalarProjectionReconciler:
     ) -> tuple[ScalarProjectionReconciliation, ...]:
         """Fence/materialize/certify existing generations without advancing them again."""
 
-        operation_id = _require_token("operation_id", operation_id)
-        reconciled: list[ScalarProjectionReconciliation] = []
-        for token in tokens:
-            if not isinstance(token, ProjectionWorkToken):
-                raise TypeError("tokens must contain ProjectionWorkToken values")
-            if token.definition_id != SCALAR_STATE_PROJECTION.definition_id:
-                raise ValueError("scalar reconciler received work for another projection definition")
-            if token.definition_version != SCALAR_STATE_PROJECTION.version:
-                raise ValueError("scalar reconciler received work for another projection version")
-            certificate = self._lifecycle.commit(
-                token,
-                derivation_id=_derivation_id(operation_id, token),
-                materialize=self._materializer,
-            )
-            reconciled.append(ScalarProjectionReconciliation(token, certificate))
-        return tuple(reconciled)
+        committed = self._reconciler.commit_tokens(tokens, operation_id=operation_id)
+        return tuple(ScalarProjectionReconciliation(result.token, result.certificate) for result in committed)
 
     def reconcile_assertions(
         self,
@@ -213,8 +160,5 @@ class ScalarProjectionReconciler:
     ) -> tuple[ScalarProjectionReconciliation, ...]:
         """Recover already-dirty scalar generations without incrementing their generation."""
 
-        pending = self._lifecycle.pending(
-            definition_id=SCALAR_STATE_PROJECTION.definition_id,
-            limit=limit,
-        )
-        return self.commit_tokens(pending, operation_id=operation_id)
+        committed = self._reconciler.drain_pending(operation_id=operation_id, limit=limit)
+        return tuple(ScalarProjectionReconciliation(result.token, result.certificate) for result in committed)

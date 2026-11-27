@@ -418,9 +418,18 @@ async def _run_resume_from_snapshot(
     }
 
 
+def _refusal_exit(result: dict[str, Any]) -> int:
+    """4 when any re-embedded vector was refused as shorter than expected (left without a vector)."""
+    refused = sum(int(part.get("wrong_dimension", 0)) for part in result["reembedded"].values())
+    return 4 if refused else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Snapshot, clear, and rebuild stale Neo4j embeddings after an embedder migration."
+        description="Snapshot, clear, and rebuild stale Neo4j embeddings after an embedder migration.",
+        epilog="Exit codes: 0 ok; 1 post-repair health still not ok; 4 one or more vectors were "
+        "refused for being shorter than the expected dimension (health ok, but those records "
+        "have no vector). 1 wins over 4. A dry run (no --apply) always exits 0.",
     )
     parser.add_argument(
         "--expected-dim",
@@ -477,7 +486,7 @@ def main() -> int:
                 )
             )
             print(json.dumps(result, indent=2, default=str))
-            return 0 if result["post_health"]["ok"] else 1
+            return _refusal_exit(result) if result["post_health"]["ok"] else 1
 
         if not args.apply:
             print("Dry run only. Re-run with --apply to snapshot, clear, and rebuild incompatible embeddings.")
@@ -494,7 +503,7 @@ def main() -> int:
         print(json.dumps(result, indent=2, default=str))
         if not result["post_health"]["ok"]:
             return 1
-        return 0
+        return _refusal_exit(result)
     finally:
         neo4j.close()
 

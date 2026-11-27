@@ -10,9 +10,11 @@ from menhir.config import MemorySettings
 from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
+from menhir.extensions import RuntimeExtensions, resolve_graph_extensions
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
+from menhir.services.projection_reconciliation import ProjectionWorkerRegistration
 
 
 class UnavailableGraphitiClient:
@@ -140,6 +142,26 @@ class BuildArtifacts:
     lifecycle_service: LifecycleService
     context_builder: ContextBuilderService
     candidate_service: CandidateService
+    projection_registrations: tuple[ProjectionWorkerRegistration, ...] = ()
+
+
+def build_graph_adapter(
+    neo4j: Neo4jRepository,
+    settings: MemorySettings,
+    *,
+    extensions: RuntimeExtensions | None = None,
+    embedding_dimensions: int | None = None,
+) -> MemoryGraphAdapter:
+    registry = resolve_graph_extensions(extensions, bind=True)
+    return MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=bool(
+            getattr(settings, "personal_memory_counting_enabled", False)
+            and getattr(settings, "personal_memory_scalar_state_enabled", False)
+        ),
+        **({"embedding_dimensions": embedding_dimensions} if embedding_dimensions is not None else {}),
+        **({"extensions": registry} if registry else {}),
+    )
 
 
 def build_memory_services(
@@ -148,10 +170,24 @@ def build_memory_services(
     capabilities: RuntimeCapabilities | None = None,
     read_only: bool = False,
     require_scheduler_lease: bool = False,
+    projection_registrations: tuple[ProjectionWorkerRegistration, ...] = (),
+    extensions: RuntimeExtensions | None = None,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
+    proposed = resolve_graph_extensions(extensions)
+    if proposed and projection_registrations:
+        raise ValueError("supply runtime extensions or direct worker registrations")
+    if read_only and (proposed or projection_registrations):
+        raise ValueError("projection workers require a writable runtime")
     settings = settings or MemorySettings.from_env()
     warn_retired_settings_set_false()
+    extensions = resolve_graph_extensions(extensions, bind=True)
+    if extensions:
+        if projection_registrations:
+            raise ValueError("supply runtime extensions or direct worker registrations")
+        projection_registrations = extensions.projection_workers()
+    if read_only and projection_registrations:
+        raise ValueError("projection workers require a writable runtime")
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
         database=settings.neo4j_database,
@@ -184,13 +220,11 @@ def build_memory_services(
             llm = UnavailableLLMAdapter(f"{llm_reason} ({exc})")
     else:
         llm = UnavailableLLMAdapter(llm_reason)
-    graph_adapter = MemoryGraphAdapter(
-        neo4j=neo4j,
+    graph_adapter = build_graph_adapter(
+        neo4j,
+        settings,
         embedding_dimensions=expected_graphiti_embedding_dimension(settings),
-        counting_enabled=bool(
-            settings.personal_memory_counting_enabled
-            and settings.personal_memory_scalar_state_enabled
-        ),
+        extensions=extensions,
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
@@ -269,6 +303,7 @@ def build_memory_services(
         lifecycle_service=lifecycle_service,
         context_builder=context_builder,
         candidate_service=candidate_service,
+        projection_registrations=tuple(projection_registrations),
     )
 
 

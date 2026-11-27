@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 
@@ -117,18 +118,36 @@ class IngestDocumentTool(BaseTextTool):
                         user_id=session.user_id,
                         session_id=session.session_id,
                         source="document-ingest",
+                        # Document-derived and free of occurred_at, so a re-run of the same
+                        # document replays the existing episode instead of adding a second.
+                        idempotency_key="document-ingest:"
+                        + hashlib.sha256(narrative.encode("utf-8")).hexdigest(),
                         # Forwarded only when set: byte-identical call when unpinned.
                         **({"namespace": namespace} if namespace else {}),
                     ),
                     timeout=10,
                 )
-                episode_status = (
-                    f"episode_id={ep_result.get('episode_id')}"
-                    if ep_result.get("episode_id")
-                    else "episode queue failed"
-                )
+                episode_id = ep_result.get("episode_id")
+                if (
+                    episode_id
+                    and ep_result.get("idempotent_replay")
+                    and str(ep_result.get("processing_state") or "").upper() == "FAILED"
+                ):
+                    episode_status = (
+                        f"episode queue failed (episode_id={episode_id}): the earlier "
+                        f"ingest's episode failed; re-ingesting replays it. "
+                        f"Retry it with force_reenrich(episode_uuid={episode_id})"
+                    )
+                else:
+                    episode_status = (
+                        f"episode_id={episode_id}" if episode_id else "episode queue failed"
+                    )
             except asyncio.TimeoutError:
-                episode_status = "episode queue deferred (enrichment pipeline busy)"
+                # The durable write runs in a thread that cancellation does not stop.
+                episode_status = (
+                    "episode queue outcome unknown (timed out; the episode may already be "
+                    "saved). Re-running the ingest is safe: it will not create a duplicate"
+                )
             except Exception as exc:
                 episode_status = f"episode queue error: {exc}"
         else:

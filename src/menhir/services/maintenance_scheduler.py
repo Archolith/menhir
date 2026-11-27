@@ -14,8 +14,15 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from menhir.domain.projection_lifecycle import (
+    ProjectionWorkAlreadyCompletedError,
+    ProjectionWorkToken,
+    StaleProjectionWorkError,
+)
 from menhir.infrastructure.circuit_breaker import provider_unavailable_reason
+from menhir.infrastructure.neo4j import SagaOwnershipRevoked, revocation_scope
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
+from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scheduler_lease import (
     SchedulerLeaseStore,
     _utc_now_iso,
@@ -51,6 +58,9 @@ from menhir.services.scheduler_tasks import (
 from menhir.services.source_embedding_repair import repair_source_embeddings
 
 logger = logging.getLogger(__name__)
+
+_PROJECTION_BATCH_SIZE = 100
+_PROJECTION_INTERVAL_S = 30.0
 
 
 class _LeaseLostDuringJob(Exception):
@@ -164,6 +174,7 @@ class MaintenanceScheduler:
     lease_duration_s: float = 90.0
     lease_heartbeat_s: float = 30.0
     lease_store: SchedulerLeaseStoreProtocol = field(default_factory=SchedulerLeaseStore)
+    projection_workers: tuple[ProjectionReconciler, ...] = field(default=(), repr=False)
     _task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _stop_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     # Set ONLY by _mark_lease_lost. Deliberately separate from _stop_event: an orderly stop
@@ -171,6 +182,8 @@ class MaintenanceScheduler:
     _lease_lost_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _jobs: dict[str, _JobState] = field(default_factory=dict, init=False, repr=False)
+    _projection_jobs: dict[str, ProjectionReconciler] = field(default_factory=dict, init=False, repr=False)
+    _projection_lanes: tuple[_ProjectionLane, ...] = field(default=(), init=False, repr=False)
     _owner_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{uuid4()}", init=False, repr=False)
     _owner_pid: int = field(default_factory=os.getpid, init=False, repr=False)
     _lease_acquired: bool = field(default=False, init=False, repr=False)
@@ -244,13 +257,32 @@ class MaintenanceScheduler:
         self._jobs["derived_rederive"] = _JobState(interval_s=900.0)
         if self.sidecar_compaction_interval_s > 0:
             self._jobs["sidecar_compaction"] = _JobState(interval_s=self.sidecar_compaction_interval_s)
+        if len({worker.definition_id for worker in self.projection_workers}) != len(self.projection_workers):
+            raise ValueError("duplicate projection worker for a definition")
+        self._projection_lanes = tuple(
+            _ProjectionLane(
+                worker=worker,
+                ingest_service=self.ingest_service,
+                graph_adapter=self.graph_adapter,
+                lease_name=f"{self.lease_name}:projection:{worker.definition_id}:v{worker.definition_version}",
+                lease_store=self.lease_store,
+                lease_duration_s=self.lease_duration_s,
+                lease_heartbeat_s=self.lease_heartbeat_s,
+                tick_interval_s=self.tick_interval_s,
+            )
+            for worker in self.projection_workers
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def is_running(self) -> bool:
+        """Whether the loop for this scheduler's own lease is running."""
         return self._task is not None and not self._task.done()
+
+    def _has_running_jobs(self) -> bool:
+        return self.is_running() or any(lane.is_running() for lane in self._projection_lanes)
 
     async def start(
         self,
@@ -271,7 +303,9 @@ class MaintenanceScheduler:
                 # (see _await_job_under_lease), so re-acquiring then stays an operator action.
                 self._standby_task = asyncio.create_task(
                     self._standby_loop(), name="menhir-maintenance-standby")
-            return started
+            for lane in self._projection_lanes:
+                await lane.start()
+            return started or (not force_takeover and self._has_running_jobs())
 
     async def _standby_loop(self) -> None:
         """Retry the lease until this process owns it, or stop() withdraws the request."""
@@ -373,8 +407,8 @@ class MaintenanceScheduler:
         """Force this process to take the scheduler lease for troubleshooting."""
         return await self.start(force_takeover=True, takeover_reason=reason)
 
-    async def stop(self) -> None:
-        """Stop the run loop and release the lease, atomically with respect to `start()`.
+    async def stop(self) -> bool:
+        """Stop the loops and release their leases. Return whether any were running.
 
         THE WHOLE SEQUENCE HOLDS `_state_lock` (CF-240). It used to drop the lock right after
         clearing `_task`, then await the task and release the lease outside it. A `start()`
@@ -395,6 +429,7 @@ class MaintenanceScheduler:
         this cannot deadlock or hang longer than the previous code's own unguarded `await task`.
         """
         async with self._state_lock:
+            was_running = self._has_running_jobs()
             # Withdraw the standby first, so it cannot acquire after this stop. It cannot be inside
             # _start_locked now (we hold the lock), so awaiting the cancel cannot deadlock.
             self._want_running = False
@@ -406,12 +441,15 @@ class MaintenanceScheduler:
             # Withdraw the registration first: enrichment must stop claiming as soon as the stop
             # begins, not after the loop has drained.
             clear_local_scheduler(self.lease_name, self._owner_id)
+            if task is not None:
+                self._stop_event.set()
+            if self._projection_lanes:
+                await asyncio.gather(*(lane.stop() for lane in self._projection_lanes))
             if task is None:
                 if self._lease_acquired:
                     self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
                     self._lease_acquired = False
-                return
-            self._stop_event.set()
+                return was_running
             self._task = None
             if task.cancelled():
                 logger.debug(
@@ -423,11 +461,15 @@ class MaintenanceScheduler:
             if self._lease_acquired:
                 self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
                 self._lease_acquired = False
+            return was_running
 
     def status_snapshot(self) -> dict[str, object]:
         lease = self.lease_store.fetch(lease_name=self.lease_name)
+        jobs = dict(self._jobs)
+        for lane in self._projection_lanes:
+            jobs.update(lane._jobs)
         return {
-            "running": self.is_running(),
+            "running": self._has_running_jobs(),
             "lease": {
                 "name": self.lease_name,
                 "owner_id": self._owner_id,
@@ -452,8 +494,15 @@ class MaintenanceScheduler:
                     "last_result": job.last_result,
                     "runs": job.runs,
                 }
-                for name, job in self._jobs.items()
+                for name, job in jobs.items()
             },
+            **({
+                "maintenance_running": self.is_running(),
+                "projection_leases": {
+                    name: lane.status_snapshot()["lease"]
+                    for lane in self._projection_lanes for name in lane._jobs
+                },
+            } if self._projection_lanes else {}),
         }
 
     # ------------------------------------------------------------------
@@ -738,6 +787,45 @@ class MaintenanceScheduler:
                 await self._run_job(
                     job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()
                 )
+            elif name in self._projection_jobs:
+                operation = f"scheduler_{name}"
+                await self._run_job(
+                    job, operation, self._reconcile_projection(self._projection_jobs[name], operation)
+                )
+
+    async def _reconcile_projection(
+        self, worker: ProjectionReconciler, operation: str,
+    ) -> dict[str, object]:
+        def require_lease() -> None:
+            # Check inside the thread, in case executor saturation delayed dispatch.
+            if not self._lease_is_provable():
+                raise _LeaseLostDuringJob(operation)
+
+        def pending() -> tuple[ProjectionWorkToken, ...]:
+            require_lease()
+            return worker.pending_tokens(limit=_PROJECTION_BATCH_SIZE)
+
+        def commit(token: ProjectionWorkToken) -> None:
+            require_lease()
+            worker.commit_tokens((token,), operation_id=operation)
+
+        applied = superseded = 0
+        # to_thread propagates this predicate to the repository, including its retry loop.
+        with revocation_scope(self._lease_is_provable):
+            try:
+                for token in await asyncio.to_thread(pending):
+                    if self._stop_event.is_set():
+                        break
+                    try:
+                        # Send one transaction at a time so cancellation cannot leave a batch running.
+                        await asyncio.to_thread(commit, token)
+                    except (ProjectionWorkAlreadyCompletedError, StaleProjectionWorkError):
+                        superseded += 1
+                    else:
+                        applied += 1
+            except SagaOwnershipRevoked as exc:
+                raise _LeaseLostDuringJob(operation) from exc
+        return {"applied": applied, "superseded": superseded}
 
     # ------------------------------------------------------------------
     # Job wrapper — shared timing, telemetry, and state bookkeeping
@@ -1070,3 +1158,15 @@ class MaintenanceScheduler:
 
     async def _run_review_unresolved_conflicts(self, job: _JobState) -> None:
         await self._run_job(job, "scheduler_review_unresolved_conflicts", self._make_review_unresolved_conflicts())
+
+
+@dataclass
+class _ProjectionLane(MaintenanceScheduler):
+    """Run one installed definition/version under its own lease and job loop."""
+
+    worker: ProjectionReconciler = field(kw_only=True, repr=False)
+
+    def __post_init__(self) -> None:
+        name = f"reconcile_projection:{self.worker.definition_id}"
+        self._projection_jobs[name] = self.worker
+        self._jobs[name] = _JobState(interval_s=_PROJECTION_INTERVAL_S)

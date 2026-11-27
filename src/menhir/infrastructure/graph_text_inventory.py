@@ -88,7 +88,7 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "merged_from", "merge_irreversible",
         # Write-lock tokens: a boolean set and removed in the same statement (#431), never stored.
         "_candidate_review_lock", "_artifact_supersede_lock", "_conflict_group_lock",
-        "_merge_lock", "_correlation_lock",
+        "_merge_lock", "_correlation_lock", "_decay_compress_lock",
         "_decay_delete_lock", "_bridge_lock",
         # Conflict and supersession links (uuids and enums).
         "conflict_group_id", "conflict_status", "conflict_created_at", "conflict_confirmed_at",
@@ -146,8 +146,8 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
 #: The memory text an Entity can hold today that the structural allowlist does not cover, named
 #: for documentation and tests; the authoritative rule is "not in ENTITY_STRUCTURAL_PROPERTIES".
 ENTITY_KNOWN_TEXT_PROPERTIES: tuple[str, ...] = (
-    "summary", "content", "original_content", "view_name", "view_summary", "attributes",
-    "content_embedding", "merge_audit", "candidate_notes",
+    "summary", "content", "original_content", "compressed_summary_sha256", "view_name",
+    "view_summary", "attributes", "content_embedding", "merge_audit", "candidate_notes",
 )
 
 GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (

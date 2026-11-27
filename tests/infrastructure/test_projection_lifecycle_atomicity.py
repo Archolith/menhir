@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from threading import Event
+from dataclasses import replace
+from threading import Barrier, Event
 from typing import Any
 
 import pytest
 
 from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
-from menhir.domain.projection_lifecycle import ProjectionLifecycleCorruptionError
+from menhir.domain.projection_lifecycle import ProjectionLifecycleCorruptionError, StaleProjectionWorkError
 from menhir.infrastructure.neo4j import Neo4jTransaction
 from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
 
@@ -36,6 +37,80 @@ def _target(subject: str = "ent-atomicity") -> ProjectionTarget:
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.online
+def test_projection_attempt_timeout_releases_shared_graph_lock(test_neo4j_repo) -> None:
+    bounded = ProjectionLifecycleRepository(test_neo4j_repo, commit_timeout_s=0.5)
+    healthy = ProjectionLifecycleRepository(test_neo4j_repo)
+    healthy.activate()
+    definition_a = _definition()
+    definition_b = replace(definition_a, definition_id="second-lock-definition")
+    for definition in (definition_a, definition_b):
+        healthy.publish_definition(definition, semantic_hash=definition.definition_id)
+    (a,) = healthy.dirty_targets(definition_a, [_target()], reason="stalled")
+    (b,) = healthy.dirty_targets(definition_b, [_target()], reason="healthy")
+    test_neo4j_repo.execute("CREATE (:ProjectionTestSharedLock {key:'shared'})")
+
+    entered, release = Event(), Event()
+
+    def write_shared(tx, value):
+        tx.execute("MATCH (n:ProjectionTestSharedLock {key:'shared'}) SET n.value=$v", {"v": value})
+        return value
+
+    def stall(tx, _token):
+        write_shared(tx, "first")
+        entered.set()
+        assert release.wait(timeout=12)
+        raise RuntimeError("stalled callback released")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stalled = pool.submit(bounded.commit, a, derivation_id="a", materialize=stall)
+        try:
+            assert entered.wait(timeout=5)
+            next_lane = pool.submit(
+                healthy.commit, b, derivation_id="b", materialize=lambda tx, _token: write_shared(tx, "second"),
+            )
+            assert next_lane.result(timeout=8).projection_hash == "second"
+        finally:
+            release.set()
+        with pytest.raises(RuntimeError, match="stalled callback released"):
+            stalled.result(timeout=8)
+
+    assert healthy.pending() == (a,)
+
+
+@pytest.mark.online
+def test_projection_lifecycle_only_one_concurrent_resolution_can_advance_a_generation(test_neo4j_repo) -> None:
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    v1, v2 = _definition(1), _definition(2)
+    lifecycle.publish_definition(v1, semantic_hash="race-resolve-v1")
+    (old,) = lifecycle.dirty_targets(v1, [_target()], reason="old-work")
+    lifecycle.publish_definition(v2, semantic_hash="race-resolve-v2")
+
+    ready = Barrier(2, timeout=5)
+
+    def resolve(operation, reason):
+        ready.wait()
+        return operation(v2, old, reason=reason)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        decisions = (
+            pool.submit(resolve, lifecycle.migrate_retained_work, "migrate"),
+            pool.submit(resolve, lifecycle.retire_retained_work, "retire"),
+        )
+        winners = []
+        for decision in decisions:
+            try:
+                winners.append(decision.result(timeout=10))
+            except StaleProjectionWorkError:
+                continue
+
+    (winner,) = winners
+    assert winner.generation == old.generation + 1
+    assert winner.target_present == (winner.reason == "migrate")
+    assert lifecycle.pending() == (winner,)
 
 
 @pytest.mark.online

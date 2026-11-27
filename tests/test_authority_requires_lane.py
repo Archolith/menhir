@@ -43,6 +43,8 @@ def _fake_recall(captured):
 
 
 class _Inert:
+    counting_enabled = False
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -110,7 +112,7 @@ def test_hook_cli_wiring_requires_lane(monkeypatch, lane):
 
     captured = _Captured()
     monkeypatch.setattr("menhir.cli.bootstrap.Neo4jRepository", _Inert)
-    monkeypatch.setattr("menhir.cli.bootstrap.MemoryGraphAdapter", _Inert)
+    monkeypatch.setattr("menhir.core.bootstrap.MemoryGraphAdapter", _Inert)
     monkeypatch.setattr("menhir.infrastructure.graphiti_client.GraphitiClient", FakeGraphiti)
     monkeypatch.setattr("menhir.services.recall_service.RecallService", _fake_recall(captured))
     monkeypatch.setattr("menhir.services.context_builder.ContextBuilderService", _Inert)

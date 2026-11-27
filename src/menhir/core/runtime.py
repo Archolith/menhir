@@ -11,8 +11,10 @@ from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
+from menhir.core.bootstrap import build_graph_adapter
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
+from menhir.extensions import RuntimeExtensions, resolve_graph_extensions
 from menhir.infrastructure.telemetry import (
     enable_llm_usage_telemetry,
     enable_operator_warning_persistence,
@@ -372,6 +374,18 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         return existing
 
     settings = getattr(built, "settings", None)
+    projection_workers = ()
+    registrations = getattr(built, "projection_registrations", ())
+    if registrations:
+        from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+        from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
+        from menhir.services.projection_reconciliation import ProjectionReconciler
+
+        queue = ProjectionLifecycleRepository(built.neo4j, commit_timeout_s=SAGA_MUTATION_TIMEOUT_S)
+        projection_workers = tuple(
+            ProjectionReconciler(queue, item.definition, materializer=item.materializer)
+            for item in registrations
+        )
     verifier_sync_enabled = getattr(settings, "verifier_sync_enabled", False)
     verifier_repo = None
     verifier_context = None
@@ -434,6 +448,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         ingest_service=built.ingest_service,
         graph_adapter=built.graph_adapter,
         lifecycle_service=getattr(built, "lifecycle_service", None),
+        projection_workers=projection_workers,
         revision_retention_days=getattr(settings, "revision_retention_days", 14),
         # CF-171: thread the windows through. The finding this fixes is a sibling of CF-166 --
         # a retention control that existed and was never called -- so leaving these parsed but
@@ -480,9 +495,14 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         scalar_approximate_enabled=bool(
             getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
     )
-    await scheduler.start()
+    try:
+        await scheduler.start()
+    except BaseException:
+        with suppress(Exception):
+            await scheduler.stop()
+        raise
     snapshot = scheduler.status_snapshot()
-    if not snapshot.get("running"):
+    if not snapshot.get("maintenance_running", snapshot.get("running")):
         lease = snapshot.get("lease") or {}
         logger.warning(
             "Maintenance scheduler not started in this process; blocked_reason=%s "
@@ -578,6 +598,7 @@ async def _shutdown_runtime() -> None:
             with suppress(asyncio.CancelledError):
                 await orphan_task
             _state.orphan_recovery_task = None
+        await _stop_scheduler()
         if built is not None and hasattr(built, "ingest_service"):
             try:
                 released = await built.ingest_service.shutdown()
@@ -639,7 +660,6 @@ async def _shutdown_runtime() -> None:
                     state="failed",
                 )
                 logger.exception("Neo4j driver close failed")
-        await _stop_scheduler()
     finally:
         _clear_runtime_state()
 
@@ -677,6 +697,7 @@ async def _initialize_services(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
     # Before anything else. A process that already refused write admission may not rebuild the
     # services that admit writers -- not on a retry, not through a second entry point, not after a
@@ -689,6 +710,10 @@ async def _initialize_services(
         )
 
     settings = settings or MemorySettings.from_env()
+    extensions = resolve_graph_extensions(extensions)
+    writable_maintenance = not candidate_readonly and not settings.benchmark_mode
+    if extensions and not writable_maintenance:
+        raise ValueError("extensions require a writable maintenance runtime")
     if not candidate_readonly:
         enable_llm_usage_telemetry()
         enable_operator_warning_persistence()
@@ -716,6 +741,8 @@ async def _initialize_services(
             details={"failures": annotated_failures, "startup_mode": capabilities.startup_mode},
         )
         raise RuntimeError(" | ".join(annotated_failures))
+    if extensions and not capabilities.enrichment_ready:
+        raise RuntimeError("extensions require maintenance scheduler startup")
     if capabilities.failures:
         record_lifecycle_event(
             component="runtime_init",
@@ -726,6 +753,14 @@ async def _initialize_services(
 
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="started")
     logger.info("[init 1/5] Building memory services...")
+    # Standalone graph surfaces can select a registry while preflight is
+    # running. Bind now, after this attempt has passed preflight.
+    registry = resolve_graph_extensions(extensions, bind=True)
+    if registry is not extensions:
+        if not writable_maintenance:
+            raise ValueError("extensions require a writable maintenance runtime")
+        if not capabilities.enrichment_ready:
+            raise RuntimeError("extensions require maintenance scheduler startup")
     built = build_memory_services(
         settings,
         capabilities=capabilities,
@@ -737,6 +772,7 @@ async def _initialize_services(
             and not settings.benchmark_mode
             and capabilities.enrichment_ready
         ),
+        **({"extensions": registry} if registry else {}),
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
     # No model dir set: fetch the pinned rerank model in the background; recall keeps the RRF
@@ -746,15 +782,7 @@ async def _initialize_services(
     start_model_fetch(settings, getattr(built, "recall_service", None))
 
     if candidate_readonly:
-        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
-
-        graph_adapter = MemoryGraphAdapter(
-            neo4j=built.neo4j,
-            counting_enabled=bool(
-                getattr(settings, "personal_memory_counting_enabled", False)
-                and getattr(settings, "personal_memory_scalar_state_enabled", False)
-            ),
-        )
+        graph_adapter = build_graph_adapter(built.neo4j, settings)
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
             from menhir.core.bootstrap import _duplicate_values_suffix
@@ -851,31 +879,38 @@ async def _get_services(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
-    if _state.built is not None and _state.session is not None:
+    if extensions is None and _state.built is not None and _state.session is not None:
         return _state.built, _state.session
 
     async with _init_lock:
-        if _state.built is not None and _state.session is not None:
-            return _state.built, _state.session
+        registry = resolve_graph_extensions(extensions)
+        has_runtime = _state.built is not None and _state.session is not None
         init_task = _state.init_task
-        if init_task is None or not isinstance(init_task, asyncio.Task) or init_task.done():
+        initializing = isinstance(init_task, asyncio.Task) and not init_task.done()
+        if has_runtime and not initializing:
+            return _state.built, _state.session
+        if initializing and extensions and registry is not _state.init_extensions:
+            raise ValueError("the runtime is starting with a different extension registry")
+        if not initializing:
             init_task = asyncio.create_task(
-                _initialize_services(settings, candidate_readonly=candidate_readonly)
+                _initialize_services(
+                    settings, candidate_readonly=candidate_readonly,
+                    **({"extensions": registry} if registry else {}),
+                )
             )
             _state.init_task = init_task
+            _state.init_extensions = registry
 
+    assert isinstance(init_task, asyncio.Task)
     try:
         await asyncio.shield(init_task)
-    except Exception:
+    finally:
         async with _init_lock:
-            if _state.init_task is init_task:
+            if _state.init_task is init_task and init_task.done():
                 _state.init_task = None
-        raise
-
-    async with _init_lock:
-        if _state.init_task is init_task:
-            _state.init_task = None
+                _state.init_extensions = None
     if _state.built is None or _state.session is None:
         raise RuntimeError("Service initialization completed but built/session is None")
     return _state.built, _state.session
@@ -979,9 +1014,11 @@ async def start_runtime(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> RuntimeContext:
     built, session = await _get_services(
-        settings, candidate_readonly=candidate_readonly
+        settings, candidate_readonly=candidate_readonly,
+        **({"extensions": extensions} if extensions else {}),
     )
     return RuntimeContext(
         built=built,

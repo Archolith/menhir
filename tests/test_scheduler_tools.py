@@ -156,8 +156,7 @@ def test_runtime_scheduler_pause_stops_running() -> None:
     from menhir.core.backend_impl import RuntimeProvider
 
     scheduler = MagicMock()
-    scheduler.is_running = MagicMock(return_value=True)
-    scheduler.stop = AsyncMock()
+    scheduler.stop = AsyncMock(return_value=True)
     built = MagicMock()
     built.scheduler = scheduler
     provider = RuntimeProvider(built, MagicMock())
