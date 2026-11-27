@@ -177,8 +177,8 @@ class TestCheckCorrelation:
         repo.merge_entity.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_hook_is_byte_identical(self) -> None:
-        # Default (no hook) path: a committed merge returns normally with no scalar coupling.
+    async def test_a_committed_merge_returns_normally(self) -> None:
+        # A committed merge returns normally.
         repo = _make_repo()
         coordinator = MagicMock()
         coordinator.merge.return_value = {"merged": 1, "op_id": "op-3"}

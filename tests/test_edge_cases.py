@@ -325,11 +325,11 @@ class TestSelfConflictGuard:
         """_check_contradictions_batch skips other_uuid == uuid."""
         from menhir.infrastructure.pending_actions import PendingActionStore
         from menhir.services import LifecycleService
-        from menhir.services.lifecycle_service import SIMILARITY_CONFLICT_THRESHOLD
+        from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 
         # search_scored returns the node itself at high similarity
         stub_graphiti_client.search_scored_results = [
-            ("self-node", "self match", SIMILARITY_CONFLICT_THRESHOLD + 0.1),
+            ("self-node", "self match", CORRELATION_CONFLICT_THRESHOLD + 0.1),
         ]
 
         svc = LifecycleService(
@@ -783,11 +783,11 @@ class TestTransitiveConflicts:
         """Conflict detection creates independent groups per node, not transitive closure."""
         from menhir.infrastructure.pending_actions import PendingActionStore
         from menhir.services import LifecycleService
-        from menhir.services.lifecycle_service import SIMILARITY_CONFLICT_THRESHOLD
+        from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 
         # search_scored returns high-sim hit for each query
         stub_graphiti_client.search_scored_results = [
-            ("node-B", "B content", SIMILARITY_CONFLICT_THRESHOLD + 0.05),
+            ("node-B", "B content", CORRELATION_CONFLICT_THRESHOLD + 0.05),
         ]
 
         svc = LifecycleService(

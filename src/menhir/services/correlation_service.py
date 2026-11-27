@@ -14,8 +14,7 @@ were flagged as contradictions, flooding the conflict queue with
 correlated-but-not-contradictory memories.
 
 Thresholds are based on the audit of 11,412 entities. The conflict threshold is
-defined once, as CORRELATION_CONFLICT_THRESHOLD in correlation_service_types;
-lifecycle_models.SIMILARITY_CONFLICT_THRESHOLD is the same constant.
+defined once, as CORRELATION_CONFLICT_THRESHOLD in correlation_service_types.
 
 The score routed on is an ordinal RRF rank score, not the cosine these bands
 describe (see ``classify_pair``). A real name cosine below
