@@ -20,6 +20,11 @@ Usage:
   python scripts/backfill_episode_embeddings.py --namespace lme-x --batch 100
   python scripts/backfill_episode_embeddings.py --require-complete   # build gate: exit 3 on gaps
 
+Exit codes: 0 ok; 2 embedder refused/misconfigured; 3 --require-complete found READY episodes
+without an embedding; 4 one or more vectors were refused for being shorter than the configured
+dimension (nothing written for them; never returned by --dry-run). When both 3 and 4 apply, 3 wins:
+it is the completeness contract, and refused episodes stay unembedded so the gate fails anyway.
+
 Read-only unless run WITHOUT --dry-run. Embeds via the configured Graphiti
 embedder (the same embedder recall uses), truncating content to 8,000 chars.
 """
@@ -173,6 +178,9 @@ async def _run(args: argparse.Namespace) -> int:
             print("complete: every READY episode has a content embedding.")
     finally:
         neo4j.close()
+    # Exit 3 (completeness) returned above wins; refusals alone still must not look like success.
+    if wrong_dimension and not args.dry_run:
+        return 4
     return 0
 
 
