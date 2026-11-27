@@ -94,6 +94,9 @@ class _Graph:
             "edge_uuids": [],
             "namespace": "default",
             "fence_namespace_key": "default",
+            # A finished publish (#905): the outcome recorded with the link makes it a completion.
+            "extraction_outcome": "empty",
+            "completed": True,
         }
 
     def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:
@@ -176,9 +179,10 @@ async def test_parked_row_that_gains_a_twin_link_is_a_candidate_again_and_is_fin
 
     result = await _tick(graph, ingest)
     assert result["candidates"] == 1
-    assert result["reconciled"] == 1
-    assert graph.ready == ["ep-1"]
-    assert graph.rows["ep-1"]["processing_state"] == "READY"
+    # #906: the scheduler hands the row to the worker, whose finalize-from-link marks it READY.
+    assert result["requeued"] == 1
+    assert ingest.requeued == ["ep-1"]
+    assert graph.ready == []
 
 
 @pytest.mark.asyncio
@@ -200,10 +204,11 @@ async def test_linked_parked_rows_sort_ahead_of_the_due_recheck_herd() -> None:
     graph.twins.add("twin-1")
     graph.rows["linked"]["resolved_episode_uuid"] = "twin-1"
 
-    result = await _tick(graph, _Ingest(graph))
+    ingest = _Ingest(graph)
+    result = await _tick(graph, ingest)
 
-    assert result["reconciled"] == 1
-    assert graph.ready == ["linked"]
+    assert result["requeued"] == 1
+    assert ingest.requeued[0] == "linked"
 
 
 def _candidate_query() -> tuple[str, dict]:

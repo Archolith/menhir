@@ -2668,7 +2668,6 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
     assert requeued == ["retry-now"]
     assert job.last_result == {
         "candidates": 4,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 2,
         "waiting": 1,
@@ -2689,6 +2688,7 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
 ) -> None:
     stamped_calls: list[dict[str, object]] = []
     ready_calls: list[dict[str, object]] = []
+    requeued: list[str] = []
 
     class FakeStamp:
         nodes_touched = 2
@@ -2699,7 +2699,8 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             return 0, 0
 
         async def requeue_failed_episode(self, episode_uuid: str) -> bool:
-            raise AssertionError("requeue_failed_episode should not be called for reconciled episodes")
+            requeued.append(episode_uuid)
+            return True
 
         def get_queue_depth(self) -> int:
             return 0
@@ -2709,6 +2710,9 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
 
         def get_max_enrichment_attempts(self) -> int:
             return 3
+
+        def get_context_window_retry_attempts(self) -> int:
+            return 6
 
     class FakeGraphAdapter:
         def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
@@ -2799,29 +2803,14 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
     job = scheduler._jobs["retry_failed_enrichments"]
     await scheduler._run_retry_failed_enrichments(job)
 
-    assert stamped_calls == [
-        {
-            "node_uuids": ["episode-existing-1", "entity-1"],
-            "edge_uuids": ["edge-1"],
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "source": "unit-test",
-            "source_confidence": 0.5,
-        }
-    ]
-    assert ready_calls == [
-        {
-            "episode_uuid": "manual-review",
-            "required_state": "FAILED",
-            "resolved_episode_uuid": "episode-existing-1",
-            "nodes_touched": 2,
-            "edges_touched": 1,
-        }
-    ]
+    # #906: a silent completion is handed to the worker, whose claim returns the twin link and
+    # whose finalize-from-link runs every post-publish step; the scheduler writes nothing itself.
+    assert stamped_calls == []
+    assert ready_calls == []
+    assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 1,
-        "requeued": 0,
+        "requeued": 1,
         "terminal": 0,
         "waiting": 0,
         "exhausted": 0,
@@ -2881,7 +2870,6 @@ async def test_maintenance_scheduler_does_not_retry_context_window_mismatch_beyo
     assert requeued == []
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 0,
         "terminal": 0,
         "waiting": 0,
@@ -3034,29 +3022,14 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
     job = scheduler._jobs["retry_failed_enrichments"]
     await scheduler._run_retry_failed_enrichments(job)
 
-    assert stamped_calls == [
-        {
-            "node_uuids": ["episode-existing-1", "entity-1"],
-            "edge_uuids": ["edge-1"],
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "source": "unit-test",
-            "source_confidence": 0.5,
-        }
-    ]
-    assert ready_calls == [
-        {
-            "episode_uuid": "manual-review",
-            "required_state": "FAILED",
-            "resolved_episode_uuid": "episode-existing-1",
-            "nodes_touched": 2,
-            "edges_touched": 1,
-        }
-    ]
+    # #906: the scheduler no longer stamps or marks READY, so a row that is no longer FAILED is
+    # never finalized here. The FAILED re-check is requeue_failed_episode's state read and the
+    # claim's `processing_state IN ['PENDING', 'FAILED']` guard; the fake reports an enqueue.
+    assert stamped_calls == []
+    assert ready_calls == []
     assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 0,
         "waiting": 0,

@@ -16,9 +16,8 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
-from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
+from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP, twin_link_completed
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
 from menhir.infrastructure.memory_queries import STALE_PENDING_CONFLICT_SECONDS
 from menhir.infrastructure.telemetry import record_failure_event
@@ -27,7 +26,6 @@ from menhir.services.enrichment_failures import (
     is_budget_refusal,
     is_session_window_refusal,
 )
-from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.counting_consolidation import (
     CountingConsolidationConfig,
     effective_counting_perceiver_version,
@@ -275,58 +273,25 @@ async def retry_process_candidate(
     episode_uuid = str(row.get("uuid") or "")
     processing_attempts = int(row.get("processing_attempts") or 0)
 
+    # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
+    # match) says a completion exists. #905: a link to an empty twin whose attempt collapsed (or
+    # recorded no outcome) is not a completion; it is classified like any failure below.
+    # #906: a completed link is handed to the worker, not finalized here: the requeue below lets
+    # the worker's claim return the link, and finalize-from-link runs every post-publish step on the
+    # stored text and marks READY under the claim fence. The claim is the FAILED -> ENRICHING
+    # transition; it requires FAILED (no live owner), no erase marker and no erased_at, and an
+    # attempt left. A completed link skips only the terminal/manual-review gate (the original error
+    # no longer applies once the publish is done); the attempt cap, the transient cap and the
+    # backoff still bound it, since a transient from-link failure refunds its attempt.
+    completed_link = False
     if episode_uuid:
-        # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
-        # match) says a completion exists. The retry row carries no namespace; the artifact does.
         existing_completion = await asyncio.to_thread(
             graph_adapter.linked_twin_artifact,
             episode_uuid,
         )
-        if existing_completion is not None:
-            link_namespace = str(
-                existing_completion.get("namespace") or row.get("namespace") or "default"
-            )
-            resolved_episode_uuid = str(existing_completion.get("resolved_episode_uuid") or "")
-            entity_uuids = [str(u) for u in (existing_completion.get("entity_uuids") or []) if str(u)]
-            edge_uuids = [str(u) for u in (existing_completion.get("edge_uuids") or []) if str(u)]
-            stamp_kwargs: dict[str, object] = {}
-            if row.get("bootstrap_scope") is not None:
-                stamp_kwargs["bootstrap_scope"] = row.get("bootstrap_scope")
-            stamped = await asyncio.to_thread(
-                graph_adapter.stamp_ingest_metadata,
-                node_uuids=[resolved_episode_uuid] + entity_uuids,
-                edge_uuids=edge_uuids,
-                session_id=str(row.get("session_id") or ""),
-                user_id=str(row.get("user_id") or ""),
-                source=str(row.get("source") or "claude-code"),
-                source_confidence=source_confidence_for(str(row.get("source") or "claude-code")),
-                namespace=link_namespace,
-                **stamp_kwargs,
-            )
-            try:
-                record_retention_sources(
-                    graph_adapter,
-                    entity_uuids,
-                    source_episode_uuid=episode_uuid,
-                    namespace=link_namespace,
-                )
-            except ValueError as exc:
-                logger.warning(
-                    "Leaving failed episode unreconciled after incomplete retention provenance "
-                    "episode_id=%s error=%s",
-                    episode_uuid,
-                    exc,
-                )
-                return "waiting"
-            if await asyncio.to_thread(
-                graph_adapter.mark_episode_ready,
-                episode_uuid,
-                required_state="FAILED",
-                resolved_episode_uuid=resolved_episode_uuid,
-                nodes_touched=stamped.nodes_touched,
-                edges_touched=stamped.edges_touched,
-            ):
-                return "reconciled"
+        completed_link = existing_completion is not None and twin_link_completed(
+            existing_completion
+        )
 
     classification = classify_enrichment_failure(row.get("processing_error"))
     # Only an operator-clearable context-window error (local n_ctx too small) bypasses the
@@ -339,7 +304,11 @@ async def retry_process_candidate(
     context_cap = ingest_service.get_context_window_retry_attempts()
     effective_max = max(max_attempts, context_cap) if context_window_mismatch else max_attempts
 
-    if classification in ("terminal", "manual_review") and not context_window_mismatch:
+    if (
+        classification in ("terminal", "manual_review")
+        and not context_window_mismatch
+        and not completed_link
+    ):
         record_failure_event(
             operation="scheduler_retry_failed_enrichments",
             episode_uuid=episode_uuid,
@@ -432,7 +401,7 @@ async def retry_failed_enrichments(
     failed_retry_limit: int = 50,
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc)
-    counts: dict[str, int] = dict(reconciled=0, requeued=0, terminal=0, waiting=0, exhausted=0)
+    counts: dict[str, int] = dict(requeued=0, terminal=0, waiting=0, exhausted=0)
     candidates = await asyncio.to_thread(
         graph_adapter.fetch_failed_episode_retry_candidates, limit=failed_retry_limit
     )
