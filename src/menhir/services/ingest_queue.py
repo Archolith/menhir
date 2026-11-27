@@ -209,9 +209,10 @@ class IngestQueueMixin:
             )
         return True
 
-    async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
+    async def _enqueue_pending_episode(self, episode_uuid: str) -> bool:
+        """Put the id on the in-memory queue; False when it was already queued (#879)."""
         if episode_uuid in self._queued_episode_ids:
-            return
+            return False
         queue = self._queue()
         self._queued_episode_ids.add(episode_uuid)
         try:
@@ -229,6 +230,7 @@ class IngestQueueMixin:
         queue_depth = queue.qsize()
         if queue_depth > self._queue_warning_depth:
             logger.warning("Pending enrichment queue backlog depth=%s", queue_depth)
+        return True
 
     async def _recover_stale_episode_leases(self, limit: int = 100) -> tuple[int, int]:
         """Reset expired ENRICHING leases and enqueue all retryable episodes."""
@@ -269,10 +271,10 @@ class IngestQueueMixin:
         )
         enqueued = 0
         for episode_uuid in episode_ids:
-            if episode_uuid in self._queued_episode_ids:
-                continue
-            await self._enqueue_pending_episode(episode_uuid)
-            enqueued += 1
+            # Count only ids this sweep actually put on the queue (#879); an id already queued
+            # is a no-op. `is not False` keeps a subclass or double that returns None counted.
+            if await self._enqueue_pending_episode(episode_uuid) is not False:
+                enqueued += 1
         if orphaned_resets > 0:
             logger.warning(
                 "Recovered %d orphaned ENRICHING rows for worker=%s",

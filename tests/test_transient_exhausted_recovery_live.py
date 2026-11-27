@@ -168,15 +168,14 @@ async def test_recurring_recovery_stays_stable_after_parking(
     assert sorted(queued) == sorted([resumable])
     assert _episode_row(test_neo4j_repo, exhausted)["state"] == "FAILED"
 
-    # The second sweep has nothing new to offer: the still-PENDING row is already in the
-    # in-memory queue, so it is not enqueued or counted again (#879). The parked row never
+    # The second sweep re-offers only the still-PENDING work; the parked row never
     # resurrects and never re-enters the failed count.
     second_resets, second_queued = await service.recover_stale_enrichment_leases(
         limit=10
     )
     assert second_resets == 0
-    assert second_queued == 0
-    assert queued == [resumable]
+    assert second_queued == 1
+    assert queued == [resumable, resumable]
     parked = _episode_row(test_neo4j_repo, exhausted)
     assert parked["state"] == "FAILED"
     assert parked["substage"] == "pending_transient_exhausted"
