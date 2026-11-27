@@ -156,7 +156,12 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v -n auto --dist loadfile
+        run: pytest -v -m "not timing" -n auto --dist loadfile
+
+      # Wall-clock tests (pytest.ini `timing` marker) must not share a runner with xdist workers.
+      - name: Run timing tests serially
+        working-directory: menhir
+        run: pytest -v -m timing
 
   # The same offline suite on the other supported platform and the newest Python that
   # `requires-python = ">=3.12"` admits. Windows 11 is a primary supported platform and was
@@ -217,7 +222,12 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v -n auto --dist loadfile
+        run: pytest -v -m "not timing" -n auto --dist loadfile
+
+      # Wall-clock tests (pytest.ini `timing` marker) must not share a runner with xdist workers.
+      - name: Run timing tests serially
+        working-directory: menhir
+        run: pytest -v -m timing
 
   # The unit job cannot see the behaviour this project actually depends on: supersession under
   # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair

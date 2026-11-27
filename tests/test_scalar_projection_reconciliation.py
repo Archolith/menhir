@@ -226,7 +226,9 @@ def _projection_scheduler(tmp_path: Path, *workers: ProjectionReconciler) -> Mai
 
 async def _wait_for_job(scheduler: MaintenanceScheduler, definition_id: str) -> dict[str, object]:
     name = f"reconcile_projection:{definition_id}"
-    async with asyncio.timeout(5):
+    # Polls for the condition; the ceiling only bounds a real hang. Kept under pytest's 60s
+    # per-test limit even when a test waits twice, so a loaded runner can't starve it (#1067).
+    async with asyncio.timeout(25):
         while True:
             status = scheduler.status_snapshot()["jobs"][name]
             if status["runs"]:

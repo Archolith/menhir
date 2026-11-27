@@ -15,6 +15,11 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
 ## Steps
 
 1. Land everything on `main` and push. Wait for `tests.yml` to go green on that commit.
+   Every fix meant for the release must be on `main` before the release branch is cut. Run
+   `stdio-e2e` on `main` first, so the release PR is not the first place it runs:
+
+       gh workflow run tests.yml --repo Archolith/menhir --ref main
+
 2. Open the version bump and get it merged. The gate requires HEAD == `origin/main`.
 
        python scripts/bump.py version X.Y.Z --summary "what this release does" --pr
@@ -24,6 +29,9 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
    CHANGELOG entry in the PR before merging. Without `--pr`, the edits stay in the working tree.
    The branch is `release/X.Y.Z`, so `stdio-e2e` runs on the PR (about 13 minutes); on any other
    branch name it is skipped and the required check still passes.
+   If a fix lands after the branch is cut, update the release branch by merging `main` into it.
+   Do not rebase or force-push. In the CHANGELOG conflict, keep the version entry on top, put the
+   fix's own entry below it, and add a one-line pointer to it in the version entry.
 3. Start the release image dry run on that commit, unless last night's run already covers it:
 
        gh workflow run release-image-dryrun.yml --repo Archolith/menhir --ref main

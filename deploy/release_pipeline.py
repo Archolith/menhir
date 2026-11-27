@@ -23,6 +23,7 @@ from pathlib import Path
 PYPI_PROJECT = "archolith-menhir"
 PYPI_FILE_HOST = "files.pythonhosted.org"
 REGISTRY = "ghcr.io"
+USER_AGENT = "menhir-release-pipeline"
 
 TAG_RE = re.compile(r"v([0-9]+\.[0-9]+\.[0-9]+)")
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
@@ -48,7 +49,9 @@ Http = Callable[[str, str, dict[str, str], bytes | None], tuple[int, dict[str, s
 def urllib_http(
     method: str, url: str, headers: dict[str, str], body: bytes | None,
 ) -> tuple[int, dict[str, str], bytes]:
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    request = urllib.request.Request(
+        url, data=body, headers={"User-Agent": USER_AGENT, **headers}, method=method,
+    )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             return (
@@ -62,6 +65,18 @@ def urllib_http(
             {key.lower(): value for key, value in error.headers.items()},
             error.read(),
         )
+    except OSError as error:  # URLError and TimeoutError both derive from OSError
+        raise ReleasePipelineError(f"{method} {url} failed: {error}") from error
+
+
+def _json_object(body: bytes, what: str) -> dict:
+    try:
+        parsed = json.loads(body)
+    except ValueError as error:
+        raise ReleasePipelineError(f"{what} is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise ReleasePipelineError(f"{what} is not a JSON object")
+    return parsed
 
 
 def parse_release_tag(tag: str) -> str:
@@ -82,8 +97,12 @@ def require_run_on_tag(github_ref: str, tag: str) -> None:
 
 
 def read_python_base(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ReleasePipelineError(f"cannot read {path}: {error}") from error
     lines = [
-        line.strip() for line in path.read_text(encoding="ascii").splitlines()
+        line.strip() for line in text.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
     if len(lines) != 1 or PYTHON_BASE_RE.fullmatch(lines[0]) is None:
@@ -110,7 +129,7 @@ def _registry_token(
     status, _, body = http("GET", f"https://{REGISTRY}/token?{query}", headers, None)
     if status != 200:
         raise ReleasePipelineError(f"registry token request returned HTTP {status}")
-    token = json.loads(body).get("token")
+    token = _json_object(body, "registry token reply").get("token")
     if not isinstance(token, str) or not token:
         raise ReleasePipelineError("registry returned no token")
     return token
@@ -189,8 +208,23 @@ def adopt_published_distributions(http: Http, version: str, dist_dir: Path) -> b
         return False
     if status != 200:
         raise ReleasePipelineError(f"PyPI lookup of {version} returned HTTP {status}")
-    published = json.loads(body).get("urls") or []
+    published = _json_object(body, f"PyPI reply for {version}").get("urls") or []
     local = sorted(path.name for path in dist_dir.iterdir() if path.is_file())
+    if not local:
+        raise ReleasePipelineError(f"{dist_dir} holds no distribution files to compare with PyPI")
+    if not published:
+        raise ReleasePipelineError(f"PyPI lists no files for {version}; inspect the release by hand")
+    for entry in published:
+        digests = entry.get("digests") if isinstance(entry, dict) else None
+        if (
+            not isinstance(digests, dict)
+            or not isinstance(entry.get("filename"), str)
+            or not isinstance(entry.get("url"), str)
+            or not isinstance(digests.get("sha256"), str)
+        ):
+            raise ReleasePipelineError(
+                f"PyPI file entry for {version} lacks filename, url or digests.sha256"
+            )
     if sorted(entry.get("filename", "") for entry in published) != local:
         raise ReleasePipelineError(
             f"PyPI has a different file set for {version} than this build ({local}); "
@@ -217,6 +251,9 @@ def adopt_published_distributions(http: Http, version: str, dist_dir: Path) -> b
 
 
 def _write_outputs(values: dict[str, str]) -> None:
+    for key, value in values.items():
+        if "\n" in value or "\r" in value:
+            raise ReleasePipelineError(f"output {key} contains a line break")
     lines = [f"{key}={value}\n" for key, value in values.items()]
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
@@ -244,7 +281,11 @@ def _cmd_pypi_state(args: argparse.Namespace, http: Http) -> None:
 
 
 def _cmd_tag_image(args: argparse.Namespace, http: Http) -> None:
-    credential = f"{os.environ['GITHUB_ACTOR']}:{os.environ['GH_TOKEN']}"
+    actor = os.environ.get("GITHUB_ACTOR", "").strip()
+    token = os.environ.get("GH_TOKEN", "").strip()
+    if not actor or not token:
+        raise ReleasePipelineError("GITHUB_ACTOR and GH_TOKEN must both be set and non-empty")
+    credential = f"{actor}:{token}"
     result = tag_image(http, args.image, args.tag, args.digest, credential)
     print(f"{args.image}:{args.tag} -> {args.digest}: {result}")
 

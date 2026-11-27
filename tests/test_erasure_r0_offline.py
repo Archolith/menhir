@@ -155,6 +155,14 @@ class _FlakyRenewStore(SchedulerLeaseStore):
 
     fail_renew = False
     renew_errors = 0
+    _clock_origin = time.time()
+
+    def _now_epoch(self) -> float:  # type: ignore[override]
+        # The row's lifetime is floored at 1.0s of store time. Run the store clock at 1/20th
+        # speed so a runner stall of a second or more cannot expire the row mid-outage (#977);
+        # the scheduler's provable deadline keeps its own real clock, so the outage still
+        # closes the gate.
+        return self._clock_origin + (time.time() - self._clock_origin) / 20.0
 
     def renew(self, **kwargs: Any) -> bool:
         if self.fail_renew:
@@ -220,7 +228,7 @@ async def test_a_lease_renewal_store_error_does_not_kill_the_run_loop(tmp_path) 
         assert allowed() is False
 
         store.fail_renew = False
-        assert await _until(allowed, timeout_s=2.0), "gate never reopened after renewal recovered"
+        assert await _until(allowed, timeout_s=10.0), "gate never reopened after renewal recovered"
         assert not task.done() and sched.is_running()
     finally:
         store.fail_renew = False
