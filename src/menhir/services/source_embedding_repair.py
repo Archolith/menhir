@@ -27,6 +27,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.telemetry import record_failure_event
 
@@ -99,9 +100,12 @@ async def repair_source_embeddings(
                 skipped += 1
                 continue
             calls += 1
+            # Redact like the ingest step, before truncation; ``content`` stays the stored value
+            # the write is conditioned on.
+            embed_text = prepare_memory_text(content, policy=non_refusing_policy())[:EMBED_MAX_CHARS]
             try:
                 embedding = await await_with_backoff_aware_timeout(
-                    embed(content[:EMBED_MAX_CHARS]), timeout_s=EMBED_TIMEOUT_S
+                    embed(embed_text), timeout_s=EMBED_TIMEOUT_S
                 )
             except Exception as exc:  # timeout or embedder error: count it, keep going
                 failed += 1

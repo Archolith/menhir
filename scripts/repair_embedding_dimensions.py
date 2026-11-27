@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.embedding_dimensions import (
     embedding_dimension_health,
     expected_graphiti_embedding_dimension,
+    fit_embedding_dimension,
     semantic_fact_edge_pattern,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -22,6 +24,8 @@ from menhir.infrastructure.observability import build_async_openai_client
 from menhir.infrastructure.providers import ProviderConfig
 
 DEFAULT_BATCH_SIZE = 128
+# One type or a `|` join of types (semantic_fact_edge_pattern()); nothing else is interpolated.
+_REL_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\|[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
 def _load_settings() -> MemorySettings:
@@ -216,28 +220,50 @@ async def _reembed_nodes(
     model: str,
     rows: list[dict[str, Any]],
     label: str,
+    expected_dim: int | None = None,
 ) -> dict[str, int]:
     updated = 0
     skipped = 0
+    stale = 0
+    wrong_dimension = 0
     for start in range(0, len(rows), DEFAULT_BATCH_SIZE):
         batch = rows[start:start + DEFAULT_BATCH_SIZE]
-        texts = [str(row.get("name") or "") for row in batch]
-        nonempty_indices = [idx for idx, text in enumerate(texts)]
-        if not nonempty_indices:
-            skipped += len(batch)
+        nonblank = [row for row in batch if str(row.get("name") or "").strip()]
+        skipped += len(batch) - len(nonblank)
+        if not nonblank:
             continue
-        embeddings = await _embed_texts(client, model=model, texts=texts)
-        for row, embedding in zip(batch, embeddings, strict=True):
-            neo4j.execute(
+        embeddings = await _embed_texts(
+            client, model=model, texts=[str(row["name"]) for row in nonblank]
+        )
+        for row, embedding in zip(nonblank, embeddings, strict=True):
+            if expected_dim is not None:
+                embedding = fit_embedding_dimension(embedding, expected_dim)
+                if embedding is None:
+                    wrong_dimension += 1
+                    continue
+            matched = neo4j.execute(
                 f"""
                 MATCH (n:{label})
                 WHERE elementId(n) = $element_id
+                  AND coalesce(n.uuid, '') = $uuid
+                  AND n.name = $name
+                  AND all(l IN $labels WHERE l IN labels(n))
                 SET n.name_embedding = $embedding
+                RETURN count(n) AS matched
                 """,
-                {"element_id": row["element_id"], "embedding": embedding},
+                {
+                    "element_id": row["element_id"],
+                    "uuid": str(row.get("uuid") or ""),
+                    "name": row["name"],
+                    "labels": list(row.get("labels") or [label]),
+                    "embedding": embedding,
+                },
             )
-            updated += 1
-    return {"updated": updated, "skipped": skipped}
+            if int((matched[0] if matched else {}).get("matched", 0)):
+                updated += 1
+            else:
+                stale += 1
+    return {"updated": updated, "skipped": skipped, "stale": stale, "wrong_dimension": wrong_dimension}
 
 
 async def _reembed_relationships(
@@ -246,26 +272,56 @@ async def _reembed_relationships(
     client: Any,
     model: str,
     rows: list[dict[str, Any]],
+    expected_dim: int | None = None,
 ) -> dict[str, int]:
     updated = 0
     skipped = 0
+    stale = 0
+    wrong_dimension = 0
     for start in range(0, len(rows), DEFAULT_BATCH_SIZE):
         batch = rows[start:start + DEFAULT_BATCH_SIZE]
-        texts = [str(row.get("fact") or "") for row in batch]
-        if not texts:
+        nonblank = [row for row in batch if str(row.get("fact") or "").strip()]
+        skipped += len(batch) - len(nonblank)
+        if not nonblank:
             continue
-        embeddings = await _embed_texts(client, model=model, texts=texts)
-        for row, embedding in zip(batch, embeddings, strict=True):
-            neo4j.execute(
-                """
-                MATCH ()-[r]->()
+        embeddings = await _embed_texts(
+            client, model=model, texts=[str(row["fact"]) for row in nonblank]
+        )
+        for row, embedding in zip(nonblank, embeddings, strict=True):
+            rel_type = str(row.get("rel_type") or semantic_fact_edge_pattern())
+            if not _REL_TYPE_RE.match(rel_type):  # a snapshot is a file: never interpolate it blindly
+                stale += 1
+                continue
+            if expected_dim is not None:
+                embedding = fit_embedding_dimension(embedding, expected_dim)
+                if embedding is None:
+                    wrong_dimension += 1
+                    continue
+            matched = neo4j.execute(
+                f"""
+                MATCH (a)-[r:{rel_type}]->(b)
                 WHERE elementId(r) = $element_id
+                  AND coalesce(r.uuid, '') = $uuid
+                  AND r.fact = $fact
+                  AND coalesce(a.uuid, '') = $start_uuid
+                  AND coalesce(b.uuid, '') = $end_uuid
                 SET r.fact_embedding = $embedding
+                RETURN count(r) AS matched
                 """,
-                {"element_id": row["element_id"], "embedding": embedding},
+                {
+                    "element_id": row["element_id"],
+                    "uuid": str(row.get("uuid") or ""),
+                    "fact": row["fact"],
+                    "start_uuid": str(row.get("start_uuid") or ""),
+                    "end_uuid": str(row.get("end_uuid") or ""),
+                    "embedding": embedding,
+                },
             )
-            updated += 1
-    return {"updated": updated, "skipped": skipped}
+            if int((matched[0] if matched else {}).get("matched", 0)):
+                updated += 1
+            else:
+                stale += 1
+    return {"updated": updated, "skipped": skipped, "stale": stale, "wrong_dimension": wrong_dimension}
 
 
 async def _run_apply(
@@ -284,6 +340,7 @@ async def _run_apply(
         model=model,
         rows=list(snapshot["entities"]),
         label="Entity",
+        expected_dim=expected_dim,
     )
     community_result = await _reembed_nodes(
         neo4j,
@@ -291,12 +348,14 @@ async def _run_apply(
         model=model,
         rows=list(snapshot["communities"]),
         label="Community",
+        expected_dim=expected_dim,
     )
     relationship_result = await _reembed_relationships(
         neo4j,
         client=client,
         model=model,
         rows=list(snapshot["relationships"]),
+        expected_dim=expected_dim,
     )
     return {
         "snapshot_dir": str(output_dir),
@@ -329,6 +388,7 @@ async def _run_resume_from_snapshot(
         model=model,
         rows=entities,
         label="Entity",
+        expected_dim=expected_dim,
     )
     community_result = await _reembed_nodes(
         neo4j,
@@ -336,12 +396,14 @@ async def _run_resume_from_snapshot(
         model=model,
         rows=communities,
         label="Community",
+        expected_dim=expected_dim,
     )
     relationship_result = await _reembed_relationships(
         neo4j,
         client=client,
         model=model,
         rows=relationships,
+        expected_dim=expected_dim,
     )
     return {
         "snapshot_dir": str(snapshot_dir),

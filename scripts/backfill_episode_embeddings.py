@@ -35,6 +35,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
+from menhir.infrastructure.embedding_dimensions import (
+    configured_embedding_dimension,
+    fit_embedding_dimension,
+)
 from menhir.infrastructure.episode_repository import EpisodeRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.observability import build_async_openai_client
@@ -81,7 +86,8 @@ async def _embed_text(client: Any, *, model: str, text: str) -> list[float]:
 def _eligible_content(row: dict[str, Any]) -> tuple[str, str] | None:
     """Return the listed and bounded content when this row is an apply candidate."""
     listed_content = str(row.get("content") or "")
-    content = listed_content[:_EMBED_MAX_CHARS]
+    # Redacted like the ingest step, before truncation; the listed value stays the write premise.
+    content = prepare_memory_text(listed_content, policy=non_refusing_policy())[:_EMBED_MAX_CHARS]
     if not content.strip():
         return None
     return listed_content, content
@@ -98,6 +104,8 @@ async def _run(args: argparse.Namespace) -> int:
     repo = EpisodeRepository(neo4j)
     written = 0
     skipped = 0
+    wrong_dimension = 0
+    embed_dim: int | None = None
     # Re-embed vectors stamped by a different model too (audit F2); None = model unresolved.
     model = comparable_model(ProviderConfig.for_graphiti_embedder(settings).embed_model)
     client = None
@@ -120,6 +128,7 @@ async def _run(args: argparse.Namespace) -> int:
             after_uuid = str(rows[-1]["uuid"])
             if not args.dry_run and client is None:
                 client, embed_model = _resolve_embedder(settings)
+                embed_dim = configured_embedding_dimension(embed_model)
             for row in rows:
                 eligible = _eligible_content(row)
                 if eligible is None:
@@ -136,6 +145,13 @@ async def _run(args: argparse.Namespace) -> int:
                     written += 1
                     continue
                 embedding = await _embed_text(client, model=embed_model, text=content)
+                # Same cut as the service's Graphiti embedder; recall ignores any other size.
+                fitted = fit_embedding_dimension(embedding, embed_dim)
+                if fitted is None:
+                    wrong_dimension += 1
+                    skipped += 1
+                    continue
+                embedding = fitted
                 # The bounded text is the model input; the full listed value is the conditional
                 # write premise, so a change after listing cannot stamp a stale vector.
                 if repo.set_episode_content_embedding(
@@ -148,6 +164,9 @@ async def _run(args: argparse.Namespace) -> int:
             print(f"[dry-run] {written} embedding candidate(s); skipped {skipped}.")
         else:
             print(f"wrote {written} embedding(s); skipped {skipped}.")
+            if wrong_dimension:
+                print(f"REFUSED {wrong_dimension} vector(s) shorter than the configured dimension "
+                      f"({embed_dim}); nothing was written for them.", file=sys.stderr)
         if getattr(args, "require_complete", False):
             missing = _count_ready_missing(repo, args.namespace)
             if missing:

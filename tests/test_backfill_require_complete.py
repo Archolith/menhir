@@ -63,6 +63,8 @@ def _run(monkeypatch, repo: _Repo, **args: Any) -> int:
     monkeypatch.setattr(script.ProviderConfig, "for_graphiti_embedder",
                         staticmethod(lambda settings: SimpleNamespace(embed_model="m1")))
     monkeypatch.setattr(script, "_resolve_embedder", lambda settings: (object(), "m1"))
+    # The fake embedder returns 1-dim vectors; the backfill refuses any other size (#969).
+    monkeypatch.setattr(script, "configured_embedding_dimension", lambda model: 1)
 
     async def fake_embed(client, *, model, text):
         return [0.5]
