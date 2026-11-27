@@ -30,7 +30,8 @@ def _content_key(row: Mapping[str, Any]) -> str:
     return " ".join(str(row.get("content") or "").split()).casefold()
 
 
-def _session_key(row: Mapping[str, Any]) -> str:
+def session_key(row: Mapping[str, Any]) -> str:
+    """Group real sessions and give each sessionless row its own slot."""
     session = str(row.get("session_id") or "").strip()
     return f"session:{session}" if session else f"episode:{row.get('uuid')}"
 
@@ -54,7 +55,7 @@ def spread_by_session(rows: Sequence[Mapping[str, Any]], limit: int) -> list[Map
     session_best: list[Mapping[str, Any]] = []
     rest: list[Mapping[str, Any]] = []
     for row in unique:
-        session = _session_key(row)
+        session = session_key(row)
         (rest if session in seen_sessions else session_best).append(row)
         seen_sessions.add(session)
     picked = session_best[:limit]

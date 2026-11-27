@@ -68,6 +68,58 @@ def test_get_session_episode_neighbors_cypher_is_bounded_and_scoped():
     assert neo4j.execute.call_count == 0
 
 
+@pytest.mark.online
+def test_session_episode_neighbors_keep_the_populated_side(test_neo4j_repo):
+    test_neo4j_repo.execute(
+        """
+        UNWIND range(1, 5) AS i
+        CREATE (:Episodic {
+            uuid: 'turn-' + toString(i), session_id: 'session', namespace: 'test-session-window',
+            processing_state: 'COMPLETED', source: 'user', content: 'Turn ' + toString(i),
+            created_at: datetime('2026-01-01T00:00:00Z') + duration({seconds: i})
+        })
+        """
+    )
+    query = MemoryQueryRepository(test_neo4j_repo)
+
+    for anchor, expected in (
+        ("turn-1", ["turn-2", "turn-3"]),
+        ("turn-3", ["turn-1", "turn-2", "turn-4", "turn-5"]),
+        ("turn-5", ["turn-3", "turn-4"]),
+    ):
+        rows = query.get_session_episode_neighbors(
+            "session", anchor, window=2, namespace="test-session-window", sources=("user",)
+        )
+        assert [row["uuid"] for row in rows] == expected, anchor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("spread", "sibling_session"), [(True, "s1"), (False, "s2")])
+async def test_build_source_memories_skips_expansion_without_spread_starvation(spread, sibling_session):
+    graph_adapter = MagicMock()
+    graph_adapter.search_episode_embeddings.return_value = [
+        {"uuid": "top", "session_id": "s1", "content": "top result"},
+        {"uuid": "second", "session_id": sibling_session, "content": "another result"},
+    ]
+
+    async def fake_embed(_query: str) -> list[float]:
+        return [0.1, 0.2]
+
+    service = SimpleNamespace(
+        graphiti_client=SimpleNamespace(embed_query=fake_embed),
+        graph_adapter=graph_adapter,
+    )
+    tuning = RetrievalTuningConfig(
+        source_memory_limit=2, source_memory_session_window=2, source_memory_spread=spread
+    )
+    section, note, _ = await _build_source_memories(
+        service, "query", "test-session-window", tuning, None, include_session=True
+    )
+    assert note is None
+    assert {memory.uuid for memory in section} == {"top", "second"}
+    graph_adapter.get_session_episode_neighbors.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_build_source_memories_expands_top1_when_starved_and_caps_neighbors():
     # Two distinct sessions filling effective_limit=2 -> spread starves rest.

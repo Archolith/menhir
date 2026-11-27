@@ -1,3 +1,11 @@
+## 2026-11-27 - Opt-in source-memory session window (#1057)
+
+- With session spreading enabled, recall can add bounded same-session neighbors to the top source
+  hit when the selected slots leave no room for same-session backfill. Anchors at either end can
+  expand toward the populated side.
+- The operator guide and environment example describe the disabled-by-default setting, additive
+  result count, and separate neighbor snippet cap.
+
 ## 2026-11-16 - One MCP error shape; no silent coercion; namespace checks and notes (#669, #670, #671)
 
 - Every tool failure is a `CallToolResult` with `isError: true` and `structuredContent`

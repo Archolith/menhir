@@ -259,7 +259,7 @@ async def _build_source_memories(
         query_vector = await service.graphiti_client.embed_query(query)
         spread = tuning.source_memory_spread
         if spread:
-            from menhir.domain.source_memory_spread import pool_size, spread_by_session
+            from menhir.domain.source_memory_spread import pool_size, session_key, spread_by_session
         rows = await asyncio.to_thread(
             service.graph_adapter.search_episode_embeddings,
             query_vector,
@@ -272,12 +272,12 @@ async def _build_source_memories(
             rows = spread_by_session(
                 [row for row in rows if str(row.get("uuid") or "").strip()], effective_limit)
         session_window = max(0, int(tuning.source_memory_session_window))
-        # #1057: expand top-1 hit by +-session_window adjacent turns when spread filled
-        # effective_limit across distinct sessions (so rest was starved at 50+ sessions).
+        # A repeated session key means spread used at least one slot for same-session backfill.
         if (
             session_window > 0
-            and rows
-            and (not spread or len(rows) >= effective_limit)
+            and spread
+            and len(rows) == effective_limit
+            and len({session_key(row) for row in rows}) == effective_limit
             and hasattr(service.graph_adapter, "get_session_episode_neighbors")
         ):
             top = rows[0]

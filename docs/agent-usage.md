@@ -36,9 +36,19 @@ Every MCP client receives a short version of this contract as the server instruc
 By default a recall response includes up to 10 raw source memories of up to 2000 characters each; these are
 deployment defaults (`MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT`, `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS`). Chat
 clients with tight context can set `MENHIR_RECALL_COMPACT=1` on the server, or pass `compact=true` per call.
-Compact mode drops per-item breakdowns and asks for at most 5 source memories, never more than the
-deployment default. An explicit `source_memory_limit` keeps its count and only the 1000-character cut
-applies. Cut entries end in "…" and carry `truncated: true`. Pass `compact=false` to get the full form.
+Compact mode drops per-item breakdowns and selects at most 5 source-memory hits by default, up to
+the deployment limit. An explicit `source_memory_limit` still controls hit selection. Compact mode
+cuts snippets to 1000 characters. Cut entries end in "…" and carry `truncated: true`.
+Pass `compact=false` to get the full form.
+
+On Neo4j, deployments can set `MENHIR_FRONTIER_SOURCE_MEMORY_SESSION_WINDOW` (default `0`, range
+`0..5`) to add up to that many earlier and later turns from the top cosine hit's session. Expansion
+requires session spreading to fill every source-memory slot without same-session backfill. Eligible
+neighbors share the namespace and source filter, and duplicate UUIDs or normalized snippets are
+skipped. They are additive to `source_memory_limit`, including an explicit limit in compact mode.
+Each neighbor uses the lower of the regular content cap and
+`MENHIR_FRONTIER_SOURCE_MEMORY_NEIGHBOR_MAX_CHARS` (default `800`, range `100..4000`), before any
+compact-mode truncation.
 
 ## Write discipline
 

@@ -781,11 +781,11 @@ class MemoryQueryRepository:
                   coalesce(n.created_at, n.reference_time) < anchor_ts
                   OR (coalesce(n.created_at, n.reference_time) = anchor_ts AND n.uuid < anchor.uuid)
               )
-            RETURN n
+            WITH n
             ORDER BY coalesce(n.created_at, n.reference_time) DESC, n.uuid DESC
             LIMIT $window
+            RETURN collect(n) AS before_nodes
         }}
-        WITH anchor, anchor_ts, collect(n) AS before_nodes
         CALL (anchor, anchor_ts) {{
             MATCH (n:Episodic)
             WHERE {base_where}
@@ -793,11 +793,12 @@ class MemoryQueryRepository:
                   coalesce(n.created_at, n.reference_time) > anchor_ts
                   OR (coalesce(n.created_at, n.reference_time) = anchor_ts AND n.uuid > anchor.uuid)
               )
-            RETURN n
+            WITH n
             ORDER BY coalesce(n.created_at, n.reference_time) ASC, n.uuid ASC
             LIMIT $window
+            RETURN collect(n) AS after_nodes
         }}
-        WITH before_nodes + collect(n) AS neighbors
+        WITH before_nodes + after_nodes AS neighbors
         UNWIND neighbors AS n
         RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
                n.session_id AS session_id,
