@@ -153,7 +153,6 @@ def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
             if outcome.episode.error
             else "episode queue failed"
         ),
-        ProjectEpisodeStatus.DEFERRED: "episode queue deferred (enrichment pipeline busy)",
         ProjectEpisodeStatus.OUTCOME_UNKNOWN: (
             "episode queue outcome unknown (timed out; the episode may already be saved). "
             "Re-running the scan is safe: it will not create a duplicate"

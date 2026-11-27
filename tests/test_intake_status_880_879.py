@@ -51,7 +51,6 @@ def test_timeout_is_outcome_unknown_not_deferred(tmp_path) -> None:
 
     outcome = _run(_scan_backend(AsyncMock(side_effect=slow)), str(tmp_path), queue_timeout_s=0.001)
     assert outcome.episode.status is ProjectEpisodeStatus.OUTCOME_UNKNOWN
-    assert outcome.episode.status is not ProjectEpisodeStatus.DEFERRED
 
 
 def test_scan_passes_stable_idempotency_key_derived_from_narrative(tmp_path) -> None:
@@ -144,7 +143,7 @@ class _Intake(IngestIntakeMixin):
     def __init__(self, has_consumer: bool):
         self._enrichment_enabled = True
         self._ensure_enrichment_worker = AsyncMock(return_value=has_consumer)
-        self._enqueue_pending_episode = AsyncMock()
+        self._enqueue_pending_episode = AsyncMock(return_value=True)
         self._record_episode_for_enrichment = lambda *a: ("ep-1", "ev-1")
 
 

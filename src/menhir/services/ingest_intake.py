@@ -111,31 +111,15 @@ class IngestIntakeMixin:
         episode_uuid, evidence_projection_uuid = outcome
         if self._enrichment_enabled:
             try:
-                # `is False`: only an explicit "no consumer" skips the enqueue; a stubbed or
-                # legacy worker hook returning None keeps the old behaviour.
-                if await self._ensure_enrichment_worker() is False:
+                if not await self._ensure_enrichment_worker():
                     # No consumer in this process (it does not hold the scheduler lease). The
                     # episode is durable PENDING; the lease holder's recovery picks it up, so
                     # do not park an id in a queue nothing drains.
-                    return IngestResult(
-                        episode_id=episode_uuid,
-                        status=IngestStatus.QUEUED,
-                        nodes_touched=1,
-                        edges_touched=0,
-                        processing_state="PENDING",
-                        warning="Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
-                    )
+                    return self._pending_recovery_result(episode_uuid)
                 await self._enqueue_pending_episode(episode_uuid)
             except Exception:
                 logger.exception("Could not schedule saved episode %s for enrichment", episode_uuid)
-                return IngestResult(
-                    episode_id=episode_uuid,
-                    status=IngestStatus.QUEUED,
-                    nodes_touched=1,
-                    edges_touched=0,
-                    processing_state="PENDING",
-                    warning="Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
-                )
+                return self._pending_recovery_result(episode_uuid)
             # The companion is also PENDING and can be recovered independently of the memory.
             if evidence_projection_uuid:
                 try:
@@ -528,6 +512,17 @@ class IngestIntakeMixin:
         return effective_processing_row(
             await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid))
 
+
+    @staticmethod
+    def _pending_recovery_result(episode_uuid: str) -> IngestResult:
+        return IngestResult(
+            episode_id=episode_uuid,
+            status=IngestStatus.QUEUED,
+            nodes_touched=1,
+            edges_touched=0,
+            processing_state="PENDING",
+            warning="Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        )
 
     async def ingest_episode(
         self,

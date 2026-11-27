@@ -271,8 +271,8 @@ class IngestQueueMixin:
         )
         enqueued = 0
         for episode_uuid in episode_ids:
-            # Count only ids this sweep actually put on the queue (#879); an id already queued
-            # is a no-op. `is not False` keeps a subclass or double that returns None counted.
+            # Count only ids this sweep actually put on the queue; an id already queued is a no-op.
+            # `is not False`: keeps a double that returns None counted.
             if await self._enqueue_pending_episode(episode_uuid) is not False:
                 enqueued += 1
         if orphaned_resets > 0:
@@ -424,7 +424,7 @@ class IngestQueueMixin:
             return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        return await self._enqueue_pending_episode(episode_uuid) is not False
+        return await self._enqueue_pending_episode(episode_uuid)
 
     async def requeue_failed_episode(self, episode_uuid: str) -> bool:
         """Enqueue one already-failed episode for an explicit retry attempt."""
@@ -440,7 +440,7 @@ class IngestQueueMixin:
             return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        return await self._enqueue_pending_episode(episode_uuid) is not False
+        return await self._enqueue_pending_episode(episode_uuid)
 
     async def shutdown(self) -> int:
         """Stop the in-process worker and release leases owned by this runtime."""

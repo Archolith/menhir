@@ -53,7 +53,6 @@ class ProjectEpisodeStatus(str, Enum):
     NOT_REQUESTED = "not_requested"
     QUEUED = "queued"
     FAILED = "failed"
-    DEFERRED = "deferred"
     ERROR = "error"
     OUTCOME_UNKNOWN = "outcome_unknown"
     NO_NARRATIVE = "no_narrative"
