@@ -147,7 +147,12 @@ def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
 
     episode_status = {
         ProjectEpisodeStatus.QUEUED: f"episode_id={outcome.episode.episode_id}",
-        ProjectEpisodeStatus.FAILED: "episode queue failed",
+        ProjectEpisodeStatus.FAILED: (
+            f"episode queue failed (episode_id={outcome.episode.episode_id}): "
+            f"{outcome.episode.error}"
+            if outcome.episode.error
+            else "episode queue failed"
+        ),
         ProjectEpisodeStatus.DEFERRED: "episode queue deferred (enrichment pipeline busy)",
         ProjectEpisodeStatus.OUTCOME_UNKNOWN: (
             "episode queue outcome unknown (timed out; the episode may already be saved). "

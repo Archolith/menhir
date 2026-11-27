@@ -196,3 +196,91 @@ async def test_follower_that_later_gains_lease_recovers_skipped_pending(monkeypa
         for t in service._worker_tasks:
             t.cancel()
         await asyncio.gather(*service._worker_tasks, return_exceptions=True)
+
+
+# ---- F1042-2: enqueue / requeue without a consumer ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("method", "state"),
+    [("enqueue_pending_episode", "PENDING"), ("requeue_failed_episode", "FAILED")],
+)
+@pytest.mark.asyncio
+async def test_enqueue_and_requeue_return_false_without_consumer(monkeypatch, method, state) -> None:
+    svc = _service(require_scheduler_lease=True)
+    monkeypatch.setattr(svc, "_enrichment_allowed", lambda: False)
+    svc._enrichment_enabled = True
+    svc.graph_adapter.fetch_episode_processing = MagicMock(
+        return_value={"processing_state": state}
+    )
+    assert await getattr(svc, method)("ep-1") is False
+    assert "ep-1" not in svc._queued_episode_ids
+    assert svc.get_queue_depth() == 0
+
+
+@pytest.mark.parametrize(
+    ("method", "state"),
+    [("enqueue_pending_episode", "PENDING"), ("requeue_failed_episode", "FAILED")],
+)
+@pytest.mark.asyncio
+async def test_enqueue_and_requeue_return_true_with_consumer(monkeypatch, method, state) -> None:
+    svc = _service(require_scheduler_lease=True)
+    monkeypatch.setattr(svc, "_enrichment_allowed", lambda: True)
+    svc._enrichment_enabled = True
+    svc.graph_adapter.fetch_episode_processing = MagicMock(
+        return_value={"processing_state": state}
+    )
+    try:
+        assert await getattr(svc, method)("ep-1") is True
+        assert "ep-1" in svc._queued_episode_ids
+    finally:
+        for t in svc._worker_tasks:
+            t.cancel()
+        await asyncio.gather(*svc._worker_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_force_reenrich_reports_not_queued_without_consumer(monkeypatch) -> None:
+    from menhir.mcp.tools.ops.force_reenrich import ForceReenrichTool
+
+    backend = SimpleNamespace(
+        force_reset_failed_episode=AsyncMock(return_value=True),
+        enqueue_pending_episode=AsyncMock(return_value=False),
+    )
+    tool = ForceReenrichTool()
+    monkeypatch.setattr(tool, "get_backend", lambda: backend)
+    out = await tool.endpoint(episode_uuid="11111111-1111-4111-8111-111111111111", wait=False)
+    assert "queued: False" in out
+    assert "pending queue recovery" in out
+    assert "result: submitted" not in out
+
+
+# ---- F1042-1: scan replaying a FAILED episode --------------------------------------------------
+
+
+def _replay(state):
+    return {
+        "episode_id": "ep-old",
+        "status": "queued",
+        "idempotent_replay": True,
+        "processing_state": state,
+    }
+
+
+def test_scan_replaying_failed_episode_reports_failed(tmp_path) -> None:
+    outcome = _run(_scan_backend(AsyncMock(return_value=_replay("FAILED"))), str(tmp_path))
+    assert outcome.episode.status is ProjectEpisodeStatus.FAILED
+    assert outcome.episode.episode_id == "ep-old"
+    assert "force_reenrich" in (outcome.episode.error or "")
+
+    from menhir.mcp.tools.ingest import ingest_project as tool_module
+
+    text = tool_module._format_project_ingest_outcome(outcome)
+    assert "ep-old" in text and "force_reenrich" in text
+
+
+@pytest.mark.parametrize("state", ["READY", "PENDING"])
+def test_scan_replaying_other_states_stays_queued(tmp_path, state) -> None:
+    outcome = _run(_scan_backend(AsyncMock(return_value=_replay(state))), str(tmp_path))
+    assert outcome.episode.status is ProjectEpisodeStatus.QUEUED
+    assert outcome.episode.episode_id == "ep-old"

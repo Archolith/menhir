@@ -418,11 +418,13 @@ class IngestQueueMixin:
         row = self.graph_adapter.fetch_episode_processing(episode_uuid)
         if row is None or row.get("processing_state") != ProcessingState.PENDING:
             return False
-        await self._ensure_enrichment_worker()
+        # No consumer in this process: an in-memory enqueue nothing drains is not a success. The
+        # durable row stays, so the lease holder's recovery picks it up (#879).
+        if not await self._ensure_enrichment_worker():
+            return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        await self._enqueue_pending_episode(episode_uuid)
-        return True
+        return await self._enqueue_pending_episode(episode_uuid) is not False
 
     async def requeue_failed_episode(self, episode_uuid: str) -> bool:
         """Enqueue one already-failed episode for an explicit retry attempt."""
@@ -432,11 +434,13 @@ class IngestQueueMixin:
         row = self.graph_adapter.fetch_episode_processing(episode_uuid)
         if row is None or row.get("processing_state") != ProcessingState.FAILED:
             return False
-        await self._ensure_enrichment_worker()
+        # No consumer in this process: an in-memory enqueue nothing drains is not a success. The
+        # durable row stays, so the lease holder's recovery picks it up (#879).
+        if not await self._ensure_enrichment_worker():
+            return False
         if episode_uuid in self._queued_episode_ids:
             return False
-        await self._enqueue_pending_episode(episode_uuid)
-        return True
+        return await self._enqueue_pending_episode(episode_uuid) is not False
 
     async def shutdown(self) -> int:
         """Stop the in-process worker and release leases owned by this runtime."""

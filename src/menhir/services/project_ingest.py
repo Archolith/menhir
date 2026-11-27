@@ -220,10 +220,26 @@ async def execute_project_ingest(
                 timeout=queue_timeout_s,
             )
             episode_id = queued.get("episode_id")
-            episode = ProjectEpisodeOutcome(
-                ProjectEpisodeStatus.QUEUED if episode_id else ProjectEpisodeStatus.FAILED,
-                episode_id=str(episode_id) if episode_id else None,
-            )
+            if (
+                episode_id
+                and queued.get("idempotent_replay")
+                and str(queued.get("processing_state") or "").upper() == "FAILED"
+            ):
+                # The same narrative replays the earlier episode, which failed: QUEUED would
+                # hide that nothing will extract it until it is retried.
+                episode = ProjectEpisodeOutcome(
+                    ProjectEpisodeStatus.FAILED,
+                    episode_id=str(episode_id),
+                    error=(
+                        f"the earlier scan's episode {episode_id} failed; re-scanning replays it. "
+                        f"Retry it with force_reenrich(episode_uuid={episode_id})"
+                    ),
+                )
+            else:
+                episode = ProjectEpisodeOutcome(
+                    ProjectEpisodeStatus.QUEUED if episode_id else ProjectEpisodeStatus.FAILED,
+                    episode_id=str(episode_id) if episode_id else None,
+                )
         except asyncio.TimeoutError:
             # The durable write runs in a thread that cancellation does not stop, so the
             # episode may already be saved: not "deferred".
