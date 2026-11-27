@@ -123,6 +123,24 @@ def _valid_at_sort_key(raw: object) -> float:
     return parsed.timestamp()
 
 
+_LANE_INJECTED_SOURCES = frozenset({CandidateSource.SCALAR_AUTHORITY, CandidateSource.OBSERVATION})
+
+
+def _lane_injected_first(candidates: list[Any]) -> list[Any]:
+    """Observation, authority and history candidates first (stable), so the cross-encoder head
+    scores them instead of flooring them behind ``rerank_top_n`` search hits (#922)."""
+    return sorted(candidates, key=lambda c: c.source not in _LANE_INJECTED_SOURCES)
+
+
+def _cut_keeping(scored: list[Any], n: int, keep: set[str]) -> list[Any]:
+    """``scored[:n]``, except ranked entries in ``keep`` past the cut displace the lowest-ranked
+    others. Rank order is preserved and the count is still ``n`` (#922)."""
+    must = [m.uuid for m in scored if m.uuid in keep][:max(0, n)]
+    rest = [m.uuid for m in scored if m.uuid not in keep][:max(0, n - len(must))]
+    chosen = set(must) | set(rest)
+    return [m for m in scored if m.uuid in chosen]
+
+
 def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
     """Slots ordered by best observation cosine descending, ties by slot tuple ascending.
 
@@ -864,6 +882,8 @@ async def _run_recall(
         getattr(service, "counting_recall_authority_only", True)
         and getattr(service, "counting_enabled", False))
     _occurrence_obs_ids: set[str] = set()
+    observation_lane_note: str | None = None
+    history_lane_note: str | None = None
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -885,6 +905,12 @@ async def _run_recall(
         from menhir.infrastructure.audit_trail import RECALL as _authority_audit
         if service.scalar_view_authority_enabled:
             _authority_audit.begin()
+        # #923: the lane commits in two atomic stages, observations then authority. A failure
+        # part-way restores the snapshot taken before the failing stage, so the caller never gets a
+        # partial authority set (dicts are copied: a View that won search is upgraded in place).
+        _lane_snapshot = (
+            [dict(c) for c in candidate_inputs], dict(metadata_by_uuid), len(authority_layer))
+        _obs_stage_done = False
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
             obs_hits = await asyncio.to_thread(
@@ -1019,6 +1045,9 @@ async def _run_recall(
                     )
             logger.debug("observation injection query=%r added=%d (k=10)", query[:60], obs_added)
             _obs_slots_for_history = obs_slots  # share with scalar_history lane below
+            _lane_snapshot = (
+                [dict(c) for c in candidate_inputs], dict(metadata_by_uuid), len(authority_layer))
+            _obs_stage_done = True
 
             # Phase 4a.4: for each SURFACED slot, DETERMINISTICALLY inject the current scalar_state
             # View by slot-keyed lookup (NOT embedding rank), so the authoritative CURRENT value
@@ -1537,6 +1566,14 @@ async def _run_recall(
                              "authority_annotations": auth_added,
                              "intent": _intent.value, "query": query[:120]})
         except Exception as exc:
+            candidate_inputs[:] = _lane_snapshot[0]
+            metadata_by_uuid.clear()
+            metadata_by_uuid.update(_lane_snapshot[1])
+            del authority_layer[_lane_snapshot[2]:]
+            if not _obs_stage_done:
+                _obs_slots_for_history = set()
+                _obs_slot_best_cosine.clear()
+                _occurrence_obs_ids.clear()
             if _circuit_open_cause(exc) is not None:
                 # #642: expected while the embed breaker refuses; recall already carries its note.
                 logger.info("observation injection skipped: embedding unavailable (%s)", exc)
@@ -1544,6 +1581,15 @@ async def _run_recall(
                 logger.exception(
                     "observation injection failed query=%r; leaving recall unchanged", query[:60]
                 )
+                observation_lane_note = (
+                    "Scalar authority lane failed; current-value verdicts were omitted."
+                    if _obs_stage_done else
+                    "Scalar observation lane failed; observation and authority results were omitted.")
+                if service.scalar_view_authority_enabled:
+                    _authority_audit.audit(
+                        "observation_lane", "rolled_back", namespace=stamped_namespace(namespace),
+                        details={"error": exc.__class__.__name__, "query": query[:120],
+                                 "stage": "authority" if _obs_stage_done else "observation"})
         _t_phases["observation_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Scalar history advisory lane (flag-gated) ---
@@ -1562,6 +1608,9 @@ async def _run_recall(
     #
     if service.scalar_history_enabled and namespace is not None and _obs_slots_for_history:
         _t = perf_counter()
+        # #923: atomic like the observation lane; a failure on any slot drops every addition.
+        _history_snapshot = (
+            [dict(c) for c in candidate_inputs], dict(metadata_by_uuid), len(authority_layer))
         try:
             from menhir.domain.scalar_view_authority import QueryIntent
             from menhir.domain.scalar_view_suppression import authority_query_intent
@@ -1682,11 +1731,17 @@ async def _run_recall(
                 _sh_added += 1
             logger.debug(
                 "scalar-history advisory lane query=%r added=%d", query[:60], _sh_added)
-        except Exception:
+        except Exception as exc:
+            candidate_inputs[:] = _history_snapshot[0]
+            metadata_by_uuid.clear()
+            metadata_by_uuid.update(_history_snapshot[1])
+            del authority_layer[_history_snapshot[2]:]
             logger.exception(
                 "scalar-history advisory lane failed query=%r; leaving recall unchanged",
                 query[:60],
             )
+            if _circuit_open_cause(exc) is None:  # #642: the breaker note already says it
+                history_lane_note = "Scalar history lane failed; history verdicts were omitted."
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Counted authority only (unit R, flag-gated): a counted slot's occurrences leave recall ---
@@ -1720,8 +1775,10 @@ async def _run_recall(
     # --- Adjacency ---
     _t = perf_counter()
     eligible_uuids = [str(c["uuid"]) for c in candidate_inputs]
+    adjacency_notes: list[str] = []
     adjacency_map, edge_index = (
-        await service._compute_adjacency(eligible_uuids, context_node_ids, namespace)
+        await service._compute_adjacency(
+            eligible_uuids, context_node_ids, namespace, degradation_notes=adjacency_notes)
         if eligible_uuids else ({}, {})
     )
     _t_phases["adjacency"] = int((perf_counter() - _t) * 1000)
@@ -1784,7 +1841,10 @@ async def _run_recall(
         _t_phases["source_memories"] = source_memory_ms
     # Read after every lane ran so refusals during this recall are reflected.
     breaker_note = embed_breaker_note(service.graphiti_client)
-    shared_note = " | ".join(n for n in (limit_note, breaker_note, source_memory_note) if n) or None
+    shared_note = " | ".join(n for n in (
+        limit_note, breaker_note, source_memory_note, observation_lane_note, history_lane_note,
+        *adjacency_notes,
+    ) if n) or None
 
     if not candidates:
         if visible_pending_rows:
@@ -1901,7 +1961,7 @@ async def _run_recall(
                     c.uuid, getattr(c, "name", None),
                     (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
                 )
-                for c in candidates
+                for c in _lane_injected_first(candidates)
             ],
         )
         if rerank_results is not None:
@@ -1969,7 +2029,15 @@ async def _run_recall(
     )
     capped = result_limit < limit and len(pending_fallback) + len(scored) > result_limit
     pending_fallback = pending_fallback[:result_limit]
-    top_results = pending_fallback + scored[:max(0, result_limit - len(pending_fallback))]
+    scored_room = max(0, result_limit - len(pending_fallback))
+    if rerank is not None:
+        # #922: the cross-encoder must not cut a deterministically injected authority/history
+        # candidate that authority_layer reports; it displaces the lowest-ranked other result.
+        authority_uuids = {c.uuid for c in candidates if c.source == CandidateSource.SCALAR_AUTHORITY}
+        authority_uuids.update(v.view_uuid for v in authority_layer if v.view_uuid)
+        top_results = pending_fallback + _cut_keeping(scored, scored_room, authority_uuids)
+    else:
+        top_results = pending_fallback + scored[:scored_room]
     warden_status.unchecked_pending = len(pending_fallback)
 
     # Signal when all candidates were below the similarity floor
@@ -2072,6 +2140,8 @@ async def _run_recall(
             project=file_context_project,
             limit=200,
             namespace=namespace,
+            # #923: rows for the returned memories, not the 200 most recently dirtied anchors.
+            memory_uuids=[sm.uuid for sm in top_results],
         )
         stale_by_uuid: dict[str, dict[str, Any]] = {
             str(r["memory_uuid"]): r
