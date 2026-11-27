@@ -39,6 +39,7 @@ async def scan_node(
     exclude_uuids: set[str] | None = None,
     on_conflict: ConflictHandler | None = None,
     errors: list[str] | None = None,
+    contain_failures: bool = False,
 ) -> CorrelationBatchResult:
     """Search for ``node_uuid``'s neighbours and classify each hit in rank order (#871).
 
@@ -55,10 +56,11 @@ async def scan_node(
       is collected, so the caller can fall back to a later pair.
     - ``related`` and plain ``none`` go on to the next hit.
 
-    Errors: a failed search is logged and returns ``skipped=1``. With ``errors`` given, a failed
-    search or ``classify_pair`` appends ``node_uuid`` and ends the scan, so the caller can leave the
-    node for its next pass (#938, #1008); without it a ``classify_pair`` failure raises. Usage-limit
-    and saga-pause signals always raise.
+    Errors: a failed search is logged and returns ``skipped=1``. With ``contain_failures`` a failed
+    ``classify_pair`` ends the scan instead of raising, so the caller can leave the node for its
+    next pass (#938, #1008); otherwise it raises. ``errors`` is only an output: when given, the
+    uuid of a node whose search or ``classify_pair`` failed is appended. Usage-limit and saga-pause
+    signals always raise.
     """
     if not query.strip():
         return CorrelationBatchResult(checked=1, skipped=1)
@@ -85,13 +87,14 @@ async def scan_node(
         except (LlmUsageControlSignal, SagaWritesPausedError):
             raise
         except Exception as exc:
-            if errors is None:
+            if not contain_failures:
                 raise
             logger.warning(
                 "classify_pair failed for %s <-> %s (%s); candidate left for the next pass",
                 node_uuid, other_uuid, type(exc).__name__, exc_info=True,
             )
-            errors.append(node_uuid)
+            if errors is not None:
+                errors.append(node_uuid)
             break
 
         if final_action == "none":

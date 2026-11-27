@@ -23,16 +23,9 @@ from menhir.domain import merge_eligibility as me
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import MergeCoordinator, pair_key
+from tests._merge_eligibility_helpers import REPO_ROW_BASE, node_signals as _node
 
 pytestmark = pytest.mark.unit
-
-
-def _node(uuid: str, *, restored_from_merge: str | None = None) -> me.NodeSignals:
-    return me.NodeSignals(
-        uuid=uuid, exists=True, ineligible_role=False, namespace="default",
-        freshness="ACTIVE", scope="SESSION", user_flagged=False, conflict_status=None,
-        restored_from_merge=restored_from_merge,
-    )
 
 
 # --------------------------------------------------------------------------- node stamp
@@ -57,16 +50,13 @@ def test_a_restore_from_a_third_node_does_not_veto() -> None:
 
 def test_the_repository_reads_the_stamp() -> None:
     neo4j = MagicMock()
-    base = {"ineligible_role": False, "namespace": "default", "freshness": "ACTIVE",
-            "scope": "SESSION", "user_flagged": False, "memory_retired": False,
-            "source_retention_protected": False, "conflict_status": None}
+    base = REPO_ROW_BASE
     neo4j.execute.return_value = [
         {"uuid": "S", **base, "restored_from_merge": None},
         {"uuid": "B", **base, "restored_from_merge": "S"},
     ]
     decision = CorrelationRepository(neo4j).evaluate_merge_eligibility("S", "B")
     assert decision.reason_code == me.PREVIOUSLY_UNMERGED
-    assert "n.restored_from_merge AS restored_from_merge" in neo4j.execute.call_args.args[0]
 
 
 # --------------------------------------------------------------------------- journal

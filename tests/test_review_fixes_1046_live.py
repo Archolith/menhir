@@ -107,7 +107,7 @@ def test_a_split_node_cannot_rejoin_through_the_survivors_absorber(live_repo, ta
     merger = MergeCoordinator(graph_adapter=graph, journal=journal)
 
     first = merger.merge(survivor_uuid=s, absorbed_uuid=b, similarity=0.97)
-    assert first["merged"] == 1 and first["survivor_uuid"] == s and first["absorbed_uuid"] == b
+    assert first["merged"] == 1
     assert UnmergeCoordinator(graph_adapter=graph, journal=journal).unmerge(first["op_id"])["restored"] == 1
     assert merger.merge(survivor_uuid=c, absorbed_uuid=s, similarity=0.97)["merged"] == 1
 

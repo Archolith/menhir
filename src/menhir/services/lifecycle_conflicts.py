@@ -39,7 +39,6 @@ from menhir.services.lifecycle_models import (
     PERSISTENT_EDGE_PROMOTE_THRESHOLD,
     SHARPNESS_COSINE_FLOOR,
     SHARPNESS_PROMOTE_THRESHOLD,
-    SIMILARITY_CONFLICT_THRESHOLD,
     ConsolidationResult,
     DecayResult,
     ProgressCallback,

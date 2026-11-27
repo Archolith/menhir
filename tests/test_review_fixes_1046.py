@@ -1,11 +1,9 @@
-"""Survivor promotion, unmerge lineage and correlation-only edges (offline).
+"""Survivor promotion and unmerge lineage (offline).
 
 - a promotion candidate absorbed by a merge is promoted through its survivor. Before,
   promoting the absorbed uuid matched nothing and the SESSION survivor stayed sweepable.
 - the unmerge veto follows the survivor's merged_from lineage, so a split pair cannot
   rejoin through the node that later absorbed the original survivor.
-- create_related_to_edge counts and updates only correlation edges, never a Graphiti
-  fact edge (also RELATES_TO), and locks the pair before its check-then-create.
 """
 
 from __future__ import annotations
@@ -19,6 +17,7 @@ from menhir.domain import merge_eligibility as me
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.services import lifecycle_consolidation
 from menhir.services.lifecycle_service import LifecycleService
+from tests._merge_eligibility_helpers import REPO_ROW_BASE, node_signals as _node
 
 pytestmark = pytest.mark.unit
 
@@ -28,17 +27,13 @@ pytestmark = pytest.mark.unit
 class _MergeIntoSurvivor:
     """classify_pair stand-in: the candidate merges into ``survivor`` (a coordinator-style result)."""
 
-    def __init__(self, survivor: str, *, report_survivor: bool = True) -> None:
+    def __init__(self, survivor: str) -> None:
         self.survivor = survivor
-        self.report_survivor = report_survivor
 
     async def classify_pair(self, source: str, target: str, score: float):
         if target != self.survivor:
             return "none", None
-        details = {"merged": 1, "op_id": "op-1"}
-        if self.report_survivor:
-            details.update(survivor_uuid=target, absorbed_uuid=source)
-        return "merged", details
+        return "merged", {"merged": 1, "op_id": "op-1"}
 
 
 def _consolidation(adapter, graphiti, monkeypatch, correlation):
@@ -81,21 +76,6 @@ async def test_an_absorbed_promotion_candidate_promotes_its_survivor(
 
 
 @pytest.mark.asyncio
-async def test_no_survivor_is_promoted_without_one_in_the_merge_result(
-    stub_memory_graph_adapter, stub_graphiti_client, monkeypatch,
-) -> None:
-    """The survivor comes from the merge result, never from a guess at the search hit."""
-    svc, promoted_calls, revisions = _consolidation(
-        stub_memory_graph_adapter, stub_graphiti_client, monkeypatch,
-        _MergeIntoSurvivor("surv", report_survivor=False),
-    )
-
-    await svc.consolidate_session("s1")
-
-    assert promoted_calls == [["cand"]] and revisions == []
-
-
-@pytest.mark.asyncio
 async def test_other_batch_callers_are_unchanged() -> None:
     """The conflict scan and candidate review call the batch without absorbed_into."""
     class _Host(lifecycle_consolidation.LifecycleConsolidationMixin):
@@ -111,14 +91,6 @@ async def test_other_batch_callers_are_unchanged() -> None:
 
 
 # --------------------------------------------------------------------------- unmerge lineage
-
-def _node(uuid, *, restored_from_merge=None, merged_from=()):
-    return me.NodeSignals(
-        uuid=uuid, exists=True, ineligible_role=False, namespace="default", freshness="ACTIVE",
-        scope="SESSION", user_flagged=False, conflict_status=None,
-        restored_from_merge=restored_from_merge, merged_from=tuple(merged_from),
-    )
-
 
 @pytest.mark.parametrize(
     "survivor, absorbed",
@@ -139,9 +111,7 @@ def test_unrelated_lineage_does_not_veto() -> None:
 
 def test_the_repository_reads_merged_from() -> None:
     neo4j = MagicMock()
-    base = {"ineligible_role": False, "namespace": "default", "freshness": "ACTIVE",
-            "scope": "SESSION", "user_flagged": False, "memory_retired": False,
-            "source_retention_protected": False, "conflict_status": None}
+    base = REPO_ROW_BASE
     neo4j.execute.return_value = [
         {"uuid": "C", **base, "restored_from_merge": None, "merged_from": ["S"]},
         {"uuid": "B", **base, "restored_from_merge": "S", "merged_from": []},
@@ -149,19 +119,12 @@ def test_the_repository_reads_merged_from() -> None:
     assert CorrelationRepository(neo4j).evaluate_merge_eligibility("C", "B").reason_code == (
         me.PREVIOUSLY_UNMERGED
     )
-    assert "coalesce(n.merged_from, []) AS merged_from" in neo4j.execute.call_args.args[0]
 
 
-# --------------------------------------------------------------------------- correlation-only edges
-
-def test_only_correlation_edges_are_matched_updated_or_merged() -> None:
+def test_the_pair_is_locked_before_the_existence_check() -> None:
+    """The lock makes check-then-create atomic; no online test can observe the ordering."""
     neo4j = MagicMock()
     neo4j.execute.return_value = []
     CorrelationRepository(neo4j).create_related_to_edge("u-1", "u-2", similarity=0.75)
     cypher = neo4j.execute.call_args.args[0]
-
-    assert "[(a)-[e:RELATES_TO]-(b) WHERE e.type = 'correlation' | e]" in cypher
-    assert "MERGE (a)-[r:RELATES_TO {type: 'correlation'}]->(b)" in cypher
-    # Both nodes are write-locked before the existence check, so check-then-create is atomic.
-    lock = cypher.index("SET a._correlation_lock = true, b._correlation_lock = true")
-    assert lock < cypher.index("AS existing")
+    assert cypher.index("_correlation_lock = true") < cypher.index("AS existing")

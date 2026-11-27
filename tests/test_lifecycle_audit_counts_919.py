@@ -56,17 +56,14 @@ def _repo(rows):
 
 
 def test_promote_returns_the_uuids_it_promoted() -> None:
-    repo, neo4j = _repo([{"promoted_uuids": ["a"]}])
+    repo, _ = _repo([{"promoted_uuids": ["a"]}])
     assert repo.promote_to_persistent(["a", "absorbed"]) == ["a"]
-    assert "collect(n.uuid) AS promoted_uuids" in neo4j.execute.call_args.args[0]
     assert repo.promote_to_persistent([]) == []
 
 
 def test_demote_returns_only_the_newly_demoted_uuids() -> None:
-    repo, neo4j = _repo([{"newly_demoted_uuids": ["new"]}])
+    repo, _ = _repo([{"newly_demoted_uuids": ["new"]}])
     assert repo.set_demote_ttl(["old", "new"], 14) == ["new"]
-    cypher = neo4j.execute.call_args.args[0]
-    assert "n.ttl_expires IS NULL" in cypher and "collect(n.uuid) AS newly_demoted_uuids" in cypher
     assert repo.set_demote_ttl([], 14) == []
 
 

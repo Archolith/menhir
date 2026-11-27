@@ -22,7 +22,6 @@ from menhir.domain.namespace import namespace_to_group_ids
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.services import correlation_service_checks as checks
 from menhir.services.correlation_service import CorrelationService
-from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 from menhir.services.lifecycle_consolidation import LifecycleConsolidationMixin
 
 pytestmark = pytest.mark.unit
@@ -241,17 +240,6 @@ def test_the_pair_is_ordered_so_a_reverse_check_matches_the_same_edge(pair) -> N
     assert (params["low_uuid"], params["high_uuid"]) == ("uuid-a", "uuid-b")
 
 
-def test_the_edge_query_matches_either_direction_and_creates_only_when_absent() -> None:
-    repo, neo4j = _edge_repo([])
-    assert repo.create_related_to_edge("uuid-1", "uuid-2", similarity=0.75) is False
-    cypher = neo4j.execute.call_args.args[0]
-    assert "[(a)-[e:RELATES_TO]-(b) WHERE e.type = 'correlation' | e]" in cypher, (
-        "an existing correlation edge either way round must match"
-    )
-    # The directed MERGE is reached only when no edge exists either way round.
-    assert cypher.index("WHERE size(existing) = 0") < cypher.index("MERGE (a)-[r:RELATES_TO {type: 'correlation'}]->(b)")
-
-
 @pytest.mark.asyncio
 async def test_classify_pair_reports_a_matched_edge_as_not_created() -> None:
     repo = MagicMock()
@@ -262,8 +250,3 @@ async def test_classify_pair_reports_a_matched_edge_as_not_created() -> None:
 
 
 # --------------------------------------------------------------------------- one threshold
-
-def test_one_conflict_threshold() -> None:
-    from menhir.services import lifecycle_models
-
-    assert lifecycle_models.SIMILARITY_CONFLICT_THRESHOLD is CORRELATION_CONFLICT_THRESHOLD

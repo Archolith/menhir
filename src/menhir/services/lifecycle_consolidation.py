@@ -38,7 +38,6 @@ from menhir.services.lifecycle_models import (
     PERSISTENT_EDGE_PROMOTE_THRESHOLD,
     SHARPNESS_COSINE_FLOOR,
     SHARPNESS_PROMOTE_THRESHOLD,
-    SIMILARITY_CONFLICT_THRESHOLD,
     ConsolidationResult,
     DecayResult,
     ProgressCallback,
@@ -465,7 +464,7 @@ class LifecycleConsolidationMixin:
 
         Correlation routing (Step 8): scores of 0.70–0.85 receive a RELATES_TO
         edge instead of entering the conflict queue.  Only scores
-        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
+        >= CORRELATION_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
         are RRF rank scores, not cosines; see CorrelationService.classify_pair.
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
@@ -506,17 +505,17 @@ class LifecycleConsolidationMixin:
             # The shared scan (#871): a merge ends it, a drop ends it (going on would reach hits
             # this loop never classified; test_drop_ends_the_node_scan), a queued conflict ends it.
             # A failed search or classify_pair is recorded in `errors` and never promoted
-            # unchecked (#938, #1008); without `errors` a classify_pair failure raises.
+            # unchecked (#938, #1008); without `errors` a classify_pair failure raises (contain_failures).
             scan = await scan_node(
                 correlation_service.classify_pair, self.graphiti_client, uuid, query,
                 group_ids=group_ids, num_results=5, stop_on_drop=True,
                 on_conflict=_queue_conflict, errors=errors,
+                contain_failures=errors is not None,
             )
             if absorbed_into is not None:
                 for cr in scan.results or []:
-                    survivor_uuid = (cr.details or {}).get("survivor_uuid")
-                    if cr.action == "merged" and survivor_uuid:
-                        absorbed_into[uuid] = str(survivor_uuid)
+                    if cr.action == "merged" and cr.target_uuid:
+                        absorbed_into[uuid] = str(cr.target_uuid)
 
         return conflicts
 
