@@ -173,8 +173,14 @@ class ResolveConflictTool(BaseJsonTool):
                 estimator = getattr(backend, "estimate_bridges_for_nodes", None)
                 bridge_estimate: dict[str, Any] | None = None
                 if callable(estimator):
-                    pending = estimator(would_remove, **scope)
-                    bridge_estimate = await pending if inspect.isawaitable(pending) else pending
+                    # An older server (unknown operation) or an adapter without the estimate
+                    # raises; the preview then says "unavailable" instead of failing.
+                    try:
+                        pending = estimator(would_remove, **scope)
+                        bridge_estimate = await pending if inspect.isawaitable(pending) else pending
+                    except Exception as exc:
+                        logger.warning("resolve_conflict dry run: bridge estimate unavailable: %s", exc)
+                        bridge_estimate = None
                 return self.render_json(
                     {
                         "dry_run": True,

@@ -139,26 +139,31 @@ def test_conflict_candidate_and_status_mutations_apply_live_fact_retention_guard
     repo.requeue_conflicts_for_llm_review()
     repo.list_conflict_groups()
 
-    set_conflict_query = neo4j.calls[0][0]
+    # set_conflict locks a, b and both groups' members before its mutation (#890).
+    set_conflict_query = next(query for query, _ in neo4j.calls if "canonical_group_id" in query)
     for variable in ("a", "b", "orphan"):
         _assert_live_fact_retention_guard(set_conflict_query, variable)
-    _assert_live_fact_retention_guard(neo4j.calls[1][0])
-    _assert_live_fact_retention_guard(neo4j.calls[2][0])
-    _assert_live_fact_retention_guard(neo4j.calls[2][0], "m")
-    _assert_live_fact_retention_guard(neo4j.calls[3][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-3][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-2][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-2][0], "m")
+    _assert_live_fact_retention_guard(neo4j.calls[-1][0])
 
 
 @pytest.mark.unit
 def test_conflict_gone_and_bridge_mutations_apply_live_fact_retention_guard() -> None:
     neo4j = _CaptureNeo4j(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],
+            # Early read, then (in the fenced transaction, #890) the member lock and the locked read.
             [
                 {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
                 {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove"},
             ],
-            [{"content": "keep", "original_content": None}],
-            [{"content": ""}],
+            [{"locked": 2}],
+            [
+                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep",
+                 "content": "keep", "original_content": None},
+                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove", "content": ""},
+            ],
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 1}],
             [{"total_edges_bridged": 0}],

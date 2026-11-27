@@ -560,3 +560,25 @@ async def test_the_dry_run_says_unavailable_when_the_backend_cannot_estimate() -
 
     assert out["bridge_count_estimate"] is None
     assert out["bridge_estimate_available"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    AttributeError("'StubGraphAdapter' object has no attribute 'estimate_bridges_for_nodes'"),
+    RuntimeError("Unknown backend operation: estimate_bridges_for_nodes"),
+])
+async def test_the_dry_run_says_unavailable_when_the_estimate_raises(error: Exception) -> None:
+    """An older server or an adapter without the op: the method exists on the client, the call fails."""
+    import json
+
+    tool, backend = _dry_run_tool({})
+    backend.estimate_bridges_for_nodes = AsyncMock(side_effect=error)
+
+    out = json.loads(await tool.endpoint(
+        group_id=GROUP, action="replace", keep_uuid="keep", dry_run=True
+    ))
+
+    backend.resolve_conflict_group.assert_not_called()
+    assert out["bridge_count_estimate"] is None
+    assert out["bridge_estimate_available"] is False
+    assert out["would_remove_uuids"] == ["t1", "t2"]
