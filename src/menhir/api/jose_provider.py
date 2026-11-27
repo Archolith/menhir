@@ -9,11 +9,14 @@ PyJWT) without touching any other module.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from joserfc import jwt as _jwt
 from joserfc.jwk import KeySet as _KeySet, RSAKey as _RSAKey
 from joserfc.jwt import JWTClaimsRegistry as _JWTClaimsRegistry
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Opaque type aliases
@@ -36,11 +39,32 @@ class JoseError(Exception):
 # ---------------------------------------------------------------------------
 
 def parse_jwks(payload: dict) -> KeySetHandle:
-    """Build a key set from a JWKS dict."""
+    """Build a key set from a JWKS dict.
+
+    A key that cannot be imported is skipped and logged, so one bad entry does not
+    discard the usable ones. Only imported keys are ever in the set, so a token can
+    never verify against a key that failed to parse. Raises :exc:`JoseError` when the
+    payload is malformed or no usable key remains.
+    """
     try:
-        return _KeySet.import_key_set(payload)
+        entries = payload["keys"]
+        if not isinstance(entries, list):
+            raise TypeError("keys is not a list")
     except Exception as exc:
         raise JoseError("Unable to parse JWKS") from exc
+    keys: list[Any] = []
+    skipped = 0
+    for entry in entries:
+        try:
+            keys.extend(_KeySet.import_key_set({"keys": [entry]}).keys)
+        except Exception as exc:
+            skipped += 1
+            logger.warning("Skipping unusable JWK in JWKS: %s", type(exc).__name__)
+    if not keys:
+        raise JoseError("Unable to parse JWKS: no usable keys")
+    if skipped:
+        logger.warning("JWKS parsed with %d unusable key(s) skipped, %d usable", skipped, len(keys))
+    return _KeySet(keys)
 
 
 def jwks_has_kid(keyset: KeySetHandle, kid: str) -> bool:

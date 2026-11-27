@@ -258,7 +258,7 @@ def _try_log_query_auth_usage(tool_name: str) -> None:
         record_mcp_event(
             kind="background",
             operation="query_auth_usage",
-            payload={"tool": tool_name},
+            payload={"tool": tool_name, "operation": tool_name},
             success=True,
         )
     except Exception:

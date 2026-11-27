@@ -434,6 +434,9 @@ def record_destructive_op(
             payload={
                 "surface": surface,
                 "name": name,
+                # `name` is not a safe telemetry key (it would keep entity and memory names
+                # elsewhere), so the operation is also carried under the allowlisted key.
+                "operation": name,
                 "tier": tier,
                 "session_id": session_id,
                 "user_id": user_id,

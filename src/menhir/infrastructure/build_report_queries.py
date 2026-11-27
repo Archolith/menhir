@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
+from menhir.domain.namespace import namespace_to_group_id
 
 BUILD_COUNT_SECTIONS = ("state", "scalar", "integrity")
 
@@ -38,10 +39,13 @@ _SCALAR_QUERIES: dict[str, str] = {
     "user_founded_scalar_views": (
         "MATCH (t:TurnEvidence {namespace:$ns, declarant:'user'})-[:FOUNDS]->"
         "(a:TypedAssertion {namespace:$ns})<-[:CURRENT_ANCHOR]-"
-        "(v:Entity {group_id:$ns, view_kind:'scalar_state'}) "
+        "(v:Entity {group_id:$gid, view_kind:'scalar_state'}) "
         "WHERE coalesce(v.view_current, true) RETURN count(DISTINCT v) AS c"
     ),
 }
+
+# Keyed on group_id alone; their ``$ns`` is bound to the translated group_id (default -> '').
+_GROUP_KEYED_SCALARS = frozenset({"scalar_views", "scalar_history_views"})
 
 _ADMITTED_QUERY = (
     "MATCH (t:TurnEvidence {namespace:$ns}) "
@@ -72,7 +76,7 @@ _VALID_AT_UNSUBMITTED_QUERY = (
 _TIME_UNPAIRED_QUERY = (
     "MATCH (q:Episodic {namespace:$ns}) WHERE q.valid_at IS NULL "
     "AND q.processing_state = 'READY' AND coalesce(q.extraction_mode, '') <> $store_only "
-    "OPTIONAL MATCH (g:Episodic {group_id:$ns}) "
+    "OPTIONAL MATCH (g:Episodic {group_id:$gid}) "
     "WHERE g.uuid = q.resolved_episode_uuid AND g.valid_at IS NOT NULL "
     "WITH q, collect(g) AS gs, "
     "q.processing_substage = 'verbatim_skipped' AND q.extraction_skipped_for IS NOT NULL AS skipped "
@@ -90,13 +94,13 @@ _TIME_UNPAIRED_QUERY = (
 )
 
 _CROSS_NAMESPACE_QUERY = (
-    "MATCH (a) WHERE toLower(a.namespace) = $nl OR toLower(a.group_id) = $nl "
+    "MATCH (a) WHERE toLower(a.namespace) = $nl OR toLower(a.group_id) = $gl "
     "WITH a, CASE WHEN a.namespace IS NOT NULL AND a.group_id IS NOT NULL "
-    "AND toLower(a.namespace) <> toLower(a.group_id) THEN 1 ELSE 0 END AS split "
+    "AND [toLower(a.namespace), toLower(a.group_id)] <> [$nl, $gl] THEN 1 ELSE 0 END AS split "
     "OPTIONAL MATCH (a)-[r]-(b) WHERE toLower(coalesce(b.namespace, $nl)) <> $nl "
-    "OR toLower(coalesce(b.group_id, $nl)) <> $nl "
+    "OR toLower(coalesce(b.group_id, $gl)) <> $gl "
     "OR toLower(coalesce(r.namespace, $nl)) <> $nl "
-    "OR toLower(coalesce(r.group_id, $nl)) <> $nl "
+    "OR toLower(coalesce(r.group_id, $gl)) <> $gl "
     "WITH a, split, count(r) AS crossing RETURN sum(split) + sum(crossing) AS c"
 )
 
@@ -146,7 +150,7 @@ class BuildReportQueries:
         if unknown:
             raise ValueError(f"unknown build count sections: {sorted(unknown)}")
         ns = namespace
-        params = {"ns": ns}
+        params = {"ns": ns, "gid": namespace_to_group_id(ns)}
         out: dict[str, Any] = {"namespace": ns}
         if "state" in wanted:
             row = self._one(_STATE_QUERY, params, "state")
@@ -157,7 +161,11 @@ class BuildReportQueries:
             }
         if "scalar" in wanted:
             out["scalar"] = {
-                key: self._count(query, params, f"scalar.{key}")
+                key: self._count(
+                    query,
+                    {"ns": params["gid"]} if key in _GROUP_KEYED_SCALARS else params,
+                    f"scalar.{key}",
+                )
                 for key, query in _SCALAR_QUERIES.items()
             }
         if "integrity" in wanted:
@@ -165,14 +173,15 @@ class BuildReportQueries:
         return out
 
     def _integrity(self, ns: str, submitted_epoch_millis: list[int] | None) -> dict[str, Any]:
+        gid = namespace_to_group_id(ns)
         params = {"ns": ns}
-        store_params = {"ns": ns, "store_only": EXTRACTION_MODE_STORE_ONLY}
+        store_params = {"ns": ns, "gid": gid, "store_only": EXTRACTION_MODE_STORE_ONLY}
         admitted = self._one(_ADMITTED_QUERY, store_params, "integrity.admitted")
         unsubmitted: int | None = None
         if submitted_epoch_millis is not None:
             unsubmitted = self._count(
                 _VALID_AT_UNSUBMITTED_QUERY,
-                {"ns": ns, "epochs": [int(e) for e in submitted_epoch_millis]},
+                {"ns": gid, "epochs": [int(e) for e in submitted_epoch_millis]},
                 "integrity.episodes_valid_at_unsubmitted",
             )
         return {
@@ -184,7 +193,7 @@ class BuildReportQueries:
             "ready_episodes_time_unpaired": self._count(
                 _TIME_UNPAIRED_QUERY, store_params, "integrity.ready_episodes_time_unpaired"),
             "cross_namespace_links": self._count(
-                _CROSS_NAMESPACE_QUERY, {"nl": ns.lower()}, "integrity.cross_namespace_links"),
+                _CROSS_NAMESPACE_QUERY, {"nl": ns.lower(), "gl": gid.lower()}, "integrity.cross_namespace_links"),
         }
 
     def failed_evidence_projections(self, namespace: str) -> list[dict[str, Any]]:
@@ -196,6 +205,6 @@ class BuildReportQueries:
 
     def promote_namespace_scope(self, namespace: str) -> dict[str, Any]:
         # Two sequential single-statement writes; each SET is absolute, so re-running is harmless.
-        entities = self._count(_PROMOTE_ENTITIES_QUERY, {"ns": namespace}, "promote.entities")
-        edges = self._count(_PROMOTE_EDGES_QUERY, {"ns": namespace}, "promote.edges")
+        entities = self._count(_PROMOTE_ENTITIES_QUERY, {"ns": namespace_to_group_id(namespace)}, "promote.entities")
+        edges = self._count(_PROMOTE_EDGES_QUERY, {"ns": namespace_to_group_id(namespace)}, "promote.edges")
         return {"namespace": namespace, "entities_promoted": entities, "edges_promoted": edges}
