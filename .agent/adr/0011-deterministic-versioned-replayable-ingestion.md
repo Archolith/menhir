@@ -55,9 +55,18 @@ temporal validity and derived state, not incidental database IDs or operational 
 Stable identities required by existing contracts remain stable.
 
 LLMs and embedding providers can be nondeterministic even with identical requests. Their
-outputs are observations or proposals, not authority. Record the accepted observation and its
-provenance when policy permits. Replay it rather than resampling it unless explicitly invalidated.
-Deterministic admission and domain invariants decide what it can support (ADR 0009); stable
+outputs are observations or proposals, not authority. An **accepted observation** in this ADR
+means a validated, source-grounded perception artifact eligible for downstream evaluation;
+acceptance at this boundary is not semantic admission under ADR 0009, certification of truth,
+or a grant of authority. Grounding and validation are themselves versioned. Other model-dependent
+outputs, such as candidate-resolution proposals or vectors, have their own stage contracts;
+they are not all perception artifacts or evidence.
+
+Record the permitted reusable artifact and its provenance, and replay it rather than resampling
+it unless explicitly invalidated. Preserve the distinction between perception artifacts, admission
+receipts, and admitted assertions. A changed admission policy must re-evaluate affected admission
+decisions under current source grants; it need not repeat compatible perception. A cached artifact
+or historical receipt cannot bypass current admission, source revocation, or erasure. Stable
 reproduction is not evidence of factual correctness. Correction remains possible through explicit
 supersession, evidence changes or reviewed migration. ADR 0003's deterministic fold boundary
 is retained, not relaxed. Existing model-dependent resolution and consolidation decisions are
@@ -77,11 +86,32 @@ replayable units. Illustrative boundaries (not a required physical implementatio
 - Deterministic folds, counts and materialized Views.
 
 Split further where meaningful cost, change frequency or ownership boundaries warrant it.
-Model-dependent substeps should have separately reusable outputs when safe. Dependencies may span
-episodes, entities, namespaces (only where already explicitly permitted), graph snapshots and
-time. Cross-episode stateful work needs a defined causal order and conservative invalidation;
-do not assume all steps are pure functions of one episode or that a cyclic dependency can be
-replayed in arbitrary order. Feedback requires an explicit bounded reconciliation contract.
+Model-dependent substeps should have separately reusable outputs when safe.
+
+**Graphiti boundary.** The current Archolith fork, distributed as `archolith-graphiti-core`
+and imported as `graphiti_core`, performs coupled extraction, resolution, graph writes,
+temporal invalidation and embedding work through the Graphiti ingestion path. Menhir owns the
+semantic compatibility, policy, and replay contract. Prefer the fork's existing typed extension
+points and Menhir extraction/resolution/LLM adapters over a parallel ingestion engine or runtime
+monkey-patching. Inventory which seams expose sufficiently complete inputs and outputs for safe
+replay. Until a finer boundary is proven, treat coupled operations as one coarse invalidation
+and replay unit; never assume an extraction receipt or task trace captures everything necessary
+to replay a model decision. Include the exact fork version and relevant hook/policy versions
+in the manifest and review their compatibility on upgrades. A fork bump is not automatically
+a full re-ingest, nor automatically compatible.
+
+Dependencies may span episodes, entities, namespaces (only where already explicitly permitted),
+graph snapshots and time. Cross-episode stateful work needs a defined causal order and conservative
+invalidation; do not assume all steps are pure functions of one episode or that a cyclic dependency
+can be replayed in arbitrary order. Feedback requires an explicit bounded reconciliation contract.
+
+**Negative and set-valued dependencies matter.** A candidate search, uniqueness decision,
+absence check, ranking cutoff or empty result depends on the relevant candidate universe and query
+semantics, not only the records returned or chosen. Adding a previously missing candidate or
+changing an index can invalidate prior decisions. Declare the scope and revision of those
+dependencies, including empty results; when precise dependency tracking is unavailable, invalidate
+a conservative partition or replay range. A list of existing graph edges alone is not a complete
+dependency proof.
 
 Persist sufficient compatible intermediates, stage receipts and provenance to resume or migrate
 without repeating successful work. Record model/provider identity, prompt and contract versions,
@@ -116,6 +146,28 @@ manifest records compatibility, not a second hand-maintained schema. Track appli
 separately from graph schema and per-capability realization versions. A mixed-version graph must
 not claim a single fully current semantic version.
 
+### Repair versus historical replay
+
+These are distinct operations with different guarantees:
+
+- **In-place targeted repair** reconciles affected support against the current, explicitly pinned
+  graph state and rules, preserving independent support and current lifecycle decisions. It must
+  be idempotent and agree with a clean recomputation of the affected derivation under those same
+  inputs and dependency boundaries. It does not inherently reproduce the graph a historical
+  ingestion would have produced.
+- **Causal-order replay** reconstructs the relevant historical processing prefix or a verified
+  compatible checkpoint, then applies affected operations in their declared dependency/arrival
+  order with the target rules and compatible observations. Expand the replay scope where an
+  earlier change alters later candidate sets, identity resolution or edge invalidation. Compare
+  against a clean run with the same initial state, inputs, observations, ordering and rules.
+
+Event time still governs temporal truth and folds under ADR 0003; arrival/processing order
+reconstructs the context for stateful interpretation and is not a substitute for event time.
+Historical replay must also respect current erasure, source permissions and lifecycle constraints.
+If a valid historical context cannot be reconstructed, report the limitation and do not claim
+historical equivalence from present-state repair. The migration planner must declare which
+guarantee applies, including for mixed-mode migrations.
+
 ### 4. Coverage is a first-class graph property
 
 For each enabled capability, track coverage of the relevant source/work units with explicit
@@ -129,11 +181,31 @@ report per-capability denominators, missing work, failed work, and deterministic
 repair paths. The first adoption step is a read-only historical coverage census; legacy records
 without adequate evidence are unknown, not presumed complete or retrospectively declared failed.
 
+Read-side defaults depend on the capability's contract and the affected scope. Invariant-critical
+or authoritative paths must fail closed when their required coverage, dependencies or admission
+proof is unknown, stale, failed or blocked. Do not assert a complete count, definitive absence,
+latest/current value, or authoritative conclusion from an incomplete relevant input set.
+Unaffected paths may continue. Advisory recall may return independently valid evidence through an
+existing authorized fallback, with explicit partial-coverage metadata and no authority promotion.
+Do not present stale projections as current; an explicitly labeled historical read is permitted
+only where its existing contract and erasure restrictions allow it. Capabilities may impose
+stricter rules, and no fallback may circumvent namespace, admission, privacy or lifecycle gates.
+
 ### 5. Migration readiness is a mandatory release gate
 
 Before cutting each release, classify changes against supported predecessor graphs:
 compatible/no migration, deterministic migration, re-embedding, targeted model replay, or
 explicitly unsupported. A no-change classification needs evidence, not an empty changelog.
+
+Semantic compatibility and operational deployment are separate dimensions. Map the semantic
+classification onto the existing app-only versus maintenance deployment contract: compatible
+changes may qualify for app-only deployment if the existing mechanical classifier permits it.
+A deterministic migration, re-embedding or targeted replay that requires graph writes must
+have a reviewed, separately coordinated maintenance path, or a tested deferred path with
+safe reads/writes and explicit capability activation gating. Do not assume a container-only
+swap authorizes graph mutation; the semantic manifest cannot override the deployment
+classifier, production lock or acceptance/rollback contract. Unsupported required upgrades
+must be blocked with a documented supported route or explicit incompatibility.
 
 A release that changes stored semantics must include tested migration code and/or an explicit,
 safe compatibility path, including any new capability backfill or a supported deferred mode.
@@ -143,7 +215,9 @@ The release must establish:
   paths or a documented sequential upgrade route), not only empty installs.
 - A dry-run plan, affected coverage and estimated resource/model cost before execution.
 - Idempotent replay and interruption/restart tests, provenance/identity preservation, and
-  equivalence checks against clean derivation on representative controls.
+  equivalence checks against clean derivation on representative controls, using the declared
+  in-place or causal-order contract. Include new candidates, empty results and cross-episode
+  dependencies in invalidation tests.
 - A documented compatibility/read policy, rollout order, migration recovery and rollback
   constraints, and operator-visible progress and outstanding work.
 - No unsafe automatic paid work: respect explicit cost budgets and approved scope.
@@ -156,7 +230,8 @@ erasure invariants cannot be waived by deferral. Feature activation remains gove
 
 Adoption of the automated release gate is tracked in #469; until implemented, the repository
 must not claim it already enforces this contract. The migration implementation and any transition
-plan for legacy releases require review.
+plan for legacy releases require review. Establish an explicit owner-reviewed transition policy
+for existing releases; the target gate is not a claim of retrospective enforcement.
 
 ### 6. Repair is governed, recoverable and inspectable
 
@@ -171,11 +246,23 @@ for irreversible operations.
 ### 7. Benchmarking uses the same compatibility contract
 
 Keep immutable permitted benchmark snapshots and stage manifests. Retrieval-only experiments
-reuse compatible ingestion. Migrated runs are explicitly labeled and validated on a representative
-fresh-ingest control subset; fresh model observations may differ, so define semantic/quality
-tolerances before evaluating. Periodically check migration drift against clean ingestion and retain
-a held-out final evaluation. Report actual calls, costs, coverage and unresolved differences.
-A migrated run is not silently reported as a fresh end-to-end benchmark.
+reuse compatible ingestion. Evaluate three independent guarantees:
+
+1. **Deterministic replay:** pin the observations, source/dependency state, order, time and rules;
+   require semantic equivalence with no unexplained changes. This is not a statistical model
+   quality test. Declare any permitted numeric representation tolerances.
+2. **Migration fidelity:** compare migrated state against a clean derivation under the declared
+   repair or historical replay contract, including a controlled replay with fixed observations.
+   Separately compare against representative fresh-ingest controls to detect model/pipeline drift;
+   fresh observations can differ, so predeclare semantic and quality tolerances. Do not use model
+   variance to excuse deterministic invariant failures.
+3. **Knowledge and retrieval quality:** score against independently grounded expected outcomes
+   or held-out benchmark answers. Reproducibility and migration fidelity do not establish truth,
+   completeness or recall accuracy.
+
+Periodically check migration drift against clean ingestion and retain a held-out final evaluation.
+Report actual calls, costs, coverage, replay mode and unresolved differences. A migrated run is
+not silently reported as a fresh end-to-end benchmark.
 
 ## Considered alternatives
 
@@ -213,7 +300,7 @@ neither evidence authority nor a substitute for preserving an accepted result.
 ## Evidence and implementation tracking
 
 - [#469 — Version-aware ingestion migration](https://github.com/Archolith/menhir/issues/469)
-- [#423 — Supported-only cleanup/re-derivation](https://github.com/Archolith/menhir/issues/423)
+- [#423 — Supported-only cleanup/re-derivation](https://github.com/Archolith/menhir/issues/423) (closed; prior foundation, not an open blocker)
 - [#376 — Scalar projection audit](https://github.com/Archolith/menhir/issues/376)
 - [#268 — Legacy temporal stamps](https://github.com/Archolith/menhir/issues/268)
 - [#468 — View embedding gaps](https://github.com/Archolith/menhir/issues/468)
@@ -221,11 +308,21 @@ neither evidence authority nor a substitute for preserving an accepted result.
 
 ## Open owner decisions
 
-- Exact stage granularity, durable receipt format, retention budgets and compatibility fingerprint
-  mechanism after auditing existing infrastructure.
-- Supported release upgrade window, transitional adoption of the gate, and rollout of legacy
-  capability backfills after the read-only census.
-- Migration cost limits, control-sample policy, production rollout and recovery operating envelope.
+1. **Stage boundaries and compatibility:** exact stage granularity, Graphiti seam capability
+   inventory, dependency representation and version/fingerprint mechanism.
+2. **Replay material and retention:** durable artifact/receipt formats, privacy-safe retention and
+   storage budgets.
+3. **Historical coverage and repair:** read-only census, legacy backfill scope, and supported
+   checkpoint/replay contracts for stateful interpretation.
+4. **Release support and adoption:** supported predecessor window, sequential upgrade route,
+   transitional gate enforcement and integration with operational deployment classification.
+5. **Evaluation and cost:** migration cost limits, control-sample policy, semantic equivalence
+   checks and independent quality gates.
+6. **Production execution:** rollout sequence, deferred capability read/write policies where
+   stricter than the defaults, and recovery operating envelope.
+
+These decisions govern implementation and rollout; accepting this ADR's target invariants does
+not itself authorize production backfills, paid replay, or activation of default-off features.
 
 ## Non-goals
 
