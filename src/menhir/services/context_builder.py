@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 #: Opening of every stale-anchor advisory line. The hook trims packed context between entries and
 #: keys on this prefix to keep an advisory attached to the memory it qualifies.
 STALE_ADVISORY_PREFIX = "  ⚠️ Stale file anchor:"
+#: Separates entries in packed context; the hook cuts only at this boundary.
+ENTRY_SEPARATOR = "\n\n"
+#: Opening of the warning appended to a memory that needs review.
+REVIEW_REQUIRED_PREFIX = "Review required:"
 _BLANK_LINES = re.compile(r"\n(?:[ \t]*\n)+")
 
 # ---------------------------------------------------------------------------
@@ -547,7 +551,7 @@ class ContextBuilderService:
             if mem.needs_review:
                 # Pack the warning atomically with its memory under the token budget.
                 line += (
-                    "\n  Review required: " + (mem.review_reason or "source state changed")
+                    f"\n  {REVIEW_REQUIRED_PREFIX} " + (mem.review_reason or "source state changed")
                     + ". Verify the source before asserting this memory as current truth."
                 )
 
@@ -640,7 +644,7 @@ class ContextBuilderService:
                 lines.append(f"Memory note: {recall_result.note}")
             if hint_line is not None:
                 lines.append(hint_line)
-            running_tokens = _tokens_for("\n\n".join(lines))
+            running_tokens = _tokens_for(ENTRY_SEPARATOR.join(lines))
         else:
             if hint_line is not None:
                 lines.insert(hint_at, hint_line)
@@ -652,7 +656,7 @@ class ContextBuilderService:
                     lines.append(note_line)
                     running_tokens += note_tokens
 
-        context = "\n\n".join(lines)
+        context = ENTRY_SEPARATOR.join(lines)
         if todo_section:
             context += todo_section
             running_tokens += todo_tokens

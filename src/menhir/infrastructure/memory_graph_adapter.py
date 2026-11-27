@@ -1856,22 +1856,6 @@ class MemoryGraphAdapter:
         """List document entities for a project."""
         return self._structure.query_documents(project, path_filter, document_type)
 
-    def link_episode_to_documents(
-        self,
-        episode_uuid: str,
-        entity_names: list[str],
-        project: str,
-        max_links: int = 5,
-    ) -> int:
-        """Link an episode to wiki/reference documents by name match."""
-        return self._structure.link_episode_to_documents(
-            episode_uuid, entity_names, project, max_links
-        )
-
-    def get_linked_documents(self, episode_uuids: list[str]) -> list[dict[str, str]]:
-        """Get documents linked to episodes via RELATES_TO."""
-        return self._structure.get_linked_documents(episode_uuids)
-
     def list_structure_projects(self) -> list[dict[str, str]]:
         return self._structure.list_projects()
 

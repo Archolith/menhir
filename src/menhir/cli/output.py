@@ -8,10 +8,16 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
-from menhir.services.context_builder import STALE_ADVISORY_PREFIX, estimate_tokens
+from menhir.services.context_builder import (
+    ENTRY_SEPARATOR,
+    REVIEW_REQUIRED_PREFIX,
+    STALE_ADVISORY_PREFIX,
+    estimate_tokens,
+)
 
 MAX_SUMMARY = 120
 MAX_CONTEXT_CHARS = 8000
@@ -415,15 +421,25 @@ def _render_list_sections(
     return sections, remaining, context_floor, emitted_todo_uuids
 
 
-def _context_budget(
+class HookListLayout(NamedTuple):
+    """The rendered list sections and what they leave for Context, computed once per hook run."""
+
+    lines: list[str]
+    #: Token allowance (estimator units) the Context section gets after the list sections.
+    context_budget: int
+    #: uuids of the TODOs actually emitted (the rest are budget-dropped).
+    todo_uuids: set[str]
+
+
+def compute_list_layout(
     flagged: list[dict],
     todos: list[dict] | None,
     temporal_memories: list[dict] | None,
     max_tokens: int,
-) -> int:
-    """Token allowance (estimator units) the Context section gets after the list sections."""
+) -> HookListLayout:
+    """Lay out Reminders / TODOs / Pinned under `max_tokens` and derive the Context allowance."""
     effective_budget = _effective_budget(max_tokens)
-    _, remaining, context_floor, _ = _render_list_sections(
+    lines, remaining, context_floor, todo_uuids = _render_list_sections(
         flagged, todos, temporal_memories, effective_budget
     )
     list_allowance = effective_budget - context_floor
@@ -432,7 +448,8 @@ def _context_budget(
     # from is `effective_budget - context_floor`, and the max() below re-imposes the floor on
     # the result. Verified by mutation -- neither single removal fails a test, and the compound
     # removal does.
-    return max(context_floor, effective_budget - (list_allowance - remaining))
+    context_budget = max(context_floor, effective_budget - (list_allowance - remaining))
+    return HookListLayout(lines, context_budget, todo_uuids)
 
 
 def rendered_todo_uuids(
@@ -440,11 +457,11 @@ def rendered_todo_uuids(
     todos: list[dict] | None,
     temporal_memories: list[dict] | None,
     max_tokens: int,
+    layout: HookListLayout | None = None,
 ) -> set[str]:
     """uuids of the TODOs `format_hook_output` will show under `max_tokens` (the rest are budget-dropped)."""
-    return _render_list_sections(
-        flagged, todos, temporal_memories, _effective_budget(max_tokens)
-    )[3]
+    layout = layout or compute_list_layout(flagged, todos, temporal_memories, max_tokens)
+    return layout.todo_uuids
 
 
 def hook_context_max_tokens(
@@ -452,13 +469,15 @@ def hook_context_max_tokens(
     todos: list[dict] | None,
     temporal_memories: list[dict] | None,
     max_tokens: int,
+    layout: HookListLayout | None = None,
 ) -> int:
     """The ``max_tokens`` to hand ``build_context`` so its output already fits the Context allowance.
 
     ``build_context`` halves its budget under the heuristic estimator, and so does the hook, so
     the allowance is expressed in nominal tokens here to land on the same effective budget.
     """
-    budget = _context_budget(flagged, todos, temporal_memories, max_tokens)
+    layout = layout or compute_list_layout(flagged, todos, temporal_memories, max_tokens)
+    budget = layout.context_budget
     return budget if _ESTIMATION_MODE == "tokenizer" else budget * 2
 
 
@@ -470,9 +489,9 @@ def _context_blocks(text: str) -> list[str]:
     cut can never keep the memory and drop the warning.
     """
     blocks: list[str] = []
-    for part in text.split("\n\n"):
+    for part in text.split(ENTRY_SEPARATOR):
         if blocks and part.startswith(STALE_ADVISORY_PREFIX):
-            blocks[-1] += "\n\n" + part
+            blocks[-1] += ENTRY_SEPARATOR + part
         else:
             blocks.append(part)
     return blocks
@@ -489,19 +508,19 @@ def _trim_context(text: str, budget: int, max_chars: int) -> tuple[str, bool]:
     blocks = _context_blocks(text)
     kept: list[str] = []
     for block in blocks:
-        candidate = "\n\n".join([*kept, block])
+        candidate = ENTRY_SEPARATOR.join([*kept, block])
         if len(candidate) > max_chars or estimate_tokens(candidate)[0] > budget:
             break
         kept.append(block)
     if len(kept) == len(blocks):
-        return "\n\n".join(kept), False
+        return ENTRY_SEPARATOR.join(kept), False
     if not kept:
         first = blocks[0]
-        if STALE_ADVISORY_PREFIX in first or "Review required:" in first:
+        if STALE_ADVISORY_PREFIX in first or REVIEW_REQUIRED_PREFIX in first:
             return "", True
         trimmed, _ = _trim_to_tokens(first[:max_chars], budget)
         return trimmed, True
-    return "\n\n".join(kept), True
+    return ENTRY_SEPARATOR.join(kept), True
 
 
 def format_hook_output(
@@ -513,8 +532,11 @@ def format_hook_output(
     todos: list[dict] | None = None,
     temporal_memories: list[dict] | None = None,
     max_tokens: int = DEFAULT_HOOK_TOKEN_BUDGET,
+    layout: HookListLayout | None = None,
 ) -> str:
     """Build the recalled-memories block for hook injection, bounded by `max_tokens`.
+
+    `layout` is the list layout when the caller already computed it from these same lists.
 
     EVERYTHING GRAPH-DERIVED IS BUDGETED. `temporal_line` and `write_nudge` are not: both are
     generated locally from the clock and the current prompt, are a single line each, and carry no
@@ -523,24 +545,22 @@ def format_hook_output(
     """
     sections: list[str] = []
 
-    effective_budget = _effective_budget(max_tokens)
+    layout = layout or compute_list_layout(flagged, todos, temporal_memories, max_tokens)
 
     # Temporal context (client-id-specific current time + elapsed)
     if temporal_line:
         sections.append(temporal_line)
 
-    list_lines, _, _, _ = _render_list_sections(flagged, todos, temporal_memories, effective_budget)
-    sections.extend(list_lines)
+    sections.extend(layout.lines)
 
     # Context section (pre-formatted by ContextBuilderService)
     if context_text and context_text.strip():
         body = context_text.strip()
         # A fence the content can close is not a fence.
         body = body.replace("```", "'''")
-        context_budget = _context_budget(flagged, todos, temporal_memories, max_tokens)
         # build_context was handed this same allowance, so this normally keeps everything. When it
-        # does cut (a different estimate, a larger scrubbed list), it cuts between entries.
-        body, truncated = _trim_context(body, context_budget, MAX_CONTEXT_CHARS)
+        # does cut (a different estimate), it cuts between entries.
+        body, truncated = _trim_context(body, layout.context_budget, MAX_CONTEXT_CHARS)
         if truncated:
             body = body + "\n...[context truncated]"
         header = f"### Context (query={_escape_inline(query)})" if query else "### Context"

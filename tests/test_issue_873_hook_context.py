@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import sys
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,6 +19,11 @@ from menhir.services.context_builder import (
     _deduplicate,
     estimate_tokens,
 )
+
+class _FakeStdin(io.StringIO):
+    def isatty(self) -> bool:
+        return False
+
 
 _BREAKDOWN = RelevanceBreakdown(
     semantic_similarity=0.9, adjacency_bonus=0.0, recency_bonus=0.0, prominence_bonus=0.0,
@@ -205,3 +213,62 @@ async def test_todo_dropped_by_hook_budget_still_appears_in_build_context() -> N
     assert dropped["content"][:30] in result.context
     full = rendered_todo_uuids([], todos, [], 1500)
     assert full == {t["uuid"] for t in todos}
+
+
+class _RecordingBuilder:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def build_context(self, query, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(context="[Memory 1] m: parser note")
+
+
+class _TodoAdapter:
+    def __init__(self, todos: list[dict]) -> None:
+        self._todos = todos
+
+    def fetch_flagged_memories(self, limit=10, workspace=None):
+        return []
+
+    def list_todos(self, status="open", limit=5, namespace=None):
+        return self._todos
+
+    def list_temporal_in_window(self, window_days=30, namespace=None, limit=5):
+        return []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("event", ["prompt", "postcompact"])
+def test_hook_hands_build_context_the_allowance_and_the_rendered_todos(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], event: str
+) -> None:
+    from menhir.cli import hook as hook_module
+
+    max_tokens = 110
+    todos = [
+        {"uuid": f"t{i}", "content": f"distinct work item number {i} " * 3, "priority": "normal"}
+        for i in range(5)
+    ]
+    builder = _RecordingBuilder()
+    svc = SimpleNamespace(graph_adapter=_TodoAdapter(todos), context_builder=builder)
+    monkeypatch.setattr("menhir.cli.bootstrap.build_hook_services", lambda settings=None: svc)
+    monkeypatch.delenv("MENHIR_SECRET_POLICY", raising=False)
+    stdin = '{"source": "compact"}' if event == "postcompact" else "{}"
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(stdin))
+
+    if event == "postcompact":
+        hook_module._run_postcompact_impl(max_tokens=max_tokens, workspace=None)
+    else:
+        hook_module._run_prompt_impl(
+            query="a sufficiently long prompt about the parser", max_tokens=max_tokens,
+            frequency=0, workspace=None,
+        )
+
+    output = capsys.readouterr().out
+    rendered = {t["uuid"] for t in todos if t["content"][:30] in output}
+    assert 0 < len(rendered) < len(todos)
+    (call,) = builder.calls
+    assert call["exclude_todo_uuids"] == rendered
+    assert call["max_tokens"] == hook_context_max_tokens([], todos, [], max_tokens)
+    assert call["max_tokens"] < max_tokens
