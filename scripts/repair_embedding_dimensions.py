@@ -25,7 +25,7 @@ from menhir.infrastructure.providers import ProviderConfig
 
 DEFAULT_BATCH_SIZE = 128
 # One type or a `|` join of types (semantic_fact_edge_pattern()); nothing else is interpolated.
-_REL_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\|[A-Za-z_][A-Za-z0-9_]*)*$")
+_REL_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\|[A-Za-z_][A-Za-z0-9_]*)*\Z")
 
 
 def _load_settings() -> MemorySettings:

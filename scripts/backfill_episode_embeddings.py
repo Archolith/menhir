@@ -35,7 +35,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
+from menhir.domain.secret_scrub import embed_input_text
 from menhir.infrastructure.embedding_dimensions import (
     configured_embedding_dimension,
     fit_embedding_dimension,
@@ -45,9 +45,6 @@ from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.observability import build_async_openai_client
 from menhir.infrastructure.providers import ProviderConfig
 from menhir.services.embedding_identity import comparable_model
-
-#: Same truncation bound as the ingest step (services/enrichment_steps.py).
-_EMBED_MAX_CHARS = 8000
 
 
 def _load_settings() -> Any:
@@ -87,7 +84,7 @@ def _eligible_content(row: dict[str, Any]) -> tuple[str, str] | None:
     """Return the listed and bounded content when this row is an apply candidate."""
     listed_content = str(row.get("content") or "")
     # Redacted like the ingest step, before truncation; the listed value stays the write premise.
-    content = prepare_memory_text(listed_content, policy=non_refusing_policy())[:_EMBED_MAX_CHARS]
+    content = embed_input_text(listed_content)
     if not content.strip():
         return None
     return listed_content, content

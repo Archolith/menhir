@@ -104,3 +104,13 @@ def test_oversized_vector_is_truncated_and_short_vector_refused() -> None:
         label="Entity", expected_dim=4))
     assert result["wrong_dimension"] == 1 and result["updated"] == 0
     assert neo4j.queries == []
+
+
+@pytest.mark.parametrize("rel_type", ["RELATES_TO", "A|B", "_x1"])
+def test_rel_type_pattern_accepts_identifiers(rel_type: str) -> None:
+    assert script._REL_TYPE_RE.match(rel_type)
+
+
+@pytest.mark.parametrize("rel_type", ["RELATES_TO]->() DETACH DELETE n //", "", "1ABC", "A|", "A B", "A\n"])
+def test_rel_type_pattern_rejects_injection_and_malformed(rel_type: str) -> None:
+    assert not script._REL_TYPE_RE.match(rel_type)

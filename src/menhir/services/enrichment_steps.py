@@ -35,7 +35,7 @@ from menhir.infrastructure.self_binding import (
     resolve_bind_mode,
     resolve_inferred_mode,
 )
-from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
+from menhir.domain.secret_scrub import embed_input_text, non_refusing_policy, prepare_memory_text
 from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
@@ -696,11 +696,6 @@ async def run_graphiti_extraction(
 # Source-memory lane: episode content embedding (best-effort, never fatal)
 # ---------------------------------------------------------------------------
 
-#: Episode content is truncated before embedding so a pathological payload cannot
-#: blow the embedder's window; 8,000 chars is far beyond any real turn.
-_SOURCE_MEMORY_EMBED_MAX_CHARS = 8000
-
-
 def _episode_embedder_model_name(graphiti_client: Any) -> str:
     """Best-effort embedder model name; 'unknown' when it cannot be resolved."""
     return embedder_model_name(graphiti_client)
@@ -735,7 +730,7 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         )
         if has_embedding:
             return
-        content = prepare_memory_text(str(claimed.get("content") or ""), policy=non_refusing_policy())[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
+        content = embed_input_text(str(claimed.get("content") or ""))
         if not content.strip():
             return
         try:
