@@ -113,12 +113,15 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 
 - [x] Introduce an [internal reconciler](../../src/menhir/services/projection_reconciliation.py) that binds a `ProjectionDefinition` and version to its host-supplied materializer. The scalar reconciliation prototype uses it. Recovery filters by definition and version before the batch limit, and certification uses the existing transactional fence.
 - [ ] Centralize runtime repository/adapter creation or inject one resolved per-process view-kind map through all constructors, not only one bootstrap path.
-- [ ] Add default-off scheduler lane per **supported** definition, bounded batches, fenced owner and explicit repair-handler registry.
-- [ ] Test no-extensions identical startup; two different extensions in one process; A has extension/B lacks it; removing/upgrading extension leaves prior work safe; two concurrent hosts; tenant-scope isolation.
+- [x] Add one [maintenance job](../../src/menhir/services/maintenance_scheduler.py) per explicitly registered projection definition. Jobs run every 30 seconds and take up to 100 items per batch. An empty registration set adds no jobs.
+- [x] Test empty registration, two definitions in one scheduler, a restart with newly registered work, and lease takeover during a batch.
+- [ ] Test extension upgrades and removal across concurrent hosts and verify tenant-scope isolation and erasure for external materializers.
 
 **Exit:** a separately installed extension registers **and executes** without patching Menhir; all S1–S7 safety invariants from #725 pass.
 
-The internal lane consumes existing work. Runtime registration, queue producers, and scheduler wiring are still open. The focused suite passed 83 cases, including a disposable Neo4j test that confirmed a stale worker leaves the queue untouched and an installed worker can drain matching jobs around older work.
+The internal assembly seam accepts host-supplied definition/materializer pairs and binds their workers to the runtime's existing graph. Standard stdio and HTTP startup supply no pairs. Product startup registration, View-kind integration and queue producers are still open. A disposable Neo4j test confirmed that a scheduler restart picks up work left pending by a host without the matching registration.
+
+Each scheduling step runs under the existing maintenance lease. Neo4j checks revocation before starting each statement or transaction attempt, including retries. An already-dispatched transaction can finish under the work-generation fence after lease loss. Jobs still run serially through the shared scheduler, so a slow materializer can delay the next lane.
 
 The current publication API restamps existing work to the new version, and the versionless scoped scan still treats inconsistent stored versions as corruption. Extension upgrades need publication and review paths that preserve older work under D5.
 

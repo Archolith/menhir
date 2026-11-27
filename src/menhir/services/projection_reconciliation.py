@@ -14,6 +14,14 @@ ProjectionMaterializer = Callable[[Any, ProjectionWorkToken], str]
 
 
 @dataclass(frozen=True)
+class ProjectionWorkerRegistration:
+    """A trusted host's explicit pairing of a definition and materializer."""
+
+    definition: ProjectionDefinition
+    materializer: ProjectionMaterializer
+
+
+@dataclass(frozen=True)
 class ProjectionReconciliation:
     """One exact lifecycle generation successfully materialized and certified."""
 
@@ -67,6 +75,10 @@ class ProjectionReconciler:
         self._materializer = materializer
         self._derivation_prefix = derivation_prefix
 
+    @property
+    def definition_id(self) -> str:
+        return self._definition.definition_id
+
     def commit_tokens(
         self, tokens: Iterable[ProjectionWorkToken], *, operation_id: str,
     ) -> tuple[ProjectionReconciliation, ...]:
@@ -92,10 +104,12 @@ class ProjectionReconciler:
             reconciled.append(ProjectionReconciliation(token, certificate))
         return tuple(reconciled)
 
-    def drain_pending(self, *, operation_id: str, limit: int = 100) -> tuple[ProjectionReconciliation, ...]:
-        tokens = self._queue.pending(
-            definition_id=self._definition.definition_id,
+    def pending_tokens(self, *, limit: int) -> tuple[ProjectionWorkToken, ...]:
+        return self._queue.pending(
+            definition_id=self.definition_id,
             definition_version=self._definition.version,
             limit=limit,
         )
-        return self.commit_tokens(tokens, operation_id=operation_id)
+
+    def drain_pending(self, *, operation_id: str, limit: int = 100) -> tuple[ProjectionReconciliation, ...]:
+        return self.commit_tokens(self.pending_tokens(limit=limit), operation_id=operation_id)

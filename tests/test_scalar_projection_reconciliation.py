@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
+import threading
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessCertificate,
+    ProjectionWorkAlreadyCompletedError,
     ProjectionWorkToken,
 )
+from menhir.infrastructure.neo4j import Neo4jRepository, SagaOwnershipRevoked
+from menhir.services.maintenance_scheduler import MaintenanceScheduler
 from menhir.services.projection_reconciliation import ProjectionReconciler
-from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION, scalar_projection_target
 from menhir.services.scalar_projection_reconciliation import ScalarProjectionReconciler
+from menhir.services.scheduler_lease import SchedulerLeaseStore
 
 
 class _FakeLifecycle:
@@ -190,3 +199,196 @@ def test_registered_lanes_use_their_own_materializers_and_leave_unsupported_work
     assert scalar_materializer.tokens == [scalar]
     assert other_materializer.tokens == [other]
     assert lifecycle.pending_tokens == [old, unknown]
+
+
+def _projection_scheduler(tmp_path: Path, *workers: ProjectionReconciler) -> MaintenanceScheduler:
+    scheduler = MaintenanceScheduler(
+        ingest_service=SimpleNamespace(get_queue_depth=lambda: 0),
+        graph_adapter=SimpleNamespace(),
+        lease_store=SchedulerLeaseStore(db_path=tmp_path / "scheduler.db"),
+        lease_heartbeat_s=0.05,
+        tick_interval_s=0.01,
+        projection_workers=workers,
+    )
+    scheduler._jobs = {
+        name: job for name, job in scheduler._jobs.items()
+        if name.startswith("reconcile_projection:")
+    }
+    return scheduler
+
+
+async def _wait_for_job(scheduler: MaintenanceScheduler, definition_id: str) -> dict[str, object]:
+    name = f"reconcile_projection:{definition_id}"
+    async with asyncio.timeout(5):
+        while True:
+            status = scheduler.status_snapshot()["jobs"][name]
+            if status["runs"]:
+                return status
+            await asyncio.sleep(0.01)
+
+
+def test_scheduler_rejects_two_workers_for_same_definition(tmp_path: Path) -> None:
+    queue = _FakeLifecycle()
+    first = ProjectionReconciler(queue, SCALAR_STATE_PROJECTION, materializer=_Materializer())
+    second = ProjectionReconciler(
+        queue, replace(SCALAR_STATE_PROJECTION, version=2), materializer=_Materializer(),
+    )
+    with pytest.raises(ValueError, match="duplicate projection worker"):
+        _projection_scheduler(tmp_path, first, second)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_runs_separate_bounded_lanes_even_when_one_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _FakeLifecycle()
+    failed_definition = replace(SCALAR_STATE_PROJECTION, definition_id="extension.failing")
+    healthy_definition = replace(SCALAR_STATE_PROJECTION, definition_id="extension.healthy")
+    unknown_definition = replace(SCALAR_STATE_PROJECTION, definition_id="extension.unregistered")
+    target = scalar_projection_target(_row())
+    (failed,) = queue.dirty_targets(failed_definition, [target], reason="test")
+    (unknown,) = queue.dirty_targets(unknown_definition, [target], reason="test")
+    healthy_tokens = queue.dirty_targets(
+        healthy_definition, [replace(target, subject_id=f"subject-{i}") for i in range(101)], reason="test",
+    )
+    queue.fail_work_key = failed.work_key
+    real_commit = queue.commit
+
+    def commit(token: ProjectionWorkToken, **kwargs: Any) -> ProjectionFreshnessCertificate:
+        if token == healthy_tokens[0]:
+            queue.pending_tokens.remove(token)
+            raise ProjectionWorkAlreadyCompletedError("already applied by another worker")
+        return real_commit(token, **kwargs)
+
+    monkeypatch.setattr(queue, "commit", commit)
+    materializer = _Materializer()
+    scheduler = _projection_scheduler(
+        tmp_path,
+        ProjectionReconciler(queue, failed_definition, materializer=_Materializer()),
+        ProjectionReconciler(queue, healthy_definition, materializer=materializer),
+    )
+    await scheduler.start()
+    try:
+        healthy_status = await _wait_for_job(scheduler, healthy_definition.definition_id)
+        failed_status = await _wait_for_job(scheduler, failed_definition.definition_id)
+    finally:
+        await scheduler.stop()
+
+    assert failed_status["last_success"] is False
+    assert healthy_status["last_result"] == {"applied": 99, "superseded": 1}
+    assert materializer.tokens == list(healthy_tokens[1:100])
+    assert queue.pending_tokens == [failed, unknown, healthy_tokens[-1]]
+
+
+@pytest.mark.asyncio
+async def test_projection_lane_stops_dispatching_after_lease_takeover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _FakeLifecycle()
+    definition = SCALAR_STATE_PROJECTION
+    scalar = ScalarProjectionReconciler(queue, materializer=_Materializer())
+    first, second = scalar.dirty_assertions([_row(), _row(attribute="weight")])
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+    completed = asyncio.Event()
+    refused = threading.Event()
+    real_commit = queue.commit
+    neo4j = Neo4jRepository(uri="bolt://127.0.0.1:1", database="neo4j", user="test", password="test")
+
+    def driver_must_not_open():
+        pytest.fail("a former owner tried to open a Neo4j transaction")
+
+    monkeypatch.setattr(neo4j, "_get_driver", driver_must_not_open)
+
+    def commit(token: ProjectionWorkToken, **kwargs: Any) -> ProjectionFreshnessCertificate:
+        try:
+            certificate = real_commit(token, **kwargs)
+            if token == first:
+                with pytest.raises(SagaOwnershipRevoked):
+                    neo4j.execute_write(lambda _tx: None)
+                refused.set()
+            return certificate
+        finally:
+            if token == first:
+                loop.call_soon_threadsafe(completed.set)
+
+    monkeypatch.setattr(queue, "commit", commit)
+
+    def materialize(_tx: Any, token: ProjectionWorkToken) -> str:
+        if token == first:
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(timeout=10):
+                raise TimeoutError("test never released first transaction")
+        return "applied"
+
+    scheduler = _projection_scheduler(tmp_path, ProjectionReconciler(queue, definition, materializer=materialize))
+    await scheduler.start()
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        scheduler.lease_store.force_acquire(
+            lease_name=scheduler.lease_name, owner_id="next-owner", owner_pid=os.getpid(),
+            lease_duration_s=30,
+        )
+        status = await _wait_for_job(scheduler, definition.definition_id)
+        assert status["last_result"]["abandoned"] == "lease_lost"
+        assert [token for token, _ in queue.commit_calls] == [first]
+    finally:
+        release.set()
+        if started.is_set():
+            await asyncio.wait_for(completed.wait(), timeout=5)
+        await scheduler.stop()
+    assert queue.pending_tokens == [second]
+    assert refused.is_set()
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
+async def test_projection_scheduler_restart_recovers_registered_work(tmp_path: Path, test_neo4j_repo) -> None:
+    from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
+
+    queue = ProjectionLifecycleRepository(test_neo4j_repo)
+    queue.activate()
+    first = replace(SCALAR_STATE_PROJECTION, definition_id="extension.first")
+    second = replace(SCALAR_STATE_PROJECTION, definition_id="extension.second")
+    for definition in (first, second):
+        queue.publish_definition(definition, semantic_hash=definition.definition_id)
+        queue.dirty_targets(definition, [scalar_projection_target(_row())], reason="scheduled_recovery")
+
+    def materialize(tx: Any, token: ProjectionWorkToken) -> str:
+        tx.execute(
+            "CREATE (:ProjectionSchedulerTestOutput {definition_id:$definition_id, namespace:$namespace})",
+            {"definition_id": token.definition_id, "namespace": token.target.namespace},
+        )
+        return f"hash-{token.definition_id}"
+
+    before = _projection_scheduler(tmp_path, ProjectionReconciler(queue, first, materializer=materialize))
+    await before.start()
+    try:
+        assert (await _wait_for_job(before, first.definition_id))["last_result"]["applied"] == 1
+    finally:
+        await before.stop()
+    assert [token.definition_id for token in queue.pending()] == [second.definition_id]
+
+    after = _projection_scheduler(
+        tmp_path,
+        ProjectionReconciler(queue, first, materializer=materialize),
+        ProjectionReconciler(queue, second, materializer=materialize),
+    )
+    await after.start()
+    try:
+        assert (await _wait_for_job(after, first.definition_id))["last_result"]["applied"] == 0
+        assert (await _wait_for_job(after, second.definition_id))["last_result"]["applied"] == 1
+    finally:
+        await after.stop()
+    assert queue.pending() == ()
+    assert test_neo4j_repo.execute(
+        """
+        MATCH (v:ProjectionSchedulerTestOutput)
+        RETURN v.definition_id AS definition_id, v.namespace AS namespace
+        ORDER BY definition_id
+        """
+    ) == [
+        {"definition_id": first.definition_id, "namespace": "alpha"},
+        {"definition_id": second.definition_id, "namespace": "alpha"},
+    ]

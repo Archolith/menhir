@@ -14,8 +14,15 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from menhir.domain.projection_lifecycle import (
+    ProjectionWorkAlreadyCompletedError,
+    ProjectionWorkToken,
+    StaleProjectionWorkError,
+)
 from menhir.infrastructure.circuit_breaker import provider_unavailable_reason
+from menhir.infrastructure.neo4j import SagaOwnershipRevoked, revocation_scope
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
+from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scheduler_lease import (
     SchedulerLeaseStore,
     _utc_now_iso,
@@ -51,6 +58,9 @@ from menhir.services.scheduler_tasks import (
 from menhir.services.source_embedding_repair import repair_source_embeddings
 
 logger = logging.getLogger(__name__)
+
+_PROJECTION_BATCH_SIZE = 100
+_PROJECTION_INTERVAL_S = 30.0
 
 
 class _LeaseLostDuringJob(Exception):
@@ -164,6 +174,7 @@ class MaintenanceScheduler:
     lease_duration_s: float = 90.0
     lease_heartbeat_s: float = 30.0
     lease_store: SchedulerLeaseStoreProtocol = field(default_factory=SchedulerLeaseStore)
+    projection_workers: tuple[ProjectionReconciler, ...] = field(default=(), repr=False)
     _task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _stop_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     # Set ONLY by _mark_lease_lost. Deliberately separate from _stop_event: an orderly stop
@@ -171,6 +182,7 @@ class MaintenanceScheduler:
     _lease_lost_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _jobs: dict[str, _JobState] = field(default_factory=dict, init=False, repr=False)
+    _projection_jobs: dict[str, ProjectionReconciler] = field(default_factory=dict, init=False, repr=False)
     _owner_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{uuid4()}", init=False, repr=False)
     _owner_pid: int = field(default_factory=os.getpid, init=False, repr=False)
     _lease_acquired: bool = field(default=False, init=False, repr=False)
@@ -244,6 +256,12 @@ class MaintenanceScheduler:
         self._jobs["derived_rederive"] = _JobState(interval_s=900.0)
         if self.sidecar_compaction_interval_s > 0:
             self._jobs["sidecar_compaction"] = _JobState(interval_s=self.sidecar_compaction_interval_s)
+        for worker in self.projection_workers:
+            name = f"reconcile_projection:{worker.definition_id}"
+            if name in self._projection_jobs:
+                raise ValueError(f"duplicate projection worker for {worker.definition_id!r}")
+            self._projection_jobs[name] = worker
+            self._jobs[name] = _JobState(interval_s=_PROJECTION_INTERVAL_S)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -738,6 +756,43 @@ class MaintenanceScheduler:
                 await self._run_job(
                     job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()
                 )
+            elif name in self._projection_jobs:
+                operation = f"scheduler_{name}"
+                await self._run_job(
+                    job, operation, self._reconcile_projection(self._projection_jobs[name], operation)
+                )
+
+    async def _reconcile_projection(
+        self, worker: ProjectionReconciler, operation: str,
+    ) -> dict[str, object]:
+        def require_lease() -> None:
+            # Check inside the thread, in case executor saturation delayed dispatch.
+            if not self._lease_is_provable():
+                raise _LeaseLostDuringJob(operation)
+
+        def pending() -> tuple[ProjectionWorkToken, ...]:
+            require_lease()
+            return worker.pending_tokens(limit=_PROJECTION_BATCH_SIZE)
+
+        def commit(token: ProjectionWorkToken) -> None:
+            require_lease()
+            worker.commit_tokens((token,), operation_id=operation)
+
+        applied = superseded = 0
+        # to_thread propagates this predicate to the repository, including its retry loop.
+        with revocation_scope(self._lease_is_provable):
+            try:
+                for token in await asyncio.to_thread(pending):
+                    try:
+                        # Send one transaction at a time so cancellation cannot leave a batch running.
+                        await asyncio.to_thread(commit, token)
+                    except (ProjectionWorkAlreadyCompletedError, StaleProjectionWorkError):
+                        superseded += 1
+                    else:
+                        applied += 1
+            except SagaOwnershipRevoked as exc:
+                raise _LeaseLostDuringJob(operation) from exc
+        return {"applied": applied, "superseded": superseded}
 
     # ------------------------------------------------------------------
     # Job wrapper — shared timing, telemetry, and state bookkeeping

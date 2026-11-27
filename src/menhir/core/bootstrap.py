@@ -13,6 +13,7 @@ from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
+from menhir.services.projection_reconciliation import ProjectionWorkerRegistration
 
 
 class UnavailableGraphitiClient:
@@ -140,6 +141,7 @@ class BuildArtifacts:
     lifecycle_service: LifecycleService
     context_builder: ContextBuilderService
     candidate_service: CandidateService
+    projection_registrations: tuple[ProjectionWorkerRegistration, ...] = ()
 
 
 def build_memory_services(
@@ -148,8 +150,11 @@ def build_memory_services(
     capabilities: RuntimeCapabilities | None = None,
     read_only: bool = False,
     require_scheduler_lease: bool = False,
+    projection_registrations: tuple[ProjectionWorkerRegistration, ...] = (),
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
+    if read_only and projection_registrations:
+        raise ValueError("projection workers require a writable runtime")
     settings = settings or MemorySettings.from_env()
     warn_retired_settings_set_false()
     neo4j = Neo4jRepository(
@@ -269,6 +274,7 @@ def build_memory_services(
         lifecycle_service=lifecycle_service,
         context_builder=context_builder,
         candidate_service=candidate_service,
+        projection_registrations=tuple(projection_registrations),
     )
 
 

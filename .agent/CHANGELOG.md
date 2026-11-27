@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Schedule registered projection workers (#725)
+
+- Give each explicitly registered projection definition a separate maintenance job with a 100-item batch. An empty registration set adds no jobs.
+- Use the scheduler lease and the Neo4j revocation check to stop dispatch and retry after ownership loss. Already-started transactions still use the work-generation fence.
+
 ## 2026-11-26 - Internal projection execution lane (#725)
 
 - Bind each reconciliation lane to a host-supplied materializer for one definition and version. The scalar reconciliation prototype uses the same lane.

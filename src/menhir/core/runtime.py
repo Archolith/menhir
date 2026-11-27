@@ -372,6 +372,17 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         return existing
 
     settings = getattr(built, "settings", None)
+    projection_workers = ()
+    registrations = getattr(built, "projection_registrations", ())
+    if registrations:
+        from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
+        from menhir.services.projection_reconciliation import ProjectionReconciler
+
+        queue = ProjectionLifecycleRepository(built.neo4j)
+        projection_workers = tuple(
+            ProjectionReconciler(queue, item.definition, materializer=item.materializer)
+            for item in registrations
+        )
     verifier_sync_enabled = getattr(settings, "verifier_sync_enabled", False)
     verifier_repo = None
     verifier_context = None
@@ -434,6 +445,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         ingest_service=built.ingest_service,
         graph_adapter=built.graph_adapter,
         lifecycle_service=getattr(built, "lifecycle_service", None),
+        projection_workers=projection_workers,
         revision_retention_days=getattr(settings, "revision_retention_days", 14),
         # CF-171: thread the windows through. The finding this fixes is a sibling of CF-166 --
         # a retention control that existed and was never called -- so leaving these parsed but
