@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Extension roadmap Phase 0 inventory (#725, #727)
+
+- Recorded the runtime adapter constructors and the distinct projection queue and View repair paths.
+- Updated the roadmap for approved extension and remote SDK decisions and merged scoped queue fixes.
+
 ## 2026-11-25 - Record Graphiti prompt_name in LLM usage telemetry (#91)
 
 - `src/menhir/infrastructure/observability.py`: add request-scoped `set_llm_operation_label` /

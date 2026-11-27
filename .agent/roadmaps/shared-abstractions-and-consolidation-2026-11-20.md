@@ -23,7 +23,7 @@ The primary implementation owners already exist:
 |---|---|---|---|
 | Shared View storage and kind semantics | **SHIPPED for built-in kinds** | `infrastructure/view_models.py` `ViewKind`; `view_write_repository.py` single writer for built-in counter/timeline/scalar kinds; versioning and provenance; `tests/infrastructure/test_view_kind_registration.py` | Runtime-wide external registration not threaded through all repository constructors; special scalar writer/read paths still exist. |
 | Domain-neutral projection contract | **IMPLEMENTED, LIBRARY-LEVEL** | `domain/projection.py`: `ProjectionDefinition`, `ProjectionRegistry`, `ProjectionTarget`, materialize/abstain/retire, `evaluate_projection`; test `tests/domain/test_projection_registry.py` | No external package executes registered definitions end to end; `DerivedProjectionDefinition`, `EvidenceRef`, `DerivedProjectionCandidate` from #576 remain proposed, not checked in. |
-| Definition generations, fencing and freshness | **IMPLEMENTED, NOT GENERALLY ACTIVATED** | `domain/projection_lifecycle.py`, `infrastructure/projection_lifecycle_repository*.py`, transaction-scoped `commit` with freshness certificates; unit/online atomicity tests | `pending(limit)` is global/unscoped and can be blocked by a corrupt/obsolete row (#403); no registered per-definition drain worker. |
+| Definition generations, fencing and freshness | **IMPLEMENTED, NOT GENERALLY ACTIVATED** | `domain/projection_lifecycle.py`, `infrastructure/projection_lifecycle_repository*.py`, transaction-scoped `commit` with freshness certificates. Scoped pending reads and corrupt-generation quarantine landed in #730 and #731. | No runtime worker drains those queues. Unscoped pending remains a diagnostic read. |
 | Scalar adapter into generic contract | **PROTOTYPED/TESTED** | `services/scalar_projection_definition.py` and `services/scalar_projection_reconciliation.py`; `infrastructure/scalar_projection_materializer.py` | `ScalarProjectionReconciler` has no observed production constructor/caller in `src` or `scripts`; live `ScalarStateService` continues its specialized fold/rebuild path. |
 | Generic View repair receipts | **IMPLEMENTED, LIMITED WIRING** | `services/view_projection_repair.py`, `infrastructure/view_projection_repair.py` with token, lease, fence and conditional completion tests | Repair repository explicitly not registered as independently leased always-on worker; handler semantics are scalar-specific today. |
 | Multi-consumer extension registration | **NOT BUILT** | `view_kind_registry.py` resolves injected *instance-local* kinds | No single runtime-wide extension factory/dispatcher, `menhir.extensions` registration, missing-extension behavior or cross-process extension execution (#725). |
@@ -54,12 +54,37 @@ The first **go/no-go point** is an externally authored projection that can regis
 ### A0 — Inventory, decisions and compatibility baseline (P0 prerequisite; no behavior change)
 **Owners:** #725 phase 0, #576 M0, #726.
 
-- [ ] Record actual callers of `ProjectionRegistry`, `ScalarProjectionReconciler`, `ProjectionLifecycleRepository`, generic repair and `ViewRepository`; differentiate prod/test/script use. Include the five separate `MemoryGraphAdapter` construction sites documented in #725.
-- [ ] Resolve #725 D1 **trusted in-process code vs sandbox/discovery** and D6 **remote client vs embedded runtime** before defining a public API. Resolve D2/D5 for worker and versioned pending work before A3.
+- [x] Inventory the projection callers and the five runtime adapter construction sites. See the Phase 0 census below.
+- [x] Record the owner's D1 and D6 approvals in [#725](https://github.com/Archolith/menhir/issues/725). Hosts explicitly register trusted in-process extensions. The initial SDK uses the remote `BackendClient`.
+- [ ] Resolve D2 and D5 before A3. They determine who drains work and how workers handle work from older definition versions. D3, D4, and D7 still govern schemas, compatibility, and packaging respectively.
 - [ ] Freeze comparable scalar-state, scalar-history, counting, general recall, namespace erasure and View write snapshots. Add one end-to-end public-example baseline with an *unknown extension* gracefully absent.
 - [ ] Keep #726 responsible for measuring physical/source/research/wheel LOC and repeated-semantic-mechanism count.
 
 **Exit:** decisions recorded, tests/bench baselines reproducible, operator-facing modes enumerated.
+
+#### Phase 0 census
+
+Checked against `main` at `4794b41f`. Source searches covered constructor references, projection queue methods, and the `ProjectionWorkState` and `ProjectionDefinitionState` labels in `src/menhir` and `scripts`.
+
+| Path | Current behavior |
+|---|---|
+| [Projection registry](../../src/menhir/domain/projection.py) | The registry indexes definitions and creates a new registry through `with_definition`. No runtime entry point constructs and supplies one to a worker. |
+| [Production scalar state](../../src/menhir/infrastructure/memory_graph_adapter.py) | The adapter constructs `ScalarStateService` over its typed assertions and built-in View operations. This is the existing runtime fold path. |
+| [Projection queue](../../src/menhir/infrastructure/projection_lifecycle_repository_writes.py) and [scalar reconciler](../../src/menhir/services/scalar_projection_reconciliation.py) | The repository implements definition publication and work writes. The scalar reconciler can dirty assertions, drain one definition, and commit materializations. No runtime or operator script constructs the reconciler or wires a producer to those queue writes. The [realization coverage adapter](../../src/menhir/infrastructure/realization_coverage_repository.py) wraps the repository for reads. |
+| [Scheduled View repair](../../src/menhir/services/scheduler_tasks.py) | The scalar consolidation lane calls `MemoryGraphAdapter.run_view_projection_repairs` for configured namespaces. The adapter builds a repair service with a scalar rebuilder. This path consumes View repair receipts. |
+| [View repository](../../src/menhir/infrastructure/view_repository.py) | The adapter owns a `ViewRepository`. The [prototype scalar materializer](../../src/menhir/infrastructure/scalar_projection_materializer.py) also constructs one over its transaction. The [kind resolver](../../src/menhir/infrastructure/view_kind_registry.py) can resolve instance-local injected kinds. |
+
+The runtime adapter is constructed in five places:
+
+1. [Core bootstrap](../../src/menhir/core/bootstrap.py) in `build_memory_services`, used by the regular MCP runtime and CLI callers.
+2. [Candidate read-only runtime](../../src/menhir/core/runtime.py) in `_initialize_services`.
+3. [HTTP server lifespan](../../src/menhir/api/server_support.py) in `build_runtime_lifespan`.
+4. [CLI hooks](../../src/menhir/cli/bootstrap.py) in `build_hook_services`.
+5. [Standalone Explorer](../../src/menhir/explorer/app.py) in `create_app`.
+
+The LME repair, fold replay, and Hook Center smoke scripts also construct adapters. Runtime wiring must account for the five product constructors and explicitly decide the behavior of those operator and test tools. A separately installed extension still needs a host registration path, an authorized materializer and worker, and evidence that namespace scope and erasure hold across restart.
+
+The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. It covered projection registry and lifecycle contracts, View kind registration, scalar materialization and reconciliation, pending queue reads, and View repair. Full built-in behavior snapshots and no-extension startup parity are still part of A0.
 
 ### A1 — Complete the semantic contract without inventing another persistence stack (P1)
 **Owner:** #576 M1.
@@ -74,8 +99,9 @@ The first **go/no-go point** is an externally authored projection that can regis
 ### A2 — Make the shared lifecycle queue safe for other families (P0 gate before scheduling)
 **Owners:** #403, #725 phase 1, #576 M2.
 
-- [ ] Add `pending(definition_id=..., limit=...)` / safe `drain_pending` scoped by definition so unknown and corrupt work cannot starve other definitions.
-- [ ] Quarantine/diagnose bad work and define old-version migration/retirement; fail closed on freshness.
+- [x] Scope pending reads before the limit and have scalar reconciliation use that API. [#730](https://github.com/Archolith/menhir/pull/730)
+- [x] Quarantine corrupt generations on scoped reads and keep freshness checks fail-closed. [#731](https://github.com/Archolith/menhir/pull/731)
+- [ ] Define migration or retirement for pending work owned by an older extension version under #725 D5.
 - [ ] Prove multi-process fencing, generation replacement, absent-current targets, retry, crash mid-commit and namespace deletion behavior with **online Neo4j counterexamples**.
 - [ ] Separate publishing a definition from allowing a worker to execute it.
 
