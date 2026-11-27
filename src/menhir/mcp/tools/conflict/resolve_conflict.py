@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from itertools import combinations
+from typing import Any
 
 from menhir.mcp.formatters import _coerce_conflict_members, _count_unresolved_members
 from menhir.mcp.tools.base import BaseJsonTool
@@ -166,6 +168,13 @@ class ResolveConflictTool(BaseJsonTool):
 
             would_remove = [remove] if remove else sorted(uuid for uuid in member_uuids if uuid != keep)
             if dry_run:
+                # The real eligible-neighbour counts, with the same filters the bridge uses. A
+                # backend without the estimate reports "unavailable", never a made-up number.
+                estimator = getattr(backend, "estimate_bridges_for_nodes", None)
+                bridge_estimate: dict[str, Any] | None = None
+                if callable(estimator):
+                    pending = estimator(would_remove, **scope)
+                    bridge_estimate = await pending if inspect.isawaitable(pending) else pending
                 return self.render_json(
                     {
                         "dry_run": True,
@@ -175,7 +184,19 @@ class ResolveConflictTool(BaseJsonTool):
                         "nodes_resolved": max(0, len(member_uuids) - len(would_remove)),
                         "nodes_gone": len(would_remove),
                         "group_clear_count": 1,
-                        "bridge_count_estimate": len(would_remove),
+                        "bridge_count_estimate": (
+                            int(bridge_estimate.get("estimated_edges") or 0)
+                            if bridge_estimate is not None else None
+                        ),
+                        "bridge_over_cap_hubs": (
+                            list(bridge_estimate.get("over_cap") or [])
+                            if bridge_estimate is not None else []
+                        ),
+                        "bridge_neighbour_counts": (
+                            dict(bridge_estimate.get("neighbour_counts") or {})
+                            if bridge_estimate is not None else {}
+                        ),
+                        "bridge_estimate_available": bridge_estimate is not None,
                         "would_remove_uuids": would_remove,
                         "allow_promoted_removal": allow_promoted_removal,
                     }
@@ -228,6 +249,12 @@ class ResolveConflictTool(BaseJsonTool):
         except McpToolRefusal:
             raise
         except ValueError as exc:
+            # A refused resolve carries its reason and changed nothing; it is never a success.
+            if str(exc).startswith("Conflict resolve refused"):
+                raise McpToolRefusal(
+                    str(exc), code="refused",
+                    hint="Nothing was changed; retry the resolve once the cause clears.",
+                ) from exc
             raise McpToolRefusal(str(exc), code="invalid_argument") from exc
 
 

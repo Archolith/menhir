@@ -295,6 +295,12 @@ class LifecycleConflictMixin:
                         reviewed_uuids=[str(o["uuid"]) for o in rejected] + sorted(removed),
                     )
                     if not outcome.get("removed"):
+                        logger.info(
+                            "Conflict member %s not removed from group=%s: %s%s",
+                            uuid, group_id, outcome.get("reason") or "unknown",
+                            f" (unreviewed: {', '.join(outcome.get('unreviewed_uuids') or [])})"
+                            if outcome.get("unreviewed_uuids") else "",
+                        )
                         continue
                     removed.add(uuid)
                     group_cleared = True

@@ -97,6 +97,17 @@ class RuntimeProviderAdminOpsMixin:
             )
         )
 
+    async def estimate_bridges_for_nodes(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        return _to_jsonable(
+            await self._off_loop(
+                self.built.graph_adapter.estimate_bridges_for_nodes,
+                list(node_uuids),
+                namespace=namespace,
+            )
+        )
+
     async def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "pending", limit: int = 50,
         namespace: str | None = None,

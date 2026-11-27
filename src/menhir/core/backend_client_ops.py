@@ -551,6 +551,14 @@ class BackendClientOpsMixin:
             },
         )
 
+    async def estimate_bridges_for_nodes(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request(
+            "estimate_bridges_for_nodes",
+            {"node_uuids": list(node_uuids), "namespace": namespace},
+        )
+
     async def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "pending", limit: int = 50,
         namespace: str | None = None,
