@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Accepted Menhir architecture decisions, in sequence:
+Menhir architecture decisions and proposals, in sequence:
 
 | ADR | Status | Decision |
 |---|---|---|
@@ -14,6 +14,7 @@ Accepted Menhir architecture decisions, in sequence:
 | [0008](0008-separate-identity-embodiment-and-locator.md) | Accepted retrospectively | Keep semantic identity separate from embodiments, locators, and declarations. |
 | [0009](0009-source-bound-admission-authority.md) | Accepted core contract; adoption open | Cap claims by exact source grants and domain-owned authority semantics. |
 | [0010](0010-deterministic-canonical-self-identity.md) | Accepted target; activation open | Give each logical namespace one evidence-bound deterministic human identity. |
+| [0011](0011-deterministic-versioned-replayable-ingestion.md) | Proposed | Version ingestion stages, preserve compatible work, and require graph migration readiness before release. |
 
 ADRs record durable decisions and their tradeoffs. Live operational shape remains in
 [`../architecture.md`](../architecture.md), exact graph/storage contracts in
