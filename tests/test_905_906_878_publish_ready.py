@@ -156,21 +156,24 @@ class _Ingest:
         return True
 
 
-def _failed_row(error: str, attempts: int = 1) -> dict[str, Any]:
+def _failed_row(
+    error: str, attempts: int = 1, *, transient_retries: int = 0,
+    completed_at: str = "2000-01-01T00:00:00+00:00",
+) -> dict[str, Any]:
     return {
         "uuid": Q,
         "processing_attempts": attempts,
         "processing_error": error,
-        "processing_completed_at": "2000-01-01T00:00:00+00:00",
-        "transient_retries": 0,
+        "processing_completed_at": completed_at,
+        "transient_retries": transient_retries,
     }
 
 
-def _retry(adapter: Any, error: str, attempts: int = 1) -> tuple[str, _Ingest]:
+def _retry(adapter: Any, error: str, attempts: int = 1, **row: Any) -> tuple[str, _Ingest]:
     ingest = _Ingest()
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = asyncio.run(retry_process_candidate(
-            adapter, ingest, _failed_row(error, attempts), 3, datetime.now(timezone.utc)
+            adapter, ingest, _failed_row(error, attempts, **row), 3, datetime.now(timezone.utc)
         ))
     return action, ingest
 
@@ -276,7 +279,8 @@ def test_legacy_empty_link_without_an_outcome_is_not_reconciled() -> None:
     adapter.mark_episode_ready.assert_not_called()
 
 
-def test_completed_link_is_handed_to_the_worker_not_finalized_by_the_scheduler() -> None:
+def test_completed_link_with_a_terminal_error_and_attempts_left_is_requeued() -> None:
+    """(d) The original error no longer applies once the publish is done."""
     adapter = _adapter(_repo_artifact(
         extraction_outcome="policy_empty", policy_empty_reason="claimless_question", completed=True,
     ))
@@ -288,12 +292,49 @@ def test_completed_link_is_handed_to_the_worker_not_finalized_by_the_scheduler()
     adapter.record_retention_sources.assert_not_called()
 
 
-def test_completed_link_without_an_attempt_left_is_not_requeued() -> None:
-    """The claim refuses a row at the attempt cap, so the scheduler must not enqueue it."""
-    adapter = _adapter(_repo_artifact(extraction_outcome="extracted", completed=True))
-    action, ingest = _retry(adapter, COLLAPSE_ERROR, attempts=3)
+TRANSIENT_ERROR = "Failed to load model"
+
+
+def _completed_adapter() -> MagicMock:
+    return _adapter(_repo_artifact(extraction_outcome="extracted", completed=True))
+
+
+def test_completed_link_at_the_transient_cap_is_not_requeued() -> None:
+    """(a) A from-link failure graded transient refunds its attempt; the transient cap stops it."""
+    from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
+
+    action, ingest = _retry(
+        _completed_adapter(), TRANSIENT_ERROR, transient_retries=TRANSIENT_RETRY_CAP
+    )
     assert action == "exhausted"
     assert ingest.requeued == []
+
+
+def test_completed_link_inside_the_backoff_window_waits() -> None:
+    """(b) The failed-retry backoff applies to a completed link too."""
+    action, ingest = _retry(
+        _completed_adapter(), TRANSIENT_ERROR,
+        completed_at=datetime.now(timezone.utc).isoformat(),
+    )
+    assert action == "waiting"
+    assert ingest.requeued == []
+
+
+def test_completed_link_without_an_attempt_left_is_parked_as_exhausted() -> None:
+    """(c) With a terminal original error too: exhausted, so tier 1 no longer re-admits it."""
+    from menhir.services.scheduler_tasks import retry_failed_enrichments
+
+    adapter = _completed_adapter()
+    adapter.fetch_failed_episode_retry_candidates.return_value = [
+        _failed_row("Failed to extract JSON from LLM response", attempts=3)
+    ]
+    ingest = _Ingest()
+    ingest.get_max_enrichment_attempts = lambda: 3
+    with patch("menhir.services.scheduler_tasks.record_failure_event"):
+        result = asyncio.run(retry_failed_enrichments(ingest, adapter, failed_retry_limit=5))
+    assert result["exhausted"] == 1
+    assert ingest.requeued == []
+    assert adapter.park_failed_episode_retry.call_args.kwargs["reason"] == "exhausted"
     adapter.mark_episode_ready.assert_not_called()
 
 
@@ -353,12 +394,42 @@ def test_forced_retry_clears_the_link_inside_the_claim_fence() -> None:
         seen.append((claim, gate))
         return call("tx-executor")
 
-    with patch.object(enrichment_steps, "run_fenced_call", fake_fenced_call):
+    with patch.object(enrichment_steps, "run_fenced_call", fake_fenced_call),             patch.object(enrichment_steps, "read_gate_fence", lambda *_: GateFence(epoch=4)):
         handled = asyncio.run(finalize_from_link(_ctx(adapter, claim_fence=_claim())))
 
     assert handled is False
-    assert seen == [(_claim(), None)]
+    assert seen == [(_claim(), GateFence(epoch=4))], "the twin delete must run gated"
     assert adapter.clear_uncompleted_twin_link.call_args.kwargs == {"executor": "tx-executor"}
+
+
+def _erase_in_flight_neo4j() -> SimpleNamespace:
+    """The real read_gate_fence / run_fenced_call over a namespace whose erase holds erasing_ops."""
+
+    def tx_execute(query: str, params: dict[str, Any]) -> list[dict]:
+        if "AS erasing_ops" not in query:
+            return []  # the lock statement
+        return [{
+            "q_found": True, "state": "ENRICHING", "owner": "w-1", "instant_ok": True,
+            "no_marker": True, "epoch": 4, "erasing_ops": 1,
+            "resolved": TWIN, "reserved": ["reserved-2"],
+        }]
+
+    tx = SimpleNamespace(execute=tx_execute)
+    return SimpleNamespace(
+        execute=lambda query, params=None, **_: [{"epoch": 4}],  # GATE_CYPHER
+        execute_write=lambda work: work(tx),
+    )
+
+
+def test_forced_retry_does_not_delete_the_twin_while_an_erase_is_in_flight() -> None:
+    adapter = _adapter(_repo_artifact())
+    adapter.neo4j = _erase_in_flight_neo4j()
+
+    with pytest.raises(FenceLost) as lost:
+        asyncio.run(finalize_from_link(_ctx(adapter, claim_fence=_claim())))
+
+    assert lost.value.reason == "erasing_ops"
+    adapter.clear_uncompleted_twin_link.assert_not_called()
 
 
 def test_forced_retry_stops_when_the_link_changed_before_the_clear() -> None:
@@ -380,7 +451,10 @@ def test_clear_query_only_drops_an_uncompleted_link_and_deletes_an_uncited_twin(
     assert "n.resolved_episode_uuid = $resolved" in query
     assert f"NOT {el._TWIN_LINK_COMPLETE}" in query
     assert "REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome" in query
-    assert "DETACH DELETE x" in query
+    assert "DETACH DELETE" not in query
+    assert "FOREACH (r IN read_context | DELETE r)" in query
+    assert "| DELETE x)" in query
+    assert "WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)" in query
     assert "NOT EXISTS { MATCH (d)-[:MENTIONS]->(:Entity) }" in query
     assert "d.uuid IN coalesce(r.episodes, [])" in query
 
@@ -621,3 +695,17 @@ async def test_finished_link_failed_row_reaches_ready_only_through_the_worker(
     assert adapter.edge_fact_updates == [
         {"uuid": "edge-syn", "fact": "Alice manages work at Acme", "fact_source": "llm_repaired"}
     ]
+
+
+def test_from_link_with_a_missing_retention_source_raises_and_does_not_mark_ready() -> None:
+    """_record_retention_fenced re-raises a tenancy ValueError while the fence still holds."""
+    adapter = _adapter(_steps_artifact())
+    adapter.record_retention_sources.side_effect = ValueError(
+        "Retention provenance missing for 1 extracted entities"
+    )
+    service, _queries = _correlation_spy()
+    with patch("menhir.services.correlation_service.CorrelationService", service),             patch.object(enrichment_steps, "record_mcp_event"):
+        with pytest.raises(ValueError, match="Retention provenance missing"):
+            asyncio.run(finalize_from_link(_ctx(adapter)))
+    adapter.record_retention_sources.assert_called_once()
+    adapter.mark_episode_ready.assert_not_called()

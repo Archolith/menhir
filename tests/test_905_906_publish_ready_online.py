@@ -121,6 +121,55 @@ def test_clear_drops_the_collapsed_link_and_deletes_the_empty_twin(g) -> None:
     assert (row["link"], row["outcome"], row["twin_exists"]) == (None, None, False)
 
 
+def _twin_state(neo4j: Any, q: str, twin: str) -> dict:
+    return dict(neo4j.execute(
+        "MATCH (q:Episodic {uuid: $q}) "
+        "RETURN q.resolved_episode_uuid AS link, "
+        "EXISTS { MATCH (:Episodic {uuid: $twin}) } AS twin_exists",
+        params={"q": q, "twin": twin},
+    )[0])
+
+
+def test_clear_deletes_an_empty_twin_with_its_read_context_edges(g) -> None:
+    repo, neo4j, tag = g
+    q, twin = _seed(neo4j, tag, state="ENRICHING", outcome="collapsed", mentions=False)
+    neo4j.execute(
+        """
+        MATCH (g:Episodic {uuid: $twin})
+        CREATE (p:Episodic {uuid: $tag + '-prev', group_id: $tag})
+        CREATE (t:TurnEvidence {uuid: $tag + '-turn', turn_id: $tag + '-turn', namespace: $tag})
+        CREATE (g)-[:READ_CONTEXT {kind: 'previous_episode'}]->(p)
+        CREATE (g)-[:READ_CONTEXT {kind: 'repair_turn'}]->(t)
+        """,
+        params={"twin": twin, "tag": tag},
+    )
+
+    assert repo.clear_uncompleted_twin_link(q, twin) is True
+    assert _twin_state(neo4j, q, twin) == {"link": None, "twin_exists": False}
+    left = neo4j.execute(
+        "MATCH (n) WHERE n.uuid IN [$tag + '-prev', $tag + '-turn'] "
+        "RETURN count(n) AS kept, count { (n)<-[:READ_CONTEXT]-() } AS edges",
+        params={"tag": tag},
+    )[0]
+    assert (left["kept"], left["edges"]) == (2, 0)
+
+
+def test_clear_unlinks_but_keeps_a_twin_with_any_other_relationship(g) -> None:
+    repo, neo4j, tag = g
+    q, twin = _seed(neo4j, tag, state="ENRICHING", outcome="collapsed", mentions=False)
+    neo4j.execute(
+        """
+        MATCH (g:Episodic {uuid: $twin})
+        CREATE (o:Episodic {uuid: $tag + '-other', group_id: $tag})
+        CREATE (o)-[:READ_CONTEXT {kind: 'previous_episode'}]->(g)
+        """,
+        params={"twin": twin, "tag": tag},
+    )
+
+    assert repo.clear_uncompleted_twin_link(q, twin) is True
+    assert _twin_state(neo4j, q, twin) == {"link": None, "twin_exists": True}
+
+
 def test_clear_refuses_a_completed_link(g) -> None:
     repo, neo4j, tag = g
     q, twin = _seed(neo4j, tag, state="ENRICHING", outcome=None, mentions=True)

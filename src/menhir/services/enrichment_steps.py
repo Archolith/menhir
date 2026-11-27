@@ -364,8 +364,16 @@ async def finalize_from_link(ctx: EnrichmentContext) -> bool:
         return True
     if not twin_link_completed(artifact):
         resolved = str(artifact["resolved_episode_uuid"])
+        clear_ctx = ctx
+        if ctx.claim_fence is not None:
+            # The twin delete runs gated: an erase in flight (erasing_ops) or one that completed
+            # since this read moves the epoch, and the fence refuses the delete with FenceLost.
+            gate = await asyncio.to_thread(
+                read_gate_fence, ctx.graph_adapter.neo4j, ctx.claim_fence.namespace_key
+            )
+            clear_ctx = replace(ctx, gate_fence=gate)
         cleared = await _fenced_write_off_loop(
-            ctx,
+            clear_ctx,
             lambda ex: ctx.graph_adapter.clear_uncompleted_twin_link(
                 ctx.episode_uuid, resolved, **_executor_kw(ex)
             ),

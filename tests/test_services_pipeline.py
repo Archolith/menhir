@@ -2712,6 +2712,9 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
         def get_max_enrichment_attempts(self) -> int:
             return 3
 
+        def get_context_window_retry_attempts(self) -> int:
+            return 6
+
     class FakeGraphAdapter:
         def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 1}

@@ -273,25 +273,25 @@ async def retry_process_candidate(
     episode_uuid = str(row.get("uuid") or "")
     processing_attempts = int(row.get("processing_attempts") or 0)
 
+    # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
+    # match) says a completion exists. #905: a link to an empty twin whose attempt collapsed (or
+    # recorded no outcome) is not a completion; it is classified like any failure below.
+    # #906: a completed link is handed to the worker, not finalized here: the requeue below lets
+    # the worker's claim return the link, and finalize-from-link runs every post-publish step on the
+    # stored text and marks READY under the claim fence. The claim is the FAILED -> ENRICHING
+    # transition; it requires FAILED (no live owner), no erase marker and no erased_at, and an
+    # attempt left. A completed link skips only the terminal/manual-review gate (the original error
+    # no longer applies once the publish is done); the attempt cap, the transient cap and the
+    # backoff still bound it, since a transient from-link failure refunds its attempt.
+    completed_link = False
     if episode_uuid:
-        # Finalize-from-link: the publish transaction linked q to its twin, so the link (not a name
-        # match) says a completion exists. #905: a link to an empty twin whose attempt collapsed (or
-        # recorded no outcome) is not a completion; it is classified like any failure below.
-        # #906: a completed link is handed to the worker, not finalized here: the worker's claim
-        # returns the link, finalize-from-link runs every post-publish step on the stored text and
-        # marks READY under the claim fence. The claim is the FAILED -> ENRICHING transition; it
-        # requires FAILED (no live owner), no erase marker and no erased_at, and an attempt left.
         existing_completion = await asyncio.to_thread(
             graph_adapter.linked_twin_artifact,
             episode_uuid,
         )
-        if (
-            existing_completion is not None
-            and twin_link_completed(existing_completion)
-            and processing_attempts < max_attempts
-            and await ingest_service.requeue_failed_episode(episode_uuid)
-        ):
-            return "requeued"
+        completed_link = existing_completion is not None and twin_link_completed(
+            existing_completion
+        )
 
     classification = classify_enrichment_failure(row.get("processing_error"))
     # Only an operator-clearable context-window error (local n_ctx too small) bypasses the
@@ -304,7 +304,11 @@ async def retry_process_candidate(
     context_cap = ingest_service.get_context_window_retry_attempts()
     effective_max = max(max_attempts, context_cap) if context_window_mismatch else max_attempts
 
-    if classification in ("terminal", "manual_review") and not context_window_mismatch:
+    if (
+        classification in ("terminal", "manual_review")
+        and not context_window_mismatch
+        and not completed_link
+    ):
         record_failure_event(
             operation="scheduler_retry_failed_enrichments",
             episode_uuid=episode_uuid,

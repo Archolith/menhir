@@ -1234,10 +1234,11 @@ class EpisodeLifecycleRepository:
 
         A retry that must re-extract runs this first, under the claim fence (``executor``), so the
         new publish is not refused as ``already_linked``. Only the named, still-uncompleted link is
-        cleared. The twin is deleted only when it is a Graphiti episode of this queue node alone and
-        nothing cites it (no MENTIONS, no RELATES_TO edge listing it); otherwise it is left in place,
-        still covered by the erase closure through ``reserved_twin_uuids``. Returns True when the
-        link was cleared.
+        cleared. The twin is deleted only when it is a Graphiti episode of this queue node alone,
+        nothing cites it (no MENTIONS, no RELATES_TO edge listing it) and its only relationships are
+        its own outgoing READ_CONTEXT edges; those edges and the node are then deleted with plain
+        DELETE. Otherwise the twin is left in place and only unlinked; it stays covered by the erase
+        closure through ``reserved_twin_uuids``. Returns True when the link was cleared.
         """
         rows = (executor or self.neo4j).execute(
             f"""
@@ -1256,10 +1257,18 @@ class EpisodeLifecycleRepository:
               AND NOT EXISTS {{
                   MATCH (o:Episodic) WHERE o.resolved_episode_uuid = d.uuid AND o.uuid <> n.uuid
               }}
+              AND NOT EXISTS {{
+                  MATCH (d)-[x]-()
+                  WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)
+              }}
             WITH n, d, CASE WHEN d IS NULL THEN 0 ELSE 1 END AS deleting
             REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome,
                    n.resolved_policy_empty_reason, n.resolved_self_bound
-            FOREACH (x IN CASE WHEN d IS NULL THEN [] ELSE [d] END | DETACH DELETE x)
+            WITH n, d, deleting
+            OPTIONAL MATCH (d)-[rc:READ_CONTEXT]->()
+            WITH n, d, deleting, collect(rc) AS read_context
+            FOREACH (r IN read_context | DELETE r)
+            FOREACH (x IN CASE WHEN d IS NULL THEN [] ELSE [d] END | DELETE x)
             RETURN count(n) AS cleared, sum(deleting) AS twins_deleted
             """,
             params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
