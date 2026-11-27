@@ -1,8 +1,8 @@
 # ADR 0011 — Deterministic, Versioned, and Replayable Ingestion
 
-- **Status:** PROPOSED (2026-11-26). Target architecture; implementation and rollout remain open.
+- **Status:** ACCEPTED as target architecture (2026-11-26). Implementation and rollout remain open.
 - **Date:** 2026-11-26
-- **Deciders:** ctharvey (review pending)
+- **Deciders:** ctharvey
 - **Related:** [ADR 0003](0003-event-fold-view-projection-boundary.md),
   [ADR 0004](0004-single-runtime-owner-and-backend-first-access.md),
   [ADR 0005](0005-core-enforced-namespace-isolation.md),
