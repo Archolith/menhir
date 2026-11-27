@@ -331,6 +331,90 @@ class _ProjectionLifecycleWritesMixin:
 
         return self._neo4j.execute_write(work)
 
+    def migrate_retained_work(
+        self, definition: ProjectionDefinition, token: ProjectionWorkToken, *, reason: str,
+    ) -> ProjectionWorkToken:
+        """Requeue one retained generation under the current definition with its existing membership."""
+        return self._resolve_retained_work(definition, token, reason=reason, retire=False)
+
+    def retire_retained_work(
+        self, definition: ProjectionDefinition, token: ProjectionWorkToken, *, reason: str,
+    ) -> ProjectionWorkToken:
+        """Queue removal of one retained target for the current materializer."""
+        return self._resolve_retained_work(definition, token, reason=reason, retire=True)
+
+    def _resolve_retained_work(
+        self,
+        definition: ProjectionDefinition,
+        token: ProjectionWorkToken,
+        *,
+        reason: str,
+        retire: bool,
+    ) -> ProjectionWorkToken:
+        if not isinstance(definition, ProjectionDefinition):
+            raise TypeError("definition must be a ProjectionDefinition")
+        if not isinstance(token, ProjectionWorkToken):
+            raise TypeError("token must be a ProjectionWorkToken")
+        if token.definition_id != definition.definition_id or token.definition_version >= definition.version:
+            raise ValueError("token must name an older generation of the same projection definition")
+        reason = _require_nonblank("reason", reason)
+
+        def work(tx: Neo4jTransaction) -> ProjectionWorkToken:
+            self._require_current_definition(
+                tx,
+                definition_id=definition.definition_id,
+                definition_version=definition.version,
+            )
+            # Quarantine also locks this row. Recheck its state after taking the
+            # lock, and release the hold in the same transaction as the requeue.
+            rows = tx.execute(
+                """
+                MATCH (w:ProjectionWorkState {work_key:$work_key})
+                SET w.coordination_epoch=coalesce(w.coordination_epoch,0)+1
+                WITH w
+                WHERE w.definition_id=$definition_id
+                  AND w.definition_version=$older_version
+                  AND w.generation=$generation
+                  AND w.target_present=$target_present
+                  AND w.review_definition_version=$older_version
+                  AND w.review_generation=$generation
+                  AND w.generation > coalesce(w.applied_generation,0)
+                  AND (w.quarantine_generation IS NULL OR w.quarantine_generation <> w.generation)
+                REMOVE w.review_definition_version, w.review_generation
+                RETURN w.work_key AS work_key,
+                       w.definition_id AS definition_id,
+                       w.definition_version AS definition_version,
+                       w.target_json AS target_json,
+                       w.generation AS generation,
+                       w.target_present AS target_present,
+                       w.reason AS reason
+                """,
+                {
+                    "work_key": token.work_key,
+                    "definition_id": token.definition_id,
+                    "older_version": token.definition_version,
+                    "generation": token.generation,
+                    "target_present": token.target_present,
+                },
+            )
+            if not rows:
+                raise StaleProjectionWorkError("the exact retained generation is no longer eligible for resolution")
+            if len(rows) != 1:
+                raise ProjectionLifecycleCorruptionError("retained work identity is not unique")
+            if _work_token_from_row(dict(rows[0])).target != token.target:
+                raise StaleProjectionWorkError("retained work target disagrees with the requested target")
+            (queued,) = self._dirty_targets_tx(
+                tx,
+                definition_id=definition.definition_id,
+                definition_version=definition.version,
+                targets=(token.target,),
+                target_present=token.target_present and not retire,
+                reason=reason,
+            )
+            return queued
+
+        return self._neo4j.execute_write(work)
+
     def reconcile_all_targets(
         self,
         definition: ProjectionDefinition,

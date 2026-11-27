@@ -1238,6 +1238,78 @@ def test_projection_lifecycle_live_definition_bump_preserves_pending_work(test_n
 
 
 @pytest.mark.online
+def test_live_migrate_and_retire_exact_retained_work(test_neo4j_repo) -> None:
+    from menhir.services.projection_reconciliation import ProjectionReconciler
+
+    lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
+    lifecycle.activate()
+    v1, v2, v3 = (_definition(version) for version in (1, 2, 3))
+    lifecycle.publish_definition(v1, semantic_hash="resolve-v1")
+    (present, retiring, untouched) = lifecycle.dirty_targets(
+        v1, [_target("migrate"), _target("retire"), _target("untouched")], reason="old-work",
+    )
+    (absent,) = lifecycle.retire_targets(v1, [_target("previously-absent")], reason="old-removal")
+    (quarantined,) = lifecycle.dirty_targets(v1, [_target("quarantined")], reason="old-work")
+    lifecycle.publish_definition(v2, semantic_hash="resolve-v2")
+    quarantined_snapshot = _work_row(lifecycle, quarantined.target, generation=quarantined.generation)
+    lifecycle._quarantine_pending_generation(
+        {**quarantined_snapshot, "retained_for_review": True}, reason="requires corruption repair",
+    )
+
+    with pytest.raises(StaleProjectionDefinitionError):
+        lifecycle.migrate_retained_work(v3, present, reason="unpublished")
+    with pytest.raises(ValueError, match="same projection definition"):
+        lifecycle.retire_retained_work(replace(v2, definition_id="different"), present, reason="wrong-definition")
+    with pytest.raises(StaleProjectionWorkError, match="no longer eligible"):
+        lifecycle.migrate_retained_work(v2, quarantined, reason="requires prior repair")
+    with pytest.raises(StaleProjectionWorkError, match="no longer eligible"):
+        lifecycle.migrate_retained_work(v2, replace(present, generation=present.generation + 1), reason="wrong")
+    with pytest.raises(StaleProjectionWorkError, match="disagrees"):
+        lifecycle.retire_retained_work(
+            v2, replace(present, target=replace(present.target, namespace="tenant-b")), reason="wrong-target",
+        )
+    assert set(lifecycle.pending()) == {present, retiring, absent, untouched, quarantined}
+
+    migrated = lifecycle.migrate_retained_work(v2, present, reason="keep under v2")
+    migrated_absence = lifecycle.migrate_retained_work(v2, absent, reason="keep absence under v2")
+    retired = lifecycle.retire_retained_work(v2, retiring, reason="remove obsolete target")
+    for old, new, expected_present in (
+        (present, migrated, True),
+        (absent, migrated_absence, False),
+        (retiring, retired, False),
+    ):
+        assert (new.work_key, new.target) == (old.work_key, old.target)
+        assert (new.definition_version, new.generation) == (v2.version, old.generation + 1)
+        assert new.target_present is expected_present
+    with pytest.raises(StaleProjectionWorkError, match="no longer eligible"):
+        lifecycle.retire_retained_work(v2, present, reason="replayed resolution")
+
+    test_neo4j_repo.execute(
+        "CREATE (:ProjectionMigrationTestView {work_key:$work_key})", {"work_key": retiring.work_key},
+    )
+
+    def materialize(tx: Neo4jTransaction, token: ProjectionWorkToken) -> str:
+        if token.target_present:
+            tx.execute(
+                "CREATE (:ProjectionMigrationTestView {work_key:$work_key})", {"work_key": token.work_key},
+            )
+        else:
+            tx.execute(
+                "MATCH (v:ProjectionMigrationTestView {work_key:$work_key}) DELETE v", {"work_key": token.work_key},
+            )
+        return f"applied-{token.target_present}"
+
+    worker = ProjectionReconciler(lifecycle, v2, materializer=materialize)
+    results = worker.drain_pending(operation_id="post-upgrade")
+    assert {result.token for result in results} == {migrated, migrated_absence, retired}
+    assert all(result.certificate.target_present is result.token.target_present for result in results)
+    assert test_neo4j_repo.execute(
+        "MATCH (v:ProjectionMigrationTestView) RETURN v.work_key AS work_key",
+    ) == [{"work_key": migrated.work_key}]
+    assert set(lifecycle.pending()) == {untouched, quarantined}
+
+
+@pytest.mark.online
 def test_projection_lifecycle_live_reconcile_marks_removed_targets_as_work(test_neo4j_repo) -> None:
     lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)
     lifecycle.activate()

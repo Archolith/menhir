@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Resolve retained projection work explicitly (#725)
+
+- Let an extension requeue an exact retained generation under the current version or queue its removal. The worker still materializes and certifies the new generation.
+- Reject stale, quarantined, and already-resolved generations. Concurrent decisions on one generation can advance it once.
+
 ## 2026-11-26 - Preserve pending projection work across version changes (#725)
 
 - Keep the exact pending generations from the outgoing definition version available for review. Requeue settled targets under the new version.
