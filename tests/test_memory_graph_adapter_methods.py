@@ -660,12 +660,12 @@ def test_compress_node_returns_true_when_node_updated() -> None:
     neo4j = _StubNeo4jRepository(responses=[[{"updated": 1}]])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
-    result = adapter.compress_node("entity-123", "short summary")
+    result = adapter.compress_node("entity-123", "short summary", read_content="body", min_days_since_accessed=7.0)
 
     assert result is True
     assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
     assert neo4j.calls[0]["params"]["compressed_summary"] == "short summary"
-    assert "SET n.original_content = coalesce(n.original_content, n.content)" in neo4j.calls[0]["query"]
+    assert "SET n.original_content = $source_text" in neo4j.calls[0]["query"]
 
 
 @pytest.mark.unit
@@ -687,7 +687,7 @@ def test_complete_rehydration_returns_true_when_node_updated() -> None:
     neo4j = _StubNeo4jRepository(responses=[[{"updated": 1}]])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
-    result = adapter.complete_rehydration("entity-123", "merged summary")
+    result = adapter.complete_rehydration("entity-123", "merged summary", read_summary="s", read_base=None)
 
     assert result is True
     assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
@@ -916,7 +916,7 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
     assert absorption_call["params"]["uuid"] == "keep-1"
     assert "Absorbed from superseded memory (remove-1)" in absorption_call["params"]["content"]
     assert absorption_call["params"]["original"] == "Keep text"
-    assert "n.original_content = coalesce(n.original_content, $original)" in absorption_call["query"]
+    assert "ELSE coalesce(n.original_content, $original) END" in absorption_call["query"]
     gone_call = neo4j.calls[5]
     assert gone_call["params"] == {
         "group_id": "group-1",

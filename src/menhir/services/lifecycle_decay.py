@@ -15,6 +15,7 @@ from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.utils import days_ago
 from menhir.config import MemorySettings
+from menhir.infrastructure.consolidation_queries import summary_sha256
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.infrastructure.llm import LLMAdapter
@@ -133,6 +134,31 @@ class LifecycleDecayMixin:
             truncated = truncated[:last_space]
         return truncated.rstrip() + "..."
 
+    async def _trusted_rehydration_base(
+        self, node_uuid: str, state: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """The body the node's current summary replaced, and where it came from.
+
+        ``original_content`` is trusted only while the marker written with it matches the current
+        summary. Otherwise: the latest decay revision for this summary, then a legacy
+        ``original_content`` of a node never rehydrated (one compression, so its body). None when
+        nothing is known to belong to this compression.
+        """
+        summary = str(state.get("content") or "")
+        stored = str(state.get("original_content") or "").strip()
+        if stored and summary and state.get("compressed_summary_sha256") == summary_sha256(summary):
+            return stored, "stored"
+        if summary:
+            archived = await asyncio.to_thread(
+                telemetry_store.get_decay_original_content, node_uuid, summary
+            )
+            if archived:
+                return archived, "decay"
+        if (stored and int(state.get("rehydration_count") or 0) == 0
+                and int(state.get("absorbed_count") or 0) == 0):
+            return stored, "legacy"
+        return None, None
+
     async def rehydrate_node(
         self,
         node_uuid: str,
@@ -158,10 +184,32 @@ class LifecycleDecayMixin:
 
         source_uuid = source_episode_uuid or source_node_uuid
         context_text = str(new_context or "").strip()
+        # What the write must still find on the node: the summary and the stored base it read.
+        state = await asyncio.to_thread(self.graph_adapter.fetch_rehydration_state, node_uuid)
+        read_summary = state.get("content")
+        read_base = state.get("original_content")
+        read_epoch = state.get("fence_epoch")
+        base, base_source = await self._trusted_rehydration_base(node_uuid, state)
         if not context_text:
-            updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid)
+            # Restore only a body known to belong to this compression; otherwise a state flip.
+            updated = await asyncio.to_thread(
+                self.graph_adapter.complete_rehydration,
+                node_uuid,
+                base,
+                read_summary=read_summary,
+                read_base=read_base,
+                read_epoch=read_epoch if base is not None else None,
+            )
             if updated:
                 await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
+                if base is not None:
+                    record_memory_revision(
+                        node_uuid=node_uuid,
+                        field="content",
+                        old_value=str(read_summary or ""),
+                        new_value=base,
+                        changed_by="decay",
+                    )
                 record_lifecycle_action(
                     action="rehydrate",
                     node_uuid=node_uuid,
@@ -184,12 +232,13 @@ class LifecycleDecayMixin:
             )
             return False
 
-        # Archive-first recovery: attempt to retrieve the original (pre-compression)
-        # content from the revision sidecar before falling back to node content.
-        # This prevents photocopy-loss from repeated compress/rehydrate cycles.
-        archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
+        # Base: the body the last compression replaced (see _trusted_rehydration_base); failing
+        # that the oldest archived body, then the content the write is checked against.
+        archived_content = base
+        if archived_content is None:
+            archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
         existing_content = archived_content or str(
-            node.get("content") or node.get("summary") or node.get("name") or ""
+            read_summary or node.get("summary") or node.get("name") or ""
         ).strip()
 
         # Log which source was used for debugging/audit
@@ -226,7 +275,10 @@ class LifecycleDecayMixin:
             self.graph_adapter.complete_rehydration,
             node_uuid,
             merged,
+            read_summary=read_summary,
+            read_base=read_base,
             source_uuids=tuple(u for u in (source_uuid,) if u),
+            read_epoch=read_epoch,
         )
         if updated:
             await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
@@ -335,6 +387,9 @@ class LifecycleDecayMixin:
                     self.graph_adapter.compress_node,
                     uuid,
                     summary,
+                    read_content=candidate.get("content"),
+                    read_summary=candidate.get("summary"),
+                    min_days_since_accessed=_DEFAULT_COMPRESS_DAYS,
                     read_epoch=int(candidate.get("fence_epoch") or 0),
                     fence_key=str(candidate.get("fence_key") or "") or None,
                 ):

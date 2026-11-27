@@ -161,7 +161,7 @@ def test_t27b_original_content_backup_is_scrubbed_on_shared_entity(test_neo4j_re
         "MATCH (s:Entity {uuid:$s}) SET s.content = $c, s.scope = 'PERSISTENT', "
         "s.freshness = 'ACTIVE'", params={"s": ids["shared"], "c": canary})
     adapter, coord, _ = _adapter_and_coordinator(repo, tmp_path)
-    assert adapter.compress_node(ids["shared"], "compressed gist")  # production writer
+    assert adapter.compress_node(ids["shared"], "compressed gist", read_content=canary, min_days_since_accessed=0)  # production writer
     assert repo.execute("MATCH (s:Entity {uuid:$s}) RETURN s.original_content AS o",
                         params={"s": ids["shared"]})[0]["o"] == canary
 

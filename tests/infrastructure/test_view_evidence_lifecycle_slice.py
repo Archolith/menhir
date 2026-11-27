@@ -113,8 +113,8 @@ def test_other_automatic_lifecycle_mutations_apply_live_fact_retention_guard() -
     neo4j = _CaptureNeo4j()
     repo = ConsolidationRepository(neo4j)
 
-    repo.compress_node("evidence-1", "summary")
-    repo.complete_rehydration("evidence-1", "full content")
+    repo.compress_node("evidence-1", "summary", read_content="body", min_days_since_accessed=7.0)
+    repo.complete_rehydration("evidence-1", "full content", read_summary="s", read_base=None)
     repo.update_sharpness("evidence-1", 0.2)
     repo.fetch_session_entities("session-1")
     repo.promote_to_persistent(["evidence-1"])
