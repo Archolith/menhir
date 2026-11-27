@@ -1262,8 +1262,20 @@ class MemoryGraphAdapter:
             node_uuid, updated_content, source_uuids=source_uuids, read_epoch=read_epoch
         )
 
-    def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
-        return self._consolidation.bridge_and_delete(node_uuid)
+    def bridge_and_delete(
+        self,
+        node_uuid: str,
+        *,
+        min_days: float | None = None,
+        max_edge_count: int | None = None,
+        max_sharpness: float | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.bridge_and_delete(
+            node_uuid,
+            min_days=min_days,
+            max_edge_count=max_edge_count,
+            max_sharpness=max_sharpness,
+        )
 
     def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
         """Return high-level graph counts, optionally scoped to one silo (CF-33)."""
@@ -1618,6 +1630,28 @@ class MemoryGraphAdapter:
         namespace: str | None = None,
     ) -> int:
         return self._consolidation.bridge_edges_for_nodes(
+            node_uuids,
+            namespace=namespace,
+        )
+
+    def bridge_edges_for_nodes_detailed(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.bridge_edges_for_nodes_detailed(
+            node_uuids,
+            namespace=namespace,
+        )
+
+    def estimate_bridges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.estimate_bridges_for_nodes(
             node_uuids,
             namespace=namespace,
         )

@@ -379,8 +379,15 @@ class LifecycleDecayMixin:
                             ),
                         ))
                     continue
-                outcome = await asyncio.to_thread(self.graph_adapter.bridge_and_delete, del_uuid)
-                deleted += int(outcome.get("deleted", 0))
+                # Journaled: snapshot, PREPARE, one re-checking statement, verify, commit.
+                outcome = await asyncio.to_thread(
+                    self._delete_coordinator().delete_decayed_node,
+                    del_uuid,
+                    min_days=_DEFAULT_GONE_DAYS,
+                    max_edge_count=_DEFAULT_GONE_EDGE_COUNT,
+                    max_sharpness=_DEFAULT_GONE_SHARPNESS,
+                )
+                deleted += len(outcome.get("deleted") or [])
                 edges_bridged += int(outcome.get("edges_bridged", 0))
                 if outcome.get("deleted"):
                     await asyncio.to_thread(amp.complete_proposals, amp.DELETE_PROPOSAL, [del_uuid])

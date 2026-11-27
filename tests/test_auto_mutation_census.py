@@ -55,8 +55,8 @@ ALLOWED = {
         "delegate", "adapter forwards to the repository; its only caller is the coordinator"),
     ("_run", f"{_DC}.delete_expired_session_nodes"): (
         "gated", "off/propose return before any graph read or journal write"),
-    ("bridge_and_delete", "services/lifecycle_decay.py::LifecycleDecayMixin._run_decay"): (
-        "gated", "decay deletion needs auto_delete_mode() == on"),
+    ("bridge_and_delete", f"{_DC}._mutate_and_verify"): (
+        "internal", "only reached from _run via the DECAY_DELETE kind; _run_decay gates delete_decayed_node"),
     ("bridge_and_delete", f"{_ADAPTER}.bridge_and_delete"): (
         "delegate", "adapter forwards to the repository; its only caller is _run_decay"),
     ("delete_session_nodes", f"{_ADAPTER}.delete_session_nodes"): (
@@ -386,6 +386,7 @@ def test_delete_coordinator_run_graph():
     assert run_sites == {
         ("DeleteCoordinator.delete_entity", "ENTITY_DELETE"),
         ("DeleteCoordinator.delete_expired_session_nodes", "SESSION_TTL_DELETE"),
+        ("DeleteCoordinator.delete_decayed_node", "DECAY_DELETE"),
     }
     assert mutate_sites == {"DeleteCoordinator._run"}
 

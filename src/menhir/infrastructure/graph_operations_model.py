@@ -24,7 +24,7 @@ OPERATION_KINDS = frozenset(
     {
         "METRIC_WRITE", "METRIC_MIGRATE", "METRIC_REVERSE",
         "ENTITY_MERGE", "ENTITY_UNMERGE", "LEGACY_ENTITY_UNMERGE",
-        "ENTITY_DELETE", "SESSION_TTL_DELETE",
+        "ENTITY_DELETE", "SESSION_TTL_DELETE", "DECAY_DELETE",
         "EXPLICIT_ERASURE",
     }
 )
@@ -56,7 +56,7 @@ _PARTICIPANT_PAIR_KINDS = frozenset(
 # lives in the erasure_subjects inventory, not in request_json, so a large namespace stays
 # bounded), so it takes no participant lock and fences on its target_key instead.
 _PARTICIPANT_DELETE_KINDS = frozenset(
-    {"ENTITY_DELETE", "SESSION_TTL_DELETE", "EXPLICIT_ERASURE"}
+    {"ENTITY_DELETE", "SESSION_TTL_DELETE", "DECAY_DELETE", "EXPLICIT_ERASURE"}
 )
 _PARTICIPANT_KINDS = _PARTICIPANT_PAIR_KINDS | _PARTICIPANT_DELETE_KINDS
 

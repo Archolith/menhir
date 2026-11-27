@@ -1,4 +1,4 @@
-"""Journaled physical-delete coordinators (plan Phase 6): ENTITY_DELETE and SESSION_TTL_DELETE.
+"""Journaled physical-delete coordinators (plan Phase 6): ENTITY_DELETE, SESSION_TTL_DELETE, DECAY_DELETE.
 
 Both delete paths were destructive with no durable before-record:
 
@@ -131,6 +131,36 @@ class DeleteCoordinator:
             dry_run=dry_run,
         )
 
+    # ------------------------------------------------------------------ decay delete
+    def delete_decayed_node(
+        self,
+        node_uuid: str,
+        *,
+        min_days: float,
+        max_edge_count: int,
+        max_sharpness: float,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Delete ONE COMPRESSED node the decay sweep selected, journaled, bridging its neighbours.
+
+        The caller owns the ``auto_delete_mode`` gate. Every delete predicate is re-checked on the
+        live node inside the one mutation statement, so a node rehydrated or recalled after
+        selection is skipped, not deleted. The result carries ``edges_bridged`` and
+        ``bridge_skipped_hubs`` from that statement.
+        """
+        return self._run(
+            kind="DECAY_DELETE",
+            targets=[node_uuid],
+            require_scope=None,
+            trigger="decay_sweep",
+            dry_run=dry_run,
+            decay_gate={
+                "min_days": min_days,
+                "max_edge_count": max_edge_count,
+                "max_sharpness": max_sharpness,
+            },
+        )
+
     # ------------------------------------------------------------------ the saga
     def _run(
         self,
@@ -140,6 +170,7 @@ class DeleteCoordinator:
         require_scope: str | None,
         trigger: str,
         dry_run: bool,
+        decay_gate: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         targets = [t for t in dict.fromkeys(targets) if t]
         if not targets:
@@ -184,6 +215,8 @@ class DeleteCoordinator:
             "require_scope": require_scope,
             "requested_at": _utc_now_iso(),
         }
+        if decay_gate is not None:
+            request["decay_gate"] = decay_gate
         snapshot_payload = {
             "schema_version": ms.SCHEMA_VERSION,
             "nodes": snapshots,
@@ -218,7 +251,7 @@ class DeleteCoordinator:
             return self._mutate_and_verify(
                 op_id=op_id, kind=kind, present=present, require_scope=require_scope,
                 already_absent=already_absent, orphan_evidence=orphan_evidence,
-                owner_token=token,
+                owner_token=token, decay_gate=decay_gate,
             )
 
     def _mutate_and_verify(
@@ -231,18 +264,27 @@ class DeleteCoordinator:
         already_absent: list[str],
         orphan_evidence: list[str],
         owner_token: str,
+        decay_gate: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Destroy, verify absence, then transition. Runs inside the ownership heartbeat scope."""
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
+        bridge_outcome: dict[str, Any] = {}
         try:
-            # Only the TTL sweep re-checks expiry in the statement; ENTITY_DELETE is unchanged.
-            ttl_kwargs = {"require_expired_ttl": True} if kind == "SESSION_TTL_DELETE" else {}
-            deleted = self.graph_adapter.delete_entities_returning_uuids(
-                present,
-                require_scope=require_scope,
-                protect_retention=(kind == "SESSION_TTL_DELETE"),
-                **ttl_kwargs,
-            )
+            if kind == "DECAY_DELETE":
+                # One statement: lock, re-check every delete predicate, bridge, DETACH DELETE.
+                bridge_outcome = self.graph_adapter.bridge_and_delete(
+                    present[0], **(decay_gate or {})
+                )
+                deleted = list(present) if int(bridge_outcome.get("deleted", 0) or 0) else []
+            else:
+                # Only the TTL sweep re-checks expiry in the statement; ENTITY_DELETE is unchanged.
+                ttl_kwargs = {"require_expired_ttl": True} if kind == "SESSION_TTL_DELETE" else {}
+                deleted = self.graph_adapter.delete_entities_returning_uuids(
+                    present,
+                    require_scope=require_scope,
+                    protect_retention=(kind == "SESSION_TTL_DELETE"),
+                    **ttl_kwargs,
+                )
         except Exception as exc:  # noqa: BLE001
             close_after_failed_mutation(
                 self.journal, op_id, owner_token=owner_token, exc=exc,
@@ -279,6 +321,9 @@ class DeleteCoordinator:
             "already_absent": already_absent,
             "newly_unreferenced_evidence": orphan_evidence,  # reported; never deleted
         }
+        if kind == "DECAY_DELETE":
+            result["edges_bridged"] = int(bridge_outcome.get("edges_bridged", 0) or 0)
+            result["bridge_skipped_hubs"] = list(bridge_outcome.get("bridge_skipped_hubs") or [])
         if settled == COMPLETED_BY_OTHER_OWNER:
             result["completed_by_other_owner"] = True
         return result
@@ -300,7 +345,7 @@ class DeleteCoordinator:
         decides (needs review).
         """
         operation_kind = row.get("operation_kind")
-        if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
+        if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE", "DECAY_DELETE"):
             return SKIP, {}
         # Structural problems with the ROW are classified; infrastructure failures are NOT.
         #

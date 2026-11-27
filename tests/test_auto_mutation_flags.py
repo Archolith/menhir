@@ -452,12 +452,14 @@ async def test_decay_deletion_obeys_delete_switch(monkeypatch, tmp_path, mode):
     _modes(monkeypatch, merge="on", delete=mode)
     bridge = MagicMock(return_value={"deleted": 1, "edges_bridged": 0})
     svc = _decay_service(tmp_path, bridge)
-    with patch.object(LifecycleService, "should_delete", staticmethod(lambda node: True)):
+    coordinator = MagicMock()
+    coordinator.delete_decayed_node.return_value = {"deleted": ["d1"], "edges_bridged": 0}
+    with patch.object(LifecycleService, "should_delete", staticmethod(lambda node: True)),             patch.object(LifecycleService, "_delete_coordinator", lambda self: coordinator):
         result = await svc.apply_decay()
     if mode == "on":
-        assert bridge.call_count == 1 and result.deleted == 1
+        assert coordinator.delete_decayed_node.call_count == 1 and result.deleted == 1
     else:
-        assert bridge.call_count == 0 and result.deleted == 0
+        assert coordinator.delete_decayed_node.call_count == 0 and result.deleted == 0
     proposals = _pending(amp.DELETE_PROPOSAL)
     assert [r["node_uuid"] for r in proposals] == (["d1"] if mode == "propose" else [])
 

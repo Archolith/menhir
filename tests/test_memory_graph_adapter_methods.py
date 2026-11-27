@@ -705,7 +705,7 @@ def test_bridge_and_delete_returns_counts() -> None:
 
     assert result == {"edges_bridged": 2, "deleted": 1}
     assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
-    assert "MERGE (a)-[r:RELATES_TO]->(b)" in neo4j.calls[0]["query"]
+    assert "MERGE (a)-[r:RELATES_TO]-(b)" in neo4j.calls[0]["query"]
     assert "DETACH DELETE n" in neo4j.calls[0]["query"]
 
 

@@ -104,6 +104,7 @@ def build_handlers(
     if delete is not None:
         handlers["ENTITY_DELETE"] = delete
         handlers["SESSION_TTL_DELETE"] = delete
+        handlers["DECAY_DELETE"] = delete
     if erasure is not None:
         handlers["EXPLICIT_ERASURE"] = erasure
     return handlers
