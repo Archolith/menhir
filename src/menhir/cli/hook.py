@@ -328,8 +328,16 @@ def _run_prompt_impl(
             )
 
     output = _render_hook_output(
-        flagged, todos, temporal_memories, layout, context_text, withheld,
-        effective_query, write_nudge, temporal_line, max_tokens=max_tokens,
+        flagged=flagged,
+        todos=todos,
+        temporal_memories=temporal_memories,
+        layout=layout,
+        context_text=context_text,
+        withheld=withheld,
+        query=effective_query,
+        write_nudge=write_nudge,
+        temporal_line=temporal_line,
+        max_tokens=max_tokens,
     )
     print(wrap_hook_response(output or None, event="UserPromptSubmit"), flush=True)
 
@@ -443,8 +451,16 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
             )
 
     output = _render_hook_output(
-        flagged, todos, temporal_memories, layout, context_text, withheld,
-        effective_query, None, temporal_line, max_tokens=max_tokens,
+        flagged=flagged,
+        todos=todos,
+        temporal_memories=temporal_memories,
+        layout=layout,
+        context_text=context_text,
+        withheld=withheld,
+        query=effective_query,
+        write_nudge=None,
+        temporal_line=temporal_line,
+        max_tokens=max_tokens,
     )
     print(wrap_hook_response(output or None, event="SessionStart"), flush=True)
 
