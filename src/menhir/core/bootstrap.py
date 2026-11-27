@@ -174,6 +174,13 @@ def build_memory_services(
     extensions: RuntimeExtensions | None = None,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
+    proposed = resolve_graph_extensions(extensions)
+    if proposed and projection_registrations:
+        raise ValueError("supply runtime extensions or direct worker registrations")
+    if read_only and (proposed or projection_registrations):
+        raise ValueError("projection workers require a writable runtime")
+    settings = settings or MemorySettings.from_env()
+    warn_retired_settings_set_false()
     extensions = resolve_graph_extensions(extensions, bind=True)
     if extensions:
         if projection_registrations:
@@ -181,8 +188,6 @@ def build_memory_services(
         projection_registrations = extensions.projection_workers()
     if read_only and projection_registrations:
         raise ValueError("projection workers require a writable runtime")
-    settings = settings or MemorySettings.from_env()
-    warn_retired_settings_set_false()
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
         database=settings.neo4j_database,

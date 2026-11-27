@@ -1360,7 +1360,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         from menhir.core.bootstrap import build_graph_adapter, resolve_graph_extensions
 
-        registry = resolve_graph_extensions(extensions, bind=True)
+        registry = resolve_graph_extensions(extensions)
         owned_repo = repo is None
         app.state.settings = settings
         app.state.repo = repo or _repo_from_settings(settings)

@@ -388,7 +388,8 @@ async def test_projection_lease_is_independent_of_older_host_and_exclusive_for_t
     duplicate = _projection_scheduler(tmp_path, ProjectionReconciler(queue, current, materializer=_Materializer()))
     assert await first.start()
     try:
-        assert not await capable.start()
+        assert await capable.start()
+        assert capable.status_snapshot()["maintenance_running"] is False
         assert not await duplicate.start()
         assert (await _wait_for_job(capable, current.definition_id))["last_result"]["applied"] == 1
         lane = f"reconcile_projection:{current.definition_id}"

@@ -274,9 +274,7 @@ class RuntimeProviderAdminOpsMixin:
         scheduler = getattr(self.built, "scheduler", None)
         if scheduler is None:
             return False
-        was_running = await self._off_loop(scheduler.is_running)
-        await scheduler.stop()
-        return was_running
+        return bool(await scheduler.stop())
 
     async def scheduler_resume(self) -> bool:
         scheduler = getattr(self.built, "scheduler", None)

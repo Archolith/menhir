@@ -134,3 +134,24 @@ def test_registered_kind_cannot_supersede_builtin_with_same_discriminator(test_n
     assert external["superseded"] is False
     assert repo.fetch_timeline(**target)["uuid"] == builtin["uuid"]
     assert repo.fetch_current(kind.name, **target, slot="timeline")["value"] == "extension record"
+
+
+@pytest.mark.online
+def test_extension_view_default_aliases_share_one_current_key(test_neo4j_repo) -> None:
+    kind = ExternalTestKind()
+    repo = ViewRepository(test_neo4j_repo, kinds=_registry_with(kind))
+    target = {"subject": "a project", "slot": "extension"}
+    implicit = repo.record(kind.name, **target, value="first")
+    assert repo.fetch_current(kind.name, **target, namespace="default")["value"] == "first"
+
+    explicit = repo.record(kind.name, **target, namespace="default", value="second")
+    assert explicit["view_key"] == implicit["view_key"]
+    assert explicit["superseded"] is True
+    empty = repo.record(kind.name, **target, namespace="", value="third")
+    assert empty["view_key"] == implicit["view_key"]
+    assert empty["superseded"] is True
+    assert repo.fetch_current(kind.name, **target, namespace="default")["value"] == "third"
+    assert test_neo4j_repo.execute(
+        "MATCH (n:Entity {view_kind:$kind, view_current:true}) RETURN count(n) AS count",
+        {"kind": kind.name},
+    ) == [{"count": 1}]

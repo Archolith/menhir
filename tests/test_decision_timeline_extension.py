@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import replace
 from datetime import date
+from threading import Event
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,11 +16,13 @@ from menhir import extensions as extension_module
 from menhir.api import server
 from menhir.config import MemorySettings
 from menhir.core import bootstrap, runtime
+from menhir.core.backend_runtime import RuntimeProvider
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
 from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+from menhir.services.scheduler_lease import SchedulerLeaseStore
 
 
 @pytest.fixture(autouse=True)
@@ -97,11 +101,8 @@ def test_duplicate_extension_fails_before_server_resources(monkeypatch) -> None:
         server.create_app(extensions=(EXTENSION,))
 
 
-@pytest.mark.asyncio
-@pytest.mark.online
-async def test_registered_decision_timeline_corrects_erases_and_recovers_on_restart(
-    test_neo4j_repo, monkeypatch, tmp_path,
-) -> None:
+@pytest.fixture
+def graph_only_runtime_settings(test_neo4j_repo, monkeypatch, tmp_path) -> MemorySettings:
     monkeypatch.setenv("MENHIR_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(
         runtime, "collect_runtime_capabilities",
@@ -122,11 +123,19 @@ async def test_registered_decision_timeline_corrects_erases_and_recovers_on_rest
     )
     monkeypatch.setattr("menhir.services.cross_encoder_rerank.start_model_fetch", lambda *_a, **_kw: None)
     monkeypatch.setattr(runtime, "_run_startup_saga_observe", AsyncMock())
-    settings = replace(
+    return replace(
         MemorySettings.from_env(), artifact_reconcile_mode="off", structure_watcher_enabled=False,
         experience_counter_enabled=False, personal_memory_scalar_state_enabled=False,
         personal_memory_counting_enabled=False, verifier_sync_enabled=False,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.online
+async def test_registered_decision_timeline_corrects_erases_and_recovers_on_restart(
+    test_neo4j_repo, graph_only_runtime_settings,
+) -> None:
+    settings = graph_only_runtime_settings
     project = "menhir"
     alpha, beta = "timeline-alpha", "timeline-beta"
     day = date(2026, 11, 26)
@@ -193,3 +202,102 @@ async def test_registered_decision_timeline_corrects_erases_and_recovers_on_rest
         await entries(recovered, alpha, ["Draft v1", "Resume after restart"])
         await entries(recovered, beta, ["Independent decision"])
     assert ProjectionLifecycleRepository(test_neo4j_repo).pending() == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.online
+async def test_http_projection_lifecycle_after_failed_startup_and_on_standby(
+    graph_only_runtime_settings, test_neo4j_repo, monkeypatch,
+) -> None:
+    settings = graph_only_runtime_settings
+    rejected = server.create_app(settings=settings).app.app
+    healthy_preflight = runtime.collect_runtime_capabilities()
+    with monkeypatch.context() as failing:
+        failing.setattr(runtime, "collect_runtime_capabilities", lambda *_a, **_kw: replace(
+            healthy_preflight, neo4j_ready=False, failures=("probe failed",),
+        ))
+        with pytest.raises(RuntimeError, match="probe failed"):
+            async with rejected.router.lifespan_context(rejected):
+                pytest.fail("the runtime accepted failed graph preflight")
+    assert extension_module._process_registry is extension_module._UNBOUND
+
+    materializer_entered = Event()
+    release_materializer = Event()
+
+    def materialize(views, token):
+        materializer_entered.set()
+        assert release_materializer.wait(15), "shutdown test did not release the materializer"
+        return EXTENSION.materialize(views, token)
+
+    registry = RuntimeExtensions((replace(EXTENSION, materialize=materialize),))
+    app = server.create_app(settings=settings, extensions=registry).app.app
+    lease = SchedulerLeaseStore()
+    holder = {"lease_name": "maintenance_scheduler", "owner_id": "external-maintenance"}
+    assert lease.try_acquire(**holder, owner_pid=os.getpid(), lease_duration_s=120)
+
+    started = asyncio.Event()
+    stop_requested = asyncio.Event()
+
+    async def serve():
+        async with app.router.lifespan_context(app):
+            started.set()
+            await stop_requested.wait()
+
+    app_task = asyncio.create_task(serve())
+    try:
+        await asyncio.wait_for(started.wait(), 15)
+        ctx = app.state.runtime_ctx
+        scheduler = ctx.scheduler
+        provider = RuntimeProvider(ctx.built, ctx.session)
+        assert ctx.built.graph_adapter.view_kinds is registry.view_kinds
+        assert scheduler.status_snapshot()["maintenance_running"] is False
+        assert scheduler.status_snapshot()["running"] is True
+        assert await provider.scheduler_pause() is True
+        assert scheduler.status_snapshot()["running"] is False
+        assert await provider.scheduler_pause() is False
+        assert await provider.scheduler_resume() is True
+        assert scheduler.status_snapshot()["maintenance_running"] is False
+        assert scheduler.status_snapshot()["running"] is True
+
+        (lane,) = scheduler._projection_lanes
+        job = f"reconcile_projection:{EXTENSION.definition.definition_id}"
+        lane._jobs[job].interval_s = 0
+        stopping_lane = asyncio.Event()
+        graph_closed = Event()
+        stop_lane = lane.stop
+        close_graph = ctx.built.neo4j.close
+
+        async def observe_stop():
+            stopping_lane.set()
+            return await stop_lane()
+
+        def observe_close():
+            graph_closed.set()
+            close_graph()
+
+        monkeypatch.setattr(lane, "stop", observe_stop)
+        monkeypatch.setattr(ctx.built.neo4j, "close", observe_close)
+        timeline = DecisionTimeline(ctx.built.neo4j, ctx.built.graph_adapter._views)
+        await asyncio.to_thread(timeline.initialize)
+        await asyncio.to_thread(
+            timeline.put, namespace="lifecycle", project="menhir",
+            decision=Decision("one", date(2026, 11, 27), "Drain before graph close", "#725"),
+        )
+        assert await asyncio.to_thread(materializer_entered.wait, 8)
+        stop_requested.set()
+        await asyncio.wait_for(stopping_lane.wait(), 8)
+        assert not graph_closed.is_set()
+        release_materializer.set()
+        await asyncio.wait_for(asyncio.shield(app_task), 15)
+        assert graph_closed.is_set()
+        persisted = DecisionTimeline(test_neo4j_repo, registry.view_repository(test_neo4j_repo))
+        current = await asyncio.to_thread(persisted.current, namespace="lifecycle", project="menhir")
+        assert current is not None
+        assert [entry["id"] for entry in current["entries"]] == ["one"]
+    finally:
+        release_materializer.set()
+        stop_requested.set()
+        try:
+            await asyncio.wait_for(app_task, 15)
+        finally:
+            lease.release(**holder)

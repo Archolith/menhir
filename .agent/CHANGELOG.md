@@ -4,6 +4,12 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-27 - Coordinate extension runtime startup and shutdown (#725)
+
+- Bind the HTTP runtime extension registry after preflight succeeds, allowing failed startup to be retried with an explicit registry.
+- Include active projection lanes in scheduler status and pause or resume results. Drain scheduler jobs before closing graph clients.
+- Use a single extension View key for omitted, empty, and explicit default namespaces.
+
 ## 2026-11-27 - Address the extension design review (#725)
 
 - Give extension Views kind-scoped keys and keep deployed built-in keys compatible.

@@ -278,7 +278,11 @@ class MaintenanceScheduler:
     # ------------------------------------------------------------------
 
     def is_running(self) -> bool:
+        """Whether the loop for this scheduler's own lease is running."""
         return self._task is not None and not self._task.done()
+
+    def _has_running_jobs(self) -> bool:
+        return self.is_running() or any(lane.is_running() for lane in self._projection_lanes)
 
     async def start(
         self,
@@ -301,7 +305,7 @@ class MaintenanceScheduler:
                     self._standby_loop(), name="menhir-maintenance-standby")
             for lane in self._projection_lanes:
                 await lane.start()
-            return started
+            return started or (not force_takeover and self._has_running_jobs())
 
     async def _standby_loop(self) -> None:
         """Retry the lease until this process owns it, or stop() withdraws the request."""
@@ -403,8 +407,8 @@ class MaintenanceScheduler:
         """Force this process to take the scheduler lease for troubleshooting."""
         return await self.start(force_takeover=True, takeover_reason=reason)
 
-    async def stop(self) -> None:
-        """Stop the run loop and release the lease, atomically with respect to `start()`.
+    async def stop(self) -> bool:
+        """Stop the loops and release their leases. Return whether any were running.
 
         THE WHOLE SEQUENCE HOLDS `_state_lock` (CF-240). It used to drop the lock right after
         clearing `_task`, then await the task and release the lease outside it. A `start()`
@@ -425,6 +429,7 @@ class MaintenanceScheduler:
         this cannot deadlock or hang longer than the previous code's own unguarded `await task`.
         """
         async with self._state_lock:
+            was_running = self._has_running_jobs()
             # Withdraw the standby first, so it cannot acquire after this stop. It cannot be inside
             # _start_locked now (we hold the lock), so awaiting the cancel cannot deadlock.
             self._want_running = False
@@ -444,7 +449,7 @@ class MaintenanceScheduler:
                 if self._lease_acquired:
                     self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
                     self._lease_acquired = False
-                return
+                return was_running
             self._task = None
             if task.cancelled():
                 logger.debug(
@@ -456,6 +461,7 @@ class MaintenanceScheduler:
             if self._lease_acquired:
                 self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
                 self._lease_acquired = False
+            return was_running
 
     def status_snapshot(self) -> dict[str, object]:
         lease = self.lease_store.fetch(lease_name=self.lease_name)
@@ -463,7 +469,7 @@ class MaintenanceScheduler:
         for lane in self._projection_lanes:
             jobs.update(lane._jobs)
         return {
-            "running": self.is_running(),
+            "running": self._has_running_jobs(),
             "lease": {
                 "name": self.lease_name,
                 "owner_id": self._owner_id,
@@ -490,10 +496,13 @@ class MaintenanceScheduler:
                 }
                 for name, job in jobs.items()
             },
-            **({"projection_leases": {
-                name: lane.status_snapshot()["lease"]
-                for lane in self._projection_lanes for name in lane._jobs
-            }} if self._projection_lanes else {}),
+            **({
+                "maintenance_running": self.is_running(),
+                "projection_leases": {
+                    name: lane.status_snapshot()["lease"]
+                    for lane in self._projection_lanes for name in lane._jobs
+                },
+            } if self._projection_lanes else {}),
         }
 
     # ------------------------------------------------------------------

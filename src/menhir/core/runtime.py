@@ -502,7 +502,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             await scheduler.stop()
         raise
     snapshot = scheduler.status_snapshot()
-    if not snapshot.get("running"):
+    if not snapshot.get("maintenance_running", snapshot.get("running")):
         lease = snapshot.get("lease") or {}
         logger.warning(
             "Maintenance scheduler not started in this process; blocked_reason=%s "
@@ -598,6 +598,7 @@ async def _shutdown_runtime() -> None:
             with suppress(asyncio.CancelledError):
                 await orphan_task
             _state.orphan_recovery_task = None
+        await _stop_scheduler()
         if built is not None and hasattr(built, "ingest_service"):
             try:
                 released = await built.ingest_service.shutdown()
@@ -659,7 +660,6 @@ async def _shutdown_runtime() -> None:
                     state="failed",
                 )
                 logger.exception("Neo4j driver close failed")
-        await _stop_scheduler()
     finally:
         _clear_runtime_state()
 
@@ -710,7 +710,9 @@ async def _initialize_services(
         )
 
     settings = settings or MemorySettings.from_env()
-    if extensions is not None and (candidate_readonly or settings.benchmark_mode):
+    extensions = resolve_graph_extensions(extensions)
+    writable_maintenance = not candidate_readonly and not settings.benchmark_mode
+    if extensions and not writable_maintenance:
         raise ValueError("extensions require a writable maintenance runtime")
     if not candidate_readonly:
         enable_llm_usage_telemetry()
@@ -739,7 +741,7 @@ async def _initialize_services(
             details={"failures": annotated_failures, "startup_mode": capabilities.startup_mode},
         )
         raise RuntimeError(" | ".join(annotated_failures))
-    if extensions is not None and not capabilities.enrichment_ready:
+    if extensions and not capabilities.enrichment_ready:
         raise RuntimeError("extensions require maintenance scheduler startup")
     if capabilities.failures:
         record_lifecycle_event(
@@ -751,6 +753,14 @@ async def _initialize_services(
 
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="started")
     logger.info("[init 1/5] Building memory services...")
+    # Standalone graph surfaces can select a registry while preflight is
+    # running. Bind now, after this attempt has passed preflight.
+    registry = resolve_graph_extensions(extensions, bind=True)
+    if registry is not extensions:
+        if not writable_maintenance:
+            raise ValueError("extensions require a writable maintenance runtime")
+        if not capabilities.enrichment_ready:
+            raise RuntimeError("extensions require maintenance scheduler startup")
     built = build_memory_services(
         settings,
         capabilities=capabilities,
@@ -762,7 +772,7 @@ async def _initialize_services(
             and not settings.benchmark_mode
             and capabilities.enrichment_ready
         ),
-        **({"extensions": extensions} if extensions is not None else {}),
+        **({"extensions": registry} if registry else {}),
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
     # No model dir set: fetch the pinned rerank model in the background; recall keeps the RRF
@@ -871,16 +881,18 @@ async def _get_services(
     candidate_readonly: bool = False,
     extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
-    registry = resolve_graph_extensions(extensions, bind=True)
     if extensions is None and _state.built is not None and _state.session is not None:
         return _state.built, _state.session
 
     async with _init_lock:
+        registry = resolve_graph_extensions(extensions)
         has_runtime = _state.built is not None and _state.session is not None
         init_task = _state.init_task
         initializing = isinstance(init_task, asyncio.Task) and not init_task.done()
         if has_runtime and not initializing:
             return _state.built, _state.session
+        if initializing and extensions and registry is not _state.init_extensions:
+            raise ValueError("the runtime is starting with a different extension registry")
         if not initializing:
             init_task = asyncio.create_task(
                 _initialize_services(
@@ -889,19 +901,16 @@ async def _get_services(
                 )
             )
             _state.init_task = init_task
+            _state.init_extensions = registry
 
     assert isinstance(init_task, asyncio.Task)
     try:
         await asyncio.shield(init_task)
-    except Exception:
+    finally:
         async with _init_lock:
-            if _state.init_task is init_task:
+            if _state.init_task is init_task and init_task.done():
                 _state.init_task = None
-        raise
-
-    async with _init_lock:
-        if _state.init_task is init_task:
-            _state.init_task = None
+                _state.init_extensions = None
     if _state.built is None or _state.session is None:
         raise RuntimeError("Service initialization completed but built/session is None")
     return _state.built, _state.session

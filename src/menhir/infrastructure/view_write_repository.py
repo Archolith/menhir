@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.namespace import normalize_namespace
 from menhir.infrastructure.neo4j import Neo4jTransaction, SAGA_MUTATION_TIMEOUT_S
 from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 from menhir.infrastructure.view_models import (
@@ -121,7 +122,7 @@ class ViewWriteRepositoryMixin:
             raise ValueError("subject_uuid must be non-blank when provided")
         # Built-in keys always contain the legacy separator. Extension keys
         # have their own format and include the kind and each identity field.
-        parts = [kind.name, (namespace or "").strip(), identity, discriminator.strip().lower()]
+        parts = [kind.name, normalize_namespace(namespace), identity, discriminator.strip().lower()]
         digest = hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode("utf-8")).hexdigest()
         return f"extension:{digest}"
 
