@@ -17,8 +17,8 @@ from menhir.services.lifecycle_service import (
     LifecycleService,
     SHARPNESS_PROMOTE_THRESHOLD,
     PERSISTENT_EDGE_PROMOTE_THRESHOLD,
-    SIMILARITY_CONFLICT_THRESHOLD,
 )
+from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 
 
 @dataclass
@@ -522,7 +522,7 @@ async def test_skipped_pending_zero_when_none_pending(stub_memory_graph_adapter,
 def test_thresholds_match_design_doc():
     assert SHARPNESS_PROMOTE_THRESHOLD == 0.5
     assert PERSISTENT_EDGE_PROMOTE_THRESHOLD == 3
-    assert SIMILARITY_CONFLICT_THRESHOLD == 0.85
+    assert CORRELATION_CONFLICT_THRESHOLD == 0.85
 
 
 # --- Decay orchestration ---

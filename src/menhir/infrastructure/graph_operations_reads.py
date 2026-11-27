@@ -107,6 +107,25 @@ class _GraphOperationsReadsMixin:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def pair_unmerge_op_ids(self, target_key: str) -> list[str]:
+        """Op ids proving an operator split this entity pair (#939), oldest first.
+
+        ``target_key`` is the order-independent ``merge_coordinator.pair_key``, which ENTITY_MERGE,
+        ENTITY_UNMERGE and LEGACY_ENTITY_UNMERGE rows all carry. A forward merge is marked REVERSED
+        only best-effort after its unmerge commits (#920), so a COMMITTED unmerge of the pair counts
+        on its own.
+        """
+        self._ensure_ready()
+        with connect_telemetry_db(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT op_id FROM graph_operations WHERE target_key = ? AND ("
+                "(operation_kind = 'ENTITY_MERGE' AND state = 'REVERSED') OR "
+                "(operation_kind IN ('ENTITY_UNMERGE', 'LEGACY_ENTITY_UNMERGE') "
+                "AND state = 'COMMITTED')) ORDER BY created_at ASC",
+                (target_key,),
+            ).fetchall()
+        return [str(r[0]) for r in rows]
+
     def list_committed_merges(self, *, page_size: int = 5000) -> list[dict[str, Any]]:
         """Read-only merge-lineage source for the ScalarStateView C.4.4 repair passes: ALL COMMITTED
         ENTITY_MERGE ops as ``[{op_id, absorbed_uuid, survivor_uuid}]``, oldest first (chain order).

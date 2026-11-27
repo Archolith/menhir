@@ -164,6 +164,12 @@ class MergeCoordinator:
         if not eligibility.allowed:
             return {"merged": 0, "reason": eligibility.reason_code,
                     "diagnostics": eligibility.diagnostics}
+        # (1b) The journal half of the PREVIOUSLY_UNMERGED veto (#939); the node stamp half is in
+        # the eligibility policy. An operator unmerge of this pair is never undone automatically.
+        unmerge_ops = self.journal.pair_unmerge_op_ids(pair_key(survivor_uuid, absorbed_uuid))
+        if unmerge_ops:
+            return {"merged": 0, "reason": me.PREVIOUSLY_UNMERGED,
+                    "diagnostics": {"source": "journal", "op_ids": list(unmerge_ops)}}
 
         mode = amp.auto_merge_mode()
         if mode != "on":

@@ -520,14 +520,17 @@ class ConsolidationRepository:
         )
         return int(rows[0].get("persistent_neighbors", 0)) if rows else 0
 
-    def promote_to_persistent(self, node_uuids: list[str]) -> int:
+    def promote_to_persistent(self, node_uuids: list[str]) -> list[str]:
         """Promote SESSION nodes to PERSISTENT with ACTIVE freshness.
 
         Clears any pending demotion (ttl_expires) — a rescued node is no longer demoted.
+
+        Returns the uuids actually promoted. A requested node that is gone (absorbed by a merge),
+        no longer SESSION, or lifecycle-protected is not in it, so callers audit only real changes.
         """
 
         if not node_uuids:
-            return 0
+            return []
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
@@ -536,10 +539,10 @@ class ConsolidationRepository:
                   "n.freshness = 'ACTIVE'",
                   "n.promoted_at = datetime()",
                   "n.ttl_expires = null"))
-            .return_raw("count(n) AS promoted")
+            .return_raw("collect(n.uuid) AS promoted_uuids")
             .build())
         rows = self.neo4j.execute(query, params={"uuids": node_uuids})
-        return int(rows[0].get("promoted", 0)) if rows else 0
+        return [str(u) for u in (rows[0].get("promoted_uuids") or [])] if rows else []
 
     def delete_session_nodes(self, node_uuids: list[str]) -> int:
         """DETACH DELETE the given SESSION Entity nodes."""
@@ -626,17 +629,17 @@ class ConsolidationRepository:
         )
         return [str(u) for u in (rows[0].get("orphaned") or [])] if rows else []
 
-    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> int:
+    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> list[str]:
         """Set a time-to-live for SESSION nodes (F5 demotion grace window).
 
-        Uses coalesce to set once: if a node already has ttl_expires, it is NOT reset.
+        Sets once: a node that already has ttl_expires is NOT reset.
         Only nodes without a prior TTL are newly demoted.
 
-        Returns the count of nodes that had NO prior TTL (newly demoted).
+        Returns the uuids of the nodes that had NO prior TTL (newly demoted).
         """
 
         if not node_uuids:
-            return 0
+            return []
 
         # Decide and mutate in one statement so a source flag added after candidate discovery
         # cannot race the TTL write.
@@ -645,10 +648,10 @@ class ConsolidationRepository:
             .where("n.uuid IN $uuids", "n.scope = 'SESSION'", "n.ttl_expires IS NULL",
                    harmful_automatic_mutation_allowed_cypher("n"))
             .set("n.ttl_expires = datetime() + duration({days: $days})")
-            .return_raw("count(n) AS newly_demoted_count")
+            .return_raw("collect(n.uuid) AS newly_demoted_uuids")
             .build())
         rows = self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
-        return int(rows[0].get("newly_demoted_count", 0)) if rows else 0
+        return [str(u) for u in (rows[0].get("newly_demoted_uuids") or [])] if rows else []
 
     def fetch_ttl_expired_session_uuids(
         self,

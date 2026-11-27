@@ -13,9 +13,8 @@ This replaces the previous behaviour where *all* pairs above 0.85
 were flagged as contradictions, flooding the conflict queue with
 correlated-but-not-contradictory memories.
 
-Thresholds are based on the audit of 11,412 entities and the
-existing SIMILARITY_CONFLICT_THRESHOLD (0.85) and sharpness
-threshold (0.7) in lifecycle_service.py.
+Thresholds are based on the audit of 11,412 entities. The conflict threshold is
+defined once, as CORRELATION_CONFLICT_THRESHOLD in correlation_service_types.
 
 The score routed on is an ordinal RRF rank score, not the cosine these bands
 describe (see ``classify_pair``). A real name cosine below
@@ -57,7 +56,11 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from menhir.core.bootstrap import UnavailableGraphitiClient
+    from menhir.infrastructure.graphiti_client import GraphitiClient
     from menhir.infrastructure.llm import LLMAdapter
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.services.merge_coordinator import MergeCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +84,14 @@ class CorrelationService(CorrelationChecksMixin):
 
     def __init__(
         self,
-        correlation_repo: CorrelationRepository,
-        graphiti_client: Any,
+        correlation_repo: "CorrelationRepository | MemoryGraphAdapter",
+        graphiti_client: "GraphitiClient | UnavailableGraphitiClient",
         *,
         related_threshold: float = CORRELATION_RELATED_THRESHOLD,
         conflict_threshold: float = CORRELATION_CONFLICT_THRESHOLD,
         merge_threshold: float = CORRELATION_MERGE_THRESHOLD,
         llm: "LLMAdapter | None" = None,
-        merge_coordinator: Any = None,
-        on_merge_committed: Any = None,
+        merge_coordinator: "MergeCoordinator | None" = None,
         similarity_floor: float = CORRELATION_SIMILARITY_FLOOR,
     ) -> None:
         self._repo = correlation_repo
@@ -99,15 +101,11 @@ class CorrelationService(CorrelationChecksMixin):
         self._merge_threshold = merge_threshold
         self._llm = llm
         self._merge_coordinator = merge_coordinator
-        # Optional post-COMMIT hook, injected only when ScalarState (Piece C) is enabled. Called
-        # after a merge COMMITs to rebind scalar assertions onto the survivor. None (default) ->
-        # no scalar-state coupling, byte-identical to before. Best-effort: it must never fail the
-        # merge (the merge already committed; scalar reconciliation is repairable out of band).
-        self._on_merge_committed = on_merge_committed
+        # Scalar rebind after a merge: ScalarStateService.repair_incomplete_reconciliations.
         self._similarity_floor = similarity_floor
 
     @property
-    def merge_coordinator(self) -> Any:
+    def merge_coordinator(self) -> "MergeCoordinator":
         """The journaled merge saga (plan Phase 4). Built lazily on the default sidecar.
 
         Every confirmed merge goes through this, NOT through the raw repository primitive: the
@@ -213,22 +211,6 @@ class CorrelationService(CorrelationChecksMixin):
                         "Correlation: MERGED %s absorbed into %s (sim=%.3f, judge-confirmed, op=%s)",
                         source_uuid, target_uuid, similarity, merge_result.get("op_id"),
                     )
-                    # Post-COMMIT scalar-state reconciliation (Piece C.3), best-effort and only when
-                    # wired. The merge is already durable; a failure here is repaired out of band by
-                    # the orphan-rebind pass, so it must never turn a committed merge into an error.
-                    if self._on_merge_committed is not None:
-                        try:
-                            await asyncio.to_thread(
-                                self._on_merge_committed,
-                                absorbed_uuid=source_uuid, survivor_uuid=target_uuid,
-                                merge_op_id=str(merge_result.get("op_id") or ""),
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning(
-                                "scalar-state merge rebind failed for %s <- %s (op=%s): %s; "
-                                "leaving for orphan-rebind repair",
-                                target_uuid, source_uuid, merge_result.get("op_id"), exc,
-                            )
                     return "merged", merge_result
                 if merge_result.get("reason") in (
                     amp.AUTO_MERGE_OFF, amp.AUTO_MERGE_PROPOSED
@@ -382,6 +364,20 @@ class CorrelationService(CorrelationChecksMixin):
             return "related"
         return "none"
 
+    def _read_merge_veto_inputs(
+        self, survivor_uuid: str, absorbed_uuid: str,
+    ) -> tuple[list[dict[str, Any]], bool, bool, bool]:
+        """The four blocking repository reads behind a merge proposal. Run via asyncio.to_thread.
+
+        Returns ``(metadata, ineligible_node_veto, co_mention_veto, anchor_project_veto)``.
+        """
+        return (
+            self._repo.fetch_entity_merge_metadata([survivor_uuid, absorbed_uuid]),
+            self._repo.check_ineligible_node_veto(survivor_uuid, absorbed_uuid),
+            self._repo.check_co_mention_veto(survivor_uuid, absorbed_uuid),
+            self._repo.check_anchor_project_veto(survivor_uuid, absorbed_uuid),
+        )
+
     async def _handle_merge_proposal(
         self,
         survivor_uuid: str,
@@ -397,19 +393,19 @@ class CorrelationService(CorrelationChecksMixin):
 
         Returns: "merged" if confirmed, "conflict" otherwise.
         """
-        # Fetched early (SSOT-08) so the promoted-node veto can run unconditionally,
+        # Metadata is fetched early (SSOT-08) so the promoted-node veto can run unconditionally,
         # like the other three vetoes -- reused below for the judge prompt so a
-        # confirmed merge doesn't re-fetch the same metadata.
-        metadata = self._repo.fetch_entity_merge_metadata([survivor_uuid, absorbed_uuid])
+        # confirmed merge doesn't re-fetch the same metadata. All four reads run off the
+        # event loop in one worker-thread hop (#872).
+        metadata, ineligible_node_veto, co_mention_veto, anchor_project_veto = (
+            await asyncio.to_thread(self._read_merge_veto_inputs, survivor_uuid, absorbed_uuid)
+        )
         metadata_by_uuid = {m["uuid"]: m for m in metadata}
         meta_a = metadata_by_uuid.get(survivor_uuid, {})
         meta_b = metadata_by_uuid.get(absorbed_uuid, {})
 
         # Part 1: Run deterministic vetoes (abstain-only; veto downgrades to conflict)
         promoted_veto = str(meta_a.get("scope") or "") == "PROMOTED" or str(meta_b.get("scope") or "") == "PROMOTED"
-        ineligible_node_veto = self._repo.check_ineligible_node_veto(survivor_uuid, absorbed_uuid)
-        co_mention_veto = self._repo.check_co_mention_veto(survivor_uuid, absorbed_uuid)
-        anchor_project_veto = self._repo.check_anchor_project_veto(survivor_uuid, absorbed_uuid)
 
         if promoted_veto:
             # SSOT-08: a PROMOTED node is operator-curated, verified ground truth --

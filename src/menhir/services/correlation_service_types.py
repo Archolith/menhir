@@ -1,8 +1,8 @@
 """Thresholds and result types for the correlation service (facade split).
 
-Moved verbatim from ``correlation_service.py`` so the facade module stays under
-the file-size budget. ``correlation_service`` re-exports every public symbol
-defined here, so existing import sites keep working unchanged.
+Split out of ``correlation_service.py`` so the facade module stays under the file-size
+budget. ``correlation_service`` re-exports the public symbols; production code imports
+them from here, and only tests import them through the facade.
 """
 
 from __future__ import annotations
