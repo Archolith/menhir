@@ -126,10 +126,25 @@ def _valid_at_sort_key(raw: object) -> float:
 _LANE_INJECTED_SOURCES = frozenset({CandidateSource.SCALAR_AUTHORITY, CandidateSource.OBSERVATION})
 
 
-def _lane_injected_first(candidates: list[Any]) -> list[Any]:
-    """Observation, authority and history candidates first (stable), so the cross-encoder head
-    scores them instead of flooring them behind ``rerank_top_n`` search hits (#922)."""
-    return sorted(candidates, key=lambda c: c.source not in _LANE_INJECTED_SOURCES)
+def _lane_injected_first(candidates: list[Any], top_n: int) -> list[Any]:
+    """Up to half of the cross-encoder head (``top_n // 2``) goes to injected candidates,
+    authority first, then observation/history, so the head scores them instead of flooring them
+    behind ``rerank_top_n`` search hits. The rest keep their order (#922)."""
+    injected = sorted(
+        (c for c in candidates if c.source in _LANE_INJECTED_SOURCES),
+        key=lambda c: c.source != CandidateSource.SCALAR_AUTHORITY,
+    )[:max(0, top_n) // 2]
+    head = {id(c) for c in injected}
+    return injected + [c for c in candidates if id(c) not in head]
+
+
+def _protected_leads(scored: list[Any], n: int) -> set[str]:
+    """Leading authority candidates the result cut must keep: at most ``max(1, n // 2)``, by
+    rank, so injected Views can never push out every search result (#922)."""
+    if n <= 0:
+        return set()
+    return {m.uuid for m in scored if m.is_scalar_authority}.intersection(
+        [m.uuid for m in scored if m.is_scalar_authority][:max(1, n // 2)])
 
 
 def _cut_keeping(scored: list[Any], n: int, keep: set[str]) -> list[Any]:
@@ -139,6 +154,19 @@ def _cut_keeping(scored: list[Any], n: int, keep: set[str]) -> list[Any]:
     rest = [m.uuid for m in scored if m.uuid not in keep][:max(0, n - len(must))]
     chosen = set(must) | set(rest)
     return [m for m in scored if m.uuid in chosen]
+
+
+def _verdict_candidate_uuid(verdict: Any, candidate_uuids: set[str]) -> str | None:
+    """The ranked candidate a verdict stands for: its View, or for as-of / expiry verdicts (no
+    View) the synthetic ``scalar-asof:`` / ``scalar-expiry:`` candidate of the same slot."""
+    if verdict.view_uuid:
+        return verdict.view_uuid
+    prefix = {"as_of": "scalar-asof:", "expired": "scalar-expiry:"}.get(verdict.kind)
+    if prefix is None:
+        return None
+    suffix = (f":{verdict.subject_uuid}:{verdict.attribute}:{verdict.scope}:"
+              f"{verdict.value_kind}:{verdict.unit}")
+    return next((u for u in candidate_uuids if u.startswith(prefix) and u.endswith(suffix)), None)
 
 
 def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
@@ -1961,7 +1989,7 @@ async def _run_recall(
                     c.uuid, getattr(c, "name", None),
                     (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
                 )
-                for c in _lane_injected_first(candidates)
+                for c in _lane_injected_first(candidates, tuning.rerank_top_n)
             ],
         )
         if rerank_results is not None:
@@ -2031,11 +2059,22 @@ async def _run_recall(
     pending_fallback = pending_fallback[:result_limit]
     scored_room = max(0, result_limit - len(pending_fallback))
     if rerank is not None:
-        # #922: the cross-encoder must not cut a deterministically injected authority/history
-        # candidate that authority_layer reports; it displaces the lowest-ranked other result.
-        authority_uuids = {c.uuid for c in candidates if c.source == CandidateSource.SCALAR_AUTHORITY}
-        authority_uuids.update(v.view_uuid for v in authority_layer if v.view_uuid)
-        top_results = pending_fallback + _cut_keeping(scored, scored_room, authority_uuids)
+        # #922: the cross-encoder must not cut a leading authority candidate; it displaces the
+        # lowest-ranked other result. Leads are capped so search results keep at least half.
+        # Advisory and history Views compete on rank.
+        kept = _cut_keeping(scored, scored_room, _protected_leads(scored, scored_room))
+        top_results = pending_fallback + kept
+        # A verdict whose ranked candidate the cut removed is dropped, not reported as returned.
+        # Consumers (context_builder, the packet query, API/MCP payloads) treat every verdict as
+        # present evidence, so a marker would need each of them to learn it. Verdicts with no
+        # ranked candidate (counted Views, unit R) are unaffected.
+        ranked_uuids = {m.uuid for m in scored}
+        cut_uuids = ranked_uuids - {m.uuid for m in kept}
+        if cut_uuids:
+            authority_layer[:] = [
+                v for v in authority_layer
+                if _verdict_candidate_uuid(v, ranked_uuids) not in cut_uuids
+            ]
     else:
         top_results = pending_fallback + scored[:scored_room]
     warden_status.unchecked_pending = len(pending_fallback)

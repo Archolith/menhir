@@ -4,7 +4,8 @@
 - #923.2 a failed observation/authority lane rolls back and says so.
 - #923 c1 an adjacency failure carries a note.
 - #923 c2 the stale-label name fallback applies only when an item has no uuid.
-- #922 with the cross-encoder rerank on, injected candidates are scored and authority is not cut.
+- #922 with the cross-encoder rerank on, injected candidates are scored, leading authority is not
+  cut (capped), and authority_layer reports only Views that are returned.
 """
 
 from __future__ import annotations
@@ -345,33 +346,119 @@ async def _rerank_recall(client, adapter, *, top_n, max_results):
 async def test_injected_candidates_are_in_the_rerank_head(
     stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
 ):
-    """rerank_top_n = the number of search hits: before #922 only the hits were scored and the
-    injected View was floored behind them."""
+    """Before #922 only the first rerank_top_n search hits were scored and the injected View was
+    floored behind them. Now half the head goes to injected candidates, authority first."""
     scorer = _rerank_scorer(monkeypatch, _SCORES)
-    await _rerank_recall(stub_graphiti_client, stub_memory_graph_adapter, top_n=2, max_results=7)
+    await _rerank_recall(stub_graphiti_client, stub_memory_graph_adapter, top_n=4, max_results=7)
     scored = scorer.calls[0]
-    assert len(scored) == 2
+    assert len(scored) == 4
     assert any(p.startswith("postcards: 37") for p in scored)
     assert any(p.startswith("17 postcards") for p in scored)
+    assert any(p.startswith("Test Entity") for p in scored)
+    assert any(p.startswith("Another Entity") for p in scored)
 
 
 @pytest.mark.asyncio
-async def test_rerank_cap_does_not_cut_the_injected_authority_view(
+async def test_rerank_cap_keeps_a_leading_view_with_a_low_score(
     stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
 ):
-    """The cross-encoder ranks the View last; the default cap still keeps it, displacing the
-    lowest-ranked other result, so authority_layer never reports a View that is not returned."""
+    """The cross-encoder ranks the leading View last; the default cap still keeps it, displacing
+    the lowest-ranked other result."""
+    _rerank_scorer(monkeypatch, _SCORES)
+    stub_memory_graph_adapter.scalar_view_has_user_foundation = lambda **_: True
+    res = await _rerank_recall(stub_graphiti_client, stub_memory_graph_adapter,
+                               top_n=50, max_results=2)
+    ids = [r.uuid for r in res.results]
+    assert ids == ["entity-1", "sv-1"]
+    leads = [v for v in (res.authority_layer or ()) if v.status == "leads"]
+    assert [v.view_uuid for v in leads] == ["sv-1"]
+    assert "capped the default result limit at 2" in (res.note or "")
+
+
+@pytest.mark.asyncio
+async def test_advisory_view_competes_on_rank_and_its_verdict_follows_it(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
+):
+    """An advisory View is not protected. When the cut removes it, its verdict is dropped rather
+    than reported as if the View were returned."""
     _rerank_scorer(monkeypatch, _SCORES)
     res = await _rerank_recall(stub_graphiti_client, stub_memory_graph_adapter,
                                top_n=50, max_results=2)
     ids = [r.uuid for r in res.results]
-    assert len(ids) == 2
-    assert "sv-1" in ids
-    assert ids[0] == "entity-1"
+    assert ids == ["entity-1", "entity-2"]
+    assert not [v for v in (res.authority_layer or ()) if v.view_uuid == "sv-1"]
+
+
+def _many_slot_pool(client, adapter, *, slots, hits):
+    from datetime import datetime, timezone
+
+    client.search_scored_results = [(f"hit-{i}", f"Search {i}", 0.9 - i / 100) for i in range(hits)]
+    adapter.candidate_metadata = [{
+        "uuid": f"hit-{i}", "name": f"Search {i}", "scope": "PERSISTENT", "type": "SEMANTIC",
+        "content": f"search content {i}", "summary": None, "namespace": "proj",
+        "last_accessed": datetime.now(timezone.utc), "edge_count": 1, "freshness": "ACTIVE",
+        "user_flagged": False,
+    } for i in range(hits)]
+    base = _postcard_observation_hit()[0]
+    obs = [{**base, "assertion_id": f"obs-{i}", "attribute": f"attr_{i}", "unit": f"u{i}",
+            "stated_span": f"obs {i} items", "cosine": 0.95 - i / 100} for i in range(slots)]
+    views = {f"attr_{i}": {**_state_view(), "uuid": f"sv-{i}", "attribute": f"attr_{i}",
+                           "unit": f"u{i}", "view_key": f"vk-{i}", "name": f"view attr_{i}: 37"}
+             for i in range(slots)}
+    _setup_observation_lane(adapter, obs_hit=obs)
+    adapter.fetch_current_scalar_view_for_slot = (
+        lambda *, subject_uuid, attribute, scope, value_kind, unit, namespace: views.get(attribute))
+    adapter.scalar_view_has_user_foundation = lambda **_: True
+
+
+@pytest.mark.asyncio
+async def test_many_leading_views_cannot_push_out_the_search_results(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
+):
+    """Eight leading Views, all ranked below the search hits, against the default cap of 7:
+    at most n // 2 are protected, so at least ceil(n / 2) search results survive, and every
+    verdict reported names a View that is returned."""
+    import math
+
+    scorer = _rerank_scorer(monkeypatch, {"Search": 4.0, "view": -5.0, "obs": -9.0})
+    _many_slot_pool(stub_graphiti_client, stub_memory_graph_adapter, slots=8, hits=6)
+    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter, rerank_model_dir="m").recall(
+        QUERY, namespace="proj", tuning=RetrievalTuningConfig(
+            enable_cross_encoder_rerank=True, rerank_top_n=8, rerank_max_results=7))
+    ids = [r.uuid for r in res.results]
+    assert len(ids) == 7
+    assert sum(u.startswith("hit-") for u in ids) >= math.ceil(7 / 2)
+    assert 1 <= sum(u.startswith("sv-") for u in ids) <= 7 // 2
     reported = {v.view_uuid for v in (res.authority_layer or ()) if v.view_uuid}
-    assert reported == {"sv-1"}
-    assert reported <= set(ids)
-    assert "capped the default result limit at 2" in (res.note or "")
+    assert reported and reported <= set(ids)
+    # F1045-2: the head is at most half injected, so real hits are still scored.
+    head = scorer.calls[0]
+    assert len(head) == 8
+    assert sum(p.startswith("Search") for p in head) >= 4
+
+
+def test_lane_injected_first_bounds_the_injected_share_authority_first():
+    from types import SimpleNamespace
+
+    from menhir.domain.retrieval_tuning import CandidateSource as S
+    from menhir.services.recall_pipeline import _lane_injected_first
+
+    rows = [SimpleNamespace(uuid=u, source=s) for u, s in (
+        ("h1", S.VECTOR), ("h2", S.VECTOR), ("o1", S.OBSERVATION), ("o2", S.OBSERVATION),
+        ("a1", S.SCALAR_AUTHORITY), ("h3", S.VECTOR))]
+    assert [r.uuid for r in _lane_injected_first(rows, 4)] == ["a1", "o1", "h1", "h2", "o2", "h3"]
+    assert [r.uuid for r in _lane_injected_first(rows, 1)] == ["h1", "h2", "o1", "o2", "a1", "h3"]
+
+
+def test_protected_leads_are_capped_by_rank():
+    from types import SimpleNamespace
+
+    from menhir.services.recall_pipeline import _protected_leads
+
+    rows = [SimpleNamespace(uuid=f"v{i}", is_scalar_authority=i % 2 == 0) for i in range(10)]
+    assert _protected_leads(rows, 7) == {"v0", "v2", "v4"}
+    assert _protected_leads(rows, 1) == {"v0"}
+    assert _protected_leads(rows, 0) == set()
 
 
 def test_cut_keeping_is_a_plain_cut_when_nothing_is_past_it():
