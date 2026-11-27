@@ -296,7 +296,7 @@ def test_every_saga_kind_a_coordinator_writes_has_a_declared_statement_count():
     """A kind missing from the table silently falls back, which is safe but hides a real omission."""
     written_kinds = {
         "ENTITY_MERGE", "ENTITY_UNMERGE", "ENTITY_DELETE", "SESSION_TTL_DELETE",
-        "METRIC_WRITE", "LEGACY_ENTITY_UNMERGE",
+        "METRIC_WRITE", "LEGACY_ENTITY_UNMERGE", "DECAY_DELETE",
     }
     missing = written_kinds - set(oo.SAGA_STATEMENT_COUNTS)
     assert not missing, f"undeclared saga kinds: {sorted(missing)}"

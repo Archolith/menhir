@@ -108,7 +108,7 @@ class TelemetryRetentionStatsMixin:
         cursor = conn.execute(
             """
             UPDATE graph_operations SET before_snapshot_json = NULL
-            WHERE operation_kind IN ('ENTITY_DELETE', 'SESSION_TTL_DELETE')
+            WHERE operation_kind IN ('ENTITY_DELETE', 'SESSION_TTL_DELETE', 'DECAY_DELETE')
               AND state IN ('COMMITTED', 'FAILED', 'REVERSED')
               AND before_snapshot_json IS NOT NULL
               AND substr(replace(updated_at, 'T', ' '), 1, 19)

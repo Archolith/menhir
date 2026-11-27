@@ -64,6 +64,109 @@ def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
     )
 
 
+#: A removed node with more eligible neighbours than this is not bridged: k neighbours would add
+#: k(k-1)/2 edges, so a hub would otherwise flood the graph with weak links.
+MAX_BRIDGE_NEIGHBOURS = 20
+
+
+def _bridge_neighbour_filter_cypher(
+    removed: str, neighbor: str, excluded: str, extra: tuple[str, ...] = ()
+) -> str:
+    """WHERE body selecting the neighbours a removed node may bridge.
+
+    Neighbours are reached over ``adjacency_edge_pattern()`` only (the edges recall treats as
+    adjacency); ANCHORED_TO, SUPERSEDES, NEXT_EPISODE and evidence edges are not adjacency, so a
+    cross-domain anchor or a supersession chain never becomes a semantic bridge. ``excluded`` is a
+    Cypher list expression of the nodes being removed. A neighbour waiting for rederive (an erase
+    scrub) is never given a new link.
+    """
+    clauses = [
+        f"{neighbor}.structure_role IS NULL",
+        non_derived_view_cypher(neighbor),
+        f"coalesce({neighbor}.freshness, '') <> 'GONE'",
+        f"NOT coalesce({neighbor}.rederive_pending, false)",
+        f"NOT {memory_retired_cypher(neighbor)}",
+        f"NOT {neighbor}.uuid IN {excluded}",
+        # Bridges stay in the removed node's tenant: an existing cross-tenant edge on it must not
+        # become a new link between two other tenants' nodes.
+        same_tenant_cypher(removed, neighbor),
+        *extra,
+    ]
+    return "\n              AND ".join(clauses)
+
+
+def bridge_cypher(
+    *,
+    excluded: str,
+    removed: str = "n",
+    neighbor_filters: tuple[str, ...] = (),
+    pair_filters: tuple[str, ...] = (),
+) -> str:
+    """Cypher block that bridges the neighbours of the bound node ``removed``.
+
+    Shared by ``bridge_and_delete`` and ``bridge_edges_for_nodes``. Yields one row with
+    ``edges_bridged`` (edges THIS block created), ``bridge_uuids`` (their uuids) and
+    ``bridge_skipped`` (true when the node had more than ``MAX_BRIDGE_NEIGHBOURS`` eligible
+    neighbours, so nothing was bridged). Neighbours are collected only up to the cap plus one.
+
+    Each neighbour is write-locked (in uuid order, so two bridgers cannot deadlock) and re-checked
+    before the pair MERGE: under read-committed a concurrent bridger of the same pair would
+    otherwise create it twice. A pair already joined by any adjacency edge gets no new edge, and
+    the MERGE is undirected between two bound nodes, so at most one RELATES_TO per unordered pair.
+    A new edge carries ``created_at = datetime.statement()``, which is constant for the statement
+    and cannot equal an edge made before it, and ``bridged_from``; counting both counts only edges
+    created here.
+    """
+    adjacency = adjacency_edge_pattern()
+    where = _bridge_neighbour_filter_cypher(removed, "neighbor", excluded, neighbor_filters)
+    pair_where = "".join(f"\n                  AND {f}" for f in pair_filters)
+    return f"""
+            CALL {{
+                WITH {removed}
+                CALL {{
+                    WITH {removed}
+                    OPTIONAL MATCH ({removed})-[:{adjacency}]-(neighbor:Entity)
+                    WHERE {where}
+                    WITH DISTINCT neighbor LIMIT {MAX_BRIDGE_NEIGHBOURS + 1}
+                    RETURN collect(neighbor) AS neighbors
+                }}
+                WITH {removed}.uuid AS removed_uuid, neighbors,
+                     size(neighbors) > {MAX_BRIDGE_NEIGHBOURS} AS hub
+                CALL {{
+                    WITH removed_uuid, neighbors, hub
+                    WITH removed_uuid, CASE WHEN hub THEN [] ELSE neighbors END AS pool
+                    UNWIND pool AS locked
+                    WITH removed_uuid, locked ORDER BY locked.uuid
+                    SET locked._bridge_lock = true
+                    REMOVE locked._bridge_lock
+                    WITH removed_uuid, locked
+                    WHERE coalesce(locked.freshness, '') <> 'GONE'
+                      AND NOT coalesce(locked.rederive_pending, false)
+                      AND NOT {memory_retired_cypher("locked")}
+                    WITH removed_uuid, collect(locked) AS pool
+                    UNWIND pool AS a
+                    UNWIND pool AS b
+                    WITH removed_uuid, a, b
+                    WHERE a.uuid < b.uuid{pair_where}
+                      AND NOT EXISTS {{ (a)-[:{adjacency}]-(b) }}
+                    MERGE (a)-[r:RELATES_TO]-(b)
+                    ON CREATE SET r.uuid = randomUUID(),
+                                  r.type = 'bridged',
+                                  r.bridged_from = removed_uuid,
+                                  r.weight = 1.0,
+                                  r.source = 'system-derived',
+                                  r.scope = 'PERSISTENT',
+                                  r.created_at = datetime.statement(),
+                                  r.last_traversed = datetime()
+                    RETURN count(CASE WHEN r.created_at = datetime.statement()
+                                       AND r.bridged_from = removed_uuid THEN 1 END) AS edges_bridged,
+                           collect(CASE WHEN r.created_at = datetime.statement()
+                                         AND r.bridged_from = removed_uuid THEN r.uuid END) AS bridge_uuids
+                }}
+                RETURN edges_bridged, bridge_uuids, hub AS bridge_skipped
+            }}"""
+
+
 def summary_sha256(text: str) -> str:
     """Marker binding a stored ``original_content`` to the summary of the compression that wrote it."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -236,8 +339,12 @@ class ConsolidationRepository:
                    # CF-338: a node an erase scrubbed waits for rederive; never compress it.
                    "NOT coalesce(n.rederive_pending, false)")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
-            .with_clause(f"n, {memory_timestamp_cypher('n.decay_last_selected_at')} AS selected_at")
+            .with_clause(
+                f"n, {memory_timestamp_cypher('n.decay_last_selected_at')} AS selected_at, "
+                f"toString({memory_recency_cypher()}) AS recency"
+            )
             .return_raw("""n.uuid AS uuid,
+       recency AS recency,
        n.type AS type,
        n.name AS name,
        n.content AS content,
@@ -468,55 +575,142 @@ class ConsolidationRepository:
             lambda tx: tx.execute(query, params), key_from_uuid=node_uuid,
         ))
 
-    def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
-        """Bridge entity neighbors around a node, then delete it.
+    @staticmethod
+    def _decay_delete_gate_cypher() -> str:
+        """Every fact the delete decision was made from, as a WHERE body on the bound ``n``.
 
-        Excludes ANCHORED_TO edges and structural neighbors from bridging
-        so cross-domain anchor links don't create spurious semantic bridges.
+        The read values are the ones the caller saw; the live node may only be as stale or staler
+        (no higher edge count or sharpness, no fresher recency), of the same type, not exempt, and
+        still carrying exactly the incident relationships the before-snapshot recorded.
         """
+        return f"""n.scope = 'PERSISTENT'
+              AND n.freshness = 'COMPRESSED'
+              AND NOT coalesce(n.rederive_pending, false)
+              AND NOT coalesce(n.decay_exempt, false)
+              AND coalesce(n.type, 'SEMANTIC') = $read_type
+              AND ($requires_target_date = false
+                   OR (n.target_date IS NOT NULL AND date(n.target_date) < date()))
+              AND {memory_recency_cypher("n")} < datetime() - duration({{days: $min_days}})
+              AND {memory_recency_cypher("n")} <= datetime($read_recency)
+              AND coalesce(toInteger(n.edge_count), 0) < $max_edge_count
+              AND coalesce(toInteger(n.edge_count), 0) <= $read_edge_count
+              AND n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness
+              AND toFloat(n.sharpness) <= $read_sharpness
+              AND size([(n)-[incident]-() | incident]) = $read_rel_count
+              AND all(sig IN $read_rel_signatures WHERE sig IN [
+                    (n)-[incident]-(peer) | type(incident) + '|'
+                    + CASE WHEN startNode(incident) = n THEN 'out' ELSE 'in' END + '|'
+                    + coalesce(peer.uuid, peer.name, elementId(peer))])"""
 
-        query = """
-            MATCH (n:Entity {uuid: $node_uuid})
-            WHERE __NON_DERIVED_VIEW__
-            CALL {
-                WITH n
-                OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
-                WHERE NOT type(r) = 'ANCHORED_TO'
-                  AND neighbor.structure_role IS NULL
-                  // Bridges stay in n's tenant: an existing cross-tenant edge on n must not
-                  // become a new link between two other tenants' nodes.
-                  AND __SAME_TENANT__
-                WITH collect(DISTINCT neighbor) AS neighbors
-                UNWIND neighbors AS a
-                UNWIND neighbors AS b
-                WITH a, b WHERE a.uuid < b.uuid
-                MERGE (a)-[r:RELATES_TO]->(b)
-                ON CREATE SET r.type = 'bridged',
-                              r.bridged_from = $node_uuid,
-                              r.weight = 1.0,
-                              r.source = 'system-derived',
-                              r.scope = 'PERSISTENT',
-                              r.created_at = datetime(),
-                              r.last_traversed = datetime()
-                RETURN count(*) AS edges_bridged
-            }
-            WITH n, coalesce(edges_bridged, 0) AS edges_bridged
-            DETACH DELETE n
-            RETURN edges_bridged AS edges_bridged, 1 AS deleted
-            """.replace(
-                "__NON_DERIVED_VIEW__", harmful_automatic_mutation_allowed_cypher("n")
-            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
-        rows = self.neo4j.execute(
-            query,
-            params={"node_uuid": node_uuid},
-        )
+    def bridge_and_delete(
+        self,
+        node_uuid: str,
+        *,
+        min_days: float,
+        max_edge_count: int,
+        max_sharpness: float,
+        read_type: str,
+        read_edge_count: int,
+        read_sharpness: float,
+        read_recency: str,
+        requires_target_date: bool,
+        read_rel_count: int,
+        read_rel_signatures: list[str],
+    ) -> dict[str, Any]:
+        """Bridge entity neighbors around a node, then delete it, in one statement.
+
+        Only ``DeleteCoordinator`` (DECAY_DELETE) calls this, after journaling a before-snapshot.
+        There is no ungated form: the node is locked and every fact the decision was made from is
+        re-checked on the live node (``_decay_delete_gate_cypher``), so a node rehydrated, recalled,
+        retyped or re-linked after selection is left alone: ``deleted`` is 0.
+
+        A node with more than ``MAX_BRIDGE_NEIGHBOURS`` live neighbours is also refused
+        (``reason`` ``bridge_cap_exceeded``, ``bridge_skipped_hubs``): that degree proves its cached
+        edge count stale, and deleting it unbridged would sever them. Bridges follow
+        ``bridge_cypher``; ``bridge_uuids`` lists the edges this call created.
+        """
+        params: dict[str, Any] = {
+            "node_uuid": node_uuid,
+            "min_days": min_days,
+            "max_edge_count": max_edge_count,
+            "max_sharpness": max_sharpness,
+            "read_type": read_type,
+            "read_edge_count": read_edge_count,
+            "read_sharpness": read_sharpness,
+            "read_recency": read_recency,
+            "requires_target_date": requires_target_date,
+            "read_rel_count": read_rel_count,
+            "read_rel_signatures": read_rel_signatures,
+        }
+        query = f"""
+            MATCH (n:Entity {{uuid: $node_uuid}})
+            WHERE {harmful_automatic_mutation_allowed_cypher("n")}
+            SET n._decay_delete_lock = true
+            REMOVE n._decay_delete_lock
+            WITH n
+            // Re-check under the lock: a concurrent rehydrate or recall may have changed the node.
+            WHERE {harmful_automatic_mutation_allowed_cypher("n")}
+              AND {self._decay_delete_gate_cypher()}
+            {bridge_cypher(excluded="[$node_uuid]")}
+            WITH n, edges_bridged, bridge_uuids, bridge_skipped
+            FOREACH (_ IN CASE WHEN bridge_skipped THEN [] ELSE [1] END | DETACH DELETE n)
+            RETURN edges_bridged AS edges_bridged, bridge_uuids AS bridge_uuids,
+                   CASE WHEN bridge_skipped THEN 0 ELSE 1 END AS deleted,
+                   bridge_skipped AS bridge_skipped
+            """
+        rows = self.neo4j.execute(query, params=params, timeout_s=SAGA_MUTATION_TIMEOUT_S)
         if not rows:
             return {"edges_bridged": 0, "deleted": 0}
         row = rows[0]
-        return {
+        result: dict[str, Any] = {
             "edges_bridged": int(row.get("edges_bridged", 0) or 0),
             "deleted": int(row.get("deleted", 0) or 0),
+            "bridge_uuids": [str(u) for u in (row.get("bridge_uuids") or [])],
         }
+        if row.get("bridge_skipped"):
+            result["bridge_skipped_hubs"] = [node_uuid]
+            result["reason"] = "bridge_cap_exceeded"
+        return result
+
+    def decay_delete_gate_passes(
+        self,
+        node_uuid: str,
+        *,
+        min_days: float,
+        max_edge_count: int,
+        max_sharpness: float,
+        read_type: str,
+        read_edge_count: int,
+        read_sharpness: float,
+        read_recency: str,
+        requires_target_date: bool,
+        read_rel_count: int,
+        read_rel_signatures: list[str],
+    ) -> bool:
+        """READ-ONLY: would ``bridge_and_delete`` delete this node right now (same gate, cap)."""
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n:Entity {{uuid: $node_uuid}})
+            WHERE {harmful_automatic_mutation_allowed_cypher("n")}
+              AND {self._decay_delete_gate_cypher()}
+            CALL {{
+                WITH n
+                OPTIONAL MATCH (n)-[:{adjacency_edge_pattern()}]-(neighbor:Entity)
+                WHERE {_bridge_neighbour_filter_cypher("n", "neighbor", "[$node_uuid]")}
+                WITH DISTINCT neighbor LIMIT {MAX_BRIDGE_NEIGHBOURS + 1}
+                RETURN count(neighbor) AS k
+            }}
+            RETURN k <= {MAX_BRIDGE_NEIGHBOURS} AS passes
+            """,
+            params={
+                "node_uuid": node_uuid, "min_days": min_days, "max_edge_count": max_edge_count,
+                "max_sharpness": max_sharpness, "read_type": read_type,
+                "read_edge_count": read_edge_count, "read_sharpness": read_sharpness,
+                "read_recency": read_recency, "requires_target_date": requires_target_date,
+                "read_rel_count": read_rel_count, "read_rel_signatures": read_rel_signatures,
+            },
+        )
+        return bool(rows and rows[0].get("passes"))
 
     def update_sharpness(self, node_uuid: str, sharpness: float) -> bool:
         """Write computed sharpness to a node."""
@@ -1214,8 +1408,9 @@ class ConsolidationRepository:
         conflict resolution so that the removed node's former neighbors are
         reconnected before the 24 h decay sweep runs.
 
-        Excludes ANCHORED_TO edges and structural neighbors from bridging. When
-        ``namespace`` is supplied, the node and its neighbors stay in that silo.
+        Bridges follow ``bridge_cypher`` (adjacency edges only; live, non-derived, same-tenant
+        neighbours; none for a hub). When ``namespace`` is supplied, the node and its neighbors
+        stay in that silo.
         """
         return self.bridge_edges_for_nodes([node_uuid], namespace=namespace)
 
@@ -1228,62 +1423,83 @@ class ConsolidationRepository:
         conflict resolution so that the removed nodes' former neighbors are
         reconnected before the 24 h decay sweep runs.
 
-        Excludes ANCHORED_TO edges and structural neighbors from bridging. When
-        ``namespace`` is supplied, all participants are restricted to that silo.
+        Bridges follow ``bridge_cypher``: adjacency edges only, live non-derived same-tenant
+        neighbours that are not themselves being removed, one edge per pair, none for a hub. When
+        ``namespace`` is supplied, all participants are restricted to that silo. Returns the number
+        of edges created.
         """
-        if not node_uuids:
-            return 0
+        return int(self.bridge_edges_for_nodes_detailed(node_uuids, namespace=namespace)[
+            "edges_bridged"
+        ])
 
-        query = """
+    def bridge_edges_for_nodes_detailed(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """``bridge_edges_for_nodes`` plus the removed nodes skipped as hubs.
+
+        Returns ``{"edges_bridged": int, "bridge_skipped_hubs": [uuid, ...]}``.
+        """
+        node_uuids = list(dict.fromkeys(node_uuids))
+        if not node_uuids:
+            return {"edges_bridged": 0, "bridge_skipped_hubs": []}
+
+        bridge = bridge_cypher(
+            excluded="$node_uuids",
+            neighbor_filters=(tenant_scope_cypher("neighbor"),),
+            pair_filters=(tenant_scope_cypher("a"), tenant_scope_cypher("b")),
+        )
+        query = f"""
             UNWIND $node_uuids AS node_uuid
-            MATCH (n:Entity {uuid: node_uuid})
+            MATCH (n:Entity {{uuid: node_uuid}})
             WHERE n.freshness = 'GONE'
-              AND __TENANT_NODE_SCOPE__
-              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
-            CALL {
-                WITH n, node_uuid
-                OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
-                WHERE NOT type(r) = 'ANCHORED_TO'
-                  AND neighbor.structure_role IS NULL
-                  AND __TENANT_NEIGHBOR_SCOPE__
-                  // Holds with or without a namespace argument: an unscoped call bridged
-                  // across tenants (135 links from one resolve_conflict, 2026-11-26).
-                  AND __SAME_TENANT__
-                WITH node_uuid, collect(DISTINCT neighbor) AS neighbors
-                UNWIND neighbors AS a
-                UNWIND neighbors AS b
-                WITH node_uuid, a, b
-                WHERE a.uuid < b.uuid
-                  AND __TENANT_A_SCOPE__
-                  AND __TENANT_B_SCOPE__
-                MERGE (a)-[r:RELATES_TO]->(b)
-                ON CREATE SET r.type = 'bridged',
-                              r.bridged_from = node_uuid,
-                              r.weight = 1.0,
-                              r.source = 'system-derived',
-                              r.scope = 'PERSISTENT',
-                              r.created_at = datetime(),
-                              r.last_traversed = datetime()
-                RETURN count(*) AS edges_bridged
-            }
-            RETURN sum(coalesce(edges_bridged, 0)) AS total_edges_bridged
-            """.replace(
-                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
-                automatic_lifecycle_protection_cypher("n"),
-            ).replace(
-                "__TENANT_NODE_SCOPE__", tenant_scope_cypher("n"),
-            ).replace(
-                "__TENANT_NEIGHBOR_SCOPE__", tenant_scope_cypher("neighbor"),
-            ).replace(
-                "__TENANT_A_SCOPE__", tenant_scope_cypher("a"),
-            ).replace(
-                "__TENANT_B_SCOPE__", tenant_scope_cypher("b"),
-            ).replace("__SAME_TENANT__", same_tenant_cypher("n", "neighbor"))
+              AND {tenant_scope_cypher("n")}
+              AND {automatic_lifecycle_protection_cypher("n")}
+            {bridge}
+            RETURN sum(coalesce(edges_bridged, 0)) AS total_edges_bridged,
+                   collect(CASE WHEN bridge_skipped THEN node_uuid END) AS skipped_hubs
+            """
         rows = self.neo4j.execute(
             query,
             params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},
         )
-        return int(rows[0].get("total_edges_bridged", 0)) if rows else 0
+        if not rows:
+            return {"edges_bridged": 0, "bridge_skipped_hubs": []}
+        return {
+            "edges_bridged": int(rows[0].get("total_edges_bridged", 0) or 0),
+            "bridge_skipped_hubs": [str(u) for u in (rows[0].get("skipped_hubs") or [])],
+        }
+
+    def estimate_bridges_for_nodes(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """READ-ONLY upper bound on the bridges removing these nodes would create.
+
+        Counts each node's eligible neighbours k with the same filters ``bridge_cypher`` uses.
+        Returns ``{"neighbour_counts": {uuid: k}, "estimated_edges": sum k(k-1)/2 over nodes with
+        k <= MAX_BRIDGE_NEIGHBOURS, "over_cap": [uuid, ...]}``. It is an upper bound: pairs that
+        already have an edge, or that two removed nodes share, are not netted out.
+        """
+        node_uuids = list(dict.fromkeys(node_uuids))
+        if not node_uuids:
+            return {"neighbour_counts": {}, "estimated_edges": 0, "over_cap": []}
+        where = _bridge_neighbour_filter_cypher(
+            "n", "neighbor", "$node_uuids", (tenant_scope_cypher("neighbor"),)
+        )
+        rows = self.neo4j.execute(
+            f"""
+            UNWIND $node_uuids AS node_uuid
+            MATCH (n:Entity {{uuid: node_uuid}})
+            WHERE {tenant_scope_cypher("n")}
+            OPTIONAL MATCH (n)-[:{adjacency_edge_pattern()}]-(neighbor:Entity)
+            WHERE {where}
+            RETURN n.uuid AS uuid, count(DISTINCT neighbor) AS k
+            """,
+            params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},
+        )
+        counts = {str(r["uuid"]): int(r.get("k", 0) or 0) for r in rows}
+        over = sorted(u for u, k in counts.items() if k > MAX_BRIDGE_NEIGHBOURS)
+        estimated = sum(k * (k - 1) // 2 for k in counts.values() if k <= MAX_BRIDGE_NEIGHBOURS)
+        return {"neighbour_counts": counts, "estimated_edges": estimated, "over_cap": over}
 
     def resolve_conflict_group(
         self,

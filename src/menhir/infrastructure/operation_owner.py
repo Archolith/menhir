@@ -49,6 +49,7 @@ SAGA_STATEMENT_COUNTS: dict[str, int] = {
     "LEGACY_ENTITY_UNMERGE": 1,
     "ENTITY_DELETE": 1,
     "SESSION_TTL_DELETE": 1,
+    "DECAY_DELETE": 1,
     "METRIC_WRITE": 2,
 }
 

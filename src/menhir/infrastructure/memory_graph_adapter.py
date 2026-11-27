@@ -1285,8 +1285,12 @@ class MemoryGraphAdapter:
             source_uuids=source_uuids, read_epoch=read_epoch,
         )
 
-    def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
-        return self._consolidation.bridge_and_delete(node_uuid)
+    def bridge_and_delete(self, node_uuid: str, **gate: Any) -> dict[str, Any]:
+        """Delegate; every gate keyword of ``ConsolidationRepository.bridge_and_delete`` is required."""
+        return self._consolidation.bridge_and_delete(node_uuid, **gate)
+
+    def decay_delete_gate_passes(self, node_uuid: str, **gate: Any) -> bool:
+        return self._consolidation.decay_delete_gate_passes(node_uuid, **gate)
 
     def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
         """Return high-level graph counts, optionally scoped to one silo (CF-33)."""
@@ -1641,6 +1645,28 @@ class MemoryGraphAdapter:
         namespace: str | None = None,
     ) -> int:
         return self._consolidation.bridge_edges_for_nodes(
+            node_uuids,
+            namespace=namespace,
+        )
+
+    def bridge_edges_for_nodes_detailed(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.bridge_edges_for_nodes_detailed(
+            node_uuids,
+            namespace=namespace,
+        )
+
+    def estimate_bridges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        return self._consolidation.estimate_bridges_for_nodes(
             node_uuids,
             namespace=namespace,
         )

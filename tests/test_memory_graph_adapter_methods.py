@@ -16,7 +16,9 @@ class _StubNeo4jRepository:
     responses: list[list[dict[str, object]]] = field(default_factory=list)
     calls: list[dict[str, object]] = field(default_factory=list)
 
-    def execute(self, query: str, params: dict[str, object] | None = None) -> list[dict[str, object]]:
+    def execute(
+        self, query: str, params: dict[str, object] | None = None, timeout_s: float | None = None
+    ) -> list[dict[str, object]]:
         self.calls.append({"query": query, "params": params or {}})
         if self.responses:
             return self.responses.pop(0)
@@ -698,14 +700,18 @@ def test_complete_rehydration_returns_true_when_node_updated() -> None:
 
 @pytest.mark.unit
 def test_bridge_and_delete_returns_counts() -> None:
-    neo4j = _StubNeo4jRepository(responses=[[{"edges_bridged": 2, "deleted": 1}]])
+    neo4j = _StubNeo4jRepository(
+        responses=[[{"edges_bridged": 2, "deleted": 1, "bridge_uuids": ["b1", "b2"]}]])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
-    result = adapter.bridge_and_delete("entity-123")
+    result = adapter.bridge_and_delete(
+        "entity-123", min_days=30, max_edge_count=3, max_sharpness=0.1, read_type="SEMANTIC",
+        read_edge_count=0, read_sharpness=0.05, read_recency="2024-01-01T00:00:00Z",
+        requires_target_date=False, read_rel_count=0, read_rel_signatures=[])
 
-    assert result == {"edges_bridged": 2, "deleted": 1}
+    assert result == {"edges_bridged": 2, "deleted": 1, "bridge_uuids": ["b1", "b2"]}
     assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
-    assert "MERGE (a)-[r:RELATES_TO]->(b)" in neo4j.calls[0]["query"]
+    assert "MERGE (a)-[r:RELATES_TO]-(b)" in neo4j.calls[0]["query"]
     assert "DETACH DELETE n" in neo4j.calls[0]["query"]
 
 

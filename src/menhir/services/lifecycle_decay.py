@@ -417,6 +417,9 @@ class LifecycleDecayMixin:
                 [str(row["uuid"]) for row in delete_candidates],
             )
         proposed_deletes: list[tuple[str, str | None, str]] = []
+        delete_refusals: dict[str, str] = {}
+        delete_failures = 0
+        skipped_hubs: list[str] = []
         for candidate in delete_candidates:
             candidate["last_accessed_days_ago"] = days_ago(candidate.get("last_accessed"))
             if self.should_delete(candidate):
@@ -434,9 +437,27 @@ class LifecycleDecayMixin:
                             ),
                         ))
                     continue
-                outcome = await asyncio.to_thread(self.graph_adapter.bridge_and_delete, del_uuid)
-                deleted += int(outcome.get("deleted", 0))
+                # Journaled: snapshot, PREPARE, one re-checking statement, verify, commit.
+                try:
+                    outcome = await asyncio.to_thread(
+                        self._delete_coordinator().delete_decayed_node,
+                        del_uuid,
+                        candidate=candidate,
+                        min_days=_DEFAULT_GONE_DAYS,
+                        max_edge_count=_DEFAULT_GONE_EDGE_COUNT,
+                        max_sharpness=_DEFAULT_GONE_SHARPNESS,
+                    )
+                except Exception:  # noqa: BLE001 -- one node's failure must not end the sweep
+                    delete_failures += 1
+                    logger.exception("decay delete of %s failed; continuing the sweep", del_uuid)
+                    continue
+                deleted += len(outcome.get("deleted") or [])
                 edges_bridged += int(outcome.get("edges_bridged", 0))
+                skipped_hubs.extend(str(u) for u in outcome.get("bridge_skipped_hubs") or [])
+                if not outcome.get("deleted"):
+                    reason = str(outcome.get("reason") or "not_deleted")
+                    delete_refusals[del_uuid] = reason
+                    logger.info("decay delete of %s declined: %s", del_uuid, reason)
                 if outcome.get("deleted"):
                     await asyncio.to_thread(amp.complete_proposals, amp.DELETE_PROPOSAL, [del_uuid])
                     record_lifecycle_action(
@@ -466,6 +487,11 @@ class LifecycleDecayMixin:
             "Decay selection: active_selected=%d compressed_selected=%d sharpness=%d compressed=%d deleted=%d",
             len(active_candidates), len(delete_candidates), sharpness_recalculated, compressed, deleted,
         )
+        if delete_refusals or delete_failures or skipped_hubs:
+            logger.warning(
+                "Decay delete: refused=%d failed=%d bridge_skipped_hubs=%s",
+                len(delete_refusals), delete_failures, skipped_hubs,
+            )
         return DecayResult(
             edge_counts_synced=edge_counts_synced,
             sharpness_recalculated=sharpness_recalculated,

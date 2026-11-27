@@ -24,7 +24,7 @@ from menhir.services.saga_reconcile_outcomes import (
 )
 
 ERASURE_KIND = "EXPLICIT_ERASURE"
-_DELETE_KINDS = frozenset({"ENTITY_DELETE", "SESSION_TTL_DELETE"})
+_DELETE_KINDS = frozenset({"ENTITY_DELETE", "SESSION_TTL_DELETE", "DECAY_DELETE"})
 _LIST_STATES = ("PREPARED", "NEEDS_REVIEW")
 
 

@@ -20,6 +20,7 @@ import pytest
 
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.cypher import memory_recency_cypher
 from menhir.infrastructure.memory_queries import MemoryQueryRepository
 
 
@@ -54,6 +55,32 @@ def _link(repo, src: str, dst: str, **props) -> None:
         "MATCH (a:Entity {uuid:$a}), (b:Entity {uuid:$b}) CREATE (a)-[:RELATES_TO $p]->(b)",
         params={"a": src, "b": dst, "p": props},
     )
+
+
+def _decay_gate(repo, uuid: str) -> dict:
+    """Bounds plus the live node's own values as the decay read, so only the node's state decides."""
+    row = repo.execute(
+        f"""
+        MATCH (n:Entity {{uuid:$u}})
+        OPTIONAL MATCH (n)-[r]-(p)
+        RETURN coalesce(n.type, 'SEMANTIC') AS read_type,
+               coalesce(toInteger(n.edge_count), 0) AS read_edge_count,
+               toFloat(n.sharpness) AS read_sharpness,
+               toString({memory_recency_cypher("n")}) AS read_recency,
+               count(r) AS read_rel_count,
+               collect(CASE WHEN r IS NULL THEN NULL ELSE type(r) + '|'
+                   + CASE WHEN startNode(r) = n THEN 'out' ELSE 'in' END + '|'
+                   + coalesce(p.uuid, p.name, elementId(p)) END) AS sigs
+        """,
+        params={"u": uuid},
+    )[0]
+    return {
+        "min_days": 90.0, "max_edge_count": 3, "max_sharpness": 0.1,
+        "read_type": row["read_type"], "read_edge_count": row["read_edge_count"],
+        "read_sharpness": row["read_sharpness"], "read_recency": row["read_recency"],
+        "requires_target_date": False, "read_rel_count": row["read_rel_count"],
+        "read_rel_signatures": sorted(set(row["sigs"])),
+    }
 
 
 def _bridged_pairs(repo, origin_uuid: str) -> set[frozenset[str]]:
@@ -153,7 +180,9 @@ def test_bridge_and_delete_bridges_only_same_tenant_neighbours(live_repo, tag) -
     node with no source episodes, so harmful_automatic_mutation_allowed_cypher admits it.
     Fails on the pre-fix query (bridged d1-x and d2-x too, reporting 3)."""
     ids = _seed(live_repo, tag, {
-        "n": {"namespace": "default", "scope": "PERSISTENT", "freshness": "COMPRESSED"},
+        "n": {"namespace": "default", "scope": "PERSISTENT", "freshness": "COMPRESSED",
+              "edge_count": 0, "sharpness": 0.05,
+              "last_accessed": "2024-01-01T00:00:00Z", "created_at": "2024-01-01T00:00:00Z"},
         "d1": {"namespace": "default", "scope": "PERSISTENT", "freshness": "ACTIVE"},
         "d2": {"group_id": "", "scope": "PERSISTENT", "freshness": "ACTIVE"},
         "x": {"group_id": "archolith", "scope": "PERSISTENT", "freshness": "ACTIVE"},
@@ -161,9 +190,11 @@ def test_bridge_and_delete_bridges_only_same_tenant_neighbours(live_repo, tag) -
     for k in ("d1", "d2", "x"):
         _link(live_repo, ids["n"], ids[k], weight=0.5)
 
-    result = ConsolidationRepository(live_repo).bridge_and_delete(ids["n"])
+    result = ConsolidationRepository(live_repo).bridge_and_delete(
+        ids["n"], **_decay_gate(live_repo, ids["n"]))
 
-    assert result == {"edges_bridged": 1, "deleted": 1}
+    assert (result["edges_bridged"], result["deleted"]) == (1, 1)
+    assert len(result["bridge_uuids"]) == 1 and "reason" not in result
     assert _bridged_pairs(live_repo, ids["n"]) == {frozenset((ids["d1"], ids["d2"]))}
     assert _edge_count_between(live_repo, ids["d1"], ids["x"]) == 0
     assert _edge_count_between(live_repo, ids["d2"], ids["x"]) == 0
