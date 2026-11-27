@@ -461,6 +461,51 @@ def test_protected_leads_are_capped_by_rank():
     assert _protected_leads(rows, 0) == set()
 
 
+def _slot_verdict(kind, view_uuid=None):
+    from menhir.domain.recall import ScalarAuthorityVerdict
+
+    return ScalarAuthorityVerdict(
+        kind=kind, status="leads", subject_uuid="subj", attribute="coins", scope="s",
+        value_kind="int", unit="u", value=1, valid_at=None, view_uuid=view_uuid,
+        has_foundation=True)
+
+
+def test_candidate_uuid_builders_keep_the_wire_format():
+    from menhir.services.recall_pipeline import _asof_candidate_uuid, _expiry_candidate_uuid
+
+    assert _asof_candidate_uuid("ns", "2026-01-01", "subj", "coins", "s", "int", "u") == (
+        "scalar-asof:ns:2026-01-01:subj:coins:s:int:u")
+    assert _expiry_candidate_uuid("ns", "subj", "coins", "s", "int", "u") == (
+        "scalar-expiry:ns:subj:coins:s:int:u")
+
+
+def test_verdict_candidate_uuid_matches_the_asof_candidate_of_the_slot():
+    from menhir.services.recall_pipeline import _asof_candidate_uuid, _verdict_candidate_uuid
+
+    mine = _asof_candidate_uuid("ns", "2026-01-01", "subj", "coins", "s", "int", "u")
+    other = _asof_candidate_uuid("ns", "2026-01-01", "subj", "coins", "s", "int", "other")
+    assert _verdict_candidate_uuid(_slot_verdict("as_of"), {other, mine, "x"}) == mine
+    assert _verdict_candidate_uuid(_slot_verdict("as_of"), {other, "x"}) is None
+
+
+def test_verdict_candidate_uuid_matches_the_expiry_candidate_of_the_slot():
+    from menhir.services.recall_pipeline import (
+        _asof_candidate_uuid, _expiry_candidate_uuid, _verdict_candidate_uuid)
+
+    mine = _expiry_candidate_uuid("ns", "subj", "coins", "s", "int", "u")
+    asof = _asof_candidate_uuid("ns", "2026-01-01", "subj", "coins", "s", "int", "u")
+    assert _verdict_candidate_uuid(_slot_verdict("expired"), {asof, mine}) == mine
+    assert _verdict_candidate_uuid(_slot_verdict("expired"), {asof}) is None
+    assert _verdict_candidate_uuid(_slot_verdict("current"), {asof, mine}) is None
+
+
+def test_verdict_candidate_uuid_prefers_the_view_uuid():
+    from menhir.services.recall_pipeline import _expiry_candidate_uuid, _verdict_candidate_uuid
+
+    mine = _expiry_candidate_uuid("ns", "subj", "coins", "s", "int", "u")
+    assert _verdict_candidate_uuid(_slot_verdict("expired", view_uuid="view-1"), {mine}) == "view-1"
+
+
 def test_cut_keeping_is_a_plain_cut_when_nothing_is_past_it():
     from types import SimpleNamespace
 
