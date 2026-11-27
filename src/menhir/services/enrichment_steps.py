@@ -76,7 +76,7 @@ from menhir.services.enrichment_failures import (
     persisted_failure_text,
 )
 from menhir.services.ingest_gate import IngestGate
-from menhir.services.ingest_limits import MAX_DIFF_CHARS
+from menhir.services.ingest_limits import CHARS_PER_ESTIMATED_TOKEN, MAX_DIFF_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +178,14 @@ def _executor_kw(executor: Any) -> dict[str, Any]:
     return {} if executor is None else {"executor": executor}
 
 
-def compose_episode_body(claimed: dict[str, object]) -> str:
-    """Build the episode body sent to Graphiti, appending any attached diff."""
+def compose_episode_body(claimed: dict[str, object], max_estimated_tokens: int | None = None) -> str:
+    """Build the episode body sent to Graphiti, appending any attached diff.
+
+    With ``max_estimated_tokens`` the diff is truncated (or dropped) so the composed body fits the
+    preflight budget, so an episode intake accepted is never parked only because of its diff.
+    Production callers must pass the budget; test_every_production_compose_call_passes_the_preflight_budget
+    enforces it.
+    """
 
     content = str(claimed.get("content") or "")
     diff = claimed.get("diff")
@@ -188,9 +194,20 @@ def compose_episode_body(claimed: dict[str, object]) -> str:
     diff_text = str(diff).strip()
     if not diff_text:
         return prepare_memory_text(content, policy=non_refusing_policy())
-    if len(diff_text) > MAX_DIFF_CHARS:
-        diff_text = diff_text[:MAX_DIFF_CHARS] + "\n... [diff truncated]"
-    return prepare_memory_text(f"{content}\n\n--- git diff ---\n{diff_text}", policy=non_refusing_policy())
+    header = f"{content}\n\n--- git diff ---\n"
+    marker = "\n... [diff truncated]"
+    keep = MAX_DIFF_CHARS
+    if max_estimated_tokens is not None and max_estimated_tokens > 0:
+        keep = min(keep, CHARS_PER_ESTIMATED_TOKEN * max_estimated_tokens - len(header) - len(marker))
+        if keep <= 0:
+            return prepare_memory_text(content, policy=non_refusing_policy())
+    if len(diff_text) > keep:
+        diff_text = diff_text[:keep] + marker
+    return prepare_memory_text(f"{header}{diff_text}", policy=non_refusing_policy())
+
+
+def _compose_ctx_episode_body(ctx: EnrichmentContext) -> str:
+    return compose_episode_body(ctx.claimed, ctx.graphiti_episode_max_estimated_tokens)
 
 
 def coerce_reference_time(value: object | None) -> datetime:
@@ -229,7 +246,7 @@ def estimate_episode_tokens(episode_body: str) -> int:
     rendered = str(episode_body or "")
     if not rendered:
         return 0
-    return max(1, (len(rendered) + 3) // 4)
+    return max(1, (len(rendered) + CHARS_PER_ESTIMATED_TOKEN - 1) // CHARS_PER_ESTIMATED_TOKEN)
 
 
 def build_episode_preflight_rejection(
@@ -339,7 +356,7 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
     """Reject oversized episodes before Graphiti. Returns True if rejected."""
 
     preflight_rejection = build_episode_preflight_rejection(
-        compose_episode_body(ctx.claimed),
+        _compose_ctx_episode_body(ctx),
         ctx.graphiti_episode_max_estimated_tokens,
     )
     if preflight_rejection is not None:
@@ -613,7 +630,7 @@ async def run_graphiti_extraction(
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
-                episode_body=compose_episode_body(ctx.claimed),
+                episode_body=_compose_ctx_episode_body(ctx),
                 source_description=source_description,
                 reference_time=reference_time,
                 episode_uuid=ctx.episode_uuid,
@@ -1303,12 +1320,12 @@ async def stamp_and_finalize(
     # Best-effort LLM repair of synthetic edge facts
     _fence_check(ctx)
     await _repair_synthetic_edge_facts(
-        ctx, extracted_edges, compose_episode_body(ctx.claimed),
+        ctx, extracted_edges, _compose_ctx_episode_body(ctx),
     )
     # Best-effort structural anchoring
     _fence_check(ctx)
     _anchor_to_structural_entities(
-        ctx, [node.uuid for node in extracted_nodes], compose_episode_body(ctx.claimed),
+        ctx, [node.uuid for node in extracted_nodes], _compose_ctx_episode_body(ctx),
     )
     # Best-effort semantic correlation check (Step 8)
     # After nodes are committed, check if they correlate with existing entities.
@@ -1323,7 +1340,7 @@ async def stamp_and_finalize(
             graphiti_client=ctx.graphiti_client,
             llm=ctx.llm,  # Part 2: Pass LLM for judge-gated merge
         )
-        episode_body = compose_episode_body(ctx.claimed)
+        episode_body = _compose_ctx_episode_body(ctx)
         # Part 1: namespace-scoped correlation search (deterministic veto gate)
         namespace = str(ctx.claimed.get("namespace") or "default")
         for node in extracted_nodes:
@@ -1382,7 +1399,7 @@ async def stamp_and_finalize(
         _fence_check(ctx)
         entity_uuids = [node.uuid for node in extracted_nodes]
         freshness_map = ctx.graph_adapter.fetch_node_freshness(entity_uuids)
-        episode_content = compose_episode_body(ctx.claimed)
+        episode_content = _compose_ctx_episode_body(ctx)
         stamped_ok = ctx.graph_adapter.update_episode_processing(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
