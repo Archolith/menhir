@@ -47,6 +47,9 @@ class ErasureSubjectError(Exception):
     """Raised when a subject_type is not one of the recognised SUBJECT_TYPES."""
 
 
+_LOOKUP_CHUNK = 500
+
+
 def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
     """Of ``candidates``, which node uuids a live (unpurged) erasure covers.
 
@@ -71,35 +74,38 @@ def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
             # missing table as fail-closed suppressed EVERY content read on any deployment
             # where erasure had never run.
             found: set[str] = set()
-            placeholders = ",".join("?" for _ in wanted)
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erasure_subjects'"
             ).fetchone()
-            if exists is not None:
-                found.update(
-                    str(r[0])
-                    for r in conn.execute(
-                        "SELECT DISTINCT subject_value FROM erasure_subjects "
-                        # CF-335: a flagged live item's node-keyed rows quote the
-                        # erased text until its column purge finishes.
-                        "WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID', 'FLAGGED_UUID') "
-                        f"AND purged_at IS NULL AND subject_value IN ({placeholders})",
-                        wanted,
-                    ).fetchall()
-                )
-            # The denylist outlives purged_at: a purged subject stays suppressed forever.
             denylist = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erased_subject_denylist'"
             ).fetchone()
-            if denylist is not None:
-                found.update(
-                    str(r[0])
-                    for r in conn.execute(
-                        "SELECT subject_value FROM erased_subject_denylist "
-                        f"WHERE subject_value IN ({placeholders})",
-                        wanted,
-                    ).fetchall()
-                )
+            # Chunked so a large candidate set stays under SQLite's bound-variable limit.
+            for start in range(0, len(wanted), _LOOKUP_CHUNK):
+                chunk = wanted[start : start + _LOOKUP_CHUNK]
+                placeholders = ",".join("?" for _ in chunk)
+                if exists is not None:
+                    found.update(
+                        str(r[0])
+                        for r in conn.execute(
+                            "SELECT DISTINCT subject_value FROM erasure_subjects "
+                            # CF-335: a flagged live item's node-keyed rows quote the
+                            # erased text until its column purge finishes.
+                            "WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID', 'FLAGGED_UUID') "
+                            f"AND purged_at IS NULL AND subject_value IN ({placeholders})",
+                            chunk,
+                        ).fetchall()
+                    )
+                # The denylist outlives purged_at: a purged subject stays suppressed forever.
+                if denylist is not None:
+                    found.update(
+                        str(r[0])
+                        for r in conn.execute(
+                            "SELECT subject_value FROM erased_subject_denylist "
+                            f"WHERE subject_value IN ({placeholders})",
+                            chunk,
+                        ).fetchall()
+                    )
         return frozenset(found)
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning(

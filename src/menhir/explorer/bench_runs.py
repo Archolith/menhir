@@ -47,6 +47,20 @@ def _safe_int(value: object, default: int = 0) -> int:
     except (ValueError, TypeError, OverflowError):
         return default
 
+def _safe_score(raw_score: object, correct: bool) -> float:
+    """Coerce a checkpoint score to a finite float; fall back to *correct*."""
+    import math
+    fallback = 1.0 if correct else 0.0
+    if raw_score is None:
+        return fallback
+    try:
+        value = float(raw_score)  # type: ignore[arg-type]
+    except (ValueError, TypeError, OverflowError):
+        logger.debug("Malformed checkpoint score %r; using correct flag", raw_score)
+        return fallback
+    return value if math.isfinite(value) else fallback
+
+
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -284,7 +298,7 @@ def _parse_checkpoint_record(rec: dict[str, Any]) -> dict[str, Any] | None:
         task_id = str(result.get("task_id") or rec.get("task_id") or "")
         correct = bool(result.get("correct"))
         raw_score = result.get("score")
-        score = float(raw_score) if raw_score is not None else (1.0 if correct else 0.0)
+        score = _safe_score(raw_score, correct)
         return {
             "arm": str(rec.get("arm", "")),
             "task_id": task_id,
@@ -299,7 +313,7 @@ def _parse_checkpoint_record(rec: dict[str, Any]) -> dict[str, Any] | None:
         }
     correct = bool(rec.get("correct"))
     raw_score = rec.get("score")
-    score = float(raw_score) if raw_score is not None else (1.0 if correct else 0.0)
+    score = _safe_score(raw_score, correct)
     return {
         "arm": str(rec.get("arm", "")),
         "task_id": str(rec.get("task_id", "")),
@@ -864,6 +878,10 @@ class BenchRunCatalog:
         if not self._run_dirs and self._root is not None:
             self._run_dirs = _discover_run_dirs(self._root)
 
+    def _rediscover(self) -> None:
+        if self._root is not None:
+            self._run_dirs = _discover_run_dirs(self._root)
+
     def _run_dir(self, run_id: str) -> Path | None:
         if self._root is None:
             return None
@@ -872,13 +890,16 @@ class BenchRunCatalog:
         self._ensure_discovered()
         rel = self._run_dirs.get(run_id)
         if rel is None:
+            self._rediscover()
+            rel = self._run_dirs.get(run_id)
+        if rel is None:
             return None
         return _safe_resolve(self._root, *rel.parts)
 
     def list_runs(self) -> list[BenchRun]:
         if self._root is None:
             return []
-        self._ensure_discovered()
+        self._rediscover()
         entries: list[tuple[float, str, Path]] = []
         for rid, rel in self._run_dirs.items():
             run_dir = _safe_resolve(self._root, *rel.parts)

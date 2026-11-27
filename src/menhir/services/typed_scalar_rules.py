@@ -1351,7 +1351,7 @@ def _scalar_source_mismatch(
             _SOURCE_ASPIRATION_RE.search(clause) and not _STATED_RECORD_RE.search(clause)
         )
         is_negated = bool(_SOURCE_NEGATION_RE.search(clause))
-        if value_kind in ("boolean", "status") and subject_text.strip().lower() == "user":
+        if value_kind in ("boolean", "status") and _is_self_reference(subject_text):
             sentence = _sentence_before(leading)
             if _THIRD_PARTY_CLAUSE_RE.search(sentence) or (
                 value_kind == "boolean" and not _FIRST_PERSON_RE.search(sentence)
