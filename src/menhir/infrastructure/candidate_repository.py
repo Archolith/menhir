@@ -107,9 +107,9 @@ class CandidateRepository:
         was not merely untidy: one silo's activity could push another silo's candidate up the
         evidence ladder toward approval.
 
-        It is added to the key only when supplied, so existing nodes (which carry no
-        `namespace` property) still match their own key and are not duplicated. There is no
-        migration here and none is needed.
+        It is always in the key (unspecified resolves to the stamped default silo). An absent
+        key would match every silo's node. Pre-stamping nodes with no `namespace` property no
+        longer match; there is no migration here.
 
         Returns:
             Dict with uuid, scope, cluster_id, evidence_strength, distinct_sessions,
@@ -125,11 +125,10 @@ class CandidateRepository:
         capped_notes = _cap_notes(notes)
 
         ns = str(namespace).strip() if namespace is not None else ""
-        merge_key = "{source: $source, candidate_cluster_id: $cluster_id}"
-        if ns:
-            merge_key = (
-                "{source: $source, candidate_cluster_id: $cluster_id, namespace: $namespace}"
-            )
+        # Always keyed on the stamped namespace: an absent key would match every silo's node.
+        merge_key = (
+            "{source: $source, candidate_cluster_id: $cluster_id, namespace: $stamped_namespace}"
+        )
         rows = self.neo4j.execute(
             f"""
             MERGE (n:Entity {merge_key})

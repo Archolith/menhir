@@ -338,7 +338,14 @@ class OAuthTokenVerifier:
             if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
                 self._log_jwks_failure("MalformedJWKS", "response has no keys list", started, force_refresh)
                 raise OAuthAuthenticationError("server_error", "OAuth JWKS response is malformed")
-            self._jwks = jose_provider.parse_jwks(payload)
+            try:
+                parsed = jose_provider.parse_jwks(payload)
+            except jose_provider.JoseError as exc:
+                self._log_jwks_failure("UnusableJWKS", str(exc), started, force_refresh)
+                raise OAuthAuthenticationError(
+                    "server_error", "OAuth JWKS has no usable keys"
+                ) from exc
+            self._jwks = parsed
             self._jwks_expires_at = time.monotonic() + max(1, self.config.jwks_cache_ttl_s)
             return self._jwks
 
