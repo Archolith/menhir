@@ -33,7 +33,7 @@ def test_more_sessions_than_slots_keeps_the_best_sessions_in_cosine_order() -> N
     assert _ids(spread_by_session(rows, 4)) == ["s0", "s1", "s2", "s3"]
 
 
-def test_exact_content_repeats_are_dropped_keeping_the_first() -> None:
+def test_normalized_content_repeats_are_dropped_keeping_the_first() -> None:
     rows = [_row("a1", "A", "I ride   my bike daily."), _row("b1", "B", "i ride my bike DAILY."),
             _row("b2", "B", "Something else")]
     assert _ids(spread_by_session(rows, 3)) == ["a1", "b2"]
