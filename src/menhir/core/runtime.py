@@ -13,6 +13,7 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
+from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure.telemetry import (
     enable_llm_usage_telemetry,
     enable_operator_warning_persistence,
@@ -689,6 +690,7 @@ async def _initialize_services(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
     # Before anything else. A process that already refused write admission may not rebuild the
     # services that admit writers -- not on a retry, not through a second entry point, not after a
@@ -701,6 +703,8 @@ async def _initialize_services(
         )
 
     settings = settings or MemorySettings.from_env()
+    if extensions is not None and (candidate_readonly or settings.benchmark_mode):
+        raise ValueError("extensions require a writable maintenance runtime")
     if not candidate_readonly:
         enable_llm_usage_telemetry()
         enable_operator_warning_persistence()
@@ -728,6 +732,8 @@ async def _initialize_services(
             details={"failures": annotated_failures, "startup_mode": capabilities.startup_mode},
         )
         raise RuntimeError(" | ".join(annotated_failures))
+    if extensions is not None and not capabilities.enrichment_ready:
+        raise RuntimeError("extensions require maintenance scheduler startup")
     if capabilities.failures:
         record_lifecycle_event(
             component="runtime_init",
@@ -749,6 +755,7 @@ async def _initialize_services(
             and not settings.benchmark_mode
             and capabilities.enrichment_ready
         ),
+        **({"extensions": extensions} if extensions is not None else {}),
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
     # No model dir set: fetch the pinned rerank model in the background; recall keeps the RRF
@@ -863,20 +870,30 @@ async def _get_services(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> tuple[object, object]:
-    if _state.built is not None and _state.session is not None:
+    if extensions is None and _state.built is not None and _state.session is not None:
         return _state.built, _state.session
 
     async with _init_lock:
-        if _state.built is not None and _state.session is not None:
-            return _state.built, _state.session
+        has_runtime = _state.built is not None and _state.session is not None
         init_task = _state.init_task
-        if init_task is None or not isinstance(init_task, asyncio.Task) or init_task.done():
+        initializing = isinstance(init_task, asyncio.Task) and not init_task.done()
+        if (has_runtime or initializing) and extensions is not None and extensions is not _state.extensions:
+            raise ValueError("the process already has a different runtime extension registry")
+        if has_runtime and not initializing:
+            return _state.built, _state.session
+        if not initializing:
             init_task = asyncio.create_task(
-                _initialize_services(settings, candidate_readonly=candidate_readonly)
+                _initialize_services(
+                    settings, candidate_readonly=candidate_readonly,
+                    **({"extensions": extensions} if extensions is not None else {}),
+                )
             )
             _state.init_task = init_task
+            _state.extensions = extensions
 
+    assert isinstance(init_task, asyncio.Task)
     try:
         await asyncio.shield(init_task)
     except Exception:
@@ -991,9 +1008,11 @@ async def start_runtime(
     settings: MemorySettings | None = None,
     *,
     candidate_readonly: bool = False,
+    extensions: RuntimeExtensions | None = None,
 ) -> RuntimeContext:
     built, session = await _get_services(
-        settings, candidate_readonly=candidate_readonly
+        settings, candidate_readonly=candidate_readonly,
+        **({"extensions": extensions} if extensions is not None else {}),
     )
     return RuntimeContext(
         built=built,

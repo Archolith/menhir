@@ -331,6 +331,25 @@ class _ProjectionLifecycleWritesMixin:
 
         return self._neo4j.execute_write(work)
 
+    def dirty_target_in_transaction(
+        self, tx: Neo4jTransaction, definition: ProjectionDefinition, target: ProjectionTarget, *, reason: str,
+    ) -> ProjectionWorkToken:
+        """Queue a target in the same transaction as the host's input change.
+
+        Call this before changing input rows, so producers and materializers
+        acquire the definition lock in the same order.
+        """
+        if not isinstance(definition, ProjectionDefinition):
+            raise TypeError("definition must be a ProjectionDefinition")
+        reason = _require_nonblank("reason", reason)
+        targets = _unique_targets((target,))
+        self._require_current_definition(tx, definition_id=definition.definition_id, definition_version=definition.version)
+        (token,) = self._dirty_targets_tx(
+            tx, definition_id=definition.definition_id, definition_version=definition.version,
+            targets=targets, target_present=True, reason=reason,
+        )
+        return token
+
     def migrate_retained_work(
         self, definition: ProjectionDefinition, token: ProjectionWorkToken, *, reason: str,
     ) -> ProjectionWorkToken:

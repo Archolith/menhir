@@ -16,6 +16,7 @@ from menhir.services import MaintenanceScheduler
 if TYPE_CHECKING:
     from menhir.core.bootstrap import BuildArtifacts
     from menhir.domain.session import MemorySession
+    from menhir.extensions import RuntimeExtensions
 
 
 @dataclass
@@ -32,6 +33,7 @@ class RuntimeState:
     flagged_bootstrap_reads: dict[str, str] = field(default_factory=dict)
     _flagged_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     capabilities: RuntimeCapabilities | None = None
+    extensions: RuntimeExtensions | None = None
 
     def clear_all(self) -> None:
         self.built = None
@@ -44,6 +46,7 @@ class RuntimeState:
         with self._flagged_lock:
             self.flagged_bootstrap_reads = {}
         self.capabilities = None
+        self.extensions = None
 
     def __getitem__(self, key: str) -> object:
         if not hasattr(self, key):

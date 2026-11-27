@@ -4,6 +4,12 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-26 - Register a project decision timeline through HTTP startup (#725)
+
+- Validate host-supplied projection extensions before constructing the server. The HTTP runtime shares the registered View kinds with its scheduler materializers.
+- Add a synthetic decision timeline whose source changes and projection work are atomic. Erasing a source removes its historical Views before the scheduler rebuilds the surviving timeline.
+- Let the shared View writer run inside an existing Neo4j transaction while preserving statement timeouts for standalone writes.
+
 ## 2026-11-26 - Resolve retained projection work explicitly (#725)
 
 - Let an extension requeue an exact retained generation under the current version or queue its removal. The worker still materializes and certifies the new generation.

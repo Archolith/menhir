@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.namespace import namespace_group_id_error
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
@@ -54,6 +55,15 @@ from menhir.infrastructure.view_models import (
 )
 
 class ViewQueryRepositoryMixin:
+    def fetch_current(
+        self, kind_name: str, *, subject: str, namespace: str, **key_fields: Any,
+    ) -> dict[str, Any] | None:
+        """Inspect the current View for a registered kind and an explicit namespace."""
+        if not isinstance(namespace, str) or not namespace.strip() or namespace_group_id_error(namespace):
+            raise ValueError("fetch_current requires a valid explicit namespace")
+        kind = self.KINDS[kind_name]
+        return self._fetch_current(kind_name, self._key(namespace, subject, kind.key_discriminator(key_fields)))
+
     def fetch_counter(self, *, subject: str, counter: str, namespace: str | None = None
                       ) -> dict[str, Any] | None:
         return self._fetch_current("counter", self._key(namespace, subject, counter))

@@ -10,6 +10,7 @@ from menhir.config import MemorySettings
 from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
+from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -151,8 +152,13 @@ def build_memory_services(
     read_only: bool = False,
     require_scheduler_lease: bool = False,
     projection_registrations: tuple[ProjectionWorkerRegistration, ...] = (),
+    extensions: RuntimeExtensions | None = None,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
+    if extensions is not None:
+        if projection_registrations:
+            raise ValueError("supply runtime extensions or direct worker registrations")
+        projection_registrations = extensions.projection_workers()
     if read_only and projection_registrations:
         raise ValueError("projection workers require a writable runtime")
     settings = settings or MemorySettings.from_env()
@@ -196,6 +202,7 @@ def build_memory_services(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
         ),
+        **({"view_kinds": extensions.view_kinds} if extensions is not None else {}),
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(

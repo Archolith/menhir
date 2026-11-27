@@ -14,9 +14,11 @@ from menhir.api.mcp_remote import (
 )
 from menhir.api.oauth import OAuthTokenVerifier
 from menhir.config import MemorySettings
+from menhir.extensions import ProjectionExtension, RuntimeExtensions
 from menhir.infrastructure.logging_config import build_logging_config, configure_logging
 
 from .server_support import (
+    BACKENDLESS_SCOPES,
     build_runtime_lifespan,
     build_server_prereqs,
     configure_cors,
@@ -28,10 +30,17 @@ from .server_support import (
 logger = logging.getLogger(__name__)
 
 
-def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
+def create_app(
+    *, settings: MemorySettings | None = None, extensions: tuple[ProjectionExtension, ...] = (),
+) -> FastAPI:
     """Build the combined FastAPI application."""
+    registry = RuntimeExtensions(extensions) if extensions else None
     settings = settings or MemorySettings.from_env()
     startup_scope = settings.startup_scope
+    if registry is not None and (
+        startup_scope in BACKENDLESS_SCOPES or settings.benchmark_mode or settings.runtime_mode == "candidate-readonly"
+    ):
+        raise ValueError("extensions require a writable maintenance runtime")
     production_surface = startup_scope == "production"
     mcp_http_app, mcp_http_instance = create_mcp_streamable_http_app()
     prereqs = build_server_prereqs(
@@ -52,6 +61,7 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
             settings=settings,
             startup_scope=startup_scope,
             mcp_http_instance=mcp_http_instance,
+            extensions=registry,
         ),
     )
     app.state.settings = settings

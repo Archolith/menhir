@@ -120,7 +120,9 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 
 **Exit:** a separately installed extension registers **and executes** without patching Menhir; all S1–S7 safety invariants from #725 pass.
 
-The internal assembly seam accepts host-supplied definition/materializer pairs and binds their workers to the runtime's existing graph. Standard stdio and HTTP startup supply no pairs. Product startup registration, View-kind integration and queue producers are still open. A disposable Neo4j test confirmed that a scheduler restart picks up work left pending by a host without the matching registration.
+An HTTP host can pass explicit extensions to `create_app(extensions=...)`. Registration validates the batch before creating server resources, and the HTTP runtime uses the resolved View kinds for its adapter and transaction-scoped materializers. Default HTTP and stdio startup supply no extensions. Standalone stdio, CLI and Explorer registration and the cross-constructor registry proof remain open.
+
+The [decision timeline example](../../examples/decision_timeline.py) accepts synthetic dated decisions with source references. Its explicit producer queues a rebuild in the same transaction as a source update. Source erasure removes the selected decision and the project's historical timeline Views in that namespace, then queues a rebuild. The live test boots the HTTP runtime, checks correction and erasure in one namespace without changing another, and verifies that work queued while stopped drains after restart. This example uses an operator-only View and an extension-owned source-erasure operation. Menhir-wide namespace erasure for arbitrary extension data and the public extension conformance kit remain open.
 
 Each scheduling step runs under the existing maintenance lease. Neo4j checks revocation before starting each statement or transaction attempt, including retries. An already-dispatched transaction can finish under the work-generation fence after lease loss. Jobs still run serially through the shared scheduler, so a slow materializer can delay the next lane.
 
