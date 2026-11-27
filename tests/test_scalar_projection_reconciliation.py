@@ -2,21 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import multiprocessing
 import os
 import threading
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from examples.decision_timeline import EXTENSION, Decision, DecisionTimeline
+from menhir import extensions as extension_module
 from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessCertificate,
     ProjectionWorkAlreadyCompletedError,
     ProjectionWorkToken,
+    StaleProjectionDefinitionError,
 )
+from menhir.extensions import RuntimeExtensions
 from menhir.infrastructure.neo4j import Neo4jRepository, SagaOwnershipRevoked
+from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
 from menhir.services.maintenance_scheduler import MaintenanceScheduler
 from menhir.services.projection_reconciliation import ProjectionReconciler
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION, scalar_projection_target
@@ -404,8 +411,6 @@ async def test_projection_lease_is_independent_of_older_host_and_exclusive_for_t
 @pytest.mark.online
 @pytest.mark.asyncio
 async def test_projection_scheduler_restart_recovers_registered_work(tmp_path: Path, test_neo4j_repo) -> None:
-    from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
-
     queue = ProjectionLifecycleRepository(test_neo4j_repo)
     queue.activate()
     first = replace(SCALAR_STATE_PROJECTION, definition_id="extension.first")
@@ -451,3 +456,113 @@ async def test_projection_scheduler_restart_recovers_registered_work(tmp_path: P
         {"definition_id": first.definition_id, "namespace": "alpha"},
         {"definition_id": second.definition_id, "namespace": "alpha"},
     ]
+
+
+def _hold_previous_projection_batch(pipe, graph_options: dict[str, str], namespaces: tuple[str, ...]) -> None:
+    graph = Neo4jRepository(**graph_options)
+    try:
+        queue = ProjectionLifecycleRepository(graph)
+        registry = RuntimeExtensions((EXTENSION,))
+        timeline = DecisionTimeline(graph, registry.view_repository(graph))
+        timeline.initialize()
+        (registration,) = registry.projection_workers()
+        seed = ProjectionReconciler(queue, registration.definition, materializer=registration.materializer)
+        for decision_text in ("Before rollout", "Pending revision"):
+            for namespace in namespaces:
+                timeline.put(
+                    namespace=namespace, project="menhir",
+                    decision=Decision("one", date(2026, 11, 27), decision_text, "#725"),
+                )
+            if decision_text == "Before rollout":
+                assert len(seed.drain_pending(operation_id="before-rollout")) == len(namespaces)
+
+        def must_not_materialize(_tx, _token):
+            raise AssertionError("a stale worker reached the materializer")
+
+        worker = ProjectionReconciler(queue, registration.definition, materializer=must_not_materialize)
+        batch = worker.pending_tokens(limit=10)
+        pipe.send(batch)
+        assert pipe.poll(30) and pipe.recv() == "published"
+        for token in batch:
+            with pytest.raises(StaleProjectionDefinitionError):
+                worker.commit_tokens((token,), operation_id="previous-host")
+        pipe.send(worker.pending_tokens(limit=10))
+        assert pipe.poll(30) and pipe.recv() == "stop"
+    finally:
+        graph.close()
+        pipe.close()
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
+async def test_projection_rollout_preserves_pending_work_across_upgrade_and_removal(
+    tmp_path: Path, test_neo4j_repo: Neo4jRepository, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(extension_module, "_process_registry", extension_module._UNBOUND)
+    graph = test_neo4j_repo
+    queue = ProjectionLifecycleRepository(graph)
+    new_definition = replace(EXTENSION.definition, version=2)
+    v2 = RuntimeExtensions((replace(EXTENSION, definition=new_definition),))
+    timeline = DecisionTimeline(graph, v2.view_repository(graph))
+    namespaces = ("rollout-migrate", "rollout-retire", "rollout-hold")
+
+    ctx = multiprocessing.get_context("spawn")
+    parent, child = ctx.Pipe()
+    graph_options = {name: getattr(graph, name) for name in ("uri", "database", "user", "password")}
+    old_host = ctx.Process(target=_hold_previous_projection_batch, args=(child, graph_options, namespaces), daemon=True)
+    old_host.start()
+    child.close()
+    uninstalled = _projection_scheduler(tmp_path)
+    upgraded = None
+    try:
+        assert await asyncio.to_thread(parent.poll, 25), "old worker did not read its queue"
+        pending = {token.target.namespace: token for token in parent.recv()}
+        assert set(pending) == set(namespaces)
+        assert set(queue.pending()) == set(pending.values())
+        await asyncio.to_thread(queue.publish_definition, new_definition, semantic_hash="example-project-decisions-v2")
+        parent.send("published")
+        assert await asyncio.to_thread(parent.poll, 15), "old worker did not report its stale commits"
+        assert parent.recv() == ()
+
+        # A host with the extension removed owns general maintenance.
+        assert await uninstalled.start()
+        assert not uninstalled.status_snapshot()["jobs"]
+        assert set(queue.pending()) == set(pending.values())
+        before = {namespace: timeline.current(namespace=namespace, project="menhir") for namespace in namespaces}
+        assert all(view and view["entries"][0]["decision"] == "Before rollout" for view in before.values())
+
+        await asyncio.to_thread(
+            queue.migrate_retained_work, new_definition, pending["rollout-migrate"], reason="upgrade",
+        )
+        await asyncio.to_thread(
+            queue.retire_retained_work, new_definition, pending["rollout-retire"], reason="retire obsolete projection",
+        )
+        (second,) = v2.projection_workers()
+        upgraded = _projection_scheduler(
+            tmp_path, ProjectionReconciler(queue, second.definition, materializer=second.materializer),
+        )
+        assert await upgraded.start()
+        assert upgraded.status_snapshot()["maintenance_running"] is False
+        status = await _wait_for_job(upgraded, new_definition.definition_id)
+        assert status["last_result"] == {"applied": 2, "superseded": 0}
+        await upgraded.stop()
+        parent.send("stop")
+        await asyncio.to_thread(old_host.join, 10)
+        assert old_host.exitcode == 0
+
+        # With both extension versions stopped, only the uninstalled host remains.
+        assert uninstalled.is_running()
+        assert queue.pending() == (pending["rollout-hold"],)
+        migrated = timeline.current(namespace="rollout-migrate", project="menhir")
+        assert migrated and migrated["entries"][0]["decision"] == "Pending revision"
+        assert timeline.current(namespace="rollout-retire", project="menhir") is None
+        assert timeline.current(namespace="rollout-hold", project="menhir") == before["rollout-hold"]
+    finally:
+        parent.close()
+        if old_host.is_alive():
+            old_host.terminate()
+            await asyncio.to_thread(old_host.join, 10)
+        old_host.close()
+        if upgraded is not None:
+            await upgraded.stop()
+        await uninstalled.stop()

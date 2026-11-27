@@ -116,7 +116,8 @@ The focused offline baseline passed 62 tests and skipped 11 graph-backed cases. 
 - [x] Centralize product graph adapter and View repository construction. HTTP, hook and Explorer can share a validated registry. A source-level test guards the construction paths.
 - [x] Add one [maintenance lane](../../src/menhir/services/maintenance_scheduler.py) per explicitly registered projection definition and version. Each lane has a separate lease and loop, runs every 30 seconds, and takes up to 100 items per batch. An empty registration set adds no jobs.
 - [x] Test empty registration, two definitions in one scheduler, a restart with newly registered work, and lease takeover during a batch.
-- [ ] Test extension upgrades and removal across concurrent hosts and verify tenant-scope isolation and erasure for external materializers.
+- [x] Test a worker holding an old batch in a separate process across version publication. Verify that a host without the extension can hold the general maintenance lease while the new lane applies explicit migration and retirement, and that remaining work and Views survive when the extension workers stop.
+- [ ] Verify tenant-scope isolation and erasure for separately installed external materializers.
 
 **Exit:** a separately installed extension registers **and executes** without patching Menhir; all S1–S7 safety invariants from #725 pass.
 
@@ -128,7 +129,7 @@ The [decision timeline example](../../examples/decision_timeline.py) accepts syn
 
 Projection leases are separate from the general maintenance lease and include the installed definition version. A backend holding the general lock cannot block an installed projection on another backend sharing the lease store. Scheduler status and pause or resume results include projection lanes, with general maintenance reported separately. Each lane starts one transaction at a time with a 30-second Neo4j transaction timeout per attempt. Neo4j checks revocation before statements, transaction attempts, and retries, and an already-dispatched transaction can finish under the work-generation fence after lease loss. An orderly stop of an owned lane waits for its in-flight callback, and runtime shutdown stops the scheduler before closing graph clients. Deployments with separate lease stores still rely on the durable Neo4j generation fence.
 
-Version publication retains the exact outgoing pending generation and requeues settled targets. Versionless diagnostic reads can see valid retained work, and freshness reports it as stale with `version_review_required`. The internal lifecycle repository can migrate that generation in place, preserving target identity and membership, or queue removal of that target. Decisions require the shared-current definition and an exact eligible retained token. A regular scoped worker finishes the new generation. Host-facing upgrade orchestration and mixed-version rollout verification remain open.
+Version publication retains the exact outgoing pending generation and requeues settled targets. Versionless diagnostic reads can see valid retained work, and freshness reports it as stale with `version_review_required`. The internal lifecycle repository can migrate that generation in place, preserving target identity and membership, or queue removal of that target. Decisions require the shared-current definition and an exact eligible retained token. A regular scoped worker finishes the new generation. The disposable Neo4j test covers two versions of the example sharing a queue. Host-facing upgrade orchestration remains open.
 
 ### A4 — Derived provenance, dependency invalidation and erasure (P0 correctness prerequisite)
 **Owner:** #576 M2–M4.

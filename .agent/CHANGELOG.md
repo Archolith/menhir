@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-27 - Verify projection extension upgrades and removal (#725)
+
+- Teach the fence-lock writer census to follow typed repository factories, including the admission audit View writer.
+- Exercise an old worker holding a batch during a definition upgrade. Verify that a host without the extension preserves pending work and Views, and that the upgraded worker applies explicit migration and retirement while retaining undecided work.
+
 ## 2026-11-27 - Coordinate extension runtime startup and shutdown (#725)
 
 - Bind the HTTP runtime extension registry after preflight succeeds, allowing failed startup to be retried with an explicit registry.
