@@ -32,6 +32,11 @@ def _label(value: object) -> str | None:
     return None if value is None else str(getattr(value, "value", value))
 
 
+# One timestamp for every row: per-call datetime.now() gives later rows a recency edge that can
+# decide a tied upstream score.
+_ROW_TIME = datetime.now(timezone.utc)
+
+
 def _row(uuid: str, name: str, content: str, **extra: object) -> dict[str, object]:
     base: dict[str, object] = {
         "uuid": uuid,
@@ -40,8 +45,8 @@ def _row(uuid: str, name: str, content: str, **extra: object) -> dict[str, objec
         "type": "SEMANTIC",
         "content": content,
         "summary": content,
-        "last_accessed": datetime.now(timezone.utc),
-        "created_at": datetime.now(timezone.utc),
+        "last_accessed": _ROW_TIME,
+        "created_at": _ROW_TIME,
         "edge_count": 1,
         "sharpness": 0.2,
         "freshness": "ACTIVE",
