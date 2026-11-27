@@ -1,3 +1,34 @@
+## 2026-11-27 - Wave 1 fixes (#1041-#1047)
+
+- Enrichment preflight (#876): the episode body is cut to the preflight token budget, so
+  preflight checks the body that is sent, and intake checks the same budget. A blank error is
+  retryable.
+- Intake status (#880, #879): a project-scan queue timeout reports `OUTCOME_UNKNOWN`, and the scan
+  passes an idempotency key, so an unchanged re-scan replays its episode instead of adding a
+  duplicate. With no enrichment worker in the process, intake returns QUEUED for queue recovery
+  and enqueues nothing; stale-lease recovery counts only what it enqueued.
+- Embedding scripts (#967, #969, #970): source-embedding repair and the episode backfill redact
+  before embedding, as ingest does. Vectors are cut to the configured dimension; a short vector is
+  refused and reported. The dimension repair skips blank text, matches identity on write (a changed
+  row is reported `stale`) and validates the relationship type.
+- Context hook (#873): a stale memory always keeps its advisory. The formatter trims only between
+  entries, the hook gives `build_context` the budget left after its lists, and TODOs the hook shows
+  are not repeated. The wiki section is removed.
+- Recall (#923, #922): stale labels cover every returned memory, not only the 200 most recently
+  dirtied anchors. A failed observation or scalar-history lane rolls back and adds a note. Injected
+  authority, observation and history views get up to half the reranker head, and leading authority
+  views are kept through the result cut.
+- Correlation and consolidation (#871, #872, #939, #919): one correlation scan loop, which stops
+  once the node is merged away. `create_related_to_edge` reports only edges it created. The merge
+  vetoes run off the event loop. A pair an operator unmerged is never merged again automatically.
+  Paging no longer stops early, and audit rows follow the uuids actually changed.
+- Publish to READY (#905, #906, #878): the publish records the extraction outcome, and an empty twin
+  finalizes READY only when extraction really was empty. Finalize-from-link runs the post-publish
+  steps on the stored text. A FAILED row with a completed link goes back to the worker; with no
+  attempt left it needs `force_reset_failed_episode`. A failed fact repair is logged, not fatal.
+- Cleanups in the same PRs: one chars-per-token ratio, one embed-input helper, removed dead hooks,
+  aliases, Protocol members and the always-zero `reconciled` count.
+
 ## 2026-11-26 - Wave 1 follow-ups (#1013-#1018)
 
 - Consolidation (#1008): a failed contradiction search no longer promotes the candidate
