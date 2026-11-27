@@ -271,9 +271,8 @@ class IngestQueueMixin:
         )
         enqueued = 0
         for episode_uuid in episode_ids:
-            # Count only ids this sweep actually put on the queue; an id already queued is a no-op.
-            # `is not False`: keeps a double that returns None counted.
-            if await self._enqueue_pending_episode(episode_uuid) is not False:
+            # Count only ids this sweep actually put on the queue.
+            if await self._enqueue_pending_episode(episode_uuid):
                 enqueued += 1
         if orphaned_resets > 0:
             logger.warning(
