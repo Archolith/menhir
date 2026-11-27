@@ -343,11 +343,15 @@ def _render_list_sections(
     todos: list[dict] | None,
     temporal_memories: list[dict] | None,
     effective_budget: int,
-) -> tuple[list[str], int, int]:
-    """Render Reminders / TODOs / Pinned. Returns (lines, remaining list allowance, context floor)."""
+) -> tuple[list[str], int, int, set[str]]:
+    """Render Reminders / TODOs / Pinned.
+
+    Returns (lines, remaining list allowance, context floor, uuids of the TODOs actually emitted).
+    """
     context_floor = math.floor(effective_budget * CONTEXT_RESERVE_FRACTION)
     list_allowance = effective_budget - context_floor
     sections: list[str] = []
+    emitted_todo_uuids: set[str] = set()
 
     # The three graph-derived list sections, built in display order.
     reminder_lines: list[str] = []
@@ -399,6 +403,8 @@ def _render_list_sections(
                 break
             emitted.append(item)
             used += cost
+            if items is todo_lines and (todos or [])[position].get("uuid"):
+                emitted_todo_uuids.add(todos[position]["uuid"])
         if omitted:
             marker = f"- ...[{omitted} more omitted for budget]"
             emitted.append(marker)
@@ -406,7 +412,7 @@ def _render_list_sections(
             used += marker_cost
         sections.extend(emitted)
         remaining = max(0, remaining - used)
-    return sections, remaining, context_floor
+    return sections, remaining, context_floor, emitted_todo_uuids
 
 
 def _context_budget(
@@ -417,7 +423,7 @@ def _context_budget(
 ) -> int:
     """Token allowance (estimator units) the Context section gets after the list sections."""
     effective_budget = _effective_budget(max_tokens)
-    _, remaining, context_floor = _render_list_sections(
+    _, remaining, context_floor, _ = _render_list_sections(
         flagged, todos, temporal_memories, effective_budget
     )
     list_allowance = effective_budget - context_floor
@@ -427,6 +433,18 @@ def _context_budget(
     # the result. Verified by mutation -- neither single removal fails a test, and the compound
     # removal does.
     return max(context_floor, effective_budget - (list_allowance - remaining))
+
+
+def rendered_todo_uuids(
+    flagged: list[dict],
+    todos: list[dict] | None,
+    temporal_memories: list[dict] | None,
+    max_tokens: int,
+) -> set[str]:
+    """uuids of the TODOs `format_hook_output` will show under `max_tokens` (the rest are budget-dropped)."""
+    return _render_list_sections(
+        flagged, todos, temporal_memories, _effective_budget(max_tokens)
+    )[3]
 
 
 def hook_context_max_tokens(
@@ -511,7 +529,7 @@ def format_hook_output(
     if temporal_line:
         sections.append(temporal_line)
 
-    list_lines, _, _ = _render_list_sections(flagged, todos, temporal_memories, effective_budget)
+    list_lines, _, _, _ = _render_list_sections(flagged, todos, temporal_memories, effective_budget)
     sections.extend(list_lines)
 
     # Context section (pre-formatted by ContextBuilderService)

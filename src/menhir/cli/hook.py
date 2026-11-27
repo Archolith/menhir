@@ -20,6 +20,7 @@ from menhir.cli.output import (
     format_hook_output,
     format_save_checkpoint,
     hook_context_max_tokens,
+    rendered_todo_uuids,
     format_temporal_line,
     format_write_nudge,
     should_run_this_turn,
@@ -259,7 +260,9 @@ def _run_prompt_impl(
                         ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
-                        exclude_todo_uuids={t["uuid"] for t in todos if t.get("uuid")},
+                        exclude_todo_uuids=rendered_todo_uuids(
+                            flagged, todos, temporal_memories, max_tokens
+                        ),
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
@@ -371,7 +374,9 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                         ),
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
-                        exclude_todo_uuids={t["uuid"] for t in todos if t.get("uuid")},
+                        exclude_todo_uuids=rendered_todo_uuids(
+                            flagged, todos, temporal_memories, max_tokens
+                        ),
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
                     max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited

@@ -159,3 +159,49 @@ async def test_multi_paragraph_stale_memory_never_loses_its_advisory(max_tokens:
             assert f"tail of claim {i}." in output
     heads = sum(1 for i in range(5) if f"head of claim {i} " in output)
     assert heads == output.count(STALE_ADVISORY_PREFIX)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_tokens", [60, 100, 140, 180, 240, 320, 450, 700])
+async def test_blank_lines_in_review_reason_and_temporal_fact_never_split_memory(max_tokens: int) -> None:
+    from menhir.domain.recall import TemporalFact
+
+    fact = TemporalFact(
+        fact="fact first part.\n\nfact second part.", valid_at="2026-01-01", invalid_at=None,
+        created_at=None, expired_at=None, is_current_belief=True, temporal_role="current_belief",
+    )
+    memories = [
+        replace(
+            _mem(f"r-{i}", f"claim {i} body words " * 4, 0.9 - i * 0.01, stale=True),
+            needs_review=True, review_reason="reason head.\n\nreason tail.",
+            temporal_facts=(fact,),
+        )
+        for i in range(5)
+    ]
+    result = await _service(memories).build_context("q", max_tokens=5000)
+    assert result.context.count(STALE_ADVISORY_PREFIX) == 5
+    for block in result.context.split("\n\n"):
+        assert block.startswith(("[Memory", STALE_ADVISORY_PREFIX))
+    output = format_hook_output([], result.context, "q", max_tokens=max_tokens)
+    assert output.count("[Memory ") == output.count(STALE_ADVISORY_PREFIX)
+    assert output.count("reason tail.") == output.count(STALE_ADVISORY_PREFIX)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_todo_dropped_by_hook_budget_still_appears_in_build_context() -> None:
+    from menhir.cli.output import rendered_todo_uuids
+
+    todos = [
+        {"uuid": f"t{i}", "content": f"distinct work item number {i} " * 3, "priority": "normal"}
+        for i in range(5)
+    ]
+    shown = rendered_todo_uuids([], todos, [], 110)
+    assert 0 < len(shown) < 5
+    dropped = next(t for t in todos if t["uuid"] not in shown)
+    svc = _service([_mem("m1", "note")], todos=[dropped])
+    result = await svc.build_context("work", max_tokens=1000, exclude_todo_uuids=shown)
+    assert dropped["content"][:30] in result.context
+    full = rendered_todo_uuids([], todos, [], 1500)
+    assert full == {t["uuid"] for t in todos}

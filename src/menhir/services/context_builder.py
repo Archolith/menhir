@@ -551,10 +551,12 @@ class ContextBuilderService:
                     + ". Verify the source before asserting this memory as current truth."
                 )
 
-            tokens = _tokens_for(line)
             if mem.verifier_evidence:
                 line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
-                tokens = _tokens_for(line)
+            # Collapse blank lines across the whole entry (temporal facts, review reason and
+            # verifier evidence included), so the hook's cut at blank lines cannot split it.
+            line = _BLANK_LINES.sub("\n", line)
+            tokens = _tokens_for(line)
 
             # Stale-anchor advisory: atomic with the memory line.
             # If the memory is stale, check memory + advisory combined budget.
