@@ -831,11 +831,28 @@ def test_bridge_edges_for_node_forwards_namespace_to_every_endpoint() -> None:
         ) in call["query"]
 
 
+def _early_members(*members: tuple[str, str, str]) -> list[dict[str, object]]:
+    """The early read: uuid, scope, name, plus the fence key and epoch."""
+    return [
+        {"uuid": u, "scope": scope, "name": name, "fence_key": "default", "fence_epoch": 0}
+        for u, scope, name in members
+    ]
+
+
+def _locked_members(*members: tuple[str, str, str, str | None]) -> list[dict[str, object]]:
+    """The read under the member lock: the same plus the content the absorb works from."""
+    return [
+        {"uuid": u, "scope": scope, "name": name, "fence_key": "default", "freshness": "ACTIVE",
+         "content": content, "original_content": None, "marker": None, "absorbed_from": None}
+        for u, scope, name, content in members
+    ]
+
+
 @pytest.mark.unit
 def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None:
     neo4j = _StubNeo4jRepository(responses=[
-        [{"uuid": "m1"}, {"uuid": "m2"}, {"uuid": "m3"}],  # prefetch
-        [{"resolved": 3}],  # keep_both SET
+        [{"locked": 3}],  # lock members
+        [{"resolved": 3, "member_uuids": ["m3", "m1", "m2"]}],  # keep_both SET, reports what it changed
     ])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
@@ -855,6 +872,8 @@ def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None
         "bridged_edges": 0,
         "member_uuids": ["m1", "m2", "m3"],
     }
+    assert len(neo4j.calls) == 2
+    assert "_conflict_resolve_lock" in neo4j.calls[0]["query"]
     assert neo4j.calls[1]["params"] == {
         "group_id": "group-1",
         "resolution_status": "auto-resolved",
@@ -866,36 +885,34 @@ def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None
         for call in neo4j.calls
     )
     assert "n.conflict_status = $resolution_status" in neo4j.calls[1]["query"]
+    assert "n.conflict_group_id = null" in neo4j.calls[1]["query"]
 
 
 @pytest.mark.unit
 def test_resolve_conflict_group_replace_requires_keep_uuid() -> None:
-    neo4j = _StubNeo4jRepository(responses=[
-        [],  # prefetch (consumed before validation)
-    ])
+    neo4j = _StubNeo4jRepository()
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
     with pytest.raises(ValueError, match="requires keep_uuid"):
         adapter.resolve_conflict_group("group-1", "replace")
 
-    assert len(neo4j.calls) == 1  # prefetch only
+    assert neo4j.calls == []  # refused before any statement
 
 
 @pytest.mark.unit
 def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove"},
-            ],
-            [{"content": "Keep text", "original_content": None}],
-            [{"content": "Removed text"}],
-            [],
+            _early_members(("keep-1", "PERSISTENT", "Keep"), ("remove-1", "PERSISTENT", "Remove")),
+            [{"locked": 2}],
+            _locked_members(
+                ("keep-1", "PERSISTENT", "Keep", "Keep text"),
+                ("remove-1", "PERSISTENT", "Remove", "Removed text"),
+            ),
+            [{"absorbed": 1}],
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 2}],
-            [{"total_edges_bridged": 1}],
+            [{"total_edges_bridged": 1, "skipped_hubs": []}],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -915,25 +932,32 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
         "removed_uuid": "remove-1",
         "removed_uuids": ["remove-1"],
         "bridged_edges": 1,
+        "bridge_skipped_hubs": [],
         "member_uuids": ["keep-1", "remove-1"],
     }
-    assert len(neo4j.calls) == 8
-    absorption_call = neo4j.calls[4]
+    assert len(neo4j.calls) == 7
+    assert "_conflict_resolve_lock" in neo4j.calls[1]["query"]
+    absorption_call = neo4j.calls[3]
     assert absorption_call["params"]["uuid"] == "keep-1"
+    assert absorption_call["params"]["target"] == "remove-1"
+    assert absorption_call["params"]["content"].startswith("Keep text")
     assert "Absorbed from superseded memory (remove-1)" in absorption_call["params"]["content"]
+    assert absorption_call["params"]["content"].endswith("Removed text")
     assert absorption_call["params"]["original"] == "Keep text"
-    assert "ELSE coalesce(n.original_content, $original) END" in absorption_call["query"]
-    gone_call = neo4j.calls[5]
+    assert "n.original_content = $original" in absorption_call["query"]
+    assert "NOT $target IN coalesce(n.absorbed_from, [])" in absorption_call["query"]
+    gone_call = neo4j.calls[4]
     assert gone_call["params"] == {
         "group_id": "group-1",
         "remove_uuids": ["remove-1"],
         "resolution_status": "resolved",
+        "allow_promoted": False,
         "tenant_namespaces": ["tenant_a"],
     }
     for scoped_call in neo4j.calls:
         assert "$tenant_namespaces" in scoped_call["query"]
         assert scoped_call["params"]["tenant_namespaces"] == ["tenant_a"]
-    bridge_call = neo4j.calls[7]
+    bridge_call = neo4j.calls[6]
     for variable in ("n", "neighbor", "a", "b"):
         assert (
             f"coalesce({variable}.namespace, {variable}.group_id, '') "
@@ -947,20 +971,22 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
 def test_resolve_conflict_group_replace_without_remove_uuid_gones_all_non_keep() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}, {"uuid": "remove-2"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove One"},
-                {"uuid": "remove-2", "scope": "PERSISTENT", "name": "Remove Two"},
-            ],
-            [{"content": "Keep text", "original_content": None}],
-            [{"content": "Removed text one"}],
-            [],
-            [{"content": "Removed text two"}],
-            [],
+            _early_members(
+                ("keep-1", "PERSISTENT", "Keep"),
+                ("remove-1", "PERSISTENT", "Remove One"),
+                ("remove-2", "PERSISTENT", "Remove Two"),
+            ),
+            [{"locked": 3}],
+            _locked_members(
+                ("keep-1", "PERSISTENT", "Keep", "Keep text"),
+                ("remove-1", "PERSISTENT", "Remove One", "Removed text one"),
+                ("remove-2", "PERSISTENT", "Remove Two", "Removed text two"),
+            ),
+            [{"absorbed": 1}],
+            [{"absorbed": 1}],
             [{"removed_uuids": ["remove-1", "remove-2"]}],
             [{"resolved": 1}],
-            [{"total_edges_bridged": 3}],
+            [{"total_edges_bridged": 3, "skipped_hubs": []}],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -974,6 +1000,11 @@ def test_resolve_conflict_group_replace_without_remove_uuid_gones_all_non_keep()
     assert result["removed_uuids"] == ["remove-1", "remove-2"]
     assert result["removed_uuid"] == "remove-1"
     assert result["bridged_edges"] == 3
+    absorbs = [call for call in neo4j.calls if "count(n) AS absorbed" in call["query"]]
+    assert [call["params"]["target"] for call in absorbs] == ["remove-1", "remove-2"]
+    final_content = absorbs[-1]["params"]["content"]
+    assert final_content.startswith("Keep text")
+    assert "Removed text one" in final_content and "Removed text two" in final_content
     gone_call = next(
         call for call in neo4j.calls if "AND n.uuid IN $remove_uuids" in call["query"]
     )
@@ -981,6 +1012,7 @@ def test_resolve_conflict_group_replace_without_remove_uuid_gones_all_non_keep()
         "group_id": "group-1",
         "remove_uuids": ["remove-1", "remove-2"],
         "resolution_status": "resolved",
+        "allow_promoted": False,
         "tenant_namespaces": None,
     }
 
@@ -989,11 +1021,7 @@ def test_resolve_conflict_group_replace_without_remove_uuid_gones_all_non_keep()
 def test_resolve_conflict_group_blocks_promoted_removal_by_default() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PROMOTED", "name": "Pinned Fact"},
-            ],
+            _early_members(("keep-1", "PERSISTENT", "Keep"), ("remove-1", "PROMOTED", "Pinned Fact")),
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -1006,22 +1034,23 @@ def test_resolve_conflict_group_blocks_promoted_removal_by_default() -> None:
             remove_uuid="remove-1",
         )
 
+    assert len(neo4j.calls) == 1  # the early read only; no lock, absorb or GONE ran
+
 
 @pytest.mark.unit
 def test_resolve_conflict_group_allows_promoted_removal_with_override() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PROMOTED", "name": "Pinned Fact"},
-            ],
-            [{"content": "Keep text", "original_content": None}],
-            [{"content": "Promoted text"}],
-            [],
+            _early_members(("keep-1", "PERSISTENT", "Keep"), ("remove-1", "PROMOTED", "Pinned Fact")),
+            [{"locked": 2}],
+            _locked_members(
+                ("keep-1", "PERSISTENT", "Keep", "Keep text"),
+                ("remove-1", "PROMOTED", "Pinned Fact", "Promoted text"),
+            ),
+            [{"absorbed": 1}],
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 1}],
-            [{"total_edges_bridged": 0}],
+            [{"total_edges_bridged": 0, "skipped_hubs": []}],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -1036,6 +1065,8 @@ def test_resolve_conflict_group_allows_promoted_removal_with_override() -> None:
 
     assert result["removed_uuids"] == ["remove-1"]
     assert result["resolved"] == 1
+    gone_call = next(call for call in neo4j.calls if "n.uuid IN $remove_uuids" in call["query"])
+    assert gone_call["params"]["allow_promoted"] is True
 
 
 @pytest.mark.unit
@@ -1043,17 +1074,16 @@ def test_resolve_conflict_group_discard_new_skips_absorption_on_high_overlap() -
     text = "scheduler acquire uses localhost 8082 and llama endpoint"
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove"},
-            ],
-            [{"content": text, "original_content": None}],
-            [{"content": text}],
+            _early_members(("keep-1", "PERSISTENT", "Keep"), ("remove-1", "PERSISTENT", "Remove")),
+            [{"locked": 2}],
+            _locked_members(
+                ("keep-1", "PERSISTENT", "Keep", text),
+                ("remove-1", "PERSISTENT", "Remove", text),
+            ),
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 1}],
             [],
-            [{"total_edges_bridged": 0}],
+            [{"total_edges_bridged": 0, "skipped_hubs": []}],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -1067,6 +1097,8 @@ def test_resolve_conflict_group_discard_new_skips_absorption_on_high_overlap() -
     )
 
     assert result["action"] == "discard_new"
+    assert result["removed_uuids"] == ["remove-1"]
+    assert all("count(n) AS absorbed" not in call["query"] for call in neo4j.calls)
     assert all("SET n.content = $content" not in call["query"] for call in neo4j.calls)
     assert any("n.pending_review = true" in call["query"] for call in neo4j.calls)
     for scoped_call in neo4j.calls:
@@ -1078,18 +1110,17 @@ def test_resolve_conflict_group_discard_new_skips_absorption_on_high_overlap() -
 def test_resolve_conflict_group_discard_new_absorbs_on_low_overlap_and_marks_review() -> None:
     neo4j = _StubNeo4jRepository(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],  # prefetch
-            [
-                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
-                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove"},
-            ],
-            [{"content": "alpha beta gamma", "original_content": None}],
-            [{"content": "different tokens only"}],
-            [],
+            _early_members(("keep-1", "PERSISTENT", "Keep"), ("remove-1", "PERSISTENT", "Remove")),
+            [{"locked": 2}],
+            _locked_members(
+                ("keep-1", "PERSISTENT", "Keep", "alpha beta gamma"),
+                ("remove-1", "PERSISTENT", "Remove", "different tokens only"),
+            ),
+            [{"absorbed": 1}],
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 1}],
             [],
-            [{"total_edges_bridged": 1}],
+            [{"total_edges_bridged": 1, "skipped_hubs": []}],
         ]
     )
     adapter = MemoryGraphAdapter(neo4j=neo4j)
@@ -1102,5 +1133,8 @@ def test_resolve_conflict_group_discard_new_absorbs_on_low_overlap_and_marks_rev
     )
 
     assert result["bridged_edges"] == 1
+    absorb = next(call for call in neo4j.calls if "count(n) AS absorbed" in call["query"])
+    assert absorb["params"]["content"].startswith("alpha beta gamma")
+    assert absorb["params"]["content"].endswith("different tokens only")
     assert any("SET n.content = $content" in call["query"] for call in neo4j.calls)
     assert any("n.pending_review = true" in call["query"] for call in neo4j.calls)

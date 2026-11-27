@@ -108,10 +108,12 @@ def test_cf332_legacy_absorbed_block_without_absorbed_from_is_cut(test_neo4j_rep
 def test_cf332_absorption_refused_when_an_erase_lands_between_read_and_write(
     test_neo4j_repo, tmp_path, monkeypatch
 ) -> None:
-    """G-copy: A holds C's absorbed block. Resolution reads A, then C is erased (A's C block cut),
-    then the absorption write would put A's stale content -- with C's text -- back. The epoch read
-    before A was read refuses that write. Fails if the epoch is captured at write time, or if the
-    absorption write bypasses ``execute_copy_fenced``."""
+    """G-copy: A holds C's absorbed block. Resolution reads the epoch, then C is erased (A's C block
+    cut), then the copy would put A's stale content -- with C's text -- back. The epoch read before
+    any content was read refuses the copy, and with it the whole resolve. Fails if the epoch is
+    captured at write time, or if the absorption bypasses ``execute_copy_fenced``."""
+    from menhir.infrastructure.consolidation_queries import ConflictResolveRefused
+
     repo = test_neo4j_repo
     ns, canary = f"r2-332r-{_u()}", new_canary("CF332R")
     c = _u()
@@ -127,25 +129,28 @@ def test_cf332_absorption_refused_when_an_erase_lands_between_read_and_write(
     adapter, coord, db = _adapter_and_coordinator(repo, tmp_path)
     real_execute = repo.execute
     erased: list[dict[str, Any]] = []
+    fired: list[bool] = []
 
     def execute(cypher: str, *args: Any, **kwargs: Any) -> Any:
         rows = real_execute(cypher, *args, **kwargs)
-        params = kwargs.get("params") or (args[0] if args else {}) or {}
-        # Right after resolution reads B's content (A was read before it): erase C.
-        if not erased and "n.content AS content" in cypher and params.get("uuid") == ids["b"]:
+        # Right after the resolve captured the epoch (the early member read): erase C.
+        if not fired and "fence_epoch" in cypher:
+            fired.append(True)
             erased.append(coord.erase_memory(c))
         return rows
 
     monkeypatch.setattr(repo, "execute", execute)
 
-    adapter.resolve_conflict_group(ids["g"], "replace", keep_uuid=ids["a"], remove_uuid=ids["b"],
-                                   namespace=ns)
+    with pytest.raises(ConflictResolveRefused, match="erasure_fence"):
+        adapter.resolve_conflict_group(ids["g"], "replace", keep_uuid=ids["a"], remove_uuid=ids["b"],
+                                       namespace=ns)
 
     assert erased and erased[0]["reason"] == "erased", erased
     assert all_hits(repo, db, canary) == []
     a = _props(repo, ids["a"])
     assert "B body" not in (a.get("content") or ""), a  # the refused copy wrote nothing
-    assert _props(repo, ids["b"]).get("freshness") == "GONE"  # resolution itself still ran
+    b = _props(repo, ids["b"])
+    assert b.get("freshness") != "GONE" and b.get("conflict_group_id") == ids["g"], b  # refused, not retired
 
 
 def _block(source: str, text: str) -> str:

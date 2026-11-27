@@ -486,6 +486,15 @@ class MemoryBackend(Protocol):
         """Resolve a conflict group, optionally restricted to one namespace."""
         ...
 
+    async def estimate_bridges_for_nodes(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """Read-only upper bound on the bridges removing these nodes would create.
+
+        Returns ``neighbour_counts``, ``estimated_edges`` and ``over_cap`` (hubs that get no bridge).
+        """
+        ...
+
     async def requeue_conflicts_for_llm_review(
         self, *, from_status: str = "pending", limit: int = 50,
         namespace: str | None = None,

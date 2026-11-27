@@ -68,6 +68,18 @@ def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
 #: k(k-1)/2 edges, so a hub would otherwise flood the graph with weak links.
 MAX_BRIDGE_NEIGHBOURS = 20
 
+#: Write-lock token set and removed in one statement by the conflict writers (see graph_text_inventory).
+CONFLICT_RESOLVE_LOCK = "_conflict_resolve_lock"
+
+
+class ConflictResolveRefused(ValueError):
+    """A resolve that was refused as a whole: nothing was changed. ``reason`` names the check."""
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        suffix = f": {detail}" if detail else ""
+        super().__init__(f"Conflict resolve refused ({reason}){suffix}. Nothing was changed.")
+        self.reason = reason
+
 
 def _bridge_neighbour_filter_cypher(
     removed: str, neighbor: str, excluded: str, extra: tuple[str, ...] = ()
@@ -109,7 +121,8 @@ def bridge_cypher(
     ``bridge_skipped`` (true when the node had more than ``MAX_BRIDGE_NEIGHBOURS`` eligible
     neighbours, so nothing was bridged). Neighbours are collected only up to the cap plus one.
 
-    Each neighbour is write-locked (in uuid order, so two bridgers cannot deadlock) and re-checked
+    Each neighbour is write-locked (in uuid order; a deadlock with another locker is detected by
+    Neo4j and retried) and re-checked
     before the pair MERGE: under read-committed a concurrent bridger of the same pair would
     otherwise create it twice. A pair already joined by any adjacency edge gets no new edge, and
     the MERGE is undirected between two bound nodes, so at most one RELATES_TO per unordered pair.
@@ -970,10 +983,12 @@ class ConsolidationRepository:
         ``initial_status`` defaults to ``'pending_llm_review'`` so new detections
         wait for LLM confirmation before surfacing to the user as ``'unresolved'``.
 
+        ``a``, ``b`` and every member of either group are write-locked in one transaction before
+        the groups are read, so a concurrent resolve, removal or join cannot be overwritten.
+
         Returns (canonical_group_id, nodes_updated).
         """
-        rows = self.neo4j.execute(
-            f"""
+        decide_query = f"""
             MATCH (a:Entity), (b:Entity)
             WHERE a.uuid = $uuid_a AND b.uuid = $uuid_b
               AND {automatic_lifecycle_protection_cypher("a")}
@@ -1039,15 +1054,42 @@ class ConsolidationRepository:
                         THEN o.conflict_status ELSE 'pending_llm_review' END,
                     o.conflict_created_at = coalesce(o.conflict_created_at, datetime())
             )
-            RETURN canonical_group_id, 2 + size(orphans) AS updated
-            """,
-            params={
-                "uuid_a": node_uuid_a,
-                "uuid_b": node_uuid_b,
-                "new_group_id": new_group_id,
-                "initial_status": initial_status,
-            },
-        )
+            // b is among the orphans of its own retired group, so it is not counted twice.
+            RETURN canonical_group_id,
+                   2 + size([o IN orphans WHERE o.uuid <> b.uuid]) AS updated
+            """
+        params = {
+            "uuid_a": node_uuid_a,
+            "uuid_b": node_uuid_b,
+            "new_group_id": new_group_id,
+            "initial_status": initial_status,
+        }
+
+        def work(tx: Any) -> list[dict[str, Any]]:
+            tx.execute(
+                f"""
+                MATCH (x:Entity) WHERE x.uuid IN [$uuid_a, $uuid_b]
+                WITH x ORDER BY x.uuid
+                SET x.{CONFLICT_RESOLVE_LOCK} = true REMOVE x.{CONFLICT_RESOLVE_LOCK}
+                RETURN count(x) AS locked
+                """,
+                params,
+            )
+            # a and b are locked now, so their group ids cannot move while the members are locked.
+            tx.execute(
+                f"""
+                MATCH (a:Entity {{uuid: $uuid_a}}), (b:Entity {{uuid: $uuid_b}})
+                WITH [a.conflict_group_id, b.conflict_group_id] AS group_ids
+                MATCH (m:Entity) WHERE m.conflict_group_id IN group_ids
+                WITH m ORDER BY m.uuid
+                SET m.{CONFLICT_RESOLVE_LOCK} = true REMOVE m.{CONFLICT_RESOLVE_LOCK}
+                RETURN count(m) AS locked
+                """,
+                params,
+            )
+            return tx.execute(decide_query, params)
+
+        rows = self.neo4j.execute_write(work)
         if not rows:
             return new_group_id, 0
         canonical = str(rows[0].get("canonical_group_id") or new_group_id)
@@ -1129,7 +1171,9 @@ class ConsolidationRepository:
         ``set_conflict`` joining through an existing member writes that member, so it either
         commits before the recount (and is counted) or waits for this statement.
 
-        Returns ``removed`` (bool), ``dissolved`` (bool) and ``remaining_uuids``.
+        Returns ``removed`` (bool), ``dissolved`` (bool) and ``remaining_uuids``. A refusal also
+        carries ``reason`` (``unreviewed_members`` with ``unreviewed_uuids``, or ``member_changed``
+        when the member left the group, changed status or is out of scope).
         """
         ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
@@ -1181,7 +1225,38 @@ class ConsolidationRepository:
             },
         )
         if not rows:
-            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+            # Advisory diagnosis of the refusal, so the caller can log why nothing was removed.
+            # The refusal counts every member, as the removal does; only this namespace's uuids
+            # are named.
+            unreviewed: list[str] = []
+            any_unreviewed = False
+            if reviewed_uuids is not None:
+                unreviewed_rows = self.neo4j.execute(
+                    f"""
+                    MATCH (o:Entity)
+                    WHERE o.conflict_group_id = $group_id AND o.uuid <> $uuid
+                      AND NOT o.uuid IN $reviewed_uuids
+                    RETURN o.uuid AS uuid, {tenant_scope_cypher("o")} AS visible
+                    ORDER BY o.uuid
+                    """,
+                    params={
+                        "group_id": group_id,
+                        "uuid": node_uuid,
+                        "reviewed_uuids": list(reviewed_uuids),
+                        **tenant_scope_params(ns or None),
+                    },
+                )
+                any_unreviewed = bool(unreviewed_rows)
+                unreviewed = [
+                    str(r["uuid"]) for r in unreviewed_rows if r.get("uuid") and r.get("visible")
+                ]
+            return {
+                "removed": False,
+                "dissolved": False,
+                "remaining_uuids": [],
+                "reason": "unreviewed_members" if any_unreviewed else "member_changed",
+                "unreviewed_uuids": unreviewed,
+            }
         row = rows[0]
         return {
             "removed": True,
@@ -1433,11 +1508,11 @@ class ConsolidationRepository:
         ])
 
     def bridge_edges_for_nodes_detailed(
-        self, node_uuids: list[str], *, namespace: str | None = None
+        self, node_uuids: list[str], *, namespace: str | None = None, tx: Any | None = None
     ) -> dict[str, Any]:
         """``bridge_edges_for_nodes`` plus the removed nodes skipped as hubs.
 
-        Returns ``{"edges_bridged": int, "bridge_skipped_hubs": [uuid, ...]}``.
+        With ``tx`` the statement runs in that open transaction instead of its own. Returns ``{"edges_bridged": int, "bridge_skipped_hubs": [uuid, ...]}``.
         """
         node_uuids = list(dict.fromkeys(node_uuids))
         if not node_uuids:
@@ -1458,10 +1533,11 @@ class ConsolidationRepository:
             RETURN sum(coalesce(edges_bridged, 0)) AS total_edges_bridged,
                    collect(CASE WHEN bridge_skipped THEN node_uuid END) AS skipped_hubs
             """
-        rows = self.neo4j.execute(
-            query,
-            params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},
-        )
+        bridge_params = {"node_uuids": node_uuids, **tenant_scope_params(namespace)}
+        if tx is not None:
+            rows = tx.execute(query, bridge_params)
+        else:
+            rows = self.neo4j.execute(query, params=bridge_params)
         if not rows:
             return {"edges_bridged": 0, "bridge_skipped_hubs": []}
         return {
@@ -1520,8 +1596,13 @@ class ConsolidationRepository:
                              ``keep_uuid``, removed node set to GONE, edges bridged.
         - ``discard_new``  — same mechanics as ``replace``.
 
-        ``resolution_status`` defaults to ``'resolved'``; pass ``'auto-resolved'``
-        for the scheduler auto-resolve path (single write, no intermediate state).
+        ``replace`` and ``discard_new`` commit all-or-nothing in one transaction: every member is
+        write-locked, then membership, keep and PROMOTED are re-checked, each target is absorbed
+        at most once, and only then are members marked GONE and bridged. A refused absorption
+        (erasure fence) or a changed member raises ``ConflictResolveRefused`` and changes nothing.
+
+        ``resolution_status`` defaults to ``'resolved'``; the scheduler's auto-resolve path is
+        ``auto_resolve_settled_conflict_group``, not this method.
 
         ``namespace`` is opt-in. When supplied, every read and mutation is
         restricted to that silo, including mixed legacy groups.
@@ -1537,37 +1618,40 @@ class ConsolidationRepository:
         namespace_value = ns or None
         namespace_predicate = tenant_scope_cypher("n")
         namespace_params = tenant_scope_params(namespace_value)
+        lock = CONFLICT_RESOLVE_LOCK
 
-        # Prefetch member UUIDs before any mutation (needed for suppression recording)
-        prefetch_rows = self.neo4j.execute(
-            (Cypher()
-                .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id",
-                       namespace_predicate,
-                       automatic_lifecycle_protection_cypher("n"))
-                .return_raw("n.uuid AS uuid")
-                .build()),
-            params={"group_id": conflict_group_id, **namespace_params},
+        # Locks every member, in uuid order, for the transaction. Lockers that take other nodes
+        # first (set_conflict's a and b, the bridge's neighbours) can still deadlock with it;
+        # Neo4j detects that and execute_write retries.
+        lock_members_query = (
+            f"MATCH (n:Entity) WHERE n.conflict_group_id = $group_id AND {namespace_predicate} "
+            f"AND {automatic_lifecycle_protection_cypher('n')} "
+            f"WITH n ORDER BY n.uuid SET n.{lock} = true REMOVE n.{lock} "
+            "RETURN count(n) AS locked"
         )
-        prefetched_member_uuids = sorted(str(r["uuid"]) for r in prefetch_rows if r.get("uuid"))
+        group_params = {"group_id": conflict_group_id, **namespace_params}
 
         if action == "keep_both":
-            rows = self.neo4j.execute(
-                (Cypher()
-                    .match("(n:Entity)")
-                    .where("n.conflict_group_id = $group_id",
-                           namespace_predicate,
-                           automatic_lifecycle_protection_cypher("n"))
-                    .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
-                    .return_raw("count(n) AS resolved")
-                    .build()),
-                params={
-                    "group_id": conflict_group_id,
-                    "resolution_status": resolution_status,
-                    **namespace_params,
-                },
-            )
+
+            def keep_both_work(tx: Any) -> list[dict[str, Any]]:
+                tx.execute(lock_members_query, group_params)
+                return tx.execute(
+                    (Cypher()
+                        .match("(n:Entity)")
+                        .where("n.conflict_group_id = $group_id",
+                               namespace_predicate,
+                               automatic_lifecycle_protection_cypher("n"))
+                        .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
+                        .return_raw("count(n) AS resolved, collect(n.uuid) AS member_uuids")
+                        .build()),
+                    {**group_params, "resolution_status": resolution_status},
+                )
+
+            rows = self.neo4j.execute_write(keep_both_work)
             resolved = int(rows[0].get("resolved", 0)) if rows else 0
+            member_uuids_written = (
+                sorted(str(u) for u in (rows[0].get("member_uuids") or []) if u) if rows else []
+            )
             return {
                 "action": action,
                 "group_id": conflict_group_id,
@@ -1575,104 +1659,129 @@ class ConsolidationRepository:
                 "removed_uuid": None,
                 "removed_uuids": [],
                 "bridged_edges": 0,
-                "member_uuids": prefetched_member_uuids,
+                "member_uuids": member_uuids_written,
             }
 
         if not keep_uuid:
             raise ValueError(f"action={action!r} requires keep_uuid")
 
+        def validated_removals(rows: list[dict[str, Any]]) -> list[str]:
+            """The python guards: keep and targets are members, targets are not PROMOTED."""
+            member_uuids = {str(row.get("uuid") or "") for row in rows if row.get("uuid")}
+            if keep_uuid not in member_uuids:
+                raise ValueError(
+                    f"keep_uuid {keep_uuid!r} is not a member of conflict_group_id={conflict_group_id!r}"
+                )
+
+            if remove_uuid is None:
+                remove_uuids = sorted(uuid for uuid in member_uuids if uuid != keep_uuid)
+            else:
+                if remove_uuid == keep_uuid:
+                    raise ValueError("remove_uuid cannot equal keep_uuid")
+                if remove_uuid not in member_uuids:
+                    raise ValueError(
+                        f"remove_uuid {remove_uuid!r} is not a member of "
+                        f"conflict_group_id={conflict_group_id!r}"
+                    )
+                remove_uuids = [remove_uuid]
+
+            if not remove_uuids:
+                raise ValueError("No removable members found in conflict group")
+
+            if not allow_promoted_removal:
+                promoted = sorted(
+                    (
+                        str(row.get("name") or "(unnamed)"),
+                        str(row.get("uuid") or ""),
+                    )
+                    for row in rows
+                    if str(row.get("uuid") or "") in set(remove_uuids)
+                    and str(row.get("scope") or "") == "PROMOTED"
+                )
+                if promoted:
+                    raise ValueError(
+                        "Refusing to GONE PROMOTED node(s): "
+                        + ", ".join(f"{name} ({uuid})" for name, uuid in promoted)
+                        + ". Pass allow_promoted_removal=True to override."
+                    )
+            return remove_uuids
+
+        # Early read, outside the lock: fails fast on a bad request and supplies the G-copy fence
+        # key and epoch (CF-332). The epoch is read before any content, so an erase landing before
+        # the transaction's fence check refuses the copy instead of resurrecting scrubbed text.
         members = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
                 .where("n.conflict_group_id = $group_id",
                        namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
-                # G-copy (CF-332): each member's fence key and epoch, read before any content.
                 .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name, "
                             f"{fence_key_cypher('n')} AS fence_key, "
                             "head(COLLECT { MATCH (f:EvidenceNamespaceFence) WHERE "
                             f"f.namespace_key = {fence_key_cypher('n')} "
                             "RETURN coalesce(f.erasure_epoch, 0) }) AS fence_epoch")
                 .build()),
-            params={"group_id": conflict_group_id, **namespace_params},
+            params=group_params,
         )
-        member_uuids = {str(row.get("uuid") or "") for row in members if row.get("uuid")}
-        if keep_uuid not in member_uuids:
-            raise ValueError(f"keep_uuid {keep_uuid!r} is not a member of conflict_group_id={conflict_group_id!r}")
-
-        if remove_uuid is None:
-            remove_uuids = sorted(uuid for uuid in member_uuids if uuid != keep_uuid)
-        else:
-            if remove_uuid == keep_uuid:
-                raise ValueError("remove_uuid cannot equal keep_uuid")
-            if remove_uuid not in member_uuids:
-                raise ValueError(
-                    f"remove_uuid {remove_uuid!r} is not a member of conflict_group_id={conflict_group_id!r}"
-                )
-            remove_uuids = [remove_uuid]
-
-        if not remove_uuids:
-            raise ValueError("No removable members found in conflict group")
-
-        if not allow_promoted_removal:
-            promoted = sorted(
-                (
-                    str(row.get("name") or "(unnamed)"),
-                    str(row.get("uuid") or ""),
-                )
-                for row in members
-                if str(row.get("uuid") or "") in set(remove_uuids) and str(row.get("scope") or "") == "PROMOTED"
-            )
-            if promoted:
-                raise ValueError(
-                    "Refusing to GONE PROMOTED node(s): "
-                    + ", ".join(f"{name} ({uuid})" for name, uuid in promoted)
-                    + ". Pass allow_promoted_removal=True to override."
-                )
-
-        # G-copy (CF-332): absorption copies the removed members' text, and rewrites keep's own,
-        # into keep. The epoch came with the members read, before either content is read, so an
-        # erase landing before the write refuses the copy instead of resurrecting scrubbed text.
+        validated_removals(members)
         fence_keys = {
             str(r["uuid"]): str(r.get("fence_key") or "default") for r in members if r.get("uuid")
         }
         fence_epochs = {str(r["uuid"]): int(r.get("fence_epoch") or 0) for r in members if r.get("uuid")}
         copy_key = fence_keys.get(keep_uuid, "default")
         copy_epoch = fence_epochs.get(keep_uuid, 0)
-        absorption_fenced = ""
 
-        keep_rows = self.neo4j.execute(
-            (Cypher()
-                .match("(n:Entity)")
-                .where("n.uuid = $uuid", namespace_predicate,
-                       automatic_lifecycle_protection_cypher("n"))
-                .return_raw("n.content AS content, n.original_content AS original_content")
-                .build()),
-            params={"uuid": keep_uuid, **namespace_params},
+        read_members_query = (
+            Cypher()
+            .match("(n:Entity)")
+            .where("n.conflict_group_id = $group_id",
+                   namespace_predicate,
+                   automatic_lifecycle_protection_cypher("n"))
+            .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name, "
+                        f"{fence_key_cypher('n')} AS fence_key, n.freshness AS freshness, "
+                        "n.content AS content, n.original_content AS original_content, "
+                        "n.compressed_summary_sha256 AS marker, n.absorbed_from AS absorbed_from")
+            .build()
         )
-        keep_content: str = (keep_rows[0].get("content") or "") if keep_rows else ""
 
-        # --- Content absorption before GONE ---
-        for target_uuid in remove_uuids:
-            if absorption_fenced:
-                break
-            if fence_keys.get(target_uuid, copy_key) != copy_key:
-                logger.info(
-                    "Skipping absorption across fence keys keep=%s remove=%s", keep_uuid, target_uuid
+        def work(tx: Any) -> dict[str, Any]:
+            # execute_write may re-run this body, so every piece of state is local to it.
+            tx.execute(lock_members_query, group_params)
+            locked_rows = tx.execute(read_members_query, group_params)
+            by_uuid = {str(r["uuid"]): r for r in locked_rows if r.get("uuid")}
+            if set(by_uuid) != set(fence_keys):
+                # A member joined or left since the early read. The fence's ErasureMarker check
+                # covered only the early members, so a late joiner's text must not be copied.
+                raise ConflictResolveRefused(
+                    "member_changed",
+                    "the group's members changed since they were read: "
+                    + ", ".join(sorted(set(by_uuid) ^ set(fence_keys))),
                 )
-                continue
-            remove_rows = self.neo4j.execute(
-                (Cypher()
-                    .match("(n:Entity)")
-                    .where("n.uuid = $uuid", namespace_predicate,
-                           automatic_lifecycle_protection_cypher("n"))
-                    .return_raw("n.content AS content")
-                    .build()),
-                params={"uuid": target_uuid, **namespace_params},
-            )
-            remove_content: str = (remove_rows[0].get("content") or "") if remove_rows else ""
+            # Re-check under the lock. The early read passed, so a failure here is a concurrent
+            # change (a promotion), reported as a refusal rather than a bad request.
+            try:
+                remove_uuids = validated_removals(locked_rows)
+            except ConflictResolveRefused:
+                raise
+            except ValueError as exc:
+                raise ConflictResolveRefused("member_changed", str(exc)) from exc
+            keep_row = by_uuid[keep_uuid]
+            if str(keep_row.get("fence_key") or "default") != copy_key:
+                raise ConflictResolveRefused("fence_key_changed", f"keep {keep_uuid}")
 
-            if remove_content.strip():
+            # The keep's content as read under the lock is authoritative; it is advanced after
+            # each target so that every block survives the next write.
+            keep_content = str(keep_row.get("content") or "")
+            keep_original = keep_row.get("original_content")
+            keep_marker = keep_row.get("marker")
+            keep_compressed = keep_row.get("freshness") == "COMPRESSED"
+            absorbed_from = [str(u) for u in (keep_row.get("absorbed_from") or [])]
+
+            for target_uuid in remove_uuids:
+                target = by_uuid[target_uuid]
+                remove_content = str(target.get("content") or "")
+                if not remove_content.strip() or target_uuid in absorbed_from:
+                    continue
                 if action == "discard_new":
                     overlap = _content_overlap_ratio(keep_content, remove_content)
                     if overlap >= 0.85:
@@ -1683,60 +1792,62 @@ class ConsolidationRepository:
                             overlap,
                         )
                         continue
+                if str(target.get("fence_key") or "default") != copy_key:
+                    raise ConflictResolveRefused(
+                        "fence_key_mismatch",
+                        f"{target_uuid} is in another erasure namespace than keep {keep_uuid}",
+                    )
                 absorbed_date = datetime.now(timezone.utc).date().isoformat()
-                merged = (
-                    f"{keep_content}{ABSORBED_BLOCK_SEPARATOR}"
-                    f"{target_uuid}) on {absorbed_date} ---\n"
+                block = (
+                    f"{ABSORBED_BLOCK_SEPARATOR}{target_uuid}) on {absorbed_date} ---\n"
                     f"{remove_content}"
                 )
-                absorb_statement = (Cypher()
-                    .match("(n:Entity)")
-                    .where("n.uuid = $uuid", namespace_predicate,
-                           automatic_lifecycle_protection_cypher("n"))
-                    .set(("n.content = $content",
-                          # A COMPRESSED keep holds its replaced body in original_content: the
-                          # block goes there too (once) and the digest follows the new content,
-                          # but only over a base already trusted (marker = digest of the content
-                          # read). Otherwise the base stays and the marker is removed.
-                          "n.original_content = CASE WHEN n.freshness = 'COMPRESSED' "
-                          "AND n.original_content IS NOT NULL "
-                          "THEN CASE WHEN n.compressed_summary_sha256 = $keep_sha "
-                          "AND NOT $target IN coalesce(n.absorbed_from, []) "
-                          "THEN n.original_content + $block ELSE n.original_content END "
-                          "ELSE coalesce(n.original_content, $original) END",
-                          "n.compressed_summary_sha256 = CASE WHEN n.freshness = 'COMPRESSED' "
-                          "THEN CASE WHEN n.original_content IS NOT NULL "
-                          "AND n.compressed_summary_sha256 = $keep_sha "
-                          "THEN $content_sha ELSE null END "
-                          "ELSE n.compressed_summary_sha256 END",
-                          # The erase's selector for this block (idempotent on a retried tx).
-                          "n.absorbed_from = CASE WHEN $target IN coalesce(n.absorbed_from, []) "
-                          "THEN n.absorbed_from ELSE coalesce(n.absorbed_from, []) + $target END"))
-                    .build())
-                absorb_params = {
+                merged = f"{keep_content}{block}"
+                assignments = [
+                    "n.content = $content",
+                    # The erase's selector for this block.
+                    "n.absorbed_from = coalesce(n.absorbed_from, []) + $target",
+                ]
+                absorb_params: dict[str, Any] = {
                     "uuid": keep_uuid,
                     "content": merged,
-                    "original": keep_content,
-                    "block": merged[len(keep_content):],
-                    "content_sha": summary_sha256(merged),
-                    "keep_sha": summary_sha256(keep_content),
                     "target": target_uuid,
                     **namespace_params,
                 }
-                try:
-                    execute_copy_fenced(
-                        self.neo4j, copy_key, copy_epoch, [keep_uuid, target_uuid],
-                        lambda tx, s=absorb_statement, p=absorb_params: tx.execute(s, p),
-                    )
-                except CopyFenced as fenced:
-                    # An erase touched the namespace since the reads: absorb nothing more. The
-                    # resolution itself (GONE, bridging) copies no text and still runs.
-                    absorption_fenced = fenced.reason
-                    logger.info(
-                        "Absorption into %s refused by the erasure fence (%s)",
-                        keep_uuid, fenced.reason,
-                    )
-                    break
+                next_original, next_marker = keep_original, keep_marker
+                if keep_compressed:
+                    # A COMPRESSED keep holds its replaced body in original_content: the block goes
+                    # there too and the digest follows the new content, but only over a base
+                    # already trusted (marker = digest of the content read). Otherwise the base
+                    # stays and the marker is removed.
+                    if keep_original is not None and keep_marker == summary_sha256(keep_content):
+                        next_original = f"{keep_original}{block}"
+                        next_marker = summary_sha256(merged)
+                        assignments.append("n.original_content = $original")
+                        absorb_params["original"] = next_original
+                    else:
+                        next_marker = None
+                    assignments.append("n.compressed_summary_sha256 = $marker")
+                    absorb_params["marker"] = next_marker
+                elif keep_original is None and keep_content:
+                    # First absorption keeps a snapshot of the text it is about to extend.
+                    next_original = keep_content
+                    assignments.append("n.original_content = $original")
+                    absorb_params["original"] = next_original
+                absorbed_rows = tx.execute(
+                    (Cypher()
+                        .match("(n:Entity)")
+                        .where("n.uuid = $uuid", namespace_predicate,
+                               automatic_lifecycle_protection_cypher("n"),
+                               # A target already absorbed is a no-op, never a second block.
+                               "NOT $target IN coalesce(n.absorbed_from, [])")
+                        .set(tuple(assignments))
+                        .return_raw("count(n) AS absorbed")
+                        .build()),
+                    absorb_params,
+                )
+                if not absorbed_rows or int(absorbed_rows[0].get("absorbed") or 0) != 1:
+                    raise ConflictResolveRefused("keep_changed", f"absorb into {keep_uuid} matched nothing")
                 logger.debug(
                     "Content absorbed from %s into %s (%d chars appended)",
                     target_uuid,
@@ -1744,74 +1855,93 @@ class ConsolidationRepository:
                     len(remove_content),
                 )
                 keep_content = merged
+                keep_original, keep_marker = next_original, next_marker
+                absorbed_from.append(target_uuid)
 
-        # --- Step 1: GONE selected members ---
-        gone_rows = self.neo4j.execute(
-            (Cypher()
-                .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id", "n.uuid IN $remove_uuids",
-                       namespace_predicate,
-                       automatic_lifecycle_protection_cypher("n"))
-                .set(("n.freshness = 'GONE'",
-                      "n.conflict_status = $resolution_status",
-                      "n.conflict_group_id = null"))
-                .return_raw("collect(n.uuid) AS removed_uuids")
-                .build()),
-            params={
-                "group_id": conflict_group_id,
-                "remove_uuids": remove_uuids,
-                "resolution_status": resolution_status,
-                **namespace_params,
-            },
-        )
-        removed_uuids = []
-        if gone_rows:
-            removed_uuids = sorted(str(uuid) for uuid in (gone_rows[0].get("removed_uuids") or []) if str(uuid))
-
-        # --- Step 2: resolve all remaining group members ---
-        rows = self.neo4j.execute(
-            (Cypher()
-                .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id",
-                       namespace_predicate,
-                       automatic_lifecycle_protection_cypher("n"))
-                .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
-                .return_raw("count(n) AS resolved")
-                .build()),
-            params={
-                "group_id": conflict_group_id,
-                "resolution_status": resolution_status,
-                **namespace_params,
-            },
-        )
-        resolved = int(rows[0].get("resolved", 0)) if rows else 0
-
-        if action == "discard_new":
-            self.neo4j.execute(
+            # --- Step 1: GONE selected members, re-checking group and PROMOTED ---
+            gone_rows = tx.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.uuid = $keep_uuid", namespace_predicate,
-                           automatic_lifecycle_protection_cypher("n"))
-                    .set(("n.sharpness = CASE"
-                          " WHEN n.sharpness IS NULL THEN 0.0"
-                          " WHEN toFloat(n.sharpness) - 0.1 < 0.0 THEN 0.0"
-                          " ELSE toFloat(n.sharpness) - 0.1 END",
-                          "n.pending_review = true"))
+                    .where("n.conflict_group_id = $group_id", "n.uuid IN $remove_uuids",
+                           namespace_predicate,
+                           automatic_lifecycle_protection_cypher("n"),
+                           "($allow_promoted OR coalesce(n.scope, '') <> 'PROMOTED')")
+                    .set(("n.freshness = 'GONE'",
+                          "n.conflict_status = $resolution_status",
+                          "n.conflict_group_id = null"))
+                    .return_raw("collect(n.uuid) AS removed_uuids")
                     .build()),
-                params={"keep_uuid": keep_uuid, **namespace_params},
+                {
+                    **group_params,
+                    "remove_uuids": remove_uuids,
+                    "resolution_status": resolution_status,
+                    "allow_promoted": bool(allow_promoted_removal),
+                },
             )
+            removed_uuids = (
+                sorted(str(u) for u in (gone_rows[0].get("removed_uuids") or []) if str(u))
+                if gone_rows else []
+            )
+            if removed_uuids != sorted(remove_uuids):
+                raise ConflictResolveRefused(
+                    "member_changed", "a member left the group or was promoted during the resolve"
+                )
 
-        # --- Immediate edge bridge (avoid 24 h dead zone) ---
-        bridged_total = self.bridge_edges_for_nodes(
-            removed_uuids, namespace=namespace_value
-        )
+            # --- Step 2: resolve all remaining group members ---
+            rest_rows = tx.execute(
+                (Cypher()
+                    .match("(n:Entity)")
+                    .where("n.conflict_group_id = $group_id",
+                           namespace_predicate,
+                           automatic_lifecycle_protection_cypher("n"))
+                    .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
+                    .return_raw("count(n) AS resolved")
+                    .build()),
+                {**group_params, "resolution_status": resolution_status},
+            )
+            resolved = int(rest_rows[0].get("resolved", 0)) if rest_rows else 0
 
-        return {
-            "action": action,
-            "group_id": conflict_group_id,
-            "resolved": resolved,
-            "removed_uuid": removed_uuids[0] if removed_uuids else None,
-            "removed_uuids": removed_uuids,
-            "bridged_edges": bridged_total,
-            "member_uuids": prefetched_member_uuids,
-        }
+            if action == "discard_new":
+                tx.execute(
+                    (Cypher()
+                        .match("(n:Entity)")
+                        .where("n.uuid = $keep_uuid", namespace_predicate,
+                               automatic_lifecycle_protection_cypher("n"))
+                        .set(("n.sharpness = CASE"
+                              " WHEN n.sharpness IS NULL THEN 0.0"
+                              " WHEN toFloat(n.sharpness) - 0.1 < 0.0 THEN 0.0"
+                              " ELSE toFloat(n.sharpness) - 0.1 END",
+                              "n.pending_review = true"))
+                        .build()),
+                    {"keep_uuid": keep_uuid, **namespace_params},
+                )
+
+            # --- Immediate edge bridge (avoid 24 h dead zone), in the same transaction ---
+            bridged = self.bridge_edges_for_nodes_detailed(
+                removed_uuids, namespace=namespace_value, tx=tx
+            )
+            return {
+                "action": action,
+                "group_id": conflict_group_id,
+                "resolved": resolved,
+                "removed_uuid": removed_uuids[0] if removed_uuids else None,
+                "removed_uuids": removed_uuids,
+                "bridged_edges": bridged["edges_bridged"],
+                "bridge_skipped_hubs": bridged["bridge_skipped_hubs"],
+                "member_uuids": sorted(by_uuid),
+            }
+
+        try:
+            return execute_copy_fenced(
+                self.neo4j, copy_key, copy_epoch, sorted(fence_keys), work
+            )
+        except CopyFenced as fenced:
+            # An erase touched the namespace since the reads. Refuse the whole resolve rather
+            # than retire members whose text was never absorbed.
+            logger.info(
+                "Resolve of %s into %s refused by the erasure fence (%s)",
+                conflict_group_id, keep_uuid, fenced.reason,
+            )
+            raise ConflictResolveRefused(
+                "erasure_fence", f"{fenced.reason}; retry after the erasure finishes"
+            ) from fenced

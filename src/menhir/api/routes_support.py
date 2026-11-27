@@ -824,6 +824,7 @@ _BACKEND_METHODS = {
     "query_structure",
     "list_conflict_groups",
     "resolve_conflict_group",
+    "estimate_bridges_for_nodes",
     "requeue_conflicts_for_llm_review",
     "scan_for_conflicts",
     "confirm_pending_conflicts",
@@ -899,6 +900,8 @@ _OP_TIER_OPERATOR = {
     "reset_namespace", "promote_namespace_scope",
     # Read-only, but previews every record in a silo: operator, like the deletes it feeds.
     "list_namespace_records",
+    # Read-only, but the dry run of resolve_conflict_group, which is operator: same audience.
+    "estimate_bridges_for_nodes",
     "resolve_conflict_group", "requeue_conflicts_for_llm_review", "scan_for_conflicts",
     "confirm_pending_conflicts", "record_conflict_resolution",
     "force_reset_failed_episode", "force_release_episode_lease",
