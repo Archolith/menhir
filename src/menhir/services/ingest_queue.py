@@ -189,11 +189,12 @@ class IngestQueueMixin:
                 )
         return allowed
 
-    async def _ensure_enrichment_worker(self) -> None:
+    async def _ensure_enrichment_worker(self) -> bool:
+        """Start the worker pool; return False when this process has no consumer for the queue."""
         if not self._enrichment_enabled:
-            return
+            return False
         if not self._enrichment_gate_passes():
-            return
+            return False
         self._queue()
         # Prune finished loops, then top up to the configured concurrency. Each loop is an
         # independent consumer of the shared queue; per-episode claims are atomic, so N
@@ -206,6 +207,7 @@ class IngestQueueMixin:
                     name=f"menhir-enrichment-{len(self._worker_tasks)}",
                 )
             )
+        return True
 
     async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
         if episode_uuid in self._queued_episode_ids:
@@ -265,8 +267,12 @@ class IngestQueueMixin:
             max_attempts=self._max_enrichment_attempts,
             limit=limit,
         )
+        enqueued = 0
         for episode_uuid in episode_ids:
+            if episode_uuid in self._queued_episode_ids:
+                continue
             await self._enqueue_pending_episode(episode_uuid)
+            enqueued += 1
         if orphaned_resets > 0:
             logger.warning(
                 "Recovered %d orphaned ENRICHING rows for worker=%s",
@@ -291,7 +297,7 @@ class IngestQueueMixin:
                 transient_exhausted,
                 self._worker_id,
             )
-        return stale_resets + orphaned_resets, len(episode_ids)
+        return stale_resets + orphaned_resets, enqueued
 
     async def _check_session_budget(
         self, episode_uuid: str, session_id: str | None
@@ -375,6 +381,14 @@ class IngestQueueMixin:
             details={"limit": limit},
         )
         await self._ensure_enrichment_worker()
+        if not self._enrichment_gate_passes():
+            record_lifecycle_event(
+                component="ingest_queue",
+                event="resume_pending_episodes_service",
+                state="skipped",
+                details={"limit": limit, "reason": "no_scheduler_lease"},
+            )
+            return 0
         _, queued = await self._recover_stale_episode_leases(limit=limit)
         record_lifecycle_event(
             component="ingest_queue",
