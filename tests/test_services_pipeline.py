@@ -2668,7 +2668,6 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
     assert requeued == ["retry-now"]
     assert job.last_result == {
         "candidates": 4,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 2,
         "waiting": 1,
@@ -2811,7 +2810,6 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
     assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 0,
         "waiting": 0,
@@ -2872,7 +2870,6 @@ async def test_maintenance_scheduler_does_not_retry_context_window_mismatch_beyo
     assert requeued == []
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 0,
         "terminal": 0,
         "waiting": 0,
@@ -3033,7 +3030,6 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
     assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 0,
         "waiting": 0,

@@ -401,7 +401,7 @@ async def retry_failed_enrichments(
     failed_retry_limit: int = 50,
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc)
-    counts: dict[str, int] = dict(reconciled=0, requeued=0, terminal=0, waiting=0, exhausted=0)
+    counts: dict[str, int] = dict(requeued=0, terminal=0, waiting=0, exhausted=0)
     candidates = await asyncio.to_thread(
         graph_adapter.fetch_failed_episode_retry_candidates, limit=failed_retry_limit
     )
