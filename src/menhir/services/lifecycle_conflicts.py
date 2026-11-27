@@ -112,7 +112,8 @@ class LifecycleConflictMixin:
             "scanned": len(candidates),
             "new_conflicts": new_conflicts,
             "next_cursor": next_cursor,
-            # The clamped page size, not the caller's limit: a limit above the cap would never be done.
+            # The clamped page size, not the caller's limit: comparing with a limit above the cap
+            # reported done on every full page, so paging stopped early.
             "done": len(candidates) < page_size,
         }
 

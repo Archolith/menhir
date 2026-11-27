@@ -1,10 +1,10 @@
-"""Review fixes for PR #1046 (offline).
+"""Survivor promotion, unmerge lineage and correlation-only edges (offline).
 
-- F1046-1: a promotion candidate absorbed by a merge is promoted through its survivor. Before,
+- a promotion candidate absorbed by a merge is promoted through its survivor. Before,
   promoting the absorbed uuid matched nothing and the SESSION survivor stayed sweepable.
-- F1046-2: the unmerge veto follows the survivor's merged_from lineage, so a split pair cannot
+- the unmerge veto follows the survivor's merged_from lineage, so a split pair cannot
   rejoin through the node that later absorbed the original survivor.
-- F1046-3: create_related_to_edge counts and updates only correlation edges, never a Graphiti
+- create_related_to_edge counts and updates only correlation edges, never a Graphiti
   fact edge (also RELATES_TO), and locks the pair before its check-then-create.
 """
 
@@ -23,7 +23,7 @@ from menhir.services.lifecycle_service import LifecycleService
 pytestmark = pytest.mark.unit
 
 
-# --------------------------------------------------------------------------- F1046-1
+# --------------------------------------------------------------------------- survivor promotion
 
 class _MergeIntoSurvivor:
     """classify_pair stand-in: the candidate merges into ``survivor`` (a coordinator-style result)."""
@@ -110,7 +110,7 @@ async def test_other_batch_callers_are_unchanged() -> None:
     assert await host._check_contradictions_batch([{"uuid": "cand", "name": "c"}]) == 0
 
 
-# --------------------------------------------------------------------------- F1046-2
+# --------------------------------------------------------------------------- unmerge lineage
 
 def _node(uuid, *, restored_from_merge=None, merged_from=()):
     return me.NodeSignals(
@@ -152,7 +152,7 @@ def test_the_repository_reads_merged_from() -> None:
     assert "coalesce(n.merged_from, []) AS merged_from" in neo4j.execute.call_args.args[0]
 
 
-# --------------------------------------------------------------------------- F1046-3
+# --------------------------------------------------------------------------- correlation-only edges
 
 def test_only_correlation_edges_are_matched_updated_or_merged() -> None:
     neo4j = MagicMock()

@@ -1,10 +1,10 @@
-"""Review fixes for PR #1046 against a real Neo4j (online).
+"""Survivor promotion, unmerge lineage and correlation-only edges against a real Neo4j (online).
 
-- F1046-1: consolidation that merges a promotion candidate into a SESSION survivor leaves the
+- consolidation that merges a promotion candidate into a SESSION survivor leaves the
   survivor PERSISTENT, with no TTL, and audits its promotion.
-- F1046-2: after the original survivor is absorbed into a third node, the split node still cannot
+- after the original survivor is absorbed into a third node, the split node still cannot
   merge into that node.
-- F1046-3: a Graphiti fact edge between the pair is neither counted nor modified; a correlation
+- a Graphiti fact edge between the pair is neither counted nor modified; a correlation
   edge is still created.
 """
 
@@ -56,7 +56,7 @@ def _props(repo, uuid: str) -> dict:
     return dict(rows[0]) if rows else {}
 
 
-# --------------------------------------------------------------------------- F1046-1
+# --------------------------------------------------------------------------- survivor promotion
 
 @pytest.mark.online
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_consolidation_promotes_the_survivor_of_an_absorbed_candidate(
     assert revisions == [survivor] and result.promoted == 1
 
 
-# --------------------------------------------------------------------------- F1046-2
+# --------------------------------------------------------------------------- unmerge lineage
 
 @pytest.mark.online
 def test_a_split_node_cannot_rejoin_through_the_survivors_absorber(live_repo, tag, tmp_path) -> None:
@@ -116,7 +116,7 @@ def test_a_split_node_cannot_rejoin_through_the_survivors_absorber(live_repo, ta
     assert _props(live_repo, b)["scope"] == "SESSION"
 
 
-# --------------------------------------------------------------------------- F1046-3
+# --------------------------------------------------------------------------- correlation-only edges
 
 @pytest.mark.online
 def test_a_fact_edge_is_untouched_and_a_correlation_edge_is_created(live_repo, tag) -> None:

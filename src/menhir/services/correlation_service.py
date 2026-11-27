@@ -102,12 +102,7 @@ class CorrelationService(CorrelationChecksMixin):
         self._merge_threshold = merge_threshold
         self._llm = llm
         self._merge_coordinator = merge_coordinator
-        # No post-COMMIT scalar hook (#872). Scalar assertions bound to an absorbed node are moved
-        # onto the survivor by the scalar lane's repair pass: run_scalar_consolidation ->
-        # ScalarStateService.repair_incomplete_reconciliations replays every COMMITTED ENTITY_MERGE
-        # in the journal that has no ScalarReconcile receipt (handle_merge, per namespace), then
-        # repair_orphaned_assertions. That pass is the only mechanism, and the only one that
-        # resolves the op's namespace.
+        # Scalar rebind after a merge: ScalarStateService.repair_incomplete_reconciliations.
         self._similarity_floor = similarity_floor
 
     @property

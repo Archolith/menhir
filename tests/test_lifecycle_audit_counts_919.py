@@ -2,7 +2,7 @@
 
 Counterexamples against 4794b41f:
 - ``scan_for_conflicts(limit=5000)`` capped the page at 2000 but compared with 5000, so ``done`` was
-  False even on the last page;
+  True even on a full page and paging stopped early;
 - a demote row was written for every requested uuid, including nodes already in their grace window;
 - a SESSION -> PERSISTENT revision was written for every requested uuid, including a node absorbed
   by a merge or skipped by the promotion filter.

@@ -274,7 +274,7 @@ class LifecycleConsolidationMixin:
         # Phase 3: Contradiction detection for promotion candidates
         conflicts_detected = 0
         merge_error_log: list[str] = []
-        # absorbed promotion candidate -> the survivor that now holds its content (F1046-1).
+        # absorbed promotion candidate -> the survivor that now holds its content.
         absorbed_into: dict[str, str] = {}
         for i in range(0, len(promote_candidates_for_conflict_check), CONSOLIDATION_BATCH_SIZE):
             batch = promote_candidates_for_conflict_check[i:i + CONSOLIDATION_BATCH_SIZE]

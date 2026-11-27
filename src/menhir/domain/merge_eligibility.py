@@ -209,7 +209,7 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     # 4b. An operator unmerge split this pair (#939). The restore stamps the restored node with
     #     the survivor it came out of; re-merging the pair would undo the operator's decision. The
     #     other node's merged_from lineage counts too: once that survivor has itself been absorbed,
-    #     its content lives in the node that absorbed it (F1046-2).
+    #     its content lives in the node that absorbed it.
     unmerged_from = [
         n.uuid for n, other in ((survivor, absorbed), (absorbed, survivor))
         if n.restored_from_merge
