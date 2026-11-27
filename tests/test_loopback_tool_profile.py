@@ -16,7 +16,7 @@ from menhir.core.request_context import (
     get_request_tool_allowlist,
     reset_request_tool_allowlist,
 )
-from menhir.mcp.local_profile import DEFAULT_DENY, loopback_tool_allowlist
+from menhir.mcp.local_profile import DEFAULT_DENY, LEAN_TOOLS, loopback_tool_allowlist
 from menhir.mcp.tool_profiles import (
     ADMIN,
     CORE,
@@ -56,6 +56,17 @@ def test_operator_profile_means_every_tool() -> None:
     assert loopback_tool_allowlist("") == DEFAULT
 
 
+def test_lean_profile_is_compact_coding_subset_of_core() -> None:
+    lean = loopback_tool_allowlist("lean")
+    assert lean == LEAN_TOOLS
+    assert loopback_tool_allowlist(" LEAN ") == LEAN_TOOLS
+    assert len(lean) == 10
+    assert lean < PROFILES[CORE]
+    assert lean.isdisjoint(PROFILES[CURATE] | PROFILES[OPERATE] | PROFILES[ADMIN])
+    for excluded in ("rate_recall", "get_enrichment_status", "delete_memory", "pause_scheduler"):
+        assert excluded not in lean
+
+
 def test_an_unknown_profile_value_is_refused() -> None:
     with pytest.raises(ValueError, match="MENHIR_LOOPBACK_PROFILE"):
         loopback_tool_allowlist("admin")
@@ -66,6 +77,8 @@ def test_the_setting_is_read_and_validated_from_the_environment(monkeypatch) -> 
 
     monkeypatch.delenv("MENHIR_LOOPBACK_PROFILE", raising=False)
     assert MemorySettings.from_env().loopback_profile == "default"
+    monkeypatch.setenv("MENHIR_LOOPBACK_PROFILE", "lean")
+    assert MemorySettings.from_env().loopback_profile == "lean"
     monkeypatch.setenv("MENHIR_LOOPBACK_PROFILE", "operator")
     assert MemorySettings.from_env().loopback_profile == "operator"
     monkeypatch.setenv("MENHIR_LOOPBACK_PROFILE", "everything")
