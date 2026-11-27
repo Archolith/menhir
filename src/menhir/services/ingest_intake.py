@@ -57,7 +57,10 @@ from menhir.services.enrichment_steps import (
     stamp_and_finalize,
 )
 from menhir.services.ingest_gate import IngestGate
-from menhir.services.ingest_limits import validate_memory_payload
+from menhir.services.ingest_limits import (
+    validate_memory_payload,
+    validate_redacted_memory_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +172,11 @@ class IngestIntakeMixin:
         # 'refuse' this raises SecretRefused (a ValueError) before anything is persisted.
         episode = prepare_memory_text(episode)
         diff = prepare_memory_text(diff) if diff else diff
+        # Redaction can lengthen the text; re-check what is actually stored so preflight never
+        # parks an episode that intake accepted (#876).
+        validate_redacted_memory_payload(
+            episode, diff, getattr(self, "_graphiti_episode_max_estimated_tokens", None)
+        )
         user_statement = prepare_memory_text(user_statement) if user_statement else user_statement
         redacted_kinds = tuple(dict.fromkeys(
             kind

@@ -173,7 +173,7 @@ def persisted_failure_text(error: BaseException) -> str:
 def classify_enrichment_failure(error: object | None, *, error_type: object | None = None) -> str:
     """Classify an enrichment failure as retryable, terminal, or manual review."""
 
-    if error is None or not _normalize_error_text(error):
+    if error is None:
         return "retryable"
 
     # A deterministic transport collision needs an operator decision, not another extraction.
@@ -243,6 +243,10 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         return "retryable"
 
     if _normalize_error_type(error, error_type) in _RETRYABLE_TYPE_NAMES:
+        return "retryable"
+
+    # A blank message carries no signal: retry, but only after the type-based grades above.
+    if not error_text:
         return "retryable"
 
     return "manual_review"

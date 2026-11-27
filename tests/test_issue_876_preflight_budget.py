@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
+from menhir.domain.session import new_session
+from menhir.services.ingest_service import IngestService
 from menhir.config.settings_model import MemorySettings
 from menhir.services.enrichment_failures import classify_enrichment_failure
 from menhir.services.enrichment_steps import (
@@ -54,3 +58,77 @@ def test_small_diff_kept_intact_under_budget():
 def test_blank_failure_message_is_retryable(message):
     assert classify_enrichment_failure(message) == "retryable"
     assert classify_enrichment_failure(None) == "retryable"
+
+
+# --- review follow-ups: redaction growth, configured budget, blank typed errors -------------
+
+SECRET_LINE = 'password = "abcd1234"'  # 21 chars; redacts to 38
+
+
+def _intake(stub_memory_graph_adapter, stub_graphiti_client, stub_llm_adapter, monkeypatch):
+    svc = IngestService(
+        graph_adapter=stub_memory_graph_adapter,
+        graphiti_client=stub_graphiti_client,
+        llm=stub_llm_adapter,
+    )
+    monkeypatch.setattr(svc, "_ensure_enrichment_worker", AsyncMock())
+    monkeypatch.setattr(svc, "_enqueue_pending_episode", AsyncMock())
+    return svc
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_redaction_lengthened_content_is_rejected_at_intake_not_parked(
+    stub_memory_graph_adapter, stub_graphiti_client, stub_llm_adapter, monkeypatch
+):
+    svc = _intake(stub_memory_graph_adapter, stub_graphiti_client, stub_llm_adapter, monkeypatch)
+    content = "x" * (MAX_EPISODE_CHARS - 10 - len(SECRET_LINE)) + "\n" + SECRET_LINE
+    validate_memory_payload(content)  # passes the raw check
+
+    with pytest.raises(ValueError, match="exceeds"):
+        await svc.queue_episode_for_enrichment(content, new_session("u876"), "unit-test")
+    assert not stub_memory_graph_adapter.pending_episode_rows
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_low_configured_budget_rejects_content_over_four_times_budget(
+    stub_memory_graph_adapter, stub_graphiti_client, stub_llm_adapter, monkeypatch
+):
+    svc = _intake(stub_memory_graph_adapter, stub_graphiti_client, stub_llm_adapter, monkeypatch)
+    svc._graphiti_episode_max_estimated_tokens = 1000
+
+    with pytest.raises(ValueError, match="enrichment budget"):
+        await svc.queue_episode_for_enrichment("x" * 4001, new_session("u876"), "unit-test")
+    assert not stub_memory_graph_adapter.pending_episode_rows
+
+    result = await svc.queue_episode_for_enrichment(
+        "x" * 4000, new_session("u876"), "unit-test", diff="d" * 5000
+    )
+    assert result.episode_id in stub_memory_graph_adapter.pending_episode_rows
+
+
+def _blank_exc(name):
+    return type(name, (Exception,), {"__str__": lambda self: ""})()
+
+
+@pytest.mark.parametrize(
+    ("type_name", "expected"),
+    [
+        ("EnrichmentDeadlineExceeded", "manual_review"),
+        ("LlmBudgetExceeded", "manual_review"),
+        ("JSONDecodeError", "manual_review"),
+        ("ValidationError", "manual_review"),
+        ("RateLimitError", "retryable"),
+    ],
+)
+def test_typed_exception_with_empty_message_keeps_type_based_grade(type_name, expected):
+    exc = _blank_exc(type_name)
+    assert str(exc) == ""
+    assert classify_enrichment_failure(exc) == expected
+    assert classify_enrichment_failure("", error_type=type_name) == expected
+
+
+def test_blank_plain_message_and_untyped_blank_exception_are_retryable():
+    assert classify_enrichment_failure("  ") == "retryable"
+    assert classify_enrichment_failure(_blank_exc("SomeOtherError")) == "retryable"
