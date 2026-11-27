@@ -188,12 +188,16 @@ def nominate(
                 continue
             cand["scalar"] = prov
             cand["signals"].append("scalar_replaced")
-    for stale in ToolEventRepository(adapter).stale_anchored_memories(namespace=ns, limit=1000):
-        cand = candidates.get(str(stale.get("memory_uuid")))
-        if cand is None or cand["anchor"] is not None:
-            continue
-        cand["anchor"] = stale
-        cand["signals"].append("stale_anchor")
+    tool_events = ToolEventRepository(adapter)
+    for i in range(0, len(order), _PROVENANCE_CHUNK):
+        # Restricted to the candidates: a namespace-wide read is a top-N window by dirty_at.
+        chunk = order[i:i + _PROVENANCE_CHUNK]
+        for stale in tool_events.stale_anchored_memories(namespace=ns, limit=1000, memory_uuids=chunk):
+            cand = candidates.get(str(stale.get("memory_uuid")))
+            if cand is None or cand["anchor"] is not None:
+                continue
+            cand["anchor"] = stale
+            cand["signals"].append("stale_anchor")
 
     position = {u: i for i, u in enumerate(order)}
     nominated = [candidates[u] for u in order if candidates[u]["signals"]]
