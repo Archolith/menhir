@@ -119,3 +119,24 @@
 - Hard startup context-budget cap + path-glob-scoped memory attachment + git-worktree canonicalization + PreCompact/PostCompact hooks (from Claude Code Auto Memory): enforce a strict bootstrap cap (e.g., 200 lines / 25KB) with overflow warnings, auto-surface architectural invariants only on matching file globs, canonicalize worktrees to one workspace key, and keep hard invariants in deterministic lifecycle hooks rather than advisory recall text.
 - Public commit-pinned full-haystack LongMemEval-S benchmark + tunable recall depth knob (reasoning_level) + auditable consolidation diff logs (from Honcho): publish reproducible full-haystack LongMemEval-S ablations to answer Honcho's 90.4% headline, expose caller-selectable latency/depth tiers with include_evidence traces, and emit deterministic per-cycle consolidation diff logs (Dream History equivalent) plus a compact cached Peer/Workspace Card for zero-latency bootstrap.
 - Write-path LLM model-control-token rejection + opt-in PR-gated doc curation + lightweight cross-harness plugins (from Copilot Memory/Dreaming & Honcho): harden Menhir's secret scrubber against indirect prompt injection via control tokens, add an opt-in background job proposing human-reviewed PRs/diffs for checked-in AGENTS.md/CLAUDE.md from resolved conflict-inbox and WorkArtifact history, and ship thin MIT plugins for Claude Code and Hermes.
+
+---
+
+## 7. 2026-11-27 Addendum — 30-Item Stratified `LongMemEval-S` Pilot (`d89a0d48`)
+
+To begin closing the `S8` full-haystack evaluation gap flagged above without committing to a full 500-item `LME-S` spend first, Menhir `d89a0d48` was ingested and scored on a 30-item stratified `LongMemEval-S` pilot (`5 × 6` question types, `1,497` sessions, `15,018` turns — a `22.5×` larger haystack than Oracle). The graph and sidecars are preserved as a verified ADR 0011 baseline (`lme-snap-lmes-pilot30-d89a0d48-base`, 1:1 restore verified; see [tracker #469](https://github.com/Archolith/menhir/issues/469#issuecomment-7219756798)).
+
+| Arm / Variant | Score (30-item pilot) | Notes |
+|---|---|---|
+| `no_memory` | `1 / 30` (`3.3%`) | Sanity baseline |
+| `o500` Oracle `s4-ship` (`dcf17cb`, same 30 items) | `24 / 30` (`80.0%`) | Oracle reference on the exact same 30 questions |
+| `LME-S` base (`menhir_recall`) | `24 / 30` (`80.0%`) | Zero net degradation across a `22.5×` larger haystack |
+| `LME-S` + `drill_down` | `25 / 30` (`83.3%`) | `+1` on `852ce960` |
+| `LME-S` + `#1057` (`source_memory_session_window=2`, 3× runs) | `26 / 30` (`86.7%`) | `3/3` consistent; `51a45a95` `3/3` win, `6d550036` `2/3` win, `0` regressions across `72/72` baseline-passing trials ([PR #1061](https://github.com/Archolith/menhir/pull/1061), opt-in default `0`) |
+
+**Audited miss breakdown (post-`#1057`):**
+- `51a45a95` was the sole scale-induced retrieval gap (`spread_by_session` starving same-session context at 50+ sessions), fixed in [#1057](https://github.com/Archolith/menhir/issues/1057) / [PR #1061](https://github.com/Archolith/menhir/pull/1061).
+- `75832dbd` and `6d550036` are `LongMemEval-S` haystack-contamination artifacts where spliced ShareGPT/distractor sessions explicitly state preferences/leadership roles that contradict the Oracle-only gold rubric; Menhir accurately recalled what was in the namespace.
+- `0a995998` (known LME gold double-count bug), `gpt4_59c863d7` (`count_object="diorama"` split), and `852ce960` (`#564`, intentionally on hold, fail-closed policy) match established Oracle behavior.
+
+**Scope caveat:** This is a 30-item stratified pilot, not a full 500-item `LongMemEval-S` headline. It validates scale resilience and closes the `#1057` session-window gap, while full-500 `LME-S` and `S4 + S5` engineering-evidence-graph benchmarking remain open.
