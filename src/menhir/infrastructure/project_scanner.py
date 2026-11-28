@@ -492,15 +492,42 @@ class ProjectScanner:
         result.imports, import_name_map = _analyze_python_imports(
             root, file_entries, stack_roots, result.import_sources_unread
         )
+        from menhir.infrastructure.polyglot_treesitter import (
+            extract_polyglot_call_edges,
+            extract_polyglot_imports,
+            extract_polyglot_symbols,
+            lang_for_path,
+        )
+
+        poly_imports, poly_import_names = extract_polyglot_imports(
+            root, file_entries, _read_text_for_scan
+        )
+        if poly_imports:
+            seen_imp = {(e.source_path, e.target_path) for e in result.imports}
+            for e in poly_imports:
+                if (e.source_path, e.target_path) not in seen_imp:
+                    seen_imp.add((e.source_path, e.target_path))
+                    result.imports.append(e)
+        for src_path, nmap in poly_import_names.items():
+            import_name_map.setdefault(src_path, {}).update(nmap)
+
         result.test_edges = _detect_test_edges(file_entries, result.imports)
         result.endpoints = _detect_endpoints(root, file_entries, stack)
         result.cross_project_refs = _detect_cross_project_refs(root, file_entries, project_name)
 
-        # Extract symbols from Python files (only for Python projects or any file with .py extension)
+        # Extract symbols from Python and Tier-1 Tree-sitter languages (#1077)
         for fe in result.files:
-            if not fe.rel_path.endswith(".py"):
-                continue
-            syms, truncated = _extract_symbols(str(root / fe.rel_path), fe.rel_path)
+            if fe.rel_path.endswith(".py"):
+                syms, truncated = _extract_symbols(str(root / fe.rel_path), fe.rel_path)
+            else:
+                poly_lang = lang_for_path(fe.rel_path)
+                if poly_lang is None:
+                    continue
+                try:
+                    poly_text = _read_text_for_scan(root / fe.rel_path)
+                except OSError:
+                    continue
+                syms, truncated = extract_polyglot_symbols(poly_text, fe.rel_path, poly_lang)
             if truncated:
                 fe.symbols_truncated = True
                 result.truncated_symbol_files.append(fe.rel_path)
@@ -516,16 +543,37 @@ class ProjectScanner:
                     tl_lookup[(sym.file_path, sym.name)] = path
                 elif sym.kind == "method":
                     method_lookup[(sym.file_path, sym.parent, sym.name)] = path
+            imports_by_src: dict[str, set[str]] = {}
+            for imp_edge in result.imports:
+                imports_by_src.setdefault(imp_edge.source_path, set()).add(imp_edge.target_path)
             for fe in result.files:
-                if not fe.rel_path.endswith(".py"):
-                    continue
                 file_import_names = import_name_map.get(fe.rel_path, {})
-                result.call_edges.extend(
-                    _extract_call_edges(
-                        str(root / fe.rel_path), fe.rel_path,
-                        tl_lookup, method_lookup, file_import_names,
+                if fe.rel_path.endswith(".py"):
+                    result.call_edges.extend(
+                        _extract_call_edges(
+                            str(root / fe.rel_path), fe.rel_path,
+                            tl_lookup, method_lookup, file_import_names,
+                        )
                     )
-                )
+                else:
+                    poly_lang = lang_for_path(fe.rel_path)
+                    if poly_lang is None:
+                        continue
+                    try:
+                        poly_text = _read_text_for_scan(root / fe.rel_path)
+                    except OSError:
+                        continue
+                    result.call_edges.extend(
+                        extract_polyglot_call_edges(
+                            poly_text,
+                            fe.rel_path,
+                            poly_lang,
+                            file_import_names,
+                            tl_lookup,
+                            method_lookup,
+                            imported_files=imports_by_src.get(fe.rel_path),
+                        )
+                    )
 
         # A file disappearing after traversal is not evidence that it was deleted from the
         # project. Refuse this publication rather than prune from a torn filesystem view.
@@ -640,6 +688,8 @@ def _classify_file_role(rel_path: str) -> str:
     if re.match(r".*\.test\.(ts|tsx|js|jsx)$", name):
         return "test"
     if re.match(r".*\.spec\.(ts|tsx|js|jsx)$", name):
+        return "test"
+    if re.match(r".*[-_]test\.(c|cc|cpp|cxx|rs)$", name) or re.match(r".*_kunit\.c$", name):
         return "test"
 
     return "file"
