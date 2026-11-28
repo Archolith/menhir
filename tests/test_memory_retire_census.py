@@ -48,8 +48,9 @@ CLASSIFIED: dict[tuple[str, str, str], str] = {
     (_SV, _SVM + "list_recall_visible_scalar_history_views", VISIBILITY): "DEFAULT",
     (_SV, _SVM + "list_scalar_history_views_for_namespace", VISIBILITY): "DEFAULT",
     (_I + "view_query_repository.py", "ViewQueryRepositoryMixin.list_views", VISIBILITY): "DEFAULT",
-    # The source-memory lane of ranked recall.
+    # The source-memory lane of ranked recall, and its same-session neighbor window (#1057).
     ("services/recall_pipeline.py", "_build_source_memories", SEARCH): "DEFAULT",
+    (_MQ, _MQR + "get_session_episode_neighbors", VISIBILITY): "DEFAULT",
     # --- DELEGATE: threads the caller's choice through ------------------------------------------
     (_MQ, _MQR + "search_episode_embeddings", VISIBILITY): "DELEGATE",
     (_I + "memory_graph_adapter.py", "MemoryGraphAdapter.search_episode_embeddings", SEARCH): "DELEGATE",
