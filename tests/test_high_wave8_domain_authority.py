@@ -107,6 +107,7 @@ def test_cf47_the_mutation_predicate_is_emitted_from_the_domain_constants() -> N
     assert "$protected_conflict_states" in fragment
     assert set(me.MUTABLE_PREDICATE_PARAMS) == {
         "mergeable_freshness",
+        "mergeable_scopes",
         "protected_conflict_states",
     }
     assert me.MUTABLE_PREDICATE_PARAMS["mergeable_freshness"] == sorted(me._MERGEABLE_FRESHNESS)

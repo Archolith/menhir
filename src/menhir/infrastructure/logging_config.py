@@ -161,7 +161,7 @@ def build_logging_config(
 
 def configure_logging(
     *,
-    level: str = DEFAULT_LOG_LEVEL,
+    level: str | None = None,
     log_dir: str | None = None,
     include_console: bool = True,
 ) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.projection import (
@@ -24,7 +24,7 @@ from menhir.infrastructure.realization_coverage_repository import (
     ScalarStateProjectionHashSource,
 )
 from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
-from menhir.infrastructure.view_repository import ViewRepository
+from menhir.infrastructure.view_repository import ViewRepository, build_view_repository
 from menhir.services.scalar_projection_definition import (
     SCALAR_STATE_PROJECTION,
     scalar_projection_target,
@@ -35,6 +35,9 @@ from menhir.services.scalar_projection_hash import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from menhir.extensions import RuntimeExtensions
 
 __all__ = ["ScalarStateProjectionMaterializer"]
 
@@ -82,13 +85,17 @@ def _current_view_keys(tx: Any, token: ProjectionWorkToken) -> tuple[str, ...]:
 class ScalarStateProjectionMaterializer:
     """Materialize exactly one scalar projection target inside a T5 fenced transaction."""
 
-    def __init__(self, *, as_of: datetime | None = None, source: str = "scalar-state-lifecycle") -> None:
+    def __init__(
+        self, *, as_of: datetime | None = None, source: str = "scalar-state-lifecycle",
+        extensions: RuntimeExtensions | None = None,
+    ) -> None:
         self._as_of = as_of
         self._source = source
+        self._extensions = extensions
 
     def __call__(self, tx: Any, token: ProjectionWorkToken) -> str:
         _require_scalar_target(token)
-        views = ViewRepository(tx)
+        views = build_view_repository(tx, extensions=self._extensions)
         hashes = ScalarStateProjectionHashSource(tx)
 
         # Detect a corrupt duplicate-current surface before choosing a winner or mutating it.

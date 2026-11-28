@@ -4,6 +4,93 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-27 - Verify projection extension upgrades and removal (#725)
+
+- Teach the fence-lock writer census to follow typed repository factories, including the admission audit View writer.
+- Exercise an old worker holding a batch during a definition upgrade. Verify that a host without the extension preserves pending work and Views, and that the upgraded worker applies explicit migration and retirement while retaining undecided work.
+
+## 2026-11-27 - Coordinate extension runtime startup and shutdown (#725)
+
+- Bind the HTTP runtime extension registry after preflight succeeds, allowing failed startup to be retried with an explicit registry.
+- Include active projection lanes in scheduler status and pause or resume results. Drain scheduler jobs before closing graph clients.
+- Use a single extension View key for omitted, empty, and explicit default namespaces.
+
+## 2026-11-27 - Address the extension design review (#725)
+
+- Give extension Views kind-scoped keys and keep deployed built-in keys compatible.
+- Run each installed projection definition and version under its own lease and job loop. A stalled materializer or a backend holding the general maintenance lock can leave its own work pending while other projection lanes keep running.
+- Bind one registry for the life of the process. Validate synchronous materializers and required View read fields during registration, and document the host and author responsibilities for scope.
+
+## 2026-11-26 - Share extension registration across graph surfaces (#725)
+
+- Use one graph adapter factory and one View repository factory across Menhir's product paths. HTTP, hook and Explorer hosts can pass the same validated registry.
+- Hook and Explorer inherit a starting or running backend's registry in the same process. Conflicting registries are refused before those surfaces open graph resources. Stdio continues to use its HTTP backend.
+
+## 2026-11-26 - Add a decision timeline usefulness test (#725)
+
+- Project the sourced D5 decision history through the example extension and provide a timed comparison with finding the approval in the issue thread.
+
+## 2026-11-26 - Register a project decision timeline through HTTP startup (#725)
+
+- Validate host-supplied projection extensions before constructing the server. The HTTP runtime shares the registered View kinds with its scheduler materializers.
+- Add a synthetic decision timeline whose source changes and projection work are atomic. Erasing a source removes its historical Views before the scheduler rebuilds the surviving timeline.
+- Let the shared View writer run inside an existing Neo4j transaction while preserving statement timeouts for standalone writes.
+
+## 2026-11-26 - Resolve retained projection work explicitly (#725)
+
+- Let an extension requeue an exact retained generation under the current version or queue its removal. The worker still materializes and certifies the new generation.
+- Reject stale, quarantined, and already-resolved generations. Concurrent decisions on one generation can advance it once.
+
+## 2026-11-26 - Preserve pending projection work across version changes (#725)
+
+- Keep the exact pending generations from the outgoing definition version available for review. Requeue settled targets under the new version.
+- Refuse ordinary target updates that would replace retained work. Report retained targets as stale and keep them out of worker queues.
+
+## 2026-11-26 - Schedule registered projection workers (#725)
+
+- Give each explicitly registered projection definition a separate maintenance job with a 100-item batch. An empty registration set adds no jobs.
+- Use the scheduler lease and the Neo4j revocation check to stop dispatch and retry after ownership loss. Already-started transactions still use the work-generation fence.
+
+## 2026-11-26 - Internal projection execution lane (#725)
+
+- Bind each reconciliation lane to a host-supplied materializer for one definition and version. The scalar reconciliation prototype uses the same lane.
+- Filter worker queue reads by the installed and shared-current version before the batch limit. Mismatched work remains pending for review.
+
+## 2026-11-26 - Extension roadmap Phase 0 inventory (#725, #727)
+
+- Recorded the runtime adapter constructors and the distinct projection queue and View repair paths.
+- Updated the roadmap for approved extension and remote SDK decisions and merged scoped queue fixes.
+
+## 2026-11-25 - Record Graphiti prompt_name in LLM usage telemetry (#91)
+
+- `src/menhir/infrastructure/observability.py`: add request-scoped `set_llm_operation_label` /
+  `reset_llm_operation_label` ContextVar helpers and use the active label on `_InstrumentedEndpoint`
+  chat completions (falling back to `"chat.completions.create"` when unset; never applied to
+  embedding calls).
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`: bind `prompt_name` in
+  `MenhirOpenAIGenericClient.generate_response` across attempts and retries, resetting in `finally`,
+  so `llm_usage_events.operation` attributes per-prompt tokens and cache hits directly.
+- Tests: `tests/test_graphiti_prompt_name_telemetry.py`.
+
+## 2026-11-22 - Agent Smith OAuth clients come from the client policy
+
+- `src/menhir/api/oauth_as_metadata.py`: the hardcoded Agent Smith table (`_AGENT_SMITH_CLIENTS`,
+  `_OPERATOR_AGENT_SMITH_CLIENTS`) is removed. `/oauth/client-metadata/agent-smith.json?client=<key>`
+  and the local CIMD resolution in authorize now publish a document only when the loaded client
+  policy lists that exact client_id with a `registration` (client name, loopback redirect URIs).
+  Scope comes from the policy. No policy, no registration or a client removed from the policy:
+  404 / no local document. URLs, client_ids and ports are unchanged.
+- **Deploy precondition:** the production `client-policy.json` must give every Agent Smith client a
+  `registration` matching its stored `oauth_clients` row (same name, `http://127.0.0.1:<port>` then
+  `http://localhost:<port>` callback), or startup refuses on drift. Adding or retiring a harness
+  (e.g. `agy` 43694, later `gemini`/`gemini-config`) is then a policy change, not a release.
+- `tests/fixtures/client-policy*.synthetic.json`: Agent Smith entries carry registrations and both
+  admit `?client=agy`; digests recomputed.
+- Tests: `test_oauth_as_metadata.py` (documents from registrations, 404 without policy, removed or
+  unregistered client, foreign issuer), `test_oauth_cimd.py` (local resolution needs the policy;
+  registrations reconcile with rows stored by the old table; drift refuses startup),
+  `test_client_policy_v3.py` (agy agent tier on v2 and v3; no table fallback).
+
 ## 2026-11-15 - Hardening: loopback request checks, ingest path containment, structure signatures
 
 - `src/menhir/api/auth.py`, `api/server_support.py`: credential-free loopback grants also check the
@@ -124,17 +211,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
   fact's endpoints would flag the user node on every recall. That link is deferred to post-MVP.
 - Written only when `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER` is on.
 - `tests/test_edge_invalidation_statement_order_records.py`, `tests/test_edge_invalidation_statement_order_records_online.py`.
-
-## 2026-10-25 - Statement-order veto on edge invalidation (#168 2a)
-
-- Graphiti orders supersession by event date (`valid_at`), so an older statement whose event dates
-  later ("had it for 3 months") ended a newer one ("switched yesterday"). The invalidation hook now
-  answers KEEP on NEWER_CANDIDATE and CONTRADICTION when the cause was said before the target, and
-  both facts stay live. "Said" is the episode time: this call's episode for its own mention, the
-  stored `r.reference_time` (read by uuid and `group_id`, cached per call) for any other edge.
-- Veto only: it never ends a fact today's code keeps. The #377 authority check still answers
-  first. A missing or unparseable time keeps today's answer; a failed lookup answers KEEP. OWN_END
-  is unchanged.
-- `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER`, default on; `false` restores the old behaviour.
-  Applies at ingest, so existing graphs change only for facts written after it is on.
-- `tests/test_edge_invalidation_statement_order.py`, `tests/test_edge_invalidation_statement_order_online.py`.

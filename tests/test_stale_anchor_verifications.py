@@ -354,6 +354,102 @@ class TestLatestVerifications:
         assert ("m1", "src/foo.py") not in result
 
 
+class TestReceiptInstants:
+    """#965: receipt order and the post-dirty test use instants, never text, and a receipt counts
+    no later than the time the server recorded it (`created_at`)."""
+
+    _DIRTY = "2026-07-09T00:00:00Z"
+    _STALE = {"memory_uuid": "m1", "path": "src/foo.py", "dirty_at": _DIRTY}
+
+    @staticmethod
+    def _row(outcome, verified_at, created_at=None, path="src/foo.py"):
+        row = {"memory_uuid": "m1", "path": path, "outcome": outcome,
+               "verified_by": "agent", "verified_at": verified_at}
+        if created_at is not None:
+            row["created_at"] = created_at
+        return row
+
+    def _latest(self, rows):
+        r = _repo(default=rows)
+        return r.latest_stale_anchor_verifications(stale_anchors=[self._STALE]).get(
+            ("m1", "src/foo.py"))
+
+    def test_mixed_offsets_compare_as_instants(self):
+        # 10:00+05:00 is 05:00Z, EARLIER than 09:00Z, though it sorts later as text.
+        got = self._latest([
+            self._row("outdated", "2026-07-09T10:00:00+05:00"),
+            self._row("still_valid", "2026-07-09T09:00:00Z"),
+        ])
+        assert got["outcome"] == "still_valid"
+
+    def test_fractional_vs_whole_seconds_compare_as_instants(self):
+        got = self._latest([
+            self._row("still_valid", "2026-07-09T10:00:00Z"),
+            self._row("outdated", "2026-07-09T10:00:00.5Z"),
+        ])
+        assert got["outcome"] == "outdated"
+
+    def test_future_dated_still_valid_then_real_outdated_outdated_wins(self):
+        got = self._latest([
+            self._row("still_valid", "2099-01-01T00:00:00Z", "2026-07-09T00:00:01Z"),
+            self._row("outdated", "2026-07-09T00:00:02Z", "2026-07-09T00:00:02Z"),
+        ])
+        assert got["outcome"] == "outdated"
+
+    def test_future_dated_receipt_recorded_before_dirty_is_not_post_dirty(self):
+        got = self._latest([
+            self._row("still_valid", "2099-01-01T00:00:00Z", "2026-07-08T23:00:00Z"),
+        ])
+        assert got is None
+
+    def test_smoke_shape_plus5_still_valid_then_plus10_outdated(self):
+        got = self._latest([
+            self._row("outdated", "2026-07-09T00:10:00Z", "2026-07-09T00:00:02.000000002Z"),
+            self._row("still_valid", "2026-07-09T00:05:00Z", "2026-07-09T00:00:01.500000000Z"),
+        ])
+        assert got["outcome"] == "outdated"
+        assert got["verified_at"] == "2026-07-09T00:10:00Z"  # stored value is kept
+
+    def test_row_without_created_at_still_works(self):
+        got = self._latest([self._row("still_valid", "2026-07-09T01:00:00Z")])
+        assert got["outcome"] == "still_valid"
+
+    def test_unparseable_newest_does_not_hide_older_valid(self):
+        got = self._latest([
+            self._row("outdated", "zzz", "2026-07-09T05:00:00Z"),
+            self._row("still_valid", "2026-07-09T01:00:00Z", "2026-07-09T01:00:01Z"),
+        ])
+        assert got["outcome"] == "still_valid"
+
+    def test_tie_without_created_at_keeps_query_order(self):
+        got = self._latest([
+            self._row("outdated", "2026-07-09T01:00:00Z"),
+            self._row("still_valid", "2026-07-09T01:00:00Z"),
+        ])
+        assert got["outcome"] == "outdated"
+
+    def test_queries_order_by_server_created_at(self):
+        r = _repo(default=[])
+        r.latest_stale_anchor_verifications(stale_anchors=[self._STALE])
+        r.list_stale_anchor_verifications(namespace="tenant-a")
+        for query, params in r._neo4j.executed[-2:]:
+            assert "toString(v[$created_at_key]) AS created_at" in query
+            assert "ORDER BY v[$created_at_key] DESC" in query
+            assert "ORDER BY v[$verified_at_key]" not in query
+            assert "v.verified_at" not in query and "v.memory_uuid" not in query
+            assert params["created_at_key"] == "created_at"
+
+    def test_parse_iso_utc_accepts_neo4j_to_string_forms(self):
+        from menhir.infrastructure.tool_event_repository import _parse_iso_utc
+
+        for text in (
+            "2026-07-09T01:55:28.123456789Z",
+            "2026-07-09T01:55:28.123456789+00:00",
+            "2026-07-09T01:55:28Z",
+        ):
+            assert _parse_iso_utc(text) is not None, text
+
+
 # ---------------------------------------------------------------------------
 # API routes (via TestClient)
 # ---------------------------------------------------------------------------
@@ -406,6 +502,41 @@ class TestAPIRoutes:
         body = r.json()
         assert body["accepted"] is True
         assert body["verification"]["memory_uuid"] == "m1"
+
+    @pytest.mark.unit
+    def test_server_verified_at_keeps_subseconds_and_caller_value_is_untouched(self, monkeypatch):
+        """Fixed clock: a server-assigned receipt keeps microseconds and ends in Z, while a
+        caller-supplied verified_at is forwarded verbatim."""
+        from menhir.api import routes as routes_module
+
+        monkeypatch.setattr(
+            routes_module, "utc_now_iso", lambda: "2026-07-09T12:34:56.123456+00:00",
+        )
+        seen: list[str] = []
+        adapter = _adapter()
+        original = adapter.record_stale_anchor_verification
+
+        def record(**kwargs):
+            seen.append(kwargs["verified_at"])
+            return original(**kwargs)
+
+        adapter.record_stale_anchor_verification = record
+        c = _client(adapter)
+        server = c.post("/api/tool-events/stale-verifications", json={
+            "memory_uuid": "m1", "project": "menhir", "path": "src/foo.py",
+            "outcome": "still_valid",
+        })
+        assert server.status_code == 200
+        assert server.json()["verification"]["verified_at"] == "2026-07-09T12:34:56.123456Z"
+
+        caller_value = "2026-07-09T09:00:00.250+05:00"
+        caller = c.post("/api/tool-events/stale-verifications", json={
+            "memory_uuid": "m1", "project": "menhir", "path": "src/foo.py",
+            "outcome": "outdated", "verified_at": caller_value,
+        })
+        assert caller.status_code == 200
+        assert caller.json()["verification"]["verified_at"] == caller_value
+        assert seen == ["2026-07-09T12:34:56.123456Z", caller_value]
 
     @pytest.mark.unit
     def test_post_invalid_outcome_rejected(self):
@@ -481,6 +612,30 @@ class TestAPIRoutes:
         r = c.get("/api/tool-events/stale-verifications?limit=5")
         assert r.status_code == 200
         assert r.json()["count"] == 5
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("path", "method", "default"),
+        [
+            ("stale", "stale_anchored_memories", 200),
+            ("stale-verifications", "list_stale_anchor_verifications", 50),
+        ],
+    )
+    def test_list_limit_default_and_bounds(self, path, method, default):
+        seen: list[int] = []
+
+        def list_rows(*, limit, **kwargs):
+            seen.append(limit)
+            return []
+
+        client = _client(_adapter(**{method: list_rows}))
+        route = f"/api/tool-events/{path}"
+        assert client.get(route).status_code == 200
+        for limit in (0, 500):
+            assert client.get(route, params={"limit": limit}).status_code == 200
+        for limit in (-1, 501):
+            assert client.get(route, params={"limit": limit}).status_code == 422
+        assert seen == [default, 0, 500]
 
     @pytest.mark.unit
     def test_receipt_does_not_clear_dirty(self):

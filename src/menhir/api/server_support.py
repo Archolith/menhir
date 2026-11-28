@@ -40,9 +40,10 @@ from menhir.api.request_context import RequestContextMiddleware
 from menhir.api.routes import router as api_router
 from menhir.config import MemorySettings, build_oauth_config, resolve_auth_mode
 from menhir.config.settings import is_loopback_host
+from menhir.core.bootstrap import build_graph_adapter
 from menhir.core.runtime import RuntimeContext, start_runtime, stop_runtime
+from menhir.extensions import RuntimeExtensions
 from menhir.explorer.integration import mount_explorer
-from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.candidate_service import CandidateService
 from menhir.services.lifecycle_service import LifecycleService
 
@@ -132,6 +133,7 @@ def build_runtime_lifespan(
     settings: MemorySettings,
     startup_scope: str,
     mcp_http_instance: Any,
+    extensions: RuntimeExtensions | None = None,
 ):
     """Build the FastAPI lifespan closure for runtime + MCP HTTP session management."""
 
@@ -157,16 +159,13 @@ def build_runtime_lifespan(
         ctx: RuntimeContext = await start_runtime(
             settings,
             candidate_readonly=candidate_readonly,
+            **({"extensions": extensions} if extensions is not None else {}),
         )
         app.state.runtime_ctx = ctx
         app.state.repo = ctx.built.neo4j
-        graph_adapter = MemoryGraphAdapter(
-            neo4j=app.state.repo,
-            counting_enabled=bool(
-                getattr(settings, "personal_memory_counting_enabled", False)
-                and getattr(settings, "personal_memory_scalar_state_enabled", False)
-            ),
-        )
+        graph_adapter = getattr(ctx.built, "graph_adapter", None)
+        if getattr(graph_adapter, "view_kinds", None) is None:
+            graph_adapter = build_graph_adapter(app.state.repo, settings, extensions=extensions)
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=ctx.built.graphiti_client,

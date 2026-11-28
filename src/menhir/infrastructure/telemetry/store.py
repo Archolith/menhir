@@ -138,6 +138,12 @@ class McpTelemetryStore(
                 )
                 conn.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS idx_mcp_events_started_at
+                    ON mcp_events (started_at DESC)
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS failure_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         recorded_at TEXT NOT NULL,
@@ -216,7 +222,8 @@ class McpTelemetryStore(
                 )
                 # Durable merge audit. The graph also denormalizes this onto
                 # survivor.merge_audit, but that property dies with the node: decay
-                # (bridge_and_delete), orphan cleanup, and user deletes all DETACH DELETE
+                # (journaled DECAY_DELETE; its snapshot is pruned after a retention window),
+                # orphan cleanup, and user deletes all DETACH DELETE
                 # the survivor, destroying the recovery record for every node it ever
                 # absorbed. This sidecar outlives the graph node, so merge history --
                 # and the absorbed-node snapshot needed to unmerge -- survives.

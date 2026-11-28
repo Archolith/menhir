@@ -79,6 +79,10 @@ _llm_usage_callback: ContextVar[LLMUsageCallback | None] = ContextVar(
     "menhir_llm_usage_callback",
     default=None,
 )
+_llm_operation_label: ContextVar[str | None] = ContextVar(
+    "menhir_llm_operation_label",
+    default=None,
+)
 _default_llm_usage_callback: LLMUsageCallback | None = None
 
 
@@ -92,6 +96,19 @@ def reset_llm_usage_callback(token: Token[LLMUsageCallback | None]) -> None:
     """Reset the request-scoped LLM usage callback to a previous token."""
 
     _llm_usage_callback.reset(token)
+
+
+def set_llm_operation_label(label: str | None) -> Token[str | None]:
+    """Install a request-scoped operation label (for example Graphiti ``prompt_name``)."""
+
+    normalized = label.strip() if isinstance(label, str) and label.strip() else None
+    return _llm_operation_label.set(normalized)
+
+
+def reset_llm_operation_label(token: Token[str | None]) -> None:
+    """Reset the request-scoped LLM operation label to its previous token."""
+
+    _llm_operation_label.reset(token)
 
 
 def set_default_llm_usage_callback(callback: LLMUsageCallback | None) -> None:
@@ -523,11 +540,16 @@ class _InstrumentedEndpoint:
 
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         model = kwargs.get("model")
+        operation = (
+            (_llm_operation_label.get() or self._endpoint)
+            if self._event_type == "chat"
+            else self._endpoint
+        )
         handle = start_llm_usage_call(
             kind=self._event_type,
             model=model,
             endpoint=self._endpoint,
-            operation=self._endpoint,
+            operation=operation,
         )
         try:
             if self._retry_rate_limits:
@@ -567,7 +589,8 @@ class _CachingEmbeddingsEndpoint:
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         # Extract input texts from the OpenAI embeddings contract
         input_val = kwargs.get("input") or (args[0] if args else None)
-        if input_val is None or self._cache is None:
+        # Cache keys describe default-size vectors only.
+        if input_val is None or self._cache is None or kwargs.get("dimensions") is not None:
             return await self._inner.create(*args, **kwargs)
 
         # Normalize to list
@@ -644,7 +667,7 @@ class _CachingEmbeddingsEndpoint:
             return upstream_result
 
         # If we had no cache hits, just return upstream directly (preserves exact contract)
-        if not any(i in cached_vectors for i in range(len(texts)) if i not in miss_indices):
+        if len(miss_indices) == len(texts):
             return upstream_result
 
         # Rebuild merged response

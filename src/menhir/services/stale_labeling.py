@@ -80,9 +80,9 @@ def label_stale_anchors(
     for item in items:
         matched = None
         uid = item.get("uuid")
-        if uid and uid in stale_by_uuid:
-            matched = stale_by_uuid[uid]
-        if matched is None:
+        if uid:
+            matched = stale_by_uuid.get(uid)
+        else:
             name = item.get("name")
             if name and name in stale_by_name:
                 matched = stale_by_name[name]

@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 SHARPNESS_PROMOTE_THRESHOLD = 0.5       # M5: raised from 0.3
 PERSISTENT_EDGE_PROMOTE_THRESHOLD = 3   # M5: raised from 2
-SIMILARITY_CONFLICT_THRESHOLD = 0.85
 ORPHAN_MAX_AGE_HOURS = 4.0
 CONSOLIDATION_BATCH_SIZE = 10
 
@@ -74,6 +73,7 @@ class ConsolidationResult:
     skipped_pending: int
     orphan_episodes_cleaned: int
     demoted: int = 0
+    merge_errors: int = 0
 
 
 @dataclass(frozen=True)

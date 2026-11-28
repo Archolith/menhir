@@ -206,6 +206,7 @@ class CountDecisionRepository:
               AND a.count_status = 'counted' AND a.value_kind = p.kind
               AND a.assertion_id <> p.id AND a.count_key_embedding IS NOT NULL
               AND a.count_key_embed_version = $ev
+              AND size(a.count_key_embedding) = size(p.vec)
             WITH p, a, vector.similarity.cosine(a.count_key_embedding, p.vec) AS cos
             WHERE cos IS NOT NULL AND cos >= $min
             WITH p, a, cos ORDER BY cos DESC, a.assertion_id ASC

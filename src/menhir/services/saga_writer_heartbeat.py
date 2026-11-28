@@ -158,17 +158,25 @@ class WriterHeartbeat:
                     "saga heartbeat thread for %s did not stop within %ss", self._op_id, timeout
                 )
 
+    def _renew_once(self) -> bool:
+        """Confirm the durable owner token and update local headroom."""
+        # Measure from before the renewal so a slow write cannot overstate the lease.
+        requested_at = monotonic()
+        renewed = self._journal.renew_owner_heartbeat(
+            self._op_id, seconds=self._lease_seconds, owner_token=self._owner_token
+        )
+        if renewed:
+            self._expires_at = requested_at + self._lease_seconds
+        else:
+            self._lost.set()
+        return renewed
+
     def _loop(self) -> None:
         # Event.wait doubles as the sleep and the stop signal, so stop() is immediate rather than
         # waiting out a full interval.
         while not self._stop.wait(self._interval):
-            # Taken BEFORE the call: if renewal takes a while, the local expiry under-estimates the
-            # true one rather than over-estimating it.
-            requested_at = monotonic()
             try:
-                renewed = self._journal.renew_owner_heartbeat(
-                    self._op_id, seconds=self._lease_seconds, owner_token=self._owner_token
-                )
+                renewed = self._renew_once()
             except Exception as exc:  # noqa: BLE001
                 self._renew_errors += 1
                 logger.warning(
@@ -187,15 +195,12 @@ class WriterHeartbeat:
                 continue
 
             self._renew_errors = 0
-            if renewed:
-                self._expires_at = requested_at + self._lease_seconds
             if not renewed:
                 # Proof, not ambiguity: the row is no longer PREPARED-and-ours. Someone committed
                 # it, quarantined it, or claimed it.
                 logger.error(
                     "saga writer LOST its claim on %s; it must start no further work", self._op_id
                 )
-                self._lost.set()
                 return
 
 
@@ -249,7 +254,8 @@ def owned_mutation(
 
     The lease is derived per saga kind via ``lease_seconds_for_kind``, so the two-statement
     METRIC_WRITE path gets a longer TTL than the single-statement kinds instead of sharing one
-    constant that is wrong for at least one of them.
+    constant that is wrong for at least one of them. The claim is renewed once before the body
+    starts, so a replaced token is refused at entry rather than at the first heartbeat tick.
     """
     if not enabled:
         yield None
@@ -262,6 +268,9 @@ def owned_mutation(
         owner_token=owner_token,
         required_headroom_s=oo.mutation_window_for_kind(operation_kind),
     )
+    # Confirm the durable claim before making the driver gate available.
+    beat._renew_once()
+    beat.raise_if_lost()
     beat.start()
     try:
         with revocation_scope(beat.should_continue):

@@ -15,6 +15,7 @@ from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.utils import days_ago
 from menhir.config import MemorySettings
+from menhir.infrastructure.consolidation_queries import summary_sha256
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.infrastructure.llm import LLMAdapter
@@ -26,6 +27,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services import auto_mutation_policy as amp
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,6 @@ from menhir.services.lifecycle_models import (
     PERSISTENT_EDGE_PROMOTE_THRESHOLD,
     SHARPNESS_COSINE_FLOOR,
     SHARPNESS_PROMOTE_THRESHOLD,
-    SIMILARITY_CONFLICT_THRESHOLD,
     ConsolidationResult,
     DecayResult,
     ProgressCallback,
@@ -133,6 +134,31 @@ class LifecycleDecayMixin:
             truncated = truncated[:last_space]
         return truncated.rstrip() + "..."
 
+    async def _trusted_rehydration_base(
+        self, node_uuid: str, state: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """The body the node's current summary replaced, and where it came from.
+
+        ``original_content`` is trusted only while the marker written with it matches the current
+        summary. Otherwise: the latest decay revision for this summary, then a legacy
+        ``original_content`` of a node never rehydrated (one compression, so its body). None when
+        nothing is known to belong to this compression.
+        """
+        summary = str(state.get("content") or "")
+        stored = str(state.get("original_content") or "").strip()
+        if stored and summary and state.get("compressed_summary_sha256") == summary_sha256(summary):
+            return stored, "stored"
+        if summary:
+            archived = await asyncio.to_thread(
+                telemetry_store.get_decay_original_content, node_uuid, summary
+            )
+            if archived:
+                return archived, "decay"
+        if (stored and int(state.get("rehydration_count") or 0) == 0
+                and int(state.get("absorbed_count") or 0) == 0):
+            return stored, "legacy"
+        return None, None
+
     async def rehydrate_node(
         self,
         node_uuid: str,
@@ -158,10 +184,32 @@ class LifecycleDecayMixin:
 
         source_uuid = source_episode_uuid or source_node_uuid
         context_text = str(new_context or "").strip()
+        # What the write must still find on the node: the summary and the stored base it read.
+        state = await asyncio.to_thread(self.graph_adapter.fetch_rehydration_state, node_uuid)
+        read_summary = state.get("content")
+        read_base = state.get("original_content")
+        read_epoch = state.get("fence_epoch")
+        base, base_source = await self._trusted_rehydration_base(node_uuid, state)
         if not context_text:
-            updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid)
+            # Restore only a body known to belong to this compression; otherwise a state flip.
+            updated = await asyncio.to_thread(
+                self.graph_adapter.complete_rehydration,
+                node_uuid,
+                base,
+                read_summary=read_summary,
+                read_base=read_base,
+                read_epoch=read_epoch if base is not None else None,
+            )
             if updated:
                 await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
+                if base is not None:
+                    record_memory_revision(
+                        node_uuid=node_uuid,
+                        field="content",
+                        old_value=str(read_summary or ""),
+                        new_value=base,
+                        changed_by="decay",
+                    )
                 record_lifecycle_action(
                     action="rehydrate",
                     node_uuid=node_uuid,
@@ -184,12 +232,13 @@ class LifecycleDecayMixin:
             )
             return False
 
-        # Archive-first recovery: attempt to retrieve the original (pre-compression)
-        # content from the revision sidecar before falling back to node content.
-        # This prevents photocopy-loss from repeated compress/rehydrate cycles.
-        archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
+        # Base: the body the last compression replaced (see _trusted_rehydration_base); failing
+        # that the oldest archived body, then the content the write is checked against.
+        archived_content = base
+        if archived_content is None:
+            archived_content = await asyncio.to_thread(telemetry_store.get_original_content, node_uuid)
         existing_content = archived_content or str(
-            node.get("content") or node.get("summary") or node.get("name") or ""
+            read_summary or node.get("summary") or node.get("name") or ""
         ).strip()
 
         # Log which source was used for debugging/audit
@@ -226,7 +275,10 @@ class LifecycleDecayMixin:
             self.graph_adapter.complete_rehydration,
             node_uuid,
             merged,
+            read_summary=read_summary,
+            read_base=read_base,
             source_uuids=tuple(u for u in (source_uuid,) if u),
+            read_epoch=read_epoch,
         )
         if updated:
             await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
@@ -335,6 +387,9 @@ class LifecycleDecayMixin:
                     self.graph_adapter.compress_node,
                     uuid,
                     summary,
+                    read_content=candidate.get("content"),
+                    read_summary=candidate.get("summary"),
+                    min_days_since_accessed=_DEFAULT_COMPRESS_DAYS,
                     read_epoch=int(candidate.get("fence_epoch") or 0),
                     fence_key=str(candidate.get("fence_key") or "") or None,
                 ):
@@ -361,14 +416,50 @@ class LifecycleDecayMixin:
                 self.graph_adapter.mark_decay_candidates_selected,
                 [str(row["uuid"]) for row in delete_candidates],
             )
+        proposed_deletes: list[tuple[str, str | None, str]] = []
+        delete_refusals: dict[str, str] = {}
+        delete_failures = 0
+        skipped_hubs: list[str] = []
         for candidate in delete_candidates:
             candidate["last_accessed_days_ago"] = days_ago(candidate.get("last_accessed"))
             if self.should_delete(candidate):
                 del_uuid = str(candidate.get("uuid") or "")
-                outcome = await asyncio.to_thread(self.graph_adapter.bridge_and_delete, del_uuid)
-                deleted += int(outcome.get("deleted", 0))
+                # Automatic deletion is gated by MENHIR_AUTO_DELETE_MODE: only "on" deletes.
+                delete_mode = amp.auto_delete_mode()
+                if delete_mode != "on":
+                    if delete_mode == "propose" and del_uuid:
+                        proposed_deletes.append((
+                            del_uuid, None,
+                            amp.proposal_context(
+                                amp.AUTO_DELETE_PROPOSED, "decay_sweep",
+                                edge_count=candidate.get("edge_count"),
+                                sharpness=candidate.get("sharpness"),
+                            ),
+                        ))
+                    continue
+                # Journaled: snapshot, PREPARE, one re-checking statement, verify, commit.
+                try:
+                    outcome = await asyncio.to_thread(
+                        self._delete_coordinator().delete_decayed_node,
+                        del_uuid,
+                        candidate=candidate,
+                        min_days=_DEFAULT_GONE_DAYS,
+                        max_edge_count=_DEFAULT_GONE_EDGE_COUNT,
+                        max_sharpness=_DEFAULT_GONE_SHARPNESS,
+                    )
+                except Exception:  # noqa: BLE001 -- one node's failure must not end the sweep
+                    delete_failures += 1
+                    logger.exception("decay delete of %s failed; continuing the sweep", del_uuid)
+                    continue
+                deleted += len(outcome.get("deleted") or [])
                 edges_bridged += int(outcome.get("edges_bridged", 0))
+                skipped_hubs.extend(str(u) for u in outcome.get("bridge_skipped_hubs") or [])
+                if not outcome.get("deleted"):
+                    reason = str(outcome.get("reason") or "not_deleted")
+                    delete_refusals[del_uuid] = reason
+                    logger.info("decay delete of %s declined: %s", del_uuid, reason)
                 if outcome.get("deleted"):
+                    await asyncio.to_thread(amp.complete_proposals, amp.DELETE_PROPOSAL, [del_uuid])
                     record_lifecycle_action(
                         action="gone",
                         node_uuid=del_uuid,
@@ -377,6 +468,10 @@ class LifecycleDecayMixin:
                         after_freshness="gone",
                         llm_used=False,
                     )
+
+        if proposed_deletes:
+            await asyncio.to_thread(amp.record_proposals, amp.DELETE_PROPOSAL, proposed_deletes)
+            logger.info("auto delete: decay proposed %d node(s), none deleted", len(proposed_deletes))
 
         # Degree-zero orphan cleanup was REMOVED (2026-07-13). It inferred physical-deletion
         # eligibility from node isolation alone -- bypassing freshness, memory type, age,
@@ -392,6 +487,11 @@ class LifecycleDecayMixin:
             "Decay selection: active_selected=%d compressed_selected=%d sharpness=%d compressed=%d deleted=%d",
             len(active_candidates), len(delete_candidates), sharpness_recalculated, compressed, deleted,
         )
+        if delete_refusals or delete_failures or skipped_hubs:
+            logger.warning(
+                "Decay delete: refused=%d failed=%d bridge_skipped_hubs=%s",
+                len(delete_refusals), delete_failures, skipped_hubs,
+            )
         return DecayResult(
             edge_counts_synced=edge_counts_synced,
             sharpness_recalculated=sharpness_recalculated,

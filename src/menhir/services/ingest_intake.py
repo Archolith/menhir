@@ -57,7 +57,10 @@ from menhir.services.enrichment_steps import (
     stamp_and_finalize,
 )
 from menhir.services.ingest_gate import IngestGate
-from menhir.services.ingest_limits import validate_memory_payload
+from menhir.services.ingest_limits import (
+    validate_memory_payload,
+    validate_redacted_memory_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,33 +112,27 @@ class IngestIntakeMixin:
         if isinstance(outcome, IngestResult):
             return outcome
         episode_uuid, evidence_projection_uuid = outcome
-        try:
-            if self._enrichment_enabled:
-                await self._ensure_enrichment_worker()
+        if self._enrichment_enabled:
+            try:
+                if not await self._ensure_enrichment_worker():
+                    # No consumer in this process (it does not hold the scheduler lease). The
+                    # episode is durable PENDING; the lease holder's recovery picks it up, so
+                    # do not park an id in a queue nothing drains.
+                    return self._pending_recovery_result(episode_uuid)
                 await self._enqueue_pending_episode(episode_uuid)
-                # The projection is a real PENDING episode and enriches through the same worker;
-                # without this it would sit queued forever and produce none of the entities it
-                # exists to produce. Enqueued AFTER the memory so the curated write is never
-                # delayed by it.
-                if evidence_projection_uuid:
+            except Exception:
+                logger.exception("Could not schedule saved episode %s for enrichment", episode_uuid)
+                return self._pending_recovery_result(episode_uuid)
+            # The companion is also PENDING and can be recovered independently of the memory.
+            if evidence_projection_uuid:
+                try:
                     await self._enqueue_pending_episode(evidence_projection_uuid)
-        except Exception as exc:  # catch-all: episode queue must not crash the caller
-            logger.exception(
-                "Episode queue failed for session_id=%s source=%s",
-                session.session_id,
-                source,
-            )
-            return IngestResult(
-                episode_id="",
-                status=IngestStatus.FAILED,
-                nodes_touched=0,
-                edges_touched=0,
-                # The write landed, so say which episode and that resending would duplicate it.
-                error=(
-                    f"episode {episode_uuid} was written but could not be queued for enrichment "
-                    f"({type(exc).__name__}); do not write it again, see the server log"
-                ),
-            )
+                except Exception:
+                    logger.exception(
+                        "Could not schedule evidence projection %s for saved episode %s",
+                        evidence_projection_uuid,
+                        episode_uuid,
+                    )
 
         return IngestResult(
             episode_id=episode_uuid,
@@ -172,6 +169,11 @@ class IngestIntakeMixin:
         # 'refuse' this raises SecretRefused (a ValueError) before anything is persisted.
         episode = prepare_memory_text(episode)
         diff = prepare_memory_text(diff) if diff else diff
+        # Redaction can lengthen the text; re-check what is actually stored so preflight never
+        # parks an episode that intake accepted (#876).
+        validate_redacted_memory_payload(
+            episode, diff, getattr(self, "_graphiti_episode_max_estimated_tokens", None)
+        )
         user_statement = prepare_memory_text(user_statement) if user_statement else user_statement
         redacted_kinds = tuple(dict.fromkeys(
             kind
@@ -519,6 +521,17 @@ class IngestIntakeMixin:
             await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid))
 
 
+    @staticmethod
+    def _pending_recovery_result(episode_uuid: str) -> IngestResult:
+        return IngestResult(
+            episode_id=episode_uuid,
+            status=IngestStatus.QUEUED,
+            nodes_touched=1,
+            edges_touched=0,
+            processing_state="PENDING",
+            warning="Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        )
+
     async def ingest_episode(
         self,
         episode: str,
@@ -619,6 +632,7 @@ class IngestIntakeMixin:
                     status=IngestStatus.QUEUED,
                     nodes_touched=0,
                     edges_touched=0,
+                    warning=queue_result.warning if processing_state == ProcessingState.PENDING else None,
                 )
 
         except Exception as exc:  # catch-all: episode ingest must not crash the caller

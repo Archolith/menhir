@@ -26,6 +26,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
+from menhir.services import auto_mutation_policy as amp
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ from menhir.services.lifecycle_models import (
     PERSISTENT_EDGE_PROMOTE_THRESHOLD,
     SHARPNESS_COSINE_FLOOR,
     SHARPNESS_PROMOTE_THRESHOLD,
-    SIMILARITY_CONFLICT_THRESHOLD,
     ConsolidationResult,
     DecayResult,
     ProgressCallback,
@@ -93,23 +93,27 @@ class LifecycleConsolidationMixin:
                 "conflicts_detected": result.conflicts_detected,
                 "skipped_pending": result.skipped_pending,
                 "orphan_episodes_cleaned": result.orphan_episodes_cleaned,
+                "merge_errors": result.merge_errors,
             },
             duration_ms=duration_ms,
             success=True,
         )
         logger.info(
-            "Consolidation complete: promoted=%d deleted=%d demoted=%d conflicts=%d skipped_pending=%d orphans=%d duration_ms=%d",
+            "Consolidation complete: promoted=%d deleted=%d demoted=%d conflicts=%d skipped_pending=%d orphans=%d merge_errors=%d duration_ms=%d",
             result.promoted,
             result.deleted,
             result.demoted,
             result.conflicts_detected,
             result.skipped_pending,
             result.orphan_episodes_cleaned,
+            result.merge_errors,
             duration_ms,
         )
         return result
 
-    async def _expire_demoted_session_nodes(self, session_id: str | None) -> int:
+    async def _expire_demoted_session_nodes(
+        self, session_id: str | None, exclude: frozenset[str] = frozenset()
+    ) -> int:
         """Delete demoted SESSION nodes whose grace TTL has expired, through the journaled saga.
 
         Runs as a SESSION_TTL_DELETE operation (plan Phase 6): a complete snapshot of every target is
@@ -125,7 +129,8 @@ class LifecycleConsolidationMixin:
         by promote_to_persistent -- is excluded up front.
         """
         result = await asyncio.to_thread(
-            self._delete_coordinator().delete_expired_session_nodes, session_id=session_id
+            self._delete_coordinator().delete_expired_session_nodes,
+            session_id=session_id, exclude=exclude,
         )
         deleted = result.get("deleted") or []
         for node_uuid in deleted:
@@ -150,6 +155,26 @@ class LifecycleConsolidationMixin:
                 len(orphaned), orphaned,
             )
         return len(deleted)
+
+    async def _cleanup_orphan_episodes(self, session_id: str | None) -> int:
+        """Orphan-episode sweep behind MENHIR_AUTO_DELETE_MODE: off -> 0, propose -> record, on -> delete."""
+        mode = amp.auto_delete_mode()
+        if mode == "on":
+            return await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        if mode == "propose":
+            try:
+                uuids = await asyncio.to_thread(
+                    self.graph_adapter.fetch_orphan_episode_uuids, session_id
+                )
+            except Exception:  # noqa: BLE001 -- a proposal read must never abort consolidation
+                logger.warning("could not read orphan episodes to propose", exc_info=True)
+                return 0
+            await asyncio.to_thread(amp.record_proposals, amp.DELETE_PROPOSAL, [
+                (u, None, amp.proposal_context(amp.AUTO_DELETE_PROPOSED, "orphan_episode_cleanup"))
+                for u in uuids
+            ])
+            logger.info("auto delete: proposed %d orphan episode(s), none deleted", len(uuids))
+        return 0
 
     def _delete_coordinator(self):
         """The journaled delete saga, built lazily on the default telemetry sidecar.
@@ -184,7 +209,7 @@ class LifecycleConsolidationMixin:
             # No promotion candidates, but demoted nodes may still have expired — run the
             # TTL-expiry sweep (promotion cannot rescue anything here, so ordering is moot).
             deleted = await self._expire_demoted_session_nodes(session_id)
-            orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+            orphans = await self._cleanup_orphan_episodes(session_id)
             return ConsolidationResult(
                 promoted=0,
                 deleted=deleted,
@@ -247,15 +272,31 @@ class LifecycleConsolidationMixin:
 
         # Phase 3: Contradiction detection for promotion candidates
         conflicts_detected = 0
+        merge_error_log: list[str] = []
+        # absorbed promotion candidate -> the survivor that now holds its content.
+        absorbed_into: dict[str, str] = {}
         for i in range(0, len(promote_candidates_for_conflict_check), CONSOLIDATION_BATCH_SIZE):
             batch = promote_candidates_for_conflict_check[i:i + CONSOLIDATION_BATCH_SIZE]
-            batch_conflicts = await self._check_contradictions_batch(batch)
+            batch_conflicts = await self._check_contradictions_batch(
+                batch, merge_error_log, absorbed_into=absorbed_into,
+            )
             conflicts_detected += batch_conflicts
-            promote_uuids.extend(str(node["uuid"]) for node in batch)
+            # A candidate whose check raised is not promoted unchecked; the next pass retries it.
+            failed = set(merge_error_log)
+            promote_uuids.extend(str(node["uuid"]) for node in batch if str(node["uuid"]) not in failed)
+        # A promotion candidate absorbed by a merge is gone, so promoting its uuid matches nothing.
+        # Its content now lives in the survivor: promote that instead, or a SESSION survivor (whose
+        # TTL the merge only cleared) could be demoted and TTL-deleted later, taking it along.
+        # promote_to_persistent skips a survivor that is already PERSISTENT or protected.
+        for survivor_uuid in absorbed_into.values():
+            if survivor_uuid not in promote_uuids:
+                promote_uuids.append(survivor_uuid)
 
         # Phase 4: Execute transitions and demote
-        promoted = await asyncio.to_thread(self.graph_adapter.promote_to_persistent, promote_uuids)
-        for uuid in promote_uuids:
+        # Audit rows follow what the mutation changed (#919), not what was requested: a requested
+        # uuid may have been absorbed by a merge above, left SESSION, or be lifecycle-protected.
+        promoted_uuids = await asyncio.to_thread(self.graph_adapter.promote_to_persistent, promote_uuids)
+        for uuid in promoted_uuids:
             record_memory_revision(
                 node_uuid=uuid,
                 field="scope",
@@ -263,8 +304,11 @@ class LifecycleConsolidationMixin:
                 new_value=NodeScope.PERSISTENT,
                 changed_by="consolidation",
             )
-        demoted = await asyncio.to_thread(self.graph_adapter.set_demote_ttl, demote_uuids, DEMOTE_TTL_DAYS)
-        for uuid in demote_uuids:
+        # Only newly demoted nodes: one already in its grace window keeps its TTL and gets no new row.
+        demoted_uuids = await asyncio.to_thread(
+            self.graph_adapter.set_demote_ttl, demote_uuids, DEMOTE_TTL_DAYS
+        )
+        for uuid in demoted_uuids:
             record_lifecycle_action(
                 action="demote",
                 node_uuid=uuid,
@@ -274,7 +318,11 @@ class LifecycleConsolidationMixin:
 
         # Phase 4b: TTL-expiry delete AFTER promotion — promotion wins. promote_to_persistent
         # cleared ttl_expires on rescued nodes, so they no longer match the expired query.
-        deleted = await self._expire_demoted_session_nodes(session_id)
+        # A candidate whose contradiction check raised was neither promoted nor checked; it must not
+        # be TTL-deleted in the same pass either (#938). The next pass decides it.
+        deleted = await self._expire_demoted_session_nodes(
+            session_id, exclude=frozenset(merge_error_log)
+        )
 
         # Count pending/enriching episodes (informational — they are not consolidated)
         skipped_pending = await asyncio.to_thread(self.graph_adapter.count_pending_episodes, session_id)
@@ -282,15 +330,16 @@ class LifecycleConsolidationMixin:
             logger.info("Skipped %d PENDING/ENRICHING episodes (not yet enriched)", skipped_pending)
 
         # Phase 5: Cleanup orphan episodes
-        orphans = await asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, session_id)
+        orphans = await self._cleanup_orphan_episodes(session_id)
 
         return ConsolidationResult(
-            promoted=promoted,
+            promoted=len(promoted_uuids),
             deleted=deleted,
             conflicts_detected=conflicts_detected,
             skipped_pending=skipped_pending,
             orphan_episodes_cleaned=orphans,
-            demoted=demoted,
+            demoted=len(demoted_uuids),
+            merge_errors=len(merge_error_log),
         )
 
     async def _count_similar_nodes(
@@ -343,31 +392,108 @@ class LifecycleConsolidationMixin:
 
         return CorrelationService(self.graph_adapter, self.graphiti_client, llm=self.llm)
 
+    async def record_conflict_pair(
+        self, uuid: str, other_uuid: str,
+    ) -> tuple[str, int] | None:
+        """Queue one classified conflict pair, shared by consolidation and enrichment (#655).
+
+        Returns ``None`` when the pair was reviewed and suppressed within the cooldown,
+        else ``set_conflict``'s ``(group_id, updated)``. Callers have already searched
+        within the node's namespace, so the pair is same-silo.
+        """
+        # Skip pairs that were already reviewed and suppressed
+        try:
+            if await asyncio.to_thread(
+                telemetry_store.is_pair_resolved,
+                uuid, other_uuid,
+                cooldown_days=self.settings.conflict_cooldown_days,
+            ):
+                return None
+        except Exception:
+            logger.debug("Suppression check failed for %s <-> %s", uuid, other_uuid, exc_info=True)
+
+        # SSOT-08: a claim conflicting with a PROMOTED node is not an
+        # ordinary two-sided disagreement to be auto-adjudicated by the
+        # symmetric LLM conflict-review voter (confirm_pending_conflicts
+        # defaults to status='pending_llm_review') -- the PROMOTED side is
+        # ground truth by definition. Route it straight to 'unresolved'
+        # (an existing, already-meaningful conflict-pipeline status: LLM
+        # confirmed genuine contradiction) so it surfaces for manual
+        # operator review instead of being silently voted on.
+        initial_status = "pending_llm_review"
+        try:
+            pair_metadata = await asyncio.to_thread(
+                self.graph_adapter.fetch_entity_merge_metadata, [uuid, other_uuid],
+            )
+            if any(str(m.get("scope") or "") == "PROMOTED" for m in pair_metadata):
+                initial_status = "unresolved"
+        except Exception:
+            logger.debug(
+                "PROMOTED-scope lookup failed for %s <-> %s; defaulting to pending_llm_review",
+                uuid, other_uuid, exc_info=True,
+            )
+
+        # High similarity — flag as a conflict (status depends on whether
+        # either side is PROMOTED, see above).
+        new_group_id = str(uuid4())
+        canonical_group_id, updated = await asyncio.to_thread(
+            self.graph_adapter.set_conflict,
+            uuid, other_uuid, new_group_id,
+            initial_status=initial_status,
+        )
+        return canonical_group_id, updated
+
     async def _check_contradictions_batch(
         self,
         candidates: list[dict[str, Any]],
+        errors: list[str] | None = None,
+        *,
+        absorbed_into: dict[str, str] | None = None,
     ) -> int:
         """Check a batch of promotion candidates for contradictions with existing PERSISTENT nodes.
 
-        Returns count of conflicts detected.
+        Returns count of conflicts detected. When ``absorbed_into`` is given, each candidate a
+        merge absorbed is mapped to the survivor uuid the merge result reports.
 
         Pair classification (routing, vetoes, judge-gated merge) is delegated to
-        CorrelationService.classify_pair (SSOT-03) -- this method retains only
-        lifecycle-specific bookkeeping: namespace-scoped search, the
+        CorrelationService.classify_pair (SSOT-03), and the per-node loop to the shared
+        ``correlation_service_checks.scan_node`` (#871) -- this method retains only
+        lifecycle-specific bookkeeping: the node's namespace (``default`` when unset), the
         pending_llm_review conflict-queue write, telemetry suppression
         (cooldown) checks, and one-conflict-per-node capping.
 
         Correlation routing (Step 8): scores of 0.70–0.85 receive a RELATES_TO
         edge instead of entering the conflict queue.  Only scores
-        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
+        >= CORRELATION_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
         are RRF rank scores, not cosines; see CorrelationService.classify_pair.
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
         judge after deterministic vetoes. Merge only on unanimous yes; non-unanimous or
-        judge-unavailable → conflict (fail-safe: never merge without confirmation).
+        judge-unavailable → conflict (fail-safe: never merge without confirmation). A confirmed
+        duplicate is still not merged unless MENHIR_AUTO_MERGE_MODE is "on"; classify_pair then
+        returns ``none`` with a reason and the node's scan ends without a conflict.
         """
+        from menhir.services.correlation_service_checks import scan_node
+
         correlation_service = self._build_correlation_service()
         conflicts = 0
+
+        async def _queue_conflict(cr: Any) -> bool:
+            # final_action == "conflict" (native conflict-range score, or a merge proposal blocked
+            # by veto/judge falling through to conflict). One conflict per node; a suppressed pair
+            # keeps the scan going.
+            nonlocal conflicts
+            recorded = await self.record_conflict_pair(cr.source_uuid, cr.target_uuid)
+            if recorded is None:
+                return False
+            canonical_group_id, updated = recorded
+            if updated > 0:
+                conflicts += 1
+                logger.info(
+                    "Conflict detected: %s <-> %s (similarity=%.3f, group=%s)",
+                    cr.source_uuid, cr.target_uuid, cr.similarity, canonical_group_id,
+                )
+            return True
 
         for node in candidates:
             uuid = str(node["uuid"])
@@ -376,95 +502,20 @@ class LifecycleConsolidationMixin:
                 continue
 
             group_ids = namespace_to_group_ids(str(node.get("namespace") or "default"))
-            similar: list[tuple[str, str, float]] = []
-            try:
-                similar = await self.graphiti_client.search_scored(
-                    query, num_results=5, group_ids=group_ids
-                )
-            except Exception:  # skip node: contradiction check is best-effort
-                logger.warning("Contradiction search failed for node=%s", uuid, exc_info=True)
-                continue
-
-            for other_uuid, other_name, score in similar:
-                if other_uuid == uuid:
-                    continue
-
-                final_action, details = await correlation_service.classify_pair(
-                    uuid, other_uuid, score,
-                )
-
-                if final_action == "none" and details is not None:
-                    # Dropped where this loop used to queue or merge and stop. Going on would reach
-                    # hits it never classified; test_drop_ends_the_node_scan exercises that.
-                    break
-
-                if final_action in ("none", "related"):
-                    # "related" already created its RELATES_TO edge inside
-                    # classify_pair — don't break, keep checking remaining pairs.
-                    continue
-
-                if final_action == "merged":
-                    logger.info(
-                        "Correlation: MERGED %s absorbed into %s (sim=%.3f, judge-confirmed)",
-                        uuid, other_uuid, score,
-                    )
-                    # Skip conflict flag and continue to next node
-                    break
-
-                # final_action == "conflict" (native conflict-range score, or a
-                # merge proposal blocked by veto/judge falling through to conflict)
-
-                # Skip pairs that were already reviewed and suppressed
-                try:
-                    if await asyncio.to_thread(
-                        telemetry_store.is_pair_resolved,
-                        uuid, other_uuid,
-                        cooldown_days=self.settings.conflict_cooldown_days,
-                    ):
-                        continue
-                except Exception:
-                    logger.debug("Suppression check failed for %s <-> %s", uuid, other_uuid, exc_info=True)
-
-                # SSOT-08: a claim conflicting with a PROMOTED node is not an
-                # ordinary two-sided disagreement to be auto-adjudicated by the
-                # symmetric LLM conflict-review voter (confirm_pending_conflicts
-                # defaults to status='pending_llm_review') -- the PROMOTED side is
-                # ground truth by definition. Route it straight to 'unresolved'
-                # (an existing, already-meaningful conflict-pipeline status: LLM
-                # confirmed genuine contradiction) so it surfaces for manual
-                # operator review instead of being silently voted on.
-                initial_status = "pending_llm_review"
-                try:
-                    pair_metadata = await asyncio.to_thread(
-                        self.graph_adapter.fetch_entity_merge_metadata, [uuid, other_uuid],
-                    )
-                    if any(str(m.get("scope") or "") == "PROMOTED" for m in pair_metadata):
-                        initial_status = "unresolved"
-                except Exception:
-                    logger.debug(
-                        "PROMOTED-scope lookup failed for %s <-> %s; defaulting to pending_llm_review",
-                        uuid, other_uuid, exc_info=True,
-                    )
-
-                # High similarity — flag as a conflict (status depends on whether
-                # either side is PROMOTED, see above).
-                new_group_id = str(uuid4())
-                canonical_group_id, updated = await asyncio.to_thread(
-                    self.graph_adapter.set_conflict,
-                    uuid, other_uuid, new_group_id,
-                    initial_status=initial_status,
-                )
-                if updated > 0:
-                    conflicts += 1
-                    logger.info(
-                        "Conflict detected: %s <-> %s (similarity=%.3f, group=%s)",
-                        uuid,
-                        other_uuid,
-                        score,
-                        canonical_group_id,
-                    )
-                # Only flag one conflict per node to avoid explosion
-                break
+            # The shared scan (#871): a merge ends it, a drop ends it (going on would reach hits
+            # this loop never classified; test_drop_ends_the_node_scan), a queued conflict ends it.
+            # A failed search or classify_pair is recorded in `errors` and never promoted
+            # unchecked (#938, #1008); without `errors` a classify_pair failure raises (contain_failures).
+            scan = await scan_node(
+                correlation_service.classify_pair, self.graphiti_client, uuid, query,
+                group_ids=group_ids, num_results=5, stop_on_drop=True,
+                on_conflict=_queue_conflict, errors=errors,
+                contain_failures=errors is not None,
+            )
+            if absorbed_into is not None:
+                for cr in scan.results or []:
+                    if cr.action == "merged" and cr.target_uuid:
+                        absorbed_into[uuid] = str(cr.target_uuid)
 
         return conflicts
 

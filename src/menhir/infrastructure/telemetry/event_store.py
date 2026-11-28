@@ -7,7 +7,10 @@ import sqlite3
 from typing import Any
 
 from menhir.infrastructure.telemetry.event_store_episodes import _EventStoreEpisodesMixin
-from menhir.infrastructure.telemetry.event_store_failures import _EventStoreFailuresMixin
+from menhir.infrastructure.telemetry.event_store_failures import (
+    _EventStoreFailuresMixin,
+    _clamp_fetch_limit,
+)
 from menhir.infrastructure.telemetry.event_store_lab_runs import _EventStoreLabRunsMixin
 
 logger = logging.getLogger(__name__)
@@ -95,7 +98,7 @@ class TelemetryEventStoreMixin(
             conn.commit()
 
     def fetch_recent(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Fetch the most recent MCP events for the explorer display."""
+        """Fetch the most recent MCP events for the explorer display, up to 500."""
 
         self._ensure_ready()
         with self._connect() as conn:
@@ -108,6 +111,6 @@ class TelemetryEventStoreMixin(
                 ORDER BY started_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (_clamp_fetch_limit(limit),),
             ).fetchall()
             return [dict(row) for row in rows]

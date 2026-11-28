@@ -14,7 +14,7 @@ from menhir.domain.namespace import (
     tenant_scope_cypher,
     tenant_scope_params,
 )
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.recall_visibility import default_recall_visibility_cypher, memory_retired_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.secret_scrub import ensure_scrubbed
@@ -39,12 +39,16 @@ from menhir.infrastructure.erasure_fence import (
     warn_if_on_event_loop,
     marker_absent_for_param_cypher,
 )
+from menhir.infrastructure.publish_fence import LINK_COMPLETION_OUTCOMES
 
 logger = logging.getLogger(__name__)
 
 #: Canonical name for the per-namespace self :Entity (matches the extraction prompt's "user" subject
 #: convention, so a materialized first-person View reads naturally).
 _SELF_ENTITY_NAME = "user"
+
+#: An episode the source-embedding repair stopped listing (#921) is listed again after this long.
+SOURCE_EMBEDDING_FAILURE_COOLDOWN = "P7D"
 
 _PENDING_EPISODE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]{3,}")
 
@@ -76,6 +80,60 @@ _PROVIDER_CONTEXT_LIMIT_MARKERS = (
 #: instead rides this separate, much larger counter — a permanently dead provider must still stop
 #: consuming claim cycles eventually.
 TRANSIENT_RETRY_CAP = 20
+
+#: The failure timestamp the retry job orders FAILED candidates by (#925). Every writer that moves
+#: an episode into FAILED stamps `processing_completed_at = datetime()`, so a fresh failure always
+#: changes this value.
+_FAILED_AT = "coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at)"
+
+#: A parked retry candidate is re-examined after this long, so a raised attempt cap or a
+#: classifier change can still pick it up without an operator requeue (#925).
+RETRY_PARK_RECHECK_S = 24 * 3600
+
+#: The twin link finalize-from-link reads (`linked_twin_artifact`): the queue node names its twin
+#: and the twin exists. Shared with the retry candidate query so the two cannot drift (#1007).
+_TWIN_LINK_SET = "n.resolved_episode_uuid IS NOT NULL"
+_TWIN_LINK_MATCH = "(g:Episodic {uuid: n.resolved_episode_uuid})"
+#: #905: a link is a completion only when the publish recorded a completing extraction outcome or
+#: the twin MENTIONS an entity. An empty twin with a collapsed outcome, or with none (a link written
+#: before #905), is not; finalize-from-link clears it and re-extracts. Needs `n` and `g` bound.
+_TWIN_LINK_OUTCOME_OK = (
+    "coalesce(n.resolved_extraction_outcome, '') IN ["
+    + ", ".join(f"'{o}'" for o in LINK_COMPLETION_OUTCOMES)
+    + "]"
+)
+_TWIN_LINK_COMPLETE = f"({_TWIN_LINK_OUTCOME_OK} OR EXISTS {{ MATCH (g)-[:MENTIONS]->(:Entity) }})"
+_HAS_COMPLETED_TWIN_LINK = (
+    f"({_TWIN_LINK_SET} AND EXISTS {{ MATCH {_TWIN_LINK_MATCH} WHERE {_TWIN_LINK_COMPLETE} }})"
+)
+
+
+def twin_link_completed(artifact: dict[str, Any]) -> bool:
+    """Whether a ``linked_twin_artifact`` result is a completion (#905).
+
+    The repository computes ``completed`` with the same predicate the retry candidate tier uses.
+    An artifact without the key (an adapter predating #905) counts as a completion only when it
+    names an entity or an edge.
+    """
+    if "completed" in artifact:
+        return bool(artifact.get("completed"))
+    return bool(artifact.get("entity_uuids") or artifact.get("edge_uuids"))
+
+#: Retry candidate tier (#925, #1007). 0: not parked for this failure. 1: parked, but a completed
+#: twin link now exists, so finalize-from-link can close it (#905: a collapsed link is not one).
+#: A row parked as `exhausted` has no attempt left and the worker's claim would refuse it, so it
+#: waits for the normal recheck instead of being re-admitted every tick. 2: parked and due for its
+#: recheck. 3: parked (excluded). Rows are ordered by tier first, so a recheck herd cannot crowd
+#: out tiers 0 and 1.
+_RETRY_TIER = (
+    "CASE WHEN (properties(n)['retry_parked_for'] IS NULL"
+    f" OR properties(n)['retry_parked_for'] <> toString({_FAILED_AT})) THEN 0"
+    f" WHEN {_HAS_COMPLETED_TWIN_LINK}"
+    " AND coalesce(properties(n)['retry_parked_reason'], '') <> 'exhausted' THEN 1"
+    " WHEN properties(n)['retry_parked_at']"
+    " < datetime() - duration({seconds: $park_recheck_s}) THEN 2"
+    " ELSE 3 END"
+)
 
 
 def is_recoverable_context_window_error(error: object | None) -> bool:
@@ -296,6 +354,7 @@ class EpisodeLifecycleRepository:
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
                 n.content_embedding_at = datetime()
+            REMOVE n.source_embedding_failures, n.source_embedding_last_failed_at
             RETURN n.uuid AS uuid
             """,
             params={
@@ -306,6 +365,32 @@ class EpisodeLifecycleRepository:
             },
         )
         return bool(rows)
+
+    def record_source_embedding_failures(
+        self, episode_uuids: list[str], limit: int | None = None,
+    ) -> dict[str, int]:
+        """Bump the repair-failure count and stamp the attempt time on each episode (#921).
+
+        Read by ``list_episodes_missing_content_embedding(max_failures=...)``; cleared by a
+        successful ``set_episode_content_embedding``. Returns ``{uuid: new count}`` for the episodes whose
+        count reached ``limit`` (just excluded from the listing); empty when ``limit`` is None.
+        """
+        if not episode_uuids:
+            return {}
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.uuid IN $uuids
+            SET n.source_embedding_failures = coalesce(n.source_embedding_failures, 0) + 1,
+                n.source_embedding_last_failed_at = datetime()
+            RETURN n.uuid AS uuid, n.source_embedding_failures AS failures
+            """,
+            params={"uuids": list(episode_uuids)},
+        )
+        if limit is None:
+            return {}
+        return {str(r["uuid"]): int(r["failures"]) for r in rows
+                if int(r.get("failures") or 0) >= limit}
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """The other `:Episodic` node(s) of the same memory, in the same namespace (read-only).
@@ -651,12 +736,21 @@ class EpisodeLifecycleRepository:
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
 
+        ``max_failures`` (opt-in, #921) skips episodes whose ``source_embedding_failures`` count has
+        reached it, so a repair job's repeatedly failing rows stop heading every run's listing. An
+        excluded episode is listed again once its last failure is older than
+        ``SOURCE_EMBEDDING_FAILURE_COOLDOWN``, so a transient fault never excludes it for good.
+
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
         model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
-        of PENDING/ENRICHING ones. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        of PENDING/ENRICHING ones. ``settled_only`` keeps READY and FAILED ones: a FAILED episode
+        is recallable through the source-memory lane too (#662), and terminal failures are never
+        re-run by the retry job. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
         cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
         skips are never re-listed ahead of the rest (audit F1).
 
@@ -664,7 +758,7 @@ class EpisodeLifecycleRepository:
         visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
         'default' are the same silo; None is unscoped), `menhir_queue_episode_cypher` (only
         Menhir's own queue nodes -- never Graphiti's episodes, which the schema migration also
-        stamps with `processing_state`, #215), and the guard that excludes FAILED enrichments -- so
+        stamps with `processing_state`, #215), and the guard that excludes erase tombstones -- so
         the backfill writes embeddings only for episodes the recall lane would ever
         surface. Idempotent by construction: a node gains `content_embedding` and
         drops out of this listing.
@@ -678,16 +772,26 @@ class EpisodeLifecycleRepository:
             "($after_uuid IS NULL OR n.uuid > $after_uuid)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
-            "n.processing_state <> 'FAILED'",
+            EPISODE_NOT_ERASED,
+            # Never send erase-sealed text to the embedder (the write would be refused anyway).
+            EPISODE_NOT_MARKED,
             "($ready_only = false OR n.processing_state = 'READY')",
+            "($settled_only = false OR n.processing_state IN ['READY', 'FAILED'])",
+            "($max_failures IS NULL OR coalesce(n.source_embedding_failures, 0) < $max_failures"
+            " OR n.source_embedding_last_failed_at < datetime() - duration($failure_cooldown))",
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            # Maintenance listing: a retired episode still needs its embedding, because
+            # recall_history and timeline query anchoring are vector searches over it.
+            default_recall_visibility_cypher("n", include_retired=True),
         ]
         params: dict[str, Any] = {
             "limit": safe_limit,
             "after_uuid": after_uuid,
             "model": model,
             "ready_only": bool(ready_only),
+            "settled_only": bool(settled_only),
+            "max_failures": max_failures,
+            "failure_cooldown": SOURCE_EMBEDDING_FAILURE_COOLDOWN,
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
@@ -992,12 +1096,50 @@ class EpisodeLifecycleRepository:
             Cypher()
             .match("(n:Episodic)")
             .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED, EPISODE_NOT_MARKED)
+            # #925: skip a row parked for THIS failure. The marker names the failure it was
+            # parked for, so a later failure (new timestamp) is a candidate again even if no
+            # requeue path cleared the marker. #1007: a parked row with a twin link is re-admitted.
+            .with_clause(f"n, {_RETRY_TIER} AS retry_tier")
+            .where("retry_tier < 3")
             .return_fields(EPISODE_RETRY_FIELDS)
-            .order_by("coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at) ASC")
+            .order_by(f"retry_tier ASC, {_FAILED_AT} ASC")
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"limit": safe_limit})
+        return self.neo4j.execute(
+            query, params={"limit": safe_limit, "park_recheck_s": RETRY_PARK_RECHECK_S}
+        )
+
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        """Mark a FAILED episode the retry job judged not retryable for this failure (#925).
+
+        Only the retry candidate query reads the marker; the episode stays FAILED for every
+        other reader. `failed_at` is the candidate row's `processing_completed_at` (the ordering
+        timestamp as a string): the write is a no-op if the episode has failed again since.
+        """
+        query = (
+            Cypher()
+            .match("(n:Episodic {uuid: $episode_uuid})")
+            .where(
+                "n.processing_state = 'FAILED'",
+                f"toString({_FAILED_AT}) = $failed_at",
+                EPISODE_NOT_MARKED,
+            )
+            .set(
+                (
+                    "n.retry_parked_at = datetime()",
+                    "n.retry_parked_for = $failed_at",
+                    "n.retry_parked_reason = $reason",
+                )
+            )
+            .return_raw("count(n) AS parked")
+            .build()
+        )
+        rows = self.neo4j.execute(
+            query,
+            params={"episode_uuid": episode_uuid, "failed_at": failed_at, "reason": reason},
+        )
+        return bool(rows and int(rows[0].get("parked", 0)) > 0)
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Group FAILED episodes by their error text, most common first.
@@ -1030,16 +1172,31 @@ class EpisodeLifecycleRepository:
         exist. Returns the twin's uuid, the entities it MENTIONS, the RELATES_TO edges whose
         ``episodes`` list contains the twin, and the queue node's namespace and fence key. A marked
         queue node, a node with no link, or a link to a missing twin returns None.
+
+        #905/#906: also the extraction outcome recorded with the link, ``completed`` (the retry
+        tier's predicate), and per-uuid ``entity_details`` / ``edge_details`` (name, content, fact,
+        fact_source, endpoints) so the post-publish steps can run on the stored text.
         """
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Episodic {{uuid: $episode_uuid}})
-            WHERE n.resolved_episode_uuid IS NOT NULL AND {EPISODE_NOT_MARKED}
-            MATCH (g:Episodic {{uuid: n.resolved_episode_uuid}})
+            WHERE {_TWIN_LINK_SET} AND {EPISODE_NOT_MARKED}
+            MATCH {_TWIN_LINK_MATCH}
+            WITH n, g,
+                 [(g)-[:MENTIONS]->(e:Entity)
+                  | {{uuid: e.uuid, name: e.name, content: e.content}}] AS entities,
+                 [(s:Entity)-[r:RELATES_TO]->(t:Entity)
+                  WHERE g.uuid IN coalesce(r.episodes, [])
+                  | {{uuid: r.uuid, name: r.name, fact: r.fact, fact_source: r.fact_source,
+                     source_node_uuid: s.uuid, target_node_uuid: t.uuid}}] AS edges
             RETURN g.uuid AS resolved_episode_uuid,
-                   [(g)-[:MENTIONS]->(e:Entity) | e.uuid] AS entity_uuids,
-                   [(:Entity)-[r:RELATES_TO]->(:Entity)
-                    WHERE g.uuid IN coalesce(r.episodes, []) | r.uuid] AS edge_uuids,
+                   [x IN entities | x.uuid] AS entity_uuids,
+                   [x IN edges | x.uuid] AS edge_uuids,
+                   entities, edges,
+                   n.resolved_extraction_outcome AS extraction_outcome,
+                   n.resolved_policy_empty_reason AS policy_empty_reason,
+                   coalesce(n.resolved_self_bound, false) AS self_bound,
+                   {_TWIN_LINK_COMPLETE} AS completed,
                    n.namespace AS namespace,
                    {fence_key_cypher("n")} AS fence_namespace_key
             LIMIT 1
@@ -1058,7 +1215,64 @@ class EpisodeLifecycleRepository:
             "edge_uuids": list(dict.fromkeys(str(u) for u in (row.get("edge_uuids") or []) if u)),
             "namespace": row.get("namespace"),
             "fence_namespace_key": str(row.get("fence_namespace_key") or "default"),
+            "extraction_outcome": row.get("extraction_outcome"),
+            "policy_empty_reason": row.get("policy_empty_reason"),
+            "self_bound": bool(row.get("self_bound")),
+            "completed": bool(row.get("completed")),
+            "entity_details": {
+                str(x["uuid"]): dict(x) for x in (row.get("entities") or []) if x and x.get("uuid")
+            },
+            "edge_details": {
+                str(x["uuid"]): dict(x) for x in (row.get("edges") or []) if x and x.get("uuid")
+            },
         }
+
+    def clear_uncompleted_twin_link(
+        self, episode_uuid: str, resolved_episode_uuid: str, *, executor: Any = None
+    ) -> bool:
+        """Drop a link that is not a completion and delete its empty twin (#905).
+
+        A retry that must re-extract runs this first, under the claim fence (``executor``), so the
+        new publish is not refused as ``already_linked``. Only the named, still-uncompleted link is
+        cleared. The twin is deleted only when it is a Graphiti episode of this queue node alone,
+        nothing cites it (no MENTIONS, no RELATES_TO edge listing it) and its only relationships are
+        its own outgoing READ_CONTEXT edges; those edges and the node are then deleted with plain
+        DELETE. Otherwise the twin is left in place and only unlinked; it stays covered by the erase
+        closure through ``reserved_twin_uuids``. Returns True when the link was cleared.
+        """
+        rows = (executor or self.neo4j).execute(
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
+            WHERE n.resolved_episode_uuid = $resolved AND {EPISODE_NOT_MARKED}
+            OPTIONAL MATCH {_TWIN_LINK_MATCH}
+            WITH n, g
+            WHERE g IS NULL OR NOT {_TWIN_LINK_COMPLETE}
+            OPTIONAL MATCH (d:Episodic {{uuid: $resolved}})
+            WHERE d.processing_state IS NULL
+              AND coalesce(d.menhir_memory_uuid, n.uuid) = n.uuid
+              AND NOT EXISTS {{ MATCH (d)-[:MENTIONS]->(:Entity) }}
+              AND NOT EXISTS {{
+                  MATCH (:Entity)-[r:RELATES_TO]->(:Entity) WHERE d.uuid IN coalesce(r.episodes, [])
+              }}
+              AND NOT EXISTS {{
+                  MATCH (o:Episodic) WHERE o.resolved_episode_uuid = d.uuid AND o.uuid <> n.uuid
+              }}
+              AND NOT EXISTS {{
+                  MATCH (d)-[x]-()
+                  WHERE NOT (type(x) = 'READ_CONTEXT' AND startNode(x) = d)
+              }}
+            REMOVE n.resolved_episode_uuid, n.resolved_extraction_outcome,
+                   n.resolved_policy_empty_reason, n.resolved_self_bound
+            WITH n, d
+            OPTIONAL MATCH (d)-[rc:READ_CONTEXT]->()
+            WITH n, d, collect(rc) AS read_context
+            FOREACH (r IN read_context | DELETE r)
+            FOREACH (x IN CASE WHEN d IS NULL THEN [] ELSE [d] END | DELETE x)
+            RETURN count(n) AS cleared
+            """,
+            params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
+        )
+        return bool(rows and int(dict(rows[0]).get("cleared") or 0) > 0)
 
     def claim_pending_episode(
         self,
@@ -1669,6 +1883,15 @@ class EpisodeLifecycleRepository:
         # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
         # let status readers compute a verbatim-skipped client's effective state
         # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
+        source_eligible = " AND ".join((
+            menhir_queue_episode_cypher("n"),
+            "n.processing_state IS NOT NULL",
+            # Same as the source-memory read: FAILED stays searchable (#662).
+            EPISODE_NOT_ERASED,
+            EPISODE_NOT_MARKED,
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ))
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -1678,6 +1901,9 @@ class EpisodeLifecycleRepository:
                 MEMORY_RETURN_FIELDS,
                 "n.extraction_skipped_for AS extraction_skipped_for",
                 f"{skip_projection_map_cypher('p')} AS skip_projection",
+                f"coalesce(({source_eligible}), false) AS source_search_eligible",
+                "size(n.content_embedding) AS source_embedding_size",
+                "n.content_embedding_model AS source_embedding_model",
             )
             .limit("1")
             .build()
@@ -1703,6 +1929,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.processing_state IN ['PENDING', 'ENRICHING']",
+                f"NOT {memory_retired_cypher('n')}",
                 "($namespace IS NULL OR n.namespace = $namespace)",
                 "((coalesce(n.scope, '') <> '' AND n.scope <> 'SESSION') OR "
                 "($include_session AND ($session_id IS NULL OR coalesce(n.session_id, '') = $session_id)))",

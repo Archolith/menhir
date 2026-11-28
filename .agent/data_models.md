@@ -511,7 +511,9 @@ removes Graphiti `RELATES_TO` facts and `:Entity` nodes derived only from the er
 ones have their `fact` / `summary` / `content` blanked and get
 `rederive_pending/rederive_reason/rederive_flagged_at` plus a
 `(:DerivedRederiveRepair {repair_key, item_uuid, item_kind, namespace, status})` that the
-`derived_rederive` job resolves (`done|deleted|obsolete|failed`). Optional schema activation and
+`derived_rederive` job resolves (`done|deleted|obsolete|failed`, or `embed_pending` -> `done|embed_failed`
+for a fact rewritten without a vector, tracked by `embed_attempts`; `failed` is requeued to `pending`
+after a cooldown, at most 3 times, tracked by `requeued_at`/`requeue_count`). Optional schema activation and
 legacy reconciliation have not run, and replay tombstones remain non-operational until an HMAC key
 ring and producer checks are provided.
 
@@ -729,8 +731,14 @@ Concept id: `model.conflict`
 | Field | Type | Notes |
 |-------|------|-------|
 | `conflict_group_id` | string | Groups mutually conflicting node pairs |
-| `conflict_status` | string | `pending_llm_review`, `unresolved`, `false_positive`, `resolved`, `auto-resolved` |
+| `conflict_status` | string | Per member. `pending_llm_review` (recall flags `possible_conflict`), `unresolved` (LLM-confirmed or PROMOTED pair; recall refuses under current intent, flags otherwise), `false_positive`, `resolved`, `auto-resolved` (confirmed, aged out after 14 days undecided; recall flags `unsettled_conflict`) |
 | `conflict_created_at` | timestamp | First conflict detection time |
+| `conflict_confirmed_at` | timestamp | When the member became `unresolved` (review or PROMOTED routing); drives the `conflicts` warning |
+| `conflict_pending_since` | timestamp | When the member last entered `pending_llm_review`; a member pending over 24h counts as stuck |
+
+A new pair never downgrades a confirmed (`unresolved`) member, and merging groups keeps each live
+member's status; a node joining fresh starts a new `conflict_created_at` (#654). The 14-day
+auto-resolve skips any group that still holds a pending member. Conflicts are queued at enrichment time as well as at consolidation (#655).
 
 ## Recall Lab experiment history
 
@@ -793,7 +801,7 @@ the source of truth for "done". `op_id` and `request_json` are immutable once PR
 | Column | Notes |
 |--------|-------|
 | `op_id` | Primary key. |
-| `operation_kind` | Closed enum: `METRIC_WRITE`, `METRIC_MIGRATE`, `METRIC_REVERSE`, `ENTITY_MERGE`, `ENTITY_UNMERGE`, `LEGACY_ENTITY_UNMERGE`, `ENTITY_DELETE`, `SESSION_TTL_DELETE`. |
+| `operation_kind` | Closed enum: `METRIC_WRITE`, `METRIC_MIGRATE`, `METRIC_REVERSE`, `ENTITY_MERGE`, `ENTITY_UNMERGE`, `LEGACY_ENTITY_UNMERGE`, `ENTITY_DELETE`, `SESSION_TTL_DELETE`, `DECAY_DELETE`, `EXPLICIT_ERASURE`. |
 | `target_uuid` / `target_key` | `target_key` is the order-independent pair key for merge/unmerge; the partial unique index fences it while `PREPARED`/`NEEDS_REVIEW`. Deletes pass `target_key=NULL`. |
 | `before_snapshot_json` | The complete lossless recovery snapshot, committed BEFORE any destruction (invariant 3). |
 | `expected_after_sha256` | Postcondition fingerprint frozen at PREPARE; only an exact match may COMMIT (invariant 5). |
@@ -818,7 +826,8 @@ non-Entity peers included). A snapshot over `MAX_SNAPSHOT_BYTES` (8 MiB) abstain
 ### Merge-owned survivor delta (`domain/merge_delta.py`)
 
 An exact unmerge reverses what the merge wrote to the SURVIVOR, so
-`MERGE_OWNED_SURVIVOR_PROPERTIES` must list every property the merge's SET clause touches:
+`MERGE_OWNED_SURVIVOR_PROPERTIES` must list every content and provenance property the merge's SET
+clause touches (retention -- `scope`, `ttl_expires`, `promoted_at` -- is never lowered by an unmerge):
 `summary`, `content`, `source`, `source_confidence`, `sources`, `corroboration`. Three surfaces have
 to agree on that set or exact unmerge silently stops working:
 

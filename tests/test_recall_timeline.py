@@ -341,7 +341,7 @@ class _StubAdapter:
         return self.subject_candidates
 
     def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                  resolved_only=False):
+                                  resolved_only=False, include_retired=False):
         return self.search_hits[:limit]
 
     def list_scalar_history_views(self, *, subject_uuid, namespace=None):
@@ -452,6 +452,38 @@ async def test_window_paging_and_next_cursor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_window_cursor_preserves_both_bounds_in_either_direction() -> None:
+    rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 6)]
+    service = _svc(_StubAdapter(rows))
+    first = await service.recall_timeline(
+        namespace="ns", window_from="2026-01-02", window_to="2026-01-04", limit=2,
+    )
+    assert [entry.uuid for entry in first.entries] == ["ep-2", "ep-3"]
+    assert first.next_cursor is not None
+
+    last = await service.recall_timeline(namespace="ns", cursor=first.next_cursor, limit=2)
+    assert [entry.uuid for entry in last.entries] == ["ep-4"]
+    assert last.next_cursor is None
+    assert last.prev_cursor is not None
+
+    previous = await service.recall_timeline(namespace="ns", cursor=last.prev_cursor, limit=3)
+    assert [entry.uuid for entry in previous.entries] == ["ep-2", "ep-3"]
+    assert previous.prev_cursor is None
+
+
+@pytest.mark.asyncio
+async def test_window_cursor_preserves_an_upper_bound_without_a_lower_bound() -> None:
+    rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 4)]
+    service = _svc(_StubAdapter(rows))
+    first = await service.recall_timeline(namespace="ns", window_to="2026-01-02", limit=1)
+    assert first.next_cursor is not None
+
+    second = await service.recall_timeline(namespace="ns", cursor=first.next_cursor, limit=2)
+    assert [entry.uuid for entry in second.entries] == ["ep-2"]
+    assert second.next_cursor is None
+
+
+@pytest.mark.asyncio
 async def test_around_anchor_flag_and_neighbors() -> None:
     rows = [_row(f"ep-{i}", f"2026-01-{i:02d}") for i in range(1, 6)]
     result = await _svc(_StubAdapter(rows)).recall_timeline(
@@ -491,7 +523,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
 
     class _ModelAdapter(_StubAdapter):
         def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                      model=None, resolved_only=False):
+                                      model=None, resolved_only=False, include_retired=False):
             calls.append({"limit": limit, "namespace": namespace, "model": model})
             return self.search_hits[:limit]
 
@@ -1151,7 +1183,7 @@ def test_timeline_hides_evidence_projection_episodes() -> None:
         query, _params = neo4j.calls[0]
         twin = (
             "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
-            + default_recall_visibility_cypher("q")
+            + default_recall_visibility_cypher("q", include_retired=True)
             + " AND "
             + non_structural_memory_cypher("q")
             + " }"

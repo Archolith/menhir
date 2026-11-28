@@ -89,14 +89,19 @@ On a `file_changed` event, menhir:
 1. **Marks the file node dirty** — sets `structure_dirty=true`, `dirty_at`, `last_event_op`, and the
    optional `last_event_after_hash`/`mtime` on the matching `:Entity` file node(s). Rename marks both
    the old and new path. No structure rebuild happens (v0 is observation only).
-2. **Falls back on project mismatch** — when `project` is supplied, menhir first tries to scope the
-   match by `structure_project`. If that finds nothing, it retries path-only marking. This avoids
-   false negatives when `project_root` basename does not exactly match the stored `structure_project`.
-   For stale-reference prevention, conservative over-marking is safer than silently missing a changed
-   file. Project scoping is a precision hint, not a hard failure boundary in v0.
+2. **Scopes by project, with a guarded fallback** -- when `project` is supplied, menhir first scopes
+   the match by `structure_project`. An event naming an indexed project never marks another
+   project's files, even if that project has the same path. Only when the scoped match finds nothing
+   AND the project is unknown to the graph (no entity carries that `structure_project`) does menhir
+   retry path-only, in one statement, and it marks the files only when every match belongs to ONE
+   project. This keeps worktree and renamed-directory aliases working without marking `README.md`
+   in every project. A rename judges the union of both paths together. With no `project`, matching
+   is path-only across projects.
+   **Residual:** an unknown project whose path exists in exactly one indexed project still marks
+   that file.
 3. **Returns diagnostic info** — `{accepted, matched, marked_dirty, paths}`. `matched` = how many
-   existing file nodes were found and marked. When project fallback was used, `project_fallback_used`
-   is set to `true`.
+   existing file nodes were found and marked. `project_fallback_used` is `true` whenever the fallback
+   was eligible (project unknown), including when it matched nothing.
 
 A file not yet in the structure graph is accepted but marks nothing (there is no node to mark). This
 is a documented v0 limit. Symbol-level invalidation is not attempted — a changed file dirties the
@@ -108,7 +113,7 @@ file anchor, not individual symbols.
 
 - unsupported `event_type` in v0
 - file not yet scanned into the structure graph
-- path does not match any known file node even after fallback
+- path does not match any known file node, or the fallback found it in more than one project
 
 None of these are errors.
 
@@ -190,10 +195,14 @@ unresolved old source plus a newly registered duplicate.
 ### GET /api/tool-events/dirty
 
 Returns `{dirty_files: [...], stale_anchors: [...], counts: {dirty_files: N, stale_anchors: M}}`.
+Each list includes up to 200 entries. The counts cover all matches for the requested project
+and the caller's stale-anchor namespace scope.
 
 ### GET /api/tool-events/stale
 
 Returns only stale anchored memories. Supports `project` and `limit` query parameters.
+`limit` accepts integers from 0 through 500 and defaults to 200. Set `limit=0` to return no rows.
+Requests outside the range return HTTP 422.
 
 ```json
 {"stale_anchors": [{"memory_uuid": "...", "name": "...", "project": "menhir",
@@ -476,6 +485,9 @@ List receipts:
 ```bash
 GET /api/tool-events/stale-verifications?memory_uuid=m1
 ```
+
+`limit` accepts integers from 0 through 500 and defaults to 50. Set `limit=0` to return no rows.
+Requests outside the range return HTTP 422.
 
 ### CLI helper
 

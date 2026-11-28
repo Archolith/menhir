@@ -20,7 +20,7 @@ lists every store, how long it is kept, and how to remove it. Erasure is incompl
 
 | Store | What it holds | Where | Kept for | How to remove |
 |---|---|---|---|---|
-| Memories | Raw memory text (up to 48,000 chars), optional `diff` (up to 50,000 chars), source, session and user ids, namespace, embedding. The Graphiti twin episode carries the same body and diff. | Neo4j `:Episodic` | Indefinitely. A daily job can replace a body with a summary; demoted SESSION memories are deleted after 14 days. | `delete_memory` |
+| Memories | Raw memory text (up to 48,000 chars), optional `diff` (up to 50,000 chars), source, session and user ids, namespace, embedding. The Graphiti twin episode carries the same body and diff. | Neo4j `:Episodic` | Indefinitely. A daily job can replace a body with a summary; demoted SESSION memories are deleted after 14 days. A merge keeps the higher scope of the two memories and clears the survivor's expiry date; an unmerge does not bring an expiry date back. | `delete_memory` |
 | Entities and facts | LLM-extracted entity names and summaries, fact text, embeddings | Neo4j `:Entity`, `RELATES_TO` | Indefinitely | `delete_memory` on the entity uuid removes one entity and its edges. Nothing removes a single fact edge. |
 | Views | Scalar, history, timeline and counter values built from memories | Neo4j `:Entity` with `view_kind` | Indefinitely | `delete_memory` on the view uuid |
 | Typed assertions | Typed claims extracted from turns and memories | Neo4j `:TypedAssertion` and related heads | Indefinitely | Removed with their memory by `delete_memory`, and by `delete_namespace` |
@@ -31,7 +31,8 @@ lists every store, how long it is kept, and how to remove it. Erasure is incompl
 | Code-structure graph | File and symbol names, paths, signatures, first-line docstrings, README first paragraph | Neo4j, shared group (empty `group_id`) | Refreshed every 30 minutes by default; rescans prune stale entries | No tool |
 | File-event metadata | Dirty flags, file hash and mtime on existing file entities | Neo4j file entities | Overwritten per event | No tool |
 | Telemetry (observability) | `mcp_events` (500-char payload preview, sizes, client, session), `lifecycle_events`, `episode_task_events`, `lifecycle_actions` | Sidecar SQLite | 30 days (`MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS`) | Erasure clears addressable rows; `menhir erasure-backfill` for legacy rows |
-| Telemetry (diagnostic) | `failure_events` (may hold prompt previews and tracebacks), `recall_receipts`, `conflict_resolutions`, Recall Lab and Extraction Lab runs | Sidecar SQLite | 90 days (`MENHIR_TELEMETRY_DIAGNOSTIC_RETENTION_DAYS`) | Erasure by episode or namespace |
+| Telemetry (diagnostic) | `failure_events` (may hold prompt previews and tracebacks), `recall_receipts`, Recall Lab and Extraction Lab runs | Sidecar SQLite | 90 days (`MENHIR_TELEMETRY_DIAGNOSTIC_RETENTION_DAYS`) | Erasure by episode or namespace |
+| Conflict suppressions | `conflict_resolutions`: the two memory uuids, status, action and reviewer of each resolved conflict, used to keep resolved pairs suppressed | Sidecar SQLite | Never pruned; `conflict_cooldown_days` only decides whether a row still applies | Not reached by erasure (the columns are classified as non-content) |
 | Revisions | Full old and new field values, including pre-compression original content (the rehydration archive) | Sidecar `memory_revisions` | 14 days (`MENHIR_REVISION_RETENTION_DAYS`) | Erasure by node uuid |
 | Merge and graph-operation journals | `merge_audit` (full content of absorbed nodes); `graph_operations` (full snapshots of merged and TTL-deleted nodes) | Sidecar SQLite | Never pruned | `merge_audit` is marked erased by erasure; `graph_operations` is not reached |
 | Usage, registries, leases, queues | `llm_usage_events` (tokens, model, may hold prompt text in error fields), client and session registries, scheduler leases, pending actions, `erasure_subjects` | Sidecar SQLite | Never pruned | `llm_usage_events` by episode via erasure; the rest has no removal path |
@@ -44,6 +45,13 @@ lists every store, how long it is kept, and how to remove it. Erasure is incompl
 
 Setting a retention variable to `0` disables pruning for that tier. Pruning runs as scheduled jobs
 inside a running server.
+
+Automatic deletion is a separate switch. Expired-memory (TTL) deletion, decay deletion and orphan
+episode cleanup run only when `MENHIR_AUTO_DELETE_MODE=on`; the default is `off`, so nothing is
+deleted on a timer until you turn it on. `on` has no LLM approval yet. In `propose` the would-be deletions are recorded as
+`delete_proposal` rows in the sidecar (ids and numbers, no text) and nothing is deleted. Automatic
+merging has its own `MENHIR_AUTO_MERGE_MODE` (default `propose`). Deleting on request, erasure,
+namespace delete and unmerge do not depend on either switch.
 
 ## Removing data
 

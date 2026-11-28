@@ -19,12 +19,13 @@ from menhir.domain.timeline import (
     TimelineResult,
     TypedHistory,
     TypedHistoryEntry,
-    decode_cursor,
+    decode_cursor_with_window,
     encode_cursor,
 )
 from menhir.services.recall_pipeline import (
     _RECALL_HISTORY_MAX_CHARS,
     _embedding_model_kwargs,
+    embed_refusal_note,
 )
 
 #: Headline cap: whitespace-collapsed content, then a trailing ellipsis.
@@ -110,6 +111,7 @@ def _entry_from_row(
         content=content,
         facts=facts,
         is_anchor=is_anchor,
+        retired=bool(row.get("memory_retired")),
     )
 
 
@@ -302,7 +304,6 @@ async def run_recall_timeline(
     before_more = after_more = False
     before_probed = after_probed = False
     anchor_row: dict[str, Any] | None = None
-
     mode = starts[0] if starts else "subject"
     if mode == "at":
         boundary = (at, _MAX_INSTANT, _MAX_UUID)
@@ -352,36 +353,53 @@ async def run_recall_timeline(
                 side="after", key=anchor_key, count=count_after,
             )
     elif mode == "cursor":
-        (c_valid, c_created, c_uuid), cursor_direction = decode_cursor(
+        cursor_key, cursor_direction, window_from, window_to = decode_cursor_with_window(
             str(cursor), namespace_key=namespace_key, subject_uuid=subject_uuid
         )
-        cursor_key = (c_valid, c_created, c_uuid)
+        if window_from is not None:
+            window_from = _validate_instant("window_from", window_from)
+        if window_to is not None:
+            window_to = _validate_instant("window_to", window_to)
         if cursor_direction == "after":
             after_probed = True
             after_rows, after_more = await _probe_page(
                 adapter, namespace=namespace, subject_uuid=subject_uuid,
                 side="after", key=cursor_key, count=safe_limit,
+                window_from=window_from, window_to=window_to,
             )
         else:
             before_probed = True
             before_rows, before_more = await _probe_page(
                 adapter, namespace=namespace, subject_uuid=subject_uuid,
                 side="before", key=cursor_key, count=safe_limit,
+                window_from=window_from, window_to=window_to,
             )
     elif mode == "query":
         stripped = str(query).strip()
-        query_vector = await service.graphiti_client.embed_query(stripped)
-        # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
-        # The subject constraint runs inside the search, before its LIMIT.
-        subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
-        hits = await asyncio.to_thread(
-            adapter.search_episode_embeddings, query_vector,
-            limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
-            resolved_only=True, **_embedding_model_kwargs(service), **subject_kwargs,
-        )
-        if not hits:
-            note = _QUERY_NO_HIT_NOTE
+        hits: list[Any] = []
+        try:
+            query_vector = await service.graphiti_client.embed_query(stripped)
+        except Exception as exc:
+            # #642: a degraded answer with the breaker's note, like recall, not an error.
+            note = embed_refusal_note(
+                service.graphiti_client, exc,
+                "a query needs embeddings to find its anchor; use at, around or a window instead",
+            )
+            if note is None:
+                raise
         else:
+            # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
+            # The subject constraint runs inside the search, before its LIMIT.
+            subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
+            hits = await asyncio.to_thread(
+                adapter.search_episode_embeddings, query_vector,
+                limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
+                resolved_only=True, include_retired=True,
+                **_embedding_model_kwargs(service), **subject_kwargs,
+            )
+        if note is None and not hits:
+            note = _QUERY_NO_HIT_NOTE
+        elif hits:
             # Anchor on the best-ranked hit that can anchor: store-only receipts (assistant
             # turns, verbatim-skipped clients) have no timeline position.
             for hit in hits:
@@ -442,11 +460,17 @@ async def run_recall_timeline(
         first_key = _row_key(page_rows[0])
         last_key = _row_key(page_rows[-1])
         prev_cursor = (
-            encode_cursor(first_key, "before", namespace_key, subject_uuid)
+            encode_cursor(
+                first_key, "before", namespace_key, subject_uuid,
+                window_from=window_from, window_to=window_to,
+            )
             if not before_probed or before_more else None
         )
         next_cursor = (
-            encode_cursor(last_key, "after", namespace_key, subject_uuid)
+            encode_cursor(
+                last_key, "after", namespace_key, subject_uuid,
+                window_from=window_from, window_to=window_to,
+            )
             if not after_probed or after_more else None
         )
 

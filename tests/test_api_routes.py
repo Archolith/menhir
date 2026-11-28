@@ -182,6 +182,22 @@ class TestHealth:
 
 
 class TestRecall:
+    @pytest.mark.parametrize("payload", [{}, {"limit": 10}, {"limit": 20}])
+    def test_recall_keeps_explicit_limit_and_returns_cap_note(self, client, fake_backend, payload):
+        if not payload:
+            fake_backend.recall.return_value["note"] = "Reranking capped the default result limit at 7."
+        response = client.post("/api/recall", json={"query": "test query", **payload})
+
+        assert response.status_code == 200
+        kwargs = fake_backend.recall.await_args.kwargs
+        assert kwargs["limit"] == payload.get("limit", 10)
+        if payload:
+            assert kwargs["limit_is_explicit"] is True
+            assert "note" not in response.json()
+        else:
+            assert "limit_is_explicit" not in kwargs
+            assert response.json()["note"] == fake_backend.recall.return_value["note"]
+
     def test_recall_basic(self, client, fake_backend):
         resp = client.post("/api/recall", json={"query": "test query"})
         assert resp.status_code == 200
@@ -255,6 +271,42 @@ class TestRecall:
 
         assert response.status_code == 409
 
+    def test_bootstrap_flagged_reports_workspace_total(self, client, fake_backend):
+        fake_backend.fetch_flagged_memories.return_value = [
+            {"uuid": f"pin-{idx}", "content": "A pinned rule"} for idx in range(10)
+        ]
+        fake_backend.fetch_flagged_memory_bootstrap_version.return_value = "workspace:team:tools:12:digest"
+
+        response = client.get("/api/bootstrap/flagged", params={"workspace": "team:tools", "limit": 10})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["flagged_count"] == 10
+        assert payload["flagged_total"] == 12
+        assert payload["truncated"] is True
+        assert payload["items"][0]["content"] == "A pinned rule"
+
+    def test_bootstrap_flagged_reports_a_workspace_with_no_pins(self, client, fake_backend):
+        fake_backend.fetch_flagged_pin_counts = AsyncMock(return_value={"general": 3})
+
+        response = client.get("/api/bootstrap/flagged", params={"workspace": "tpyo"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["workspace_pin_count"] == 0
+        assert "workspace:tpyo" in payload["workspace_notice"]
+
+    def test_flag_forwards_pin_priority_and_rejects_out_of_range(self, client, fake_backend):
+        resp = client.post("/api/memory/some-uuid/flag", params={"pin_priority": 7})
+        assert resp.status_code == 200
+        assert resp.json()["pin_priority"] == 7
+        fake_backend.flag_memory.assert_awaited_with("some-uuid", pin_priority=7)
+
+        fake_backend.flag_memory.reset_mock()
+        resp = client.post("/api/memory/some-uuid/flag", params={"pin_priority": 101})
+        assert resp.status_code == 422
+        fake_backend.flag_memory.assert_not_awaited()
+
     def test_bootstrap_flagged_receipt_unlocks_scoped_context(self, client):
         flagged = client.get(
             "/api/bootstrap/flagged",
@@ -311,7 +363,7 @@ class TestRecall:
         resp = client.post("/api/recall", json={"query": "test", "preset": "recent", "limit": 5})
         assert resp.status_code == 200
         fake_backend.recall.assert_awaited_once_with(
-            "test", preset="recent", limit=5, include_session=True,
+            "test", preset="recent", limit=5, limit_is_explicit=True, include_session=True,
             include_superseded=False, include_invalidated=False, namespace=None,
         )
 
@@ -357,6 +409,36 @@ class TestContext:
 
 
 class TestIngest:
+    def test_ingest_returns_saved_id_when_scheduling_is_deferred(self, client, fake_backend):
+        fake_backend.queue_episode.return_value = {
+            "episode_id": "ep-123",
+            "status": "queued",
+            "processing_state": "PENDING",
+            "warning": "Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        }
+
+        response = client.post("/api/memory", json={"episode": "saved memory"})
+
+        assert response.status_code == 200
+        assert response.json()["episode_id"] == "ep-123"
+        assert response.json()["status"] == "queued"
+        assert "pending queue recovery" in response.json()["warning"]
+
+    def test_ingest_wait_preserves_storage_failure(self, client, fake_backend):
+        fake_backend.queue_episode.return_value = {
+            "episode_id": "",
+            "status": "failed",
+            "error": "storage unavailable",
+        }
+
+        response = client.post("/api/memory?wait=true", json={"episode": "unsaved memory"})
+
+        assert response.status_code == 200
+        assert response.json()["episode_id"] == ""
+        assert response.json()["status"] == "failed"
+        assert response.json()["error"] == "storage unavailable"
+        assert response.json()["warning"] is None
+
     def test_ingest_memory_uses_caller_session_defaults(self, client, fake_backend):
         resp = client.post("/api/memory", json={"episode": "user said hello"})
         assert resp.status_code == 200

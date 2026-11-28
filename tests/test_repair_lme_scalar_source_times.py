@@ -40,8 +40,12 @@ def test_apply_repair_rebuilds_with_runtime_counting_and_history(
             return _Service()
 
     class _Repo:
-        def execute(self, query, params=None):
-            return [{"evidence_updated": 0, "assertions_updated": 0}]
+        class _Tx:
+            def execute(self, query, params=None):
+                return [{"evidence_updated": 0, "assertions_updated": 0}]
+
+        def execute_write(self, work):
+            return work(self._Tx())
 
     monkeypatch.setattr(apply_mod, "MemoryGraphAdapter", _Adapter)
     def _plan(targets):
@@ -62,6 +66,40 @@ def test_apply_repair_rebuilds_with_runtime_counting_and_history(
     assert seen["adapter"] == {"counting_enabled": True}
     assert seen["service"] == {"scalar_history_enabled": True}
     assert audit["rebuild_flags"] == {"counting_enabled": True, "scalar_history_enabled": True}
+
+
+def test_apply_count_mismatch_rolls_back_before_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from unittest.mock import MagicMock
+
+    from menhir.infrastructure.neo4j import Neo4jRepository
+    from scripts.repair_lme_scalar_source_times import RepairPlan, SourceTimeIndex
+
+    apply_mod = sys.modules["repair_lme_scalar_source_times_apply"]
+    repository = Neo4jRepository("bolt://unused", "neo4j", "test", "")
+    driver = MagicMock()
+    tx = driver.session.return_value.__enter__.return_value.begin_transaction.return_value
+    tx.run.return_value = [MagicMock(data=lambda: {"evidence_updated": 0, "assertions_updated": 0})]
+    monkeypatch.setattr(repository, "_get_driver", lambda: driver)
+
+    plan = RepairPlan(
+        evidence_updates=({"turn_id": "turn-1", "target": "2023-08-11T20:17:00+00:00"},),
+        assertion_updates=(), rebuild_targets=(), evidence_total=1, assertion_total=0,
+        evidence_already_correct=0, assertions_already_correct=0,
+    )
+    index = SourceTimeIndex(fixture_sha256="x" * 64, session_times={}, namespaces=frozenset())
+
+    with pytest.raises(RepairRefusal, match="evidence update count changed"):
+        apply_mod.apply_repair(
+            repository, plan, audit_path=tmp_path / "audit.json", fixture_path=tmp_path / "f.json",
+            source_times=index, namespace_prefix="lme-", backup={},
+            counting_enabled=False, scalar_history_enabled=False,
+        )
+
+    tx.run.assert_called_once()
+    tx.commit.assert_not_called()
+    tx.rollback.assert_called_once()
+    assert json.loads((tmp_path / "audit.json").read_text())["status"] == "prepared"
 
 
 def _write_fixture(path: Path) -> Path:

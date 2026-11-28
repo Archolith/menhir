@@ -17,7 +17,7 @@ import pytest
 from menhir.domain.recall import CandidateData, QueryPreset, PRESET_WEIGHTS
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.services import LifecycleService, ScoringService
-from menhir.services.lifecycle_service import SIMILARITY_CONFLICT_THRESHOLD
+from menhir.services.correlation_service_types import CORRELATION_CONFLICT_THRESHOLD
 
 pytestmark = pytest.mark.unit
 
@@ -126,7 +126,7 @@ class TestSimilarityScanCreatesPending:
         # First call: sharpness computation (similarity check)
         # Second call: contradiction check (_check_contradictions_batch)
         stub_graphiti_client.search_scored_results = [
-            ("existing-persistent-1", "user prefers light mode", SIMILARITY_CONFLICT_THRESHOLD + 0.05),
+            ("existing-persistent-1", "user prefers light mode", CORRELATION_CONFLICT_THRESHOLD + 0.05),
         ]
 
         svc = _make_lifecycle_service(stub_memory_graph_adapter, stub_graphiti_client)
@@ -202,10 +202,11 @@ class TestLLMClearsFalsePositive:
         # Assert
         assert result["confirmed"] == 0
         assert result["cleared"] == 1
-        assert len(stub_memory_graph_adapter.resolve_conflict_calls) == 1
-        resolve_call = stub_memory_graph_adapter.resolve_conflict_calls[0]
-        assert resolve_call["action"] == "keep_both"
-        assert resolve_call["resolution_status"] == "false_positive"
+        # #654: review removes the rejected member; a group left with one member dissolves.
+        assert stub_memory_graph_adapter.removed_conflict_members == [
+            ("group-1", "node-A", "false_positive"),
+        ]
+        assert stub_memory_graph_adapter.conflict_groups["group-1"]["members"] == []
 
 
 class TestLLMFailureLeavePending:

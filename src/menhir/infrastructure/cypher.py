@@ -6,7 +6,7 @@ repository modules without pulling in a full OGM.
 
 from __future__ import annotations
 
-from menhir.domain.recall_visibility import view_live_provenance_cypher
+from menhir.domain.recall_visibility import memory_retired_cypher, view_live_provenance_cypher
 from menhir.infrastructure.erasure_fence import marker_absent_cypher
 
 __all__ = [
@@ -365,7 +365,31 @@ EPISODE_NOT_ERASED = (
 # EPISODE_NOT_ERASED (P4 does not replace it).
 EPISODE_NOT_MARKED = marker_absent_cypher("n")
 
-# Entity metadata for scoring/recall.
+def non_derived_view_cypher(variable: str = "n") -> str:
+    """Return a Cypher predicate that is true only for nodes that are NOT derived Views.
+
+    Derived Views are stored as ``:Entity``: recallable Views carry ``is_view``/``view_kind``, and
+    counter Views additionally ``is_quantstate``. The predicate is true when NONE of the three is
+    present, i.e. the node is an ordinary, bindable, recallable memory -- the inverse of what a
+    bind/merge/flag gate must exclude.
+
+    Shared here rather than at each call site because the rule previously existed as five
+    hand-written spellings across four modules (`episode_lifecycle`, `correlation_queries`,
+    `verifier_repository`). Two of them tested only ``is_view`` and thereby admitted legacy
+    counters (`is_view=false`, `is_quantstate=true`, `view_kind=null`), and one even inverted the
+    form (`coalesce(x.is_view, false) = false`). One shared predicate means a gate that forgets
+    ``is_quantstate`` or ``view_kind`` is the failure mode designed out.
+    """
+    return (
+        f"NOT coalesce({variable}.is_view, false) "
+        f"AND NOT coalesce({variable}.is_quantstate, false) "
+        f"AND {variable}.view_kind IS NULL"
+    )
+
+
+
+# Entity metadata for scoring/recall. Must stay below non_derived_view_cypher: building it calls
+# memory_retired_cypher, which imports that helper from this (partially loaded) module.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
     "coalesce(n['view_name'], n.name) AS name",
@@ -392,6 +416,8 @@ ENTITY_METADATA_FIELDS = (
     "n.edge_count AS edge_count",
     "n.sharpness AS sharpness",
     "n.freshness AS freshness",
+    # Legacy raw-capture copies of failed episodes are not recalled (#662); the episode is.
+    "coalesce(n['raw_capture'], false) AS raw_capture",
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
     # SESSION visibility is caller-relative. The recall boundary needs this owner stamp
@@ -413,6 +439,8 @@ ENTITY_METADATA_FIELDS = (
     "n['scalar_basis'] AS scalar_basis",
     "n['sh_op_counts'] AS sh_op_counts",
     "coalesce(n.retired, false) AS retired",
+    # Memory-level RETIRED marker (retire_memory); distinct from the View `retired` flag above.
+    f"{memory_retired_cypher('n')} AS memory_retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
     "CASE WHEN NOT coalesce(n.is_view, false) THEN true "
@@ -574,25 +602,3 @@ def build_reset_or_fail_query(
         ))
         .return_raw(f"count(n) AS {return_alias}")
         .build())
-
-
-def non_derived_view_cypher(variable: str = "n") -> str:
-    """Return a Cypher predicate that is true only for nodes that are NOT derived Views.
-
-    Derived Views are stored as ``:Entity``: recallable Views carry ``is_view``/``view_kind``, and
-    counter Views additionally ``is_quantstate``. The predicate is true when NONE of the three is
-    present, i.e. the node is an ordinary, bindable, recallable memory -- the inverse of what a
-    bind/merge/flag gate must exclude.
-
-    Shared here rather than at each call site because the rule previously existed as five
-    hand-written spellings across four modules (`episode_lifecycle`, `correlation_queries`,
-    `verifier_repository`). Two of them tested only ``is_view`` and thereby admitted legacy
-    counters (`is_view=false`, `is_quantstate=true`, `view_kind=null`), and one even inverted the
-    form (`coalesce(x.is_view, false) = false`). One shared predicate means a gate that forgets
-    ``is_quantstate`` or ``view_kind`` is the failure mode designed out.
-    """
-    return (
-        f"NOT coalesce({variable}.is_view, false) "
-        f"AND NOT coalesce({variable}.is_quantstate, false) "
-        f"AND {variable}.view_kind IS NULL"
-    )

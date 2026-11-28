@@ -6,6 +6,13 @@ import sqlite3
 from typing import Any
 
 
+_MAX_FETCH_LIMIT = 500
+
+
+def _clamp_fetch_limit(limit: int) -> int:
+    return max(0, min(_MAX_FETCH_LIMIT, limit))
+
+
 class _EventStoreFailuresMixin:
     def record_failure(
         self,
@@ -31,6 +38,8 @@ class _EventStoreFailuresMixin:
         self._ensure_ready()
         with self._connect() as conn:
             if episode_uuid and processing_attempt is not None:
+                # Serialize the duplicate check and insert across SQLite connections.
+                conn.execute("BEGIN IMMEDIATE")
                 existing = conn.execute(
                     """
                     SELECT 1
@@ -92,7 +101,7 @@ class _EventStoreFailuresMixin:
     def fetch_recent_failures(
         self, limit: int = 50, *, episode_uuid: str | None = None
     ) -> list[dict[str, Any]]:
-        """Fetch the most recent structured failure records."""
+        """Fetch up to 500 of the most recent structured failure records."""
 
         self._ensure_ready()
         clauses: list[str] = []
@@ -113,6 +122,6 @@ class _EventStoreFailuresMixin:
                 ORDER BY recorded_at DESC, id DESC
                 LIMIT ?
                 """,
-                (*params, limit),
+                (*params, _clamp_fetch_limit(limit)),
             ).fetchall()
             return [dict(row) for row in rows]

@@ -11,7 +11,9 @@ from .ingest_document import IngestDocumentTool
 from .ingest_project import IngestProjectTool
 from .list_candidates import ListCandidatesTool
 from .promote_memory import PromoteMemoryTool
+from .restore_memory import RestoreMemoryTool
+from .retire_memory import RetireMemoryTool
 from .review_candidate import ReviewCandidateTool
 from .unflag_memory import UnflagMemoryTool
 
-INGEST_TOOLS = [AddMemoryTool, AddMemoryAndTrackTool, FlagMemoryTool, UnflagMemoryTool, PromoteMemoryTool, DeleteMemoryTool, DeleteMemoriesTool, IngestProjectTool, IngestDocumentTool, CloseMemoryTool, AddCandidateTool, ListCandidatesTool, ReviewCandidateTool]
+INGEST_TOOLS = [AddMemoryTool, AddMemoryAndTrackTool, FlagMemoryTool, UnflagMemoryTool, PromoteMemoryTool, RetireMemoryTool, RestoreMemoryTool, DeleteMemoryTool, DeleteMemoriesTool, IngestProjectTool, IngestDocumentTool, CloseMemoryTool, AddCandidateTool, ListCandidatesTool, ReviewCandidateTool]

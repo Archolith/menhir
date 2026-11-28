@@ -17,23 +17,55 @@ import os
 import sys
 
 
+class _DiagnosticError(RuntimeError):
+    """Safe, concise error suitable for diagnostic output."""
+
+
+def _request_json(conn, method: str, path: str, label: str, *, body=None, headers=None):
+    try:
+        conn.request(method, path, body, headers or {})
+        response = conn.getresponse()
+        payload = response.read()
+    except (OSError, http.client.HTTPException) as exc:
+        raise _DiagnosticError(f"{label} request failed (network error)") from exc
+    if response.status != 200:
+        raise _DiagnosticError(f"{label} request failed (HTTP {response.status})")
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _DiagnosticError(f"{label} returned an unexpected payload") from exc
+
+
 def _post_token(conn: http.client.HTTPSConnection, domain: str, cid: str, secret: str) -> str:
     payload = json.dumps({
         "client_id": cid, "client_secret": secret,
         "audience": f"https://{domain}/api/v2/", "grant_type": "client_credentials",
     })
-    conn.request("POST", "/oauth/token", payload, {"content-type": "application/json"})
-    res = conn.getresponse()
-    body = json.loads(res.read().decode("utf-8"))
-    if "access_token" not in body:
-        raise SystemExit(f"mgmt token failed: {json.dumps(body)}")
-    return body["access_token"]
+    body = _request_json(conn, "POST", "/oauth/token", "management token",
+                         body=payload, headers={"content-type": "application/json"})
+    token = body.get("access_token") if isinstance(body, dict) else None
+    if not isinstance(token, str) or not token.strip():
+        raise _DiagnosticError("management token returned an unexpected payload")
+    return token
 
 
-def _get(conn: http.client.HTTPSConnection, path: str, token: str):
-    conn.request("GET", path, headers={"authorization": f"Bearer {token}"})
-    res = conn.getresponse()
-    return res.status, json.loads(res.read().decode("utf-8"))
+def _get_list(conn: http.client.HTTPSConnection, path: str, label: str, token: str) -> list:
+    payload = _request_json(conn, "GET", path, label, headers={"authorization": f"Bearer {token}"})
+    if not isinstance(payload, list):
+        raise _DiagnosticError(f"{label} returned an unexpected payload")
+    if any(not isinstance(entry, dict) for entry in payload):
+        raise _DiagnosticError(f"{label} returned malformed entries")
+    if label == "resource servers":
+        for server in payload:
+            scopes = server.get("scopes", [])
+            if not isinstance(scopes, list) or any(
+                not isinstance(scope, dict)
+                or not isinstance(scope.get("value"), str)
+                or not scope["value"].strip()
+                for scope in scopes
+            ):
+                raise _DiagnosticError("resource servers returned malformed scopes")
+    return payload
 
 
 def main() -> int:
@@ -45,24 +77,35 @@ def main() -> int:
         return 2
 
     conn = http.client.HTTPSConnection(domain)
-    token = _post_token(conn, domain, cid, secret)
+    try:
+        token = _post_token(conn, domain, cid, secret)
 
-    print("=== APIs (resource servers) ===")
-    st, servers = _get(conn, "/api/v2/resource_servers", token)
-    for s in servers if isinstance(servers, list) else []:
-        scopes = [sc.get("value") for sc in s.get("scopes", [])]
-        print(f"  name={s.get('name')!r}  identifier={s.get('identifier')!r}")
-        print(f"      id={s.get('id')}  rbac scopes={scopes}")
+        print("=== APIs (resource servers) ===")
+        servers = _get_list(conn, "/api/v2/resource-servers", "resource servers", token)
+        for s in servers:
+            scopes = [sc["value"] for sc in s.get("scopes", [])]
+            print(f"  name={s.get('name')!r}  identifier={s.get('identifier')!r}")
+            print(f"      id={s.get('id')}  rbac scopes={scopes}")
 
-    print("\n=== Client grants (app -> audience : scopes) ===")
-    st, grants = _get(conn, "/api/v2/client_grants", token)
-    for g in grants if isinstance(grants, list) else []:
-        print(f"  client_id={g.get('client_id')}  audience={g.get('audience')!r}  scope={g.get('scope')}")
+        print("\n=== Client grants (app -> audience : scopes) ===")
+        grants = _get_list(conn, "/api/v2/client-grants", "client grants", token)
+        for g in grants:
+            print(f"  client_id={g.get('client_id')}  audience={g.get('audience')!r}  scope={g.get('scope')}")
 
-    print("\n=== Applications (clients) ===")
-    st, clients = _get(conn, "/api/v2/clients?fields=client_id,name,app_type&include_fields=true", token)
-    for c in clients if isinstance(clients, list) else []:
-        print(f"  client_id={c.get('client_id')}  name={c.get('name')!r}  app_type={c.get('app_type')}")
+        print("\n=== Applications (clients) ===")
+        clients = _get_list(
+            conn,
+            "/api/v2/clients?fields=client_id,name,app_type&include_fields=true",
+            "applications",
+            token,
+        )
+        for c in clients:
+            print(f"  client_id={c.get('client_id')}  name={c.get('name')!r}  app_type={c.get('app_type')}")
+    except _DiagnosticError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
     return 0
 
 

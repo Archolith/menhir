@@ -537,6 +537,7 @@ def test_startup_wires_the_real_dispatcher_rather_than_a_coordinator(monkeypatch
         "METRIC_WRITE",
         "EXPLICIT_ERASURE",
         "LEGACY_ENTITY_UNMERGE",
+        "DECAY_DELETE",
     ):
         assert kind in built.handlers, f"{kind} has no registered handler"
 

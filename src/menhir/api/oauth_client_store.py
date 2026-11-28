@@ -7,12 +7,27 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 from typing import TYPE_CHECKING
 
 from archolith_oauth import OAuthClient, OAuthClientStore, hash_secret
 
 if TYPE_CHECKING:
     from menhir.api.client_policy import ClientPolicyAuthority
+
+
+MAX_CLIENT_DISPLAY_NAME_LENGTH = 255
+
+
+def normalize_client_display_name(value: object) -> str:
+    """Clean new client names while preserving Unicode joiners used in ordinary text."""
+    if not isinstance(value, str):
+        return ""
+    return "".join(
+        char for char in value
+        if unicodedata.category(char) not in {"Cc", "Cs", "Zl", "Zp"}
+        and char not in "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+    ).strip()[:MAX_CLIENT_DISPLAY_NAME_LENGTH]
 
 
 def new_client_id() -> str:
@@ -98,10 +113,14 @@ def upsert_cimd_client(client: OAuthClient, *, fetched_at: float) -> None:
 def _connect_cimd_cache() -> sqlite3.Connection:
     store = get_client_store()
     conn = sqlite3.connect(str(store.db_path))
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
-        "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
-    )
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
+            "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
+        )
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 

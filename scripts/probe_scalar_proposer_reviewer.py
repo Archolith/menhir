@@ -34,6 +34,7 @@ import os
 import random
 import sys
 from collections import Counter, defaultdict
+from contextlib import closing
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
@@ -151,6 +152,16 @@ def make_decoy(card: ClaimCard, rng: random.Random) -> tuple[ClaimCard, str]:
         return ClaimCard(card.claim_id, replace(p, subject_text="my brother")), "subject_wrong"
 
 
+def resolve_namespace(session, suffix: str) -> str | None:
+    """Resolve a suffix only when it identifies zero or one distinct graph namespace."""
+    row = session.run("MATCH (e:Episodic) WHERE e.group_id ENDS WITH $s "
+                      "RETURN DISTINCT e.group_id AS ns", {"s": suffix}).data()
+    namespaces = sorted({item["ns"] for item in row})
+    if len(namespaces) > 1:
+        raise ValueError(f"ambiguous namespace suffix {suffix}: {', '.join(namespaces)}")
+    return namespaces[0] if namespaces else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ns", nargs="+", required=True)
@@ -164,24 +175,28 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
     ap.add_argument("--user", default="neo4j")
-    ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
+    # Resolve the environment default only after dotenv loading, while retaining an explicit
+    # empty argv value as an intentional override.
+    ap.add_argument("--password", default=None)
     args = ap.parse_args()
 
     load_dotenv()
+    password = (args.password if args.password is not None
+                else os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         print("OPENAI_API_KEY not set", file=sys.stderr)
         return 2
     model = os.environ.get("MENHIR_PERSONAL_MEMORY_CHAT_MODEL") or "gpt-4o-mini"
-    client = OpenAI(api_key=api_key)
-    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+    driver = GraphDatabase.driver(args.uri, auth=(args.user, password))
     rng = random.Random(args.seed)
-    sink = open(args.jsonl, "w", encoding="utf-8") if args.jsonl else None
+    sink = None
 
     stats: dict[str, Counter] = defaultdict(Counter)
     truncated = 0
     calls = 0
     ctx: dict[str, object] = {}
+    refused_namespace = False
 
     def llm(system: str, user: str) -> str:
         nonlocal truncated, calls
@@ -199,14 +214,30 @@ def main() -> int:
                                    "finish": resp.choices[0].finish_reason}) + "\n")
         return text
 
-    with driver.session() as session:
+    with closing(driver), driver.session() as session:
+        resolved_namespaces: list[tuple[str, str]] = []
         for suffix in args.ns:
-            row = session.run("MATCH (e:Episodic) WHERE e.group_id ENDS WITH $s "
-                              "RETURN DISTINCT e.group_id AS ns", {"s": suffix}).data()
-            if not row:
+            try:
+                namespace = resolve_namespace(session, suffix)
+            except ValueError as exc:
+                refused_namespace = True
+                print(f"  !! {exc}", file=sys.stderr)
+                continue
+            if namespace is None:
                 print(f"  !! no namespace {suffix}", file=sys.stderr)
                 continue
-            episodes = build_episodes(session.run(EPISODES_Q, {"ns": row[0]["ns"]}).data())
+            resolved_namespaces.append((suffix, namespace))
+
+        # Validate every requested suffix before constructing the paid client, opening/truncating
+        # the capture, or evaluating any corpus. An ambiguous input therefore cannot produce a
+        # partial panel or a misleading replay file.
+        if refused_namespace:
+            return 2
+
+        client = OpenAI(api_key=api_key)
+        sink = open(args.jsonl, "w", encoding="utf-8") if args.jsonl else None
+        for suffix, namespace in resolved_namespaces:
+            episodes = build_episodes(session.run(EPISODES_Q, {"ns": namespace}).data())
             if not episodes:
                 continue
 
@@ -259,7 +290,10 @@ def main() -> int:
 
                     cards = propose_claim_cards(episodes, llm, on_drop=_pdrop)
                     if not cards:
-                        stats[arm]["no_cards"] += 1
+                        no_card_arms = ["B", "D"] if arm == "BD" else [arm]
+                        for no_card_arm in no_card_arms:
+                            if no_card_arm in args.arms:
+                                stats[no_card_arm]["no_cards"] += 1
                         continue
 
                     # Decoys are injected AFTER proposal and BEFORE review.
@@ -371,6 +405,8 @@ def main() -> int:
         s = stats[arm]
         print(f"\n=== ARM {arm} ===")
         print(f"  commits: {s['commits']}")
+        if s.get("no_cards"):
+            print(f"  no-card proposals: {s['no_cards']}")
         cur, st, wr = s[gt.CURRENT], s[gt.STALE], s[gt.WRONG]
         scored = cur + st + wr
         if scored:

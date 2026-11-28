@@ -146,10 +146,18 @@ def test_invalid_relation_and_offsets_fail_closed():
         compose_scalar_identity(_proposal(span_start=-1, span_end=-1))
 
 
-def test_custom_semantics_require_an_explicit_derivation_receipt():
+@pytest.mark.parametrize(
+    "derivation",
+    [
+        {},
+        {"derivation_kind": " proposal_fields ", "rule_id": "structural_rule"},
+        {"derivation_kind": "structural", "rule_id": "\tfallback_state "},
+    ],
+)
+def test_custom_semantics_require_an_explicit_derivation_receipt(derivation):
     with pytest.raises(ValueError, match="explicit derivation_kind and rule_id"):
         compose_scalar_identity(
-            _proposal(), relation_type="quantity", target_or_scope=("tokens", ""))
+            _proposal(), relation_type="quantity", target_or_scope=("tokens", ""), **derivation)
 
 
 def test_direct_provenance_rejects_a_forged_source_key():

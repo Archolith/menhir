@@ -184,6 +184,35 @@ class PendingActionStore:
             )
             conn.commit()
 
+    def record_proposals(self, action: str, rows: list[tuple[str, str | None, str]]) -> int:
+        """Record proposed (not executed) actions in one transaction. Idempotent per node.
+
+        *rows* are ``(node_uuid, source_uuid, context)``. A repeat refreshes context and
+        source_uuid only: attempts stays 0 (``fetch_pending`` hides rows at 10 attempts, so
+        ``upsert`` would eventually bury a proposal) and created_at keeps its first value. Each
+        row is its own statement, so a row the erasure denylist ignores (RAISE(IGNORE)) drops
+        alone and the rest of the batch still lands. Returns the number of rows submitted.
+        """
+        if not rows:
+            return 0
+        self._ensure_ready()
+        now = _utc_now_iso()
+        with connect_telemetry_db(self.db_path) as conn:
+            for node_uuid, source_uuid, context in rows:
+                conn.execute(
+                    """
+                    INSERT INTO pending_actions
+                        (node_uuid, action, context, source_uuid, attempts, created_at)
+                    VALUES (?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(node_uuid, action) DO UPDATE SET
+                        context = excluded.context,
+                        source_uuid = excluded.source_uuid
+                    """,
+                    (node_uuid, action, context, source_uuid, now),
+                )
+            conn.commit()
+        return len(rows)
+
     def complete(self, node_uuid: str, action: str | None = None) -> bool:
         """Remove a pending action after successful processing.
 

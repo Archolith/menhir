@@ -99,7 +99,9 @@ class _Hashes:
         return self.tx.hashes.pop(0)
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]]) -> None:
+def _install(
+    monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]], *, expected_kinds=None,
+) -> None:
     class _Assertions:
         def __init__(self, tx: _Tx) -> None:
             self.tx = tx
@@ -109,13 +111,21 @@ def _install(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]]) -> 
             assert namespace == "default"
             return list(rows)
 
-    monkeypatch.setattr(materializer_module, "ViewRepository", _Views)
+    def build_views(tx, *, extensions):
+        assert (extensions.view_kinds if extensions else None) is expected_kinds
+        return _Views(tx)
+
+    monkeypatch.setattr(materializer_module, "build_view_repository", build_views)
     monkeypatch.setattr(materializer_module, "TypedAssertionRepository", _Assertions)
     monkeypatch.setattr(materializer_module, "ScalarStateProjectionHashSource", _Hashes)
 
 
 @pytest.mark.unit
-def test_materializer_mutates_only_token_slot(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("registered", [False, True])
+def test_materializer_mutates_only_token_slot(monkeypatch: pytest.MonkeyPatch, registered: bool):
+    from examples.decision_timeline import EXTENSION
+    from menhir.extensions import RuntimeExtensions
+
     target_row = _row("target", attribute="owned", value=10)
     other_row = _row("other", attribute="height", value=72)
     state = fold_assertions([target_row]).states[0]
@@ -129,9 +139,10 @@ def test_materializer_mutates_only_token_slot(monkeypatch: pytest.MonkeyPatch):
         episode_uuids=state.episode_uuids,
     )
     tx = _Tx(current=False, hashes=["before", expected])
-    _install(monkeypatch, [target_row, other_row])
+    registry = RuntimeExtensions((EXTENSION,)) if registered else None
+    _install(monkeypatch, [target_row, other_row], expected_kinds=registry.view_kinds if registry else None)
 
-    result = ScalarStateProjectionMaterializer()(tx, _token(target_row))
+    result = ScalarStateProjectionMaterializer(extensions=registry)(tx, _token(target_row))
 
     assert result == expected
     assert len(tx.writes) == 1

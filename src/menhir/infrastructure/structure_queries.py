@@ -1448,73 +1448,6 @@ class StructureGraphWriter:
             for r in rows
         ]
 
-    def link_episode_to_documents(
-        self,
-        episode_uuid: str,
-        entity_names: list[str],
-        project: str,
-        max_links: int = 5,
-    ) -> int:
-        """Link an episode to up to max_links wiki/reference document entities by name match.
-
-        Creates RELATES_TO edges from the episode to matching document entities.
-
-        Args:
-            episode_uuid: The episode node UUID to link from.
-            entity_names: Extracted entity names from the episode content.
-            project: Project to search documents in.
-            max_links: Maximum number of links to create (default 5).
-
-        Returns:
-            Number of links created.
-        """
-        if not entity_names:
-            return 0
-
-        # Find matching document entities by name overlap (case-insensitive)
-        rows = self.neo4j.execute(
-            """
-            UNWIND $names AS name
-            MATCH (d:Entity {structure_project: $p, structure_role: 'document'})
-            WHERE d.document_type IN ['wiki_article', 'reference_article']
-              AND (toLower(d.name) CONTAINS toLower(name)
-                OR toLower(d.root_path) CONTAINS toLower(name))
-            WITH d LIMIT $limit
-            MATCH (e:Entity {id: $episode_id})
-            MERGE (e)-[r:RELATES_TO]->(d)
-            ON CREATE SET r.created_at = timestamp(), r.weight = 1.0
-            RETURN count(r) AS links
-            """,
-            {
-                "names": entity_names,
-                "p": project,
-                "episode_id": episode_uuid,
-                "limit": max_links,
-            },
-        )
-        return rows[0].get("links", 0) if rows else 0
-
-    def get_linked_documents(self, episode_uuids: list[str]) -> list[dict[str, str]]:
-        """Get wiki/reference documents linked to episodes via RELATES_TO."""
-        if not episode_uuids:
-            return []
-        rows = self.neo4j.execute(
-            """
-            MATCH (e:Entity)-[:RELATES_TO]->(d:Entity {structure_role: 'document'})
-            WHERE e.id IN $uuids AND d.document_type IN ['wiki_article', 'reference_article']
-            RETURN DISTINCT d.name AS name, d.root_path AS root_path, d.document_type AS doc_type
-            ORDER BY d.name
-            """,
-            {"uuids": episode_uuids},
-        )
-        return [
-            {
-                "name": str(r["name"]),
-                **_set_properties(r, ("root_path", "doc_type")),
-            }
-            for r in rows
-        ]
-
     def query_imports(self, project: str, file_path: str) -> dict[str, list[str]]:
         """Return what a file imports and what imports it."""
         file_path = self._query_path(project, file_path)
@@ -1977,59 +1910,38 @@ class StructureGraphWriter:
 
     def resolve_structural_neighbors(self, project: str, file_path: str) -> list[str]:
         """Return the file's UUID plus UUIDs of its imports, importers, and testers."""
+        result = self.resolve_structural_neighbors_bulk([project], file_path)
+        return result[1] if result else []
+
+    def resolve_structural_neighbors_bulk(
+        self, projects: list[str], file_path: str
+    ) -> tuple[str, list[str]] | None:
+        """Return neighbors only if the reference identifies one file across the supplied projects."""
+        from menhir.infrastructure.structural_anchoring import resolve_structural_entities
+
+        matches = resolve_structural_entities(self.neo4j, [file_path], project_filter=projects)
+        if len(matches) != 1:
+            return None
+        file = matches[0]
         rows = self.neo4j.execute(
             """
-            MATCH (f:Entity {structure_project: $p, structure_path: $path})
-            // CF-224: these UUIDs are consumed by recall_support, so a foreign uuid does not
-            // merely display -- it selects another project's node for retrieval.
-            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: $p})
-            OPTIONAL MATCH (importer:Entity {structure_project: $p})-[:IMPORTS]->(f)
-            OPTIONAL MATCH (tester:Entity {structure_project: $p})-[:TESTS]->(f)
+            MATCH (f:Entity {uuid: $uuid, structure_project: $project, structure_path: $path})
+            // CF-224: neighbors supply recall candidates, so every branch stays in the project.
+            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: $project})
+            WHERE imp.structure_project_id = f.structure_project_id
+               OR (imp.structure_project_id IS NULL AND f.structure_project_id IS NULL)
+            OPTIONAL MATCH (importer:Entity {structure_project: $project})-[:IMPORTS]->(f)
+            WHERE importer.structure_project_id = f.structure_project_id
+               OR (importer.structure_project_id IS NULL AND f.structure_project_id IS NULL)
+            OPTIONAL MATCH (tester:Entity {structure_project: $project})-[:TESTS]->(f)
+            WHERE tester.structure_project_id = f.structure_project_id
+               OR (tester.structure_project_id IS NULL AND f.structure_project_id IS NULL)
             RETURN f.uuid AS file_uuid,
                    collect(DISTINCT imp.uuid) AS import_uuids,
                    collect(DISTINCT importer.uuid) AS importer_uuids,
                    collect(DISTINCT tester.uuid) AS tester_uuids
             """,
-            {"p": project, "path": file_path},
-        )
-        if not rows:
-            return []
-        row = rows[0]
-        file_uuid = row.get("file_uuid")
-        if not file_uuid:
-            return []
-        uuids: set[str] = {str(file_uuid)}
-        for key in ("import_uuids", "importer_uuids", "tester_uuids"):
-            for uuid in row.get(key) or []:
-                if uuid:
-                    uuids.add(str(uuid))
-        return sorted(uuids)
-
-    def resolve_structural_neighbors_bulk(
-        self, projects: list[str], file_path: str
-    ) -> tuple[str, list[str]] | None:
-        """Return the first matched project and its file's UUID plus UUIDs of its imports, importers, and testers."""
-        if not projects:
-            return None
-        rows = self.neo4j.execute(
-            """
-            UNWIND $projects AS p
-            MATCH (f:Entity {structure_project: p, structure_path: $path})
-            // CF-224: scoped to `p`, the UNWIND variable -- NOT `$p`, which does not exist on
-            // this query and made it fail with ParameterMissing rather than leak. The two
-            // sibling queries look identical and bind their project differently; a copied
-            // predicate is wrong in exactly one of them.
-            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: p})
-            OPTIONAL MATCH (importer:Entity {structure_project: p})-[:IMPORTS]->(f)
-            OPTIONAL MATCH (tester:Entity {structure_project: p})-[:TESTS]->(f)
-            RETURN p AS matched_project,
-                   f.uuid AS file_uuid,
-                   collect(DISTINCT imp.uuid) AS import_uuids,
-                   collect(DISTINCT importer.uuid) AS importer_uuids,
-                   collect(DISTINCT tester.uuid) AS tester_uuids
-            LIMIT 1
-            """,
-            {"projects": projects, "path": file_path},
+            file,
         )
         if not rows:
             return None
@@ -2038,13 +1950,12 @@ class StructureGraphWriter:
         if not file_uuid:
             return None
 
-        matched_project = row["matched_project"]
         uuids: set[str] = {str(file_uuid)}
         for key in ("import_uuids", "importer_uuids", "tester_uuids"):
             for uuid in row.get(key) or []:
                 if uuid:
                     uuids.add(str(uuid))
-        return matched_project, sorted(uuids)
+        return file["project"], sorted(uuids)
 
     def query_linked_memories(
         self,

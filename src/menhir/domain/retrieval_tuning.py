@@ -164,6 +164,16 @@ FLOOR_EXEMPT_SOURCES: frozenset[CandidateSource] = frozenset(
 )
 
 
+# How recall orders the post-floor candidates (plan menhir-rerank-as-oracle-plan-2026-11-09).
+RANKER_RERANKER_ONLY = "reranker_only"
+RANKER_ORACLE_ONLY = "oracle_only"
+RANKER_ORACLE_COMBINED = "oracle_combined"
+RANKING_STRATEGIES: tuple[str, ...] = (RANKER_RERANKER_ONLY, RANKER_ORACLE_ONLY, RANKER_ORACLE_COMBINED)
+ORACLE_WEIGHT_ROLES: tuple[str, ...] = (
+    "relevant", "current", "historical", "conflict", "blocked", "rerank",
+)
+
+
 @dataclass(frozen=True)
 class RetrievalTuningConfig:
     """Knobs for candidate generation and semantic tuning.
@@ -181,6 +191,22 @@ class RetrievalTuningConfig:
     rerank_top_n: int = 50
     # A reranked list skips the floor and so always fills the limit; cap it to hold context size.
     rerank_max_results: int = 7
+    # Ranking strategy (MENHIR_RECALL_RANKING_STRATEGY):
+    # - reranker_only (default): cross-encoder order; the oracle residual blend is skipped and
+    #   wardens gate. The oracle combiner does not order a reranked list (tracked debt).
+    # - oracle_only: no rerank; rank floor + oracle residual blend (the rerank-off path).
+    # - oracle_combined: the combiner orders the reranked head, with the rerank logit as one
+    #   weighted role; candidates past rerank_top_n follow the head. Wardens gate.
+    # With no rerank model, or when the rerank fails, every strategy runs as oracle_only.
+    ranking_strategy: str = RANKER_RERANKER_ONLY
+    # Combiner role weights. 1.0 everywhere reproduces the unweighted log-space score; the
+    # rerank role exists only on packets carrying a rerank logit (oracle_combined).
+    oracle_weight_relevant: float = 1.0
+    oracle_weight_current: float = 1.0
+    oracle_weight_historical: float = 1.0
+    oracle_weight_conflict: float = 1.0
+    oracle_weight_blocked: float = 1.0
+    oracle_weight_rerank: float = 1.0
     embedding_dimensions: int | None = None
     # Observe-only: when a trace is requested, also run the AssertionPipeline (oracle +
     # warden) over the candidate set and attach the outcome to the trace. Never changes
@@ -261,6 +287,10 @@ class RetrievalTuningConfig:
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
 
+    @property
+    def oracle_role_weights(self) -> dict[str, float]:
+        return {role: getattr(self, f"oracle_weight_{role}") for role in ORACLE_WEIGHT_ROLES}
+
     def __post_init__(self) -> None:
         # NaN fails this too: it would otherwise silently disable the gate.
         if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
@@ -277,6 +307,15 @@ class RetrievalTuningConfig:
             raise ValueError(
                 f"facet_weight must be >= 0.0, got {self.facet_weight!r}"
             )
+        if self.ranking_strategy not in RANKING_STRATEGIES:
+            raise ValueError(
+                f"ranking_strategy must be one of {RANKING_STRATEGIES}, got {self.ranking_strategy!r}"
+            )
+        for role in ORACLE_WEIGHT_ROLES:
+            weight = getattr(self, f"oracle_weight_{role}")
+            # NaN fails this too.
+            if not 0.0 <= weight <= 10.0:
+                raise ValueError(f"oracle_weight_{role} must be in [0.0, 10.0], got {weight!r}")
         if not 1 <= self.rerank_top_n <= 200:
             raise ValueError(f"rerank_top_n must be in [1, 200], got {self.rerank_top_n!r}")
         if not 1 <= self.rerank_max_results <= 200:

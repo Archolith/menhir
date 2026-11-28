@@ -257,7 +257,14 @@ TYPED_SCALAR_SYSTEM_PROMPT = (
     "system. Read the numbered episodes and emit one observation per concrete fact that states or "
     "changes a CURRENT PROPERTY of some subject the user might later ask about (a status, a count, a "
     "time, an amount, a duration). Do NOT emit an observation for a one-off happening that is not a "
-    "standing property. Each observation is an object: "
+    "standing property. Emit only values the episode itself presents as TRUE. SARCASM or irony is not "
+    "a value: when the episode contradicts its own literal claim ('oh sure, I'm a brilliant "
+    "gardener, every plant I own is dead', 'I'm such a patient driver, I honked at a green light'), "
+    "emit only the literal events or nothing, never the ironic claim. ANOTHER PERSON'S CLAIM ('my "
+    "neighbor says she sold her motorbike', 'the plumber claims the heating is fixed') is not a value "
+    "unless the speaker affirms it; when the speaker doubts or contradicts it ('but it is still in "
+    "her driveway', 'but the flat is freezing'), emit nothing for that claim. "
+    "Each observation is an object: "
     "{\"subject\": <WHOSE/WHICH thing has this property. Decide carefully: "
     "if the property belongs to the SPEAKER THEMSELF — 'I', 'me', or 'my <personal attribute>' such as "
     "'my height', 'my wake time', 'my day off', 'my commute' — use exactly 'user'. But if 'my'/'their' "
@@ -1344,7 +1351,7 @@ def _scalar_source_mismatch(
             _SOURCE_ASPIRATION_RE.search(clause) and not _STATED_RECORD_RE.search(clause)
         )
         is_negated = bool(_SOURCE_NEGATION_RE.search(clause))
-        if value_kind in ("boolean", "status") and subject_text.strip().lower() == "user":
+        if value_kind in ("boolean", "status") and _is_self_reference(subject_text):
             sentence = _sentence_before(leading)
             if _THIRD_PARTY_CLAUSE_RE.search(sentence) or (
                 value_kind == "boolean" and not _FIRST_PERSON_RE.search(sentence)

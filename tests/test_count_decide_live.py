@@ -180,6 +180,22 @@ def test_cosine_related_pull_is_subject_kind_version_and_threshold_scoped(env):
 
 
 @pytest.mark.online
+def test_cosine_related_pull_skips_rows_of_a_different_vector_size(env):
+    """#1006: one stale-dimension row under the same embed version must not fail the query."""
+    repo, adapter, ns, _, _ = env
+    _seed(repo, ns, [
+        {"id": "near", "status": "counted", "vec": [1.0, 0.0], "ev": _EV},
+        {"id": "wrong-dim", "status": "counted", "vec": [1.0, 0.0, 0.0], "ev": _EV},
+        {"id": "probe", "status": "counted", "vec": [1.0, 0.0], "ev": _EV},
+    ])
+    probe = {"id": f"{ns}:probe", "subject_uuid": "self", "value_kind": "count",
+             "vector": [1.0, 0.0]}
+    hits = adapter.cosine_related_counted(ns, [probe], embed_version=_EV, min_cosine=0.85,
+                                          per_probe=10)
+    assert [h["assertion_id"].split(":", 1)[1] for h in hits] == ["near"]
+
+
+@pytest.mark.online
 def test_decision_stores_the_key_embedding_and_a_later_redecide_keeps_it(env):
     repo, adapter, ns, _, claim = env
     _seed(repo, ns, [{"id": "a"}])

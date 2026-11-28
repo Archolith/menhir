@@ -165,8 +165,13 @@ class LLMAdapter:
         max_retries: int = _COMPRESS_MAX_RETRIES,
         retry_base_delay_s: float = _COMPRESS_RETRY_BASE_DELAY,
         retry_sleep: Callable[[float], Awaitable[None]] | None = None,
+        raise_call_failures: bool = False,
     ) -> str | None:
-        """Run a single-text chat prompt with exponential backoff retry handling."""
+        """Run a single-text chat prompt with exponential backoff retry handling.
+
+        A failed call returns None unless ``raise_call_failures`` is set: then the provider
+        exception is re-raised so the caller can tell an outage from an empty answer (#874).
+        """
         if not user_prompt.strip():
             return None
 
@@ -207,6 +212,8 @@ class LLMAdapter:
                 raise
             except TimeoutError as exc:
                 logger.warning("LLM %s timed out; not retrying: %s", operation, exc)
+                if raise_call_failures:
+                    raise
                 return None
             except Exception as exc:
                 category = rate_limit_category(exc)
@@ -220,6 +227,8 @@ class LLMAdapter:
                         category,
                         describe_provider_error(exc),
                     )
+                    if raise_call_failures:
+                        raise
                     return None
                 # CF-262 F2. A 4xx other than timeout/conflict (auth, bad request, 402 balance) or
                 # an unimplemented backend fails the same way every time; retrying only waits.
@@ -232,6 +241,8 @@ class LLMAdapter:
                         operation,
                         describe_provider_error(exc) if status is not None else exc,
                     )
+                    if raise_call_failures:
+                        raise
                     return None
                 last_error = exc
                 if attempt < max_retries:
@@ -252,6 +263,8 @@ class LLMAdapter:
             max_retries + 1,
             exc_info=last_error,
         )
+        if raise_call_failures and last_error is not None:
+            raise last_error
         return None
 
     async def compress_content(self, content: str) -> str | None:
@@ -390,7 +403,8 @@ class LLMAdapter:
 
         ``kind`` is ``'fact'`` or ``'entity'``. Returns ``("supported", rewrite)`` when the sources
         support the item, ``("unsupported", None)`` when they do not (fact kind only), or ``None``
-        when the call failed or answered unparseably (the repair stays pending for retry).
+        when the model gave no usable answer. A failed provider call raises its exception, so the
+        caller can tell an outage (no attempt spent) from an item fault (#874).
         For ``'entity'`` the answer is always a summary rewrite, never ``unsupported``.
         """
         thinking_token = "/no_think\n" if self._wants_no_think() else ""
@@ -427,6 +441,7 @@ class LLMAdapter:
             max_tokens=_VERDICT_MAX_TOKENS,
             temperature=0.0,
             max_retries=0,
+            raise_call_failures=True,
         )
         if raw is None:
             return None

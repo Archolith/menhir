@@ -33,7 +33,7 @@ class _Adapter:
         return [{"uuid": "entity-1", "name": "Rachel"}]
 
     def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None, model=None,
-                                 subject_uuid=None, resolved_only=False):
+                                 subject_uuid=None, resolved_only=False, include_retired=False):
         self.search_calls.append({"limit": limit, "namespace": namespace, "model": model,
                                   "subject_uuid": subject_uuid,
                                   "resolved_only": resolved_only})

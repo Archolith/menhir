@@ -232,7 +232,9 @@ def test_unmerge_keeps_retention_recorded_on_survivor_after_merge(
     assert rows[0]["count"] == 1
     assert rows[0]["direct"] == [True]
     assert adapter.flag_memory(pair["ep_a"]) is True
-    assert ConsolidationRepository(live_repo).compress_node(pair["s"], "summary") is False
+    live_repo.execute("MATCH (n:Entity {uuid:$s}) SET n.created_at = datetime('2020-01-01')", params={"s": pair["s"]})
+    content = live_repo.execute("MATCH (n:Entity {uuid:$s}) RETURN n.content AS c", params={"s": pair["s"]})[0]["c"]
+    assert ConsolidationRepository(live_repo).compress_node(pair["s"], "summary", read_content=content, min_days_since_accessed=0) is False
 
 
 @pytest.fixture

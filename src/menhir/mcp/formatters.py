@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
+from menhir.domain.bootstrap_scope import WORKSPACE_BOOTSTRAP_PREFIX
 from menhir.domain.models import ProcessingState
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
@@ -228,6 +229,79 @@ def _compact_memory_item(row: dict[str, object], *, tag: str) -> dict[str, objec
             if verification:
                 item["stale_verification"] = verification
     return item
+
+
+_FLAGGED_PIN_TEXT_LIMIT = 1_000
+
+
+def _flagged_pin_item(row: dict[str, object]) -> dict[str, object]:
+    """Keep the original pin wording within a bounded startup payload."""
+    item = _compact_memory_item(row, tag="flagged")
+    text = row.get("content")
+    if not isinstance(text, str) or not text.strip():
+        text = row.get("summary")
+    if isinstance(text, str) and text.strip():
+        clipped = len(text) > _FLAGGED_PIN_TEXT_LIMIT
+        item["summary"] = f"{text[:_FLAGGED_PIN_TEXT_LIMIT - 1]}…" if clipped else text
+        if clipped:
+            item["summary_truncated"] = True
+    # `scope`/`type` describe the node's lifecycle (usually SESSION/EPISODIC for a pin);
+    # these say which startup scope pinned it and how it ranks there.
+    item["pin_scope"] = row.get("bootstrap_scope")
+    item["pin_priority"] = int(row.get("pin_priority") or 0)
+    return item
+
+
+async def _workspace_pin_fields(
+    backend: Any,
+    selection: str,
+    *,
+    workspace: str | None,
+    namespace: str | None,
+) -> dict[str, object]:
+    """Report a workspace's own pin count, so a mistyped key is not silently general-only."""
+    if not selection.startswith(WORKSPACE_BOOTSTRAP_PREFIX):
+        return {}
+    try:
+        counts = await backend.fetch_flagged_pin_counts(
+            workspace=workspace, namespace=namespace
+        )
+        count: int | None = int(dict(counts).get(selection, 0))
+    except Exception:
+        # Advisory only: the pins and receipt above are already complete. An older server
+        # lacks this operation; that is "unknown", never "zero".
+        logger.warning("could not count workspace pins for %s", selection, exc_info=True)
+        count = None
+    fields: dict[str, object] = {"workspace_pin_count": count}
+    if count == 0:
+        fields["workspace_notice"] = (
+            f"No pins are scoped to {selection}; only general pins were returned. "
+            "Check the workspace key."
+        )
+    elif count is None:
+        fields["workspace_notice"] = (
+            f"Could not count pins scoped to {selection}; the returned pins are unaffected."
+        )
+    return fields
+
+
+def _flagged_pin_counts(version: str, selection: str, returned_count: int) -> dict[str, object]:
+    """Reuse the scoped count in the receipt fingerprint without another graph read."""
+    # A workspace key itself can contain colons.
+    version_fields = version.rsplit(":", 2)
+    total = None
+    if len(version_fields) == 3 and version_fields[0] == selection:
+        count = version_fields[1]
+        if count.isdecimal():
+            total = int(count)
+    if total is not None and total < returned_count:
+        # The set can change between fetching the rows and computing the receipt.
+        total = None
+    return {
+        "flagged_count": returned_count,
+        "flagged_total": total,
+        "truncated": total > returned_count if total is not None else None,
+    }
 
 
 def _bd(breakdown: object | None, key: str) -> float:
@@ -541,6 +615,27 @@ def _episode_status_guidance(*, state: str | None, timed_out: bool) -> str:
     )
 
 
+#: What changes a PENDING source-search status, by reason (#409). The enrichment wait tracks
+#: graph work only; none of these is fixed by waiting on it.
+_SOURCE_SEARCH_GUIDANCE = {
+    "missing": (
+        "No source embedding yet. The embedding repair job retries it within minutes; check "
+        "this same receipt again later."
+    ),
+    "missing_in_flight": (
+        "No source embedding yet; the ingest step embeds it before this memory finishes."
+    ),
+    "size_mismatch": (
+        "The stored source embedding has a different size than the current embedder, so source "
+        "search cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+    "model_mismatch": (
+        "The stored source embedding was made by a different embedding model, so source search "
+        "cannot use it. Re-embed with scripts/backfill_episode_embeddings.py."
+    ),
+}
+
+
 def _format_episode_status(
     *,
     episode_uuid: str,
@@ -571,6 +666,7 @@ def _format_episode_status(
             f"enriched_episode_uuid: {row.get('resolved_episode_uuid') or '(pending)'}",
             f"timed_out: {timed_out}",
             f"updates: {len(history)}",
+            f"source_search_status: {row.get('source_search_status') or 'UNKNOWN'}",
         ]
     )
     lines.append(
@@ -578,6 +674,10 @@ def _format_episode_status(
             state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
         )
     )
+    if row.get("source_search_status") == "PENDING":
+        reason = str(row.get("source_search_reason") or "missing")
+        lines.append(f"source_search_reason: {reason}")
+        lines.append(f"source_search_guidance: {_SOURCE_SEARCH_GUIDANCE.get(reason, _SOURCE_SEARCH_GUIDANCE['missing'])}")
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):
@@ -618,13 +718,13 @@ _stuck_count_cache: tuple[float, int] | None = None
 async def _standing_unrecallable_count(backend: object) -> int:
     """Return how many episodes are currently FAILED, hence holding content with no entities.
 
-    Recall searches `:Entity`, so a FAILED episode's text is in the graph but unreachable --
-    and `add_memory` has already told its caller the write succeeded. Surfacing the count in
+    A FAILED episode's text is found only by the source-memory lane (#662): it has no entities
+    or facts -- and `add_memory` has already told its caller the write succeeded. Surfacing the count in
     the write's own response is the only signal that reaches EVERY client (Claude, Codex,
     opencode, Qwen); a host hook would only cover whichever harness installs it.
 
     Counts all FAILED, not just the never-retried ones: from the caller's side "waiting for a
-    retry" and "parked forever" are the same state -- not recallable right now. The
+    retry" and "parked forever" are the same state -- no entities or facts right now. The
     terminal/manual_review split is an operator concern and lives in the queue-health warning.
 
     Best-effort by construction: a failure to count must never fail the write.
@@ -738,6 +838,31 @@ def _operator_warning_line(entry: Any) -> str | None:
             f"WARNING: {summary}. Enrichment cannot progress until provider "
             "credits are added; stop waiting on queued episodes."
         )
+    elif kind == "conflicts":
+        try:
+            confirmed = max(0, int(entry.get("unresolved_groups") or 0))
+            stale = max(0, int(entry.get("stale_pending_groups") or 0))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if confirmed <= 0 and stale <= 0:
+            return None
+        # A group can hold both a confirmed member and a stuck one, so the two counts are
+        # worded per group and not summed.
+        parts = []
+        if confirmed:
+            parts.append(
+                f"{confirmed} conflict group{'' if confirmed == 1 else 's'} "
+                f"{'has' if confirmed == 1 else 'have'} a confirmed contradiction nobody has "
+                "decided (see review_inbox or list_conflicts)"
+            )
+        if stale:
+            parts.append(
+                f"{stale} conflict group{'' if stale == 1 else 's'} "
+                f"{'has' if stale == 1 else 'have'} a possible contradiction waiting over 24h "
+                "for LLM review (run_llm_conflict_review retries it)"
+            )
+        text = f"WARNING: {'; '.join(parts)}. Recall marks or withholds these memories until then."
+
     elif kind != "failed_episodes":
         # A kind from a newer serve: its own summary.
         return f"WARNING: {summary}." if summary else None
@@ -750,8 +875,8 @@ def _operator_warning_line(entry: Any) -> str | None:
             return None
         text = (
             f"WARNING: {unrecallable} earlier "
-            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
-            f"-- the text is stored but has no entities, so recall cannot return it. "
+            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED -- the text is "
+            f"stored and source-memory recall can return it, but it has no entities or facts. "
             f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
         )
     # No "how to silence this" text: these lines reach models at every tier, and silencing a
@@ -824,7 +949,7 @@ async def _queue_summary(backend: object) -> str:
         entries = (
             await _legacy_operator_warnings(backend)
             if _benchmark_mode()
-            else await _unacked_operator_warnings(backend)
+            else _caller_visible_warnings(await _unacked_operator_warnings(backend))
         )
         lines = [line for line in map(_operator_warning_line, entries) if line]
     except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed

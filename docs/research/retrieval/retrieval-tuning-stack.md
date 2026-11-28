@@ -188,6 +188,11 @@ shift alpha toward vector retrieval.
 
 ### CrossEncoderRerankOracle
 
+Status (2026-11-09): implemented in `services/rerank_oracle.py` as a batch oracle. Recall uses it
+through `MENHIR_RECALL_RANKING_STRATEGY`; the default `reranker_only` still orders by the logit alone
+(the combiner does not rank a reranked list), tracked as debt until `oracle_combined` wins the
+benchmark in `.agent` plan `menhir-rerank-as-oracle-plan-2026-11-09`.
+
 Definition:
 
 ```text

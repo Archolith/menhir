@@ -16,6 +16,8 @@ import threading
 import time
 from collections.abc import Callable
 
+from menhir.infrastructure.telemetry.helpers import _utc_now_iso
+
 logger = logging.getLogger(__name__)
 
 _QUEUE_MAX = 10_000
@@ -152,8 +154,10 @@ class OffLoopObservabilityWritesMixin:
 
     def record_lifecycle_action(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         parent = super().record_lifecycle_action  # type: ignore[misc]
-        if self._offloaded("lifecycle_action", lambda: parent(*args, **kwargs)):
-            return None
+        if on_event_loop_thread():
+            queued_kwargs = {**kwargs, "recorded_at": kwargs.get("recorded_at") or _utc_now_iso()}
+            if TELEMETRY_WRITER.submit("lifecycle_action", lambda: parent(*args, **queued_kwargs)):
+                return None
         return parent(*args, **kwargs)
 
     def record_llm_usage_event(self, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -164,8 +168,10 @@ class OffLoopObservabilityWritesMixin:
 
     def record_recall_query(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         parent = super().record_recall_query  # type: ignore[misc]
-        if self._offloaded("recall_query", lambda: parent(*args, **kwargs)):
-            return None
+        if on_event_loop_thread():
+            queued_kwargs = {**kwargs, "created_at": kwargs.get("created_at") or _utc_now_iso()}
+            if TELEMETRY_WRITER.submit("recall_query", lambda: parent(*args, **queued_kwargs)):
+                return None
         return parent(*args, **kwargs)
 
 

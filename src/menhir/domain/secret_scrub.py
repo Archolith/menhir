@@ -23,8 +23,6 @@ _PLUGINS: tuple[str, ...] = (
     "BasicAuthDetector",
     "CloudantDetector",
     "DiscordBotTokenDetector",
-    "GitHubTokenDetector",
-    "GitLabTokenDetector",
     "IbmCloudIamDetector",
     "IbmCosHmacDetector",
     "JwtTokenDetector",
@@ -48,10 +46,18 @@ _CONFIG: dict[str, list[object]] = {
     "filters_used": [],
 }
 
-# detect-secrets' GitHubTokenDetector knows only the ghp_/gho_/ghu_/ghs_/ghr_ formats; fine-grained
-# personal access tokens (github_pat_<22>_<59>) need their own pattern.
+# GitHub and GitLab tokens are matched here, not by detect-secrets: its GitHubTokenDetector and
+# GitLabTokenDetector capture only the prefix (`ghp`, `glpat`), so redacting their hit left the
+# token body in place (GHSA-ppqh-gffg-6j74), and it knows no fine-grained `github_pat_` tokens.
+# Each pattern accepts every token those plugins accept, and longer ones; the hit is the full match.
 _GITHUB_TOKEN_KIND = "GitHub Token"
-_GITHUB_PAT = re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}")
+_GITLAB_TOKEN_KIND = "GitLab Token"
+_FULL_TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (_GITHUB_TOKEN_KIND, re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}")),
+    (_GITHUB_TOKEN_KIND, re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}")),
+    (_GITLAB_TOKEN_KIND, re.compile(r"(?:glpat|gldt|glft|glsoat|glrt)-[A-Za-z0-9_\-]{20,}")),
+    (_GITLAB_TOKEN_KIND, re.compile(r"glcbt-(?:[0-9a-fA-F]{2}_)?[A-Za-z0-9_\-]{20,}")),
+)
 
 
 @dataclass(frozen=True)
@@ -67,7 +73,11 @@ def detect_secrets(text: str) -> list[SecretHit]:
     with transient_settings(_CONFIG):
         for line in text.splitlines():
             found_pairs = [(found.type, found.secret_value) for found in scan_line(line)]
-            found_pairs += [(_GITHUB_TOKEN_KIND, m.group(0)) for m in _GITHUB_PAT.finditer(line)]
+            found_pairs += [
+                (kind, m.group(0))
+                for kind, pattern in _FULL_TOKEN_PATTERNS
+                for m in pattern.finditer(line)
+            ]
             for kind, value in found_pairs:
                 if not value:
                     continue
@@ -140,6 +150,16 @@ def prepare_memory_text(raw: str, *, policy: str | None = None) -> ScrubbedText:
     if hits and chosen == "refuse":
         raise SecretRefused(kinds)
     return ScrubbedText(text, kinds, _MINT)
+
+
+#: Episode content is truncated before embedding so a pathological payload cannot blow the
+#: embedder's window; 8,000 chars is far beyond any real turn.
+EMBED_MAX_CHARS = 8000
+
+
+def embed_input_text(text: str) -> str:
+    """The text an episode embedder receives: redacted first, then truncated."""
+    return prepare_memory_text(text, policy=non_refusing_policy())[:EMBED_MAX_CHARS]
 
 
 def ensure_scrubbed(raw: str | None, *, policy: str | None = None) -> ScrubbedText | None:

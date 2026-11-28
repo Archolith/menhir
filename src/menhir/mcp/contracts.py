@@ -258,7 +258,7 @@ def _try_log_query_auth_usage(tool_name: str) -> None:
         record_mcp_event(
             kind="background",
             operation="query_auth_usage",
-            payload={"tool": tool_name},
+            payload={"tool": tool_name, "operation": tool_name},
             success=True,
         )
     except Exception:
@@ -361,6 +361,38 @@ def assert_tool_scopes_declared(tool_classes: "list[type] | tuple[type, ...]") -
         raise RuntimeError("MCP tool scope declarations are incomplete. " + " | ".join(problems))
 
 
+def tool_allowed_for_request(tool: str) -> bool:
+    """Whether the bound client policy (or, unbound, the env allowlist) permits ``tool``.
+
+    A bound policy is authoritative, and an empty one denies everything. With no policy the
+    MENHIR_CLIENT_TOOLS allowlist applies, and an empty one is unrestricted.
+    """
+    policy_allowlist = get_request_tool_allowlist()
+    if policy_allowlist is not None:
+        return tool in policy_allowlist
+    allowlist = get_client_tool_allowlist()
+    return (not allowlist) or tool in allowlist
+
+
+def resource_listed_for_request(resource_type: Any) -> bool:
+    """Whether a resource class should be advertised to the current caller.
+
+    Mirrors the read gates in ``BaseJsonResource.execute`` so a listing never shows what a
+    read would refuse. An empty tier applies no tier filter, matching ``tools/list``.
+    """
+    if request_uses_query_auth():
+        return False  # every resource read refuses query auth
+    governing = getattr(resource_type, "governing_tool", "")
+    if not governing or not tool_allowed_for_request(governing):
+        return False
+    tier = get_request_tier()
+    if tier and not _tier_allows(tier, getattr(resource_type, "required_tier", "readonly")):
+        return False
+    if getattr(resource_type, "refuse_when_pinned", False) and get_pinned_namespace():
+        return False
+    return True
+
+
 class BaseJsonResource(ABC):
     """Contract-enforcing base for JSON MCP resources."""
 
@@ -445,20 +477,16 @@ class BaseJsonResource(ABC):
             governing = getattr(self, "governing_tool", "")
             if not governing:
                 raise PermissionError(f"`{self.uri}` declares no governing tool; refusing")
-            policy_allowlist = get_request_tool_allowlist()
-            if policy_allowlist is not None:
-                if governing not in policy_allowlist:
+            if not tool_allowed_for_request(governing):
+                if get_request_tool_allowlist() is not None:
                     raise PermissionError(
                         f"Client is not permitted to read `{self.uri}` (needs `{governing}`; "
                         "restricted by the server's client policy)"
                     )
-            else:
-                allowlist = get_client_tool_allowlist()
-                if allowlist and governing not in allowlist:
-                    raise PermissionError(
-                        f"Client is not permitted to read `{self.uri}` (needs `{governing}`; "
-                        "restricted by MENHIR_CLIENT_TOOLS allowlist)"
-                    )
+                raise PermissionError(
+                    f"Client is not permitted to read `{self.uri}` (needs `{governing}`; "
+                    "restricted by MENHIR_CLIENT_TOOLS allowlist)"
+                )
             # A system view with no per-namespace filter is refused to a pinned client
             # before any backend read; the governing tool serves it scoped.
             if self.refuse_when_pinned and self.pinned_namespace():

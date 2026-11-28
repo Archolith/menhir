@@ -4,7 +4,10 @@ Plain cosine top-k fills the section with several turns of the best-matching ses
 the same text, while another session that holds part of the answer gets no slot. With spread on, the
 lane fetches a larger cosine-ordered pool and this picks from it:
 
-1. drop rows whose content repeats an earlier (higher-cosine) row's content exactly;
+1. drop rows whose content repeats an earlier (higher-cosine) row's content after normalization
+   (whitespace runs collapse to one space and Unicode case folding applies, so ``Use /srv/API``
+   and ``Use /srv/api`` count as the same content and only the first is kept, even where case
+   matters, as in a path);
 2. take each session's best row, in cosine order;
 3. fill the remaining slots from the rest, in cosine order.
 
@@ -39,6 +42,7 @@ def session_key(row: Mapping[str, Any]) -> str:
 def spread_by_session(rows: Sequence[Mapping[str, Any]], limit: int) -> list[Mapping[str, Any]]:
     """Pick up to ``limit`` rows from cosine-ordered ``rows`` (best first); see the module doc.
 
+    Repeats are judged on normalized content (collapsed whitespace, case-folded), not byte equality.
     Rows with empty content are never treated as repeats of each other.
     """
     if limit <= 0:

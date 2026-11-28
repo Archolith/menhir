@@ -165,6 +165,20 @@ def _isolate_client_restrictions(monkeypatch):
         monkeypatch.setenv(var, "")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _auto_mutation_modes_on():
+    """Existing tests exercise the merge and delete mechanisms, so run them with both switches on.
+
+    The shipped defaults are merge=propose and delete=off. A test of the gate itself overrides
+    these with `monkeypatch.setenv`/`delenv` inside the test. Session-scoped with its own patcher
+    because a test that calls `monkeypatch.undo()` would undo a function-scoped one.
+    """
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setenv("MENHIR_AUTO_MERGE_MODE", "on")
+        patcher.setenv("MENHIR_AUTO_DELETE_MODE", "on")
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_operator_warning_cache():
     """The FAILED-count snapshot for operator warnings is process-wide; no test may inherit it."""
@@ -598,6 +612,7 @@ class StubMemoryGraphAdapter:
         *,
         limit: int = 10,
         namespace: str | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, object]]:
         self.episode_embedding_calls.append(
             {"query_vector": query_vector, "limit": limit, "namespace": namespace}
@@ -666,6 +681,20 @@ class StubMemoryGraphAdapter:
             elif node_uuid in metadata_by_uuid:
                 freshness_map[node_uuid] = metadata_by_uuid[node_uuid]
         return freshness_map
+
+    def fetch_rehydration_state(self, node_uuid: str) -> dict[str, object]:
+        for row in self.candidate_metadata:
+            if str(row.get("uuid")) == node_uuid:
+                return {
+                    "content": row.get("content"),
+                    "original_content": row.get("original_content"),
+                    "compressed_summary_sha256": row.get("compressed_summary_sha256"),
+                    "rehydration_count": row.get("rehydration_count", 0),
+                    "absorbed_count": row.get("absorbed_count", 0),
+                    "fence_key": row.get("fence_key"),
+                    "fence_epoch": row.get("fence_epoch"),
+                }
+        return {"content": None, "original_content": None}
 
     def complete_rehydration(
         self, node_uuid: str, updated_content: str | None = None, **_fence: object
@@ -1326,6 +1355,7 @@ class StubMemoryGraphAdapter:
     sharpness_updates: dict[str, float] = field(default_factory=dict)
     conflict_calls: list[dict[str, object]] = field(default_factory=list)
     conflict_groups: dict[str, dict[str, object]] = field(default_factory=dict)
+    removed_conflict_members: list[tuple[str, str, str]] = field(default_factory=list)
     resolve_conflict_calls: list[dict[str, object]] = field(default_factory=list)
     merge_entity_calls: list[dict[str, object]] = field(default_factory=list)
     related_edge_calls: list[dict[str, object]] = field(default_factory=list)
@@ -1350,15 +1380,15 @@ class StubMemoryGraphAdapter:
     def count_persistent_edges(self, node_uuid: str) -> int:
         return self.persistent_edge_counts.get(node_uuid, 0)
 
-    def promote_to_persistent(self, node_uuids: list[str]) -> int:
+    def promote_to_persistent(self, node_uuids: list[str]) -> list[str]:
         self.promoted_nodes.extend(node_uuids)
-        return len(node_uuids)
+        return list(node_uuids)
 
     def delete_session_nodes(self, node_uuids: list[str]) -> int:
         self.deleted_session_nodes.extend(node_uuids)
         return len(node_uuids)
 
-    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> int:
+    def set_demote_ttl(self, node_uuids: list[str], ttl_days: int) -> list[str]:
         """Stub for F5 demote-with-TTL: record call and return demoted count."""
         self.set_demote_ttl_calls.append({
             "node_uuids": node_uuids,
@@ -1367,7 +1397,7 @@ class StubMemoryGraphAdapter:
         # Track newly demoted (for test assertions)
         newly_demoted = [u for u in node_uuids if u not in self.demoted_uuids]
         self.demoted_uuids.extend(newly_demoted)
-        return len(newly_demoted)
+        return newly_demoted
 
     def fetch_ttl_expired_session_uuids(self, session_id: str | None = None) -> list[dict[str, object]]:
         """Stub for F5: return programmed expired uuids."""
@@ -1417,6 +1447,7 @@ class StubMemoryGraphAdapter:
         *,
         require_scope: str | None = None,
         protect_retention: bool = False,
+        require_expired_ttl: bool = False,
     ) -> list[str]:
         """Return the uuids ACTUALLY deleted, mirroring the real scope filter.
 
@@ -1539,6 +1570,57 @@ class StubMemoryGraphAdapter:
             member["status"] = status
         return len(group["members"])
 
+    def set_conflict_member_status(
+        self, group_id: str, node_uuid: str, *, from_status: str, to_status: str,
+        namespace: str | None = None,
+    ) -> bool:
+        group = self.conflict_groups.get(group_id)
+        for member in (group or {}).get("members", []):
+            if str(member.get("uuid")) == node_uuid and member.get("status") == from_status:
+                member["status"] = to_status
+                # Mirror the members in the group-level status the older stubs read.
+                if group is not None and {m.get("status") for m in group["members"]} == {to_status}:
+                    group["status"] = to_status
+                return True
+        return False
+
+    def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+        group = self.conflict_groups.get(group_id)
+        members = (group or {}).get("members", [])
+        if not members or any(m.get("status") != "unresolved" for m in members):
+            return []
+        uuids = [str(m.get("uuid")) for m in members]
+        group["status"] = "auto-resolved"
+        members.clear()
+        self.resolve_conflict_calls.append({
+            "group_id": group_id, "action": "keep_both", "resolution_status": "auto-resolved",
+        })
+        return uuids
+
+    def remove_conflict_member(
+        self, group_id: str, node_uuid: str, *, from_status: str,
+        resolution_status: str = "false_positive", namespace: str | None = None,
+        reviewed_uuids: list[str] | None = None,
+    ) -> dict[str, object]:
+        group = self.conflict_groups.get(group_id)
+        members = (group or {}).get("members", [])
+        target = next(
+            (m for m in members if str(m.get("uuid")) == node_uuid and m.get("status") == from_status),
+            None,
+        )
+        if target is None:
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        others = {str(m.get("uuid")) for m in members if m is not target}
+        if reviewed_uuids is not None and not others <= set(reviewed_uuids):
+            return {"removed": False, "dissolved": False, "remaining_uuids": []}
+        members.remove(target)
+        self.removed_conflict_members.append((group_id, node_uuid, resolution_status))
+        remaining = [str(m.get("uuid")) for m in members]
+        dissolved = len(members) < 2
+        if dissolved:
+            members.clear()
+        return {"removed": True, "dissolved": dissolved, "remaining_uuids": remaining}
+
     def list_conflict_groups(
         self,
         *,
@@ -1547,10 +1629,18 @@ class StubMemoryGraphAdapter:
         namespace: str | None = None,
         created_before: object | None = None,
         oldest_first: bool = False,
+        include_all_members: bool = False,
     ) -> list[dict[str, object]]:
         results = []
         for group in self.conflict_groups.values():
-            if status is not None and group.get("status") != status:
+            if include_all_members:
+                if not group.get("members"):
+                    continue
+                if status is not None and not any(
+                    m.get("status") == status for m in group.get("members", [])
+                ):
+                    continue
+            elif status is not None and group.get("status") != status:
                 continue
             results.append({
                 "group_id": group["group_id"],

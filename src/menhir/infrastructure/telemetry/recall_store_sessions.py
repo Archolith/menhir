@@ -17,10 +17,13 @@ class TelemetryClientSessionsMixin:
     ) -> None:
         """Upsert a session_registry row — sets last_accessed to now.
 
-        Keyed by ``session_id`` so each conversation/window tracks independently.
+        Keyed by ``session_id`` so each conversation/window tracks independently. ``None`` counts as
+        blank, and a blank client id/name never overwrites a stored non-empty one.
         """
         if not session_id:
             return
+        client_id = client_id or ""
+        client_name = client_name or ""
         now = _utc_now_iso()
         self._ensure_ready()
         try:
@@ -31,8 +34,10 @@ class TelemetryClientSessionsMixin:
                         (session_id, client_id, client_name, first_accessed, last_accessed)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(session_id) DO UPDATE SET
-                        client_id     = excluded.client_id,
-                        client_name   = excluded.client_name,
+                        client_id     = CASE WHEN excluded.client_id = ''
+                                        THEN session_registry.client_id ELSE excluded.client_id END,
+                        client_name   = CASE WHEN excluded.client_name = ''
+                                        THEN session_registry.client_name ELSE excluded.client_name END,
                         last_accessed = excluded.last_accessed
                     """,
                     (session_id, client_id, client_name, now, now),

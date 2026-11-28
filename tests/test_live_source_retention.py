@@ -173,29 +173,57 @@ async def test_finalize_from_link_does_not_publish_ready_without_retention_links
 
 @pytest.mark.asyncio
 async def test_scheduler_continues_after_incomplete_retention_provenance() -> None:
+    """#906: the scheduler hands a completed link to the worker and writes nothing itself, so a
+    missing retention source can no longer stall it; finalize-from-link raises on it instead
+    (test_finalize_from_link_* above)."""
     from menhir.services.scheduler_tasks import retry_process_candidate
+
+    calls: list[str] = []
 
     class MissingLinkAdapter:
         def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object]:
             return {"resolved_episode_uuid": "resolved", "entity_uuids": ["entity"], "edge_uuids": []}
 
         def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:
+            calls.append("stamp")
             return SimpleNamespace(nodes_touched=1, edges_touched=0)
 
         def record_retention_sources(self, **_: object) -> int:
+            calls.append("retention")
             raise ValueError("Retention provenance missing for 1 extracted entities")
 
         def mark_episode_ready(self, **_: object) -> bool:
+            calls.append("ready")
             raise AssertionError("READY must not publish without retention provenance")
 
+    class Ingest:
+        def __init__(self) -> None:
+            self.requeued: list[str] = []
+
+        def get_queue_depth(self) -> int:
+            return 0
+
+        def get_context_window_retry_attempts(self) -> int:
+            return 6
+
+        def get_llm_session_window_seconds(self) -> int:
+            return 900
+
+        async def requeue_failed_episode(self, episode_uuid: str) -> bool:
+            self.requeued.append(episode_uuid)
+            return True
+
+    ingest = Ingest()
     result = await retry_process_candidate(
         MissingLinkAdapter(),
-        SimpleNamespace(),
+        ingest,
         {"uuid": "source", "name": "source", "namespace": "default"},
         max_attempts=3,
         now=datetime.now(timezone.utc),
     )
-    assert result == "waiting"
+    assert result == "requeued"
+    assert ingest.requeued == ["source"]
+    assert calls == []
 
 
 def _signals(uuid: str, *, source_protected: bool = False) -> me.NodeSignals:
@@ -227,16 +255,16 @@ def test_only_harmful_lifecycle_paths_inherit_source_retention() -> None:
         [
             [{"updated": 1}],
             [{"updated": 1}],
-            [{"promoted": 1}],
-            [{"newly_demoted_count": 1}],
+            [{"promoted_uuids": ["entity-1"]}],
+            [{"newly_demoted_uuids": ["entity-1"]}],
         ]
     )
     repo = ConsolidationRepository(neo4j)
 
-    assert repo.compress_node("entity-1", "summary") is True
-    assert repo.complete_rehydration("entity-1", "content") is True
-    assert repo.promote_to_persistent(["entity-1"]) == 1
-    assert repo.set_demote_ttl(["entity-1"], 7) == 1
+    assert repo.compress_node("entity-1", "summary", read_content="body", min_days_since_accessed=7.0) is True
+    assert repo.complete_rehydration("entity-1", "content", read_summary="s", read_base=None) is True
+    assert repo.promote_to_persistent(["entity-1"]) == ["entity-1"]
+    assert repo.set_demote_ttl(["entity-1"], 7) == ["entity-1"]
 
     compress_query, rehydrate_query, promote_query, ttl_query = [
         q for q, _ in neo4j.calls

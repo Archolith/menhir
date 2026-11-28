@@ -95,7 +95,7 @@ def test_create_candidate_writes_candidate_scope_unflagged_and_idempotency_key()
     call = neo4j.calls[0]
     query, params = call["query"], call["params"]
     # Idempotency key is (source, cluster_id) via MERGE.
-    assert "MERGE (n:Entity {source: $source, candidate_cluster_id: $cluster_id})" in query
+    assert "MERGE (n:Entity {source: $source, candidate_cluster_id: $cluster_id, namespace: $stamped_namespace})" in query
     assert params["source"] == "painscan-friction"
     assert params["cluster_id"] == "P017"
     # Review-tier invariants: CANDIDATE scope, never user-flagged (flagged would hit

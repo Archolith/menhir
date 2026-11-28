@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from menhir.infrastructure.episode_repository import PolicyStampResult
-
 if TYPE_CHECKING:
     from menhir.infrastructure.project_scanner import ProjectScanResult
     from menhir.services.lifecycle_models import ConsolidationResult, DecayResult
+
+#: Reserved result key (#1005): a scheduled job that returns ``{JOB_FAILED_KEY: True, ...}`` is
+#: recorded as unsuccessful. Opt-in; a job that never sets it is recorded exactly as before.
+JOB_FAILED_KEY = "job_failed"
 
 
 class SchedulerIngestService(Protocol):
@@ -41,46 +43,13 @@ class SchedulerGraphAdapter(Protocol):
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
         ...
 
+    def park_failed_episode_retry(self, episode_uuid: str, *, failed_at: str, reason: str) -> bool:
+        ...
+
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, object]]:
         ...
 
     def linked_twin_artifact(self, episode_uuid: str) -> dict[str, object] | None:
-        ...
-
-    def stamp_ingest_metadata(
-        self,
-        *,
-        node_uuids: list[str],
-        edge_uuids: list[str],
-        session_id: str,
-        user_id: str,
-        source: str,
-        source_confidence: float,
-        namespace: str = "default",
-    ) -> PolicyStampResult:
-        ...
-
-    def record_retention_sources(
-        self,
-        *,
-        source_episode_uuid: str,
-        entity_uuids: list[str],
-        namespace: str | None = None,
-    ) -> int:
-        ...
-
-    def mark_episode_ready(
-        self,
-        episode_uuid: str,
-        *,
-        worker_id: str | None = None,
-        required_state: str | None = None,
-        resolved_episode_uuid: str,
-        nodes_touched: int,
-        edges_touched: int,
-        claim_started_at: Any = None,
-        policy_empty_reason: str | None = None,
-    ) -> bool:
         ...
 
     def list_structure_projects(self) -> list[dict[str, str]]:
@@ -114,7 +83,14 @@ class SchedulerGraphAdapter(Protocol):
         after_uuid: str | None = None,
         model: str | None = None,
         ready_only: bool = False,
+        settled_only: bool = False,
+        max_failures: int | None = None,
     ) -> list[dict[str, Any]]:
+        ...
+
+    def record_source_embedding_failures(
+        self, episode_uuids: list[str], limit: int | None = None,
+    ) -> dict[str, int]:
         ...
 
     def set_episode_content_embedding(
@@ -153,6 +129,9 @@ class LifecycleServiceProtocol(Protocol):
         ...
 
     async def confirm_pending_conflicts(self, *, limit: int, verbose: bool = False, status: str = "pending_llm_review") -> dict[str, Any]:
+        ...
+
+    async def record_conflict_pair(self, uuid: str, other_uuid: str) -> tuple[str, int] | None:
         ...
 
 

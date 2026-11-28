@@ -54,6 +54,27 @@ def _deployment_default_10(monkeypatch) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("params", [{}, {"limit": 5}, {"limit": 20}])
+async def test_registered_recall_passes_explicit_limit_and_returns_note(params):
+    tool, backend = _tool([])
+    note = "Reranking capped the default result limit at 3."
+    if not params:
+        backend.recall.return_value["note"] = note
+
+    payload = json.loads(await tool.execute(query="q", **params))
+
+    kwargs = backend.recall.await_args.kwargs
+    assert kwargs["limit"] == params.get("limit", 5)
+    if params:
+        assert kwargs["limit_is_explicit"] is True
+        assert "note" not in payload
+    else:
+        assert "limit_is_explicit" not in kwargs
+        assert payload["note"] == note
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @pytest.mark.parametrize("compact", [False, None])
 async def test_non_compact_output_is_unchanged(monkeypatch, compact) -> None:
     monkeypatch.delenv("MENHIR_RECALL_COMPACT", raising=False)

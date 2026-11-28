@@ -81,6 +81,7 @@ class RecallHistoryTool(BaseJsonTool):
                     "content": m.get("content"),
                     "uuid": m.get("uuid"),
                     "source": m.get("source"),
+                    **({"retired": True} if m.get("retired") else {}),
                 }
                 for m in result.get("memories", []) or []
             ],

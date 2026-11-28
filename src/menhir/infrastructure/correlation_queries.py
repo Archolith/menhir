@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from menhir.domain.merge_eligibility import MergeEligibility
 
 from menhir.domain import merge_delta as md
+from menhir.domain.recall_visibility import memory_retired_cypher
 from menhir.domain.retention import same_tenant_cypher, source_retention_protected_cypher
 from menhir.infrastructure.cypher import non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
@@ -93,39 +94,59 @@ class CorrelationRepository:
         similarity: float,
         source: str = "correlation-detected",
     ) -> bool:
-        """Create a RELATES_TO edge between two entities if none exists.
+        """Create a RELATES_TO edge between two entities if none exists, in either direction.
 
-        Idempotent — MERGE avoids duplicate edges.  Returns True if an edge
-        was created (first time); False if it already existed.
+        Only correlation edges (``type = 'correlation'``, the marker every edge this method has
+        ever created carries) count. Graphiti fact edges are RELATES_TO too; one between the pair
+        is neither an existing correlation edge nor ever modified here.
+
+        Returns True only when this call CREATED the edge (#871). An existing correlation edge
+        between the pair, whichever way it points, is updated in place (similarity and weight only
+        rise, last_traversed is touched) and returns False, so a re-check never counts a new edge.
+        False also when either entity is missing or the two are in different tenants, which this
+        refuses: the candidate search is scoped by group_id, and an entity whose namespace
+        disagrees with its group can still pair across tenants.
+
+        A new edge always points from the lower uuid to the higher, so checking the pair the
+        other way round matches it instead of creating a reverse edge. Both nodes are write-locked
+        (lower uuid first, so two callers cannot deadlock) before the existence check, which makes
+        check-then-create atomic: a concurrent call on the same pair waits, then sees the edge.
         """
+        low_uuid, high_uuid = sorted((str(source_uuid), str(target_uuid)))
         rows = self._neo4j.execute(
             """
-            MATCH (a:Entity {uuid: $source_uuid})
-            MATCH (b:Entity {uuid: $target_uuid})
-            MERGE (a)-[r:RELATES_TO]->(b)
+            MATCH (a:Entity {uuid: $low_uuid})
+            MATCH (b:Entity {uuid: $high_uuid})
+            WHERE __SAME_TENANT__
+            SET a._correlation_lock = true, b._correlation_lock = true
+            REMOVE a._correlation_lock, b._correlation_lock
+            WITH a, b, [(a)-[e:RELATES_TO]-(b) WHERE e.type = 'correlation' | e] AS existing
+            FOREACH (e IN existing |
+                SET e.similarity = CASE
+                        WHEN $similarity > e.similarity THEN $similarity
+                        ELSE e.similarity
+                    END,
+                    e.weight = CASE
+                        WHEN $similarity > e.weight THEN $similarity
+                        ELSE e.weight
+                    END,
+                    e.last_traversed = datetime()
+            )
+            WITH a, b, existing
+            WHERE size(existing) = 0
+            MERGE (a)-[r:RELATES_TO {type: 'correlation'}]->(b)
             ON CREATE SET
-                r.type = 'correlation',
                 r.similarity = $similarity,
                 r.source = $source,
                 r.scope = 'PERSISTENT',
                 r.weight = $similarity,
                 r.created_at = datetime(),
                 r.last_traversed = datetime()
-            ON MATCH SET
-                r.similarity = CASE
-                    WHEN $similarity > r.similarity THEN $similarity
-                    ELSE r.similarity
-                END,
-                r.weight = CASE
-                    WHEN $similarity > r.weight THEN $similarity
-                    ELSE r.weight
-                END,
-                r.last_traversed = datetime()
             RETURN r.type AS edge_type
-            """,
+            """.replace("__SAME_TENANT__", same_tenant_cypher("a", "b")),
             params={
-                "source_uuid": source_uuid,
-                "target_uuid": target_uuid,
+                "low_uuid": low_uuid,
+                "high_uuid": high_uuid,
                 "similarity": similarity,
                 "source": source,
             },
@@ -158,8 +179,25 @@ class CorrelationRepository:
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'inferred_self' OR "
         "n.self_tier IS NOT NULL OR "
-        r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
-        r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
+        "(n.name =~ $ineligible_path_regex)"
+    )
+    #: Regex for the path-name clause, passed as the ``$ineligible_path_regex`` query parameter.
+    #: It must NOT be embedded as a Cypher string literal: Cypher unescapes ``\\`` and ``\b``
+    #: (backspace) before the regex engine sees them, which broke this clause (#888).
+    #: Path-shaped means: a leading root (``/``, ``./``, ``../``, ``~/``, a drive letter or UNC
+    #: prefix); two or more separators; a separator plus a file extension; or a file extension on
+    #: a word that starts lowercase (``main.py:42``). A single slash with no extension (``CI/CD``,
+    #: ``TCP/IP``) and a capitalised name with an extension (``Node.js``) stay mergeable.
+    _PATH_EXTENSIONS = (
+        "py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|cfg|ini|gradle|html|css|png|jpg|svg"
+    )
+    _INELIGIBLE_PATH_REGEX = (
+        r"(?is)(?:"
+        r"(?:[a-z]:[\\/]|\\\\|\.{0,2}/|~/).*"
+        r"|.*[\\/].*[\\/].*"
+        rf"|.*[\\/].*\.(?:{_PATH_EXTENSIONS})\b.*"
+        rf"|(?:.*[\s(\[,;:\"'])?(?-i:[a-z0-9_])[\w.-]*\.(?:{_PATH_EXTENSIONS})\b.*"
+        r")"
     )
 
     def evaluate_merge_eligibility(self, survivor_uuid: str, absorbed_uuid: str) -> "MergeEligibility":
@@ -180,10 +218,17 @@ class CorrelationRepository:
                    n.freshness AS freshness,
                    n.scope AS scope,
                    coalesce(n.user_flagged, false) AS user_flagged,
+                   {memory_retired_cypher("n")} AS memory_retired,
                    {source_retention_protected_cypher("n")} AS source_retention_protected,
-                   n.conflict_status AS conflict_status
+                   n.conflict_status AS conflict_status,
+                   n.restored_from_merge AS restored_from_merge,
+                   coalesce(n.merged_from, []) AS merged_from
             """,
-            params={"s": survivor_uuid, "a": absorbed_uuid},
+            params={
+                "s": survivor_uuid,
+                "a": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         by_uuid = {str(r["uuid"]): dict(r) for r in rows}
 
@@ -207,6 +252,12 @@ class CorrelationRepository:
                     str(r["conflict_status"]) if r.get("conflict_status") is not None else None
                 ),
                 source_retention_protected=bool(r.get("source_retention_protected", False)),
+                memory_retired=bool(r.get("memory_retired", False)),
+                restored_from_merge=(
+                    str(r["restored_from_merge"])
+                    if r.get("restored_from_merge") is not None else None
+                ),
+                merged_from=tuple(str(u) for u in (r.get("merged_from") or [])),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))
@@ -307,7 +358,10 @@ class CorrelationRepository:
         What it does:
           * recreate the absorbed node with its EXACT labels and typed properties;
           * recreate every incident relationship instance (both directions, with properties);
-          * restore the survivor's merge-owned property delta to its pre-merge values;
+          * restore the survivor's merge-owned property delta to its pre-merge values (content and
+            provenance only; the survivor's scope and TTL are left as they are, so retention only
+            ever rises across a merge/unmerge cycle);
+          * clear ``ttl_expires`` on the restored node (the snapshot value may be expired);
           * delete only the bridges this merge created (``bridged_from = absorbed``);
           * delete only the MENTIONS this merge rebound onto the survivor;
           * remove this absorption from the survivor's lineage SUBTRACTIVELY, so absorptions made by
@@ -327,7 +381,9 @@ class CorrelationRepository:
             SET a = $absorbed_properties,
                 a.restored_from_merge = $survivor,
                 a.restored_by_op = $operation_id,
-                a.restored_at = datetime()
+                a.restored_at = datetime(),
+                // The snapshot TTL may already be past; a restored node must not be sweepable.
+                a.ttl_expires = null
             WITH s, a
             CALL {
                 WITH a
@@ -533,6 +589,8 @@ class CorrelationRepository:
         1. Keep the richer summary/content (>20% longer = substantially more context).
         2. Union the source provenance (concatenate distinct values).
         3. Bump confidence (multiple independent observations = stronger signal).
+        3b. Survivor takes the higher live scope (SESSION < PERSISTENT) and its TTL is cleared, so a
+            merge never makes content easier to delete. Only SESSION/PERSISTENT pairs may merge.
         4. Bridge absorbed node's edges to the survivor.
         5. Part 3: Snapshot the absorbed node before deletion (audit trail for unmerge).
         6. Delete the absorbed node.
@@ -699,6 +757,11 @@ class CorrelationRepository:
             """
             MATCH (survivor:Entity {uuid: $survivor_uuid})
             MATCH (absorbed:Entity {uuid: $absorbed_uuid})
+            // Lock both nodes before reading them: promotion takes no journal lock, and a scope read
+            // before its commit would be written back over it.
+            SET survivor._merge_lock = true, absorbed._merge_lock = true
+            REMOVE survivor._merge_lock, absorbed._merge_lock
+            WITH survivor, absorbed
             // Defense in depth (plan Phase 3): repeat the MUTABLE material predicates inside the
             // mutation. The preflight above already gated the pair, but another writer could change
             // freshness/scope/flag/conflict/namespace in the window before this statement runs.
@@ -735,7 +798,13 @@ class CorrelationRepository:
                    AND all(u IN live_fact_uuids WHERE u IN $expected_fact_uuids)
                    AND all(u IN $expected_fact_uuids WHERE u IN live_fact_uuids))
             // Pick richer text — prefer the longer content when >20% difference
+            // Retention never drops through a merge: the survivor takes the higher LIVE scope of the
+            // pair (SESSION < PERSISTENT; the WHERE above admits only those two), computed here before
+            // either node changes. Same trim/upper normalization as the predicate; canonical value out.
             WITH survivor, absorbed, known_rel_ids,
+                toUpper(trim(survivor.scope)) = 'PERSISTENT'
+                    OR toUpper(trim(absorbed.scope)) = 'PERSISTENT' AS merged_persistent,
+                toUpper(trim(survivor.scope)) <> 'PERSISTENT' AS survivor_rises,
                 CASE
                     WHEN size(coalesce(absorbed.summary, absorbed.content, '')) >
                          size(coalesce(survivor.summary, survivor.content, '')) * 1.2
@@ -743,7 +812,14 @@ class CorrelationRepository:
                     ELSE survivor
                 END AS richer
             // Update survivor properties + append the Python-serialized audit entry
-            SET survivor.summary = coalesce(richer.summary, richer.content, survivor.summary),
+            SET survivor.scope = CASE WHEN merged_persistent THEN 'PERSISTENT' ELSE 'SESSION' END,
+                survivor.ttl_expires = null,
+                survivor.promoted_at = CASE
+                    WHEN merged_persistent AND survivor_rises
+                    THEN coalesce(survivor.promoted_at, datetime())
+                    ELSE survivor.promoted_at
+                END,
+                survivor.summary = coalesce(richer.summary, richer.content, survivor.summary),
                 survivor.content = CASE
                     WHEN size(coalesce(absorbed.content, '')) >
                          size(coalesce(survivor.content, '')) * 1.2
@@ -809,6 +885,9 @@ class CorrelationRepository:
             WHERE NOT type(r) = 'ANCHORED_TO'
             AND neighbor.structure_role IS NULL
             AND neighbor.uuid <> survivor.uuid
+            // A bridge must not join tenants: an absorbed node's existing cross-tenant edge
+            // would otherwise become a new one on the survivor.
+            AND __BRIDGE_SAME_TENANT__
             WITH survivor, absorbed, known_rel_ids, facts_moved,
                  collect(DISTINCT neighbor) AS neighbors
             FOREACH (n IN neighbors |
@@ -862,6 +941,8 @@ class CorrelationRepository:
             ).replace(
                 "__ABSORBED_RETENTION_TENANT__",
                 same_tenant_cypher("retention_source", "absorbed"),
+            ).replace(
+                "__BRIDGE_SAME_TENANT__", same_tenant_cypher("survivor", "neighbor"),
             ).replace("__MOVED_FACT__", _MOVED_FACT_WHERE),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
@@ -1057,16 +1138,19 @@ class CorrelationRepository:
         uuid_a: str,
         uuid_b: str,
     ) -> bool:
-        """Anchor-project veto: if both entities are anchored to different single projects, veto.
+        """Anchor-project veto: veto when both entities are anchored and their project sets differ.
 
-        Returns True if a veto applies (both anchored to different projects), False otherwise.
+        Identical anchor sets (single or multi) are not vetoed (#888); an unanchored side never vetoes.
         """
         rows = self._neo4j.execute(
             """
             MATCH (a:Entity {uuid: $a})-[:ANCHORED_TO]->(proj_a)
+            WITH collect(DISTINCT proj_a) AS projs_a
             MATCH (b:Entity {uuid: $b})-[:ANCHORED_TO]->(proj_b)
-            WHERE proj_a <> proj_b
-            RETURN count(*) > 0 AS veto_applies
+            WITH projs_a, collect(DISTINCT proj_b) AS projs_b
+            RETURN size(projs_a) > 0
+                   AND (any(p IN projs_a WHERE NOT p IN projs_b)
+                        OR any(p IN projs_b WHERE NOT p IN projs_a)) AS veto_applies
             """,
             params={"a": uuid_a, "b": uuid_b},
         )
@@ -1093,7 +1177,11 @@ class CorrelationRepository:
             WITH n, ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_node
             RETURN count(CASE WHEN ineligible_node THEN 1 END) > 0 AS ineligible
             """,
-            params={"a": survivor_uuid, "b": absorbed_uuid},
+            params={
+                "a": survivor_uuid,
+                "b": absorbed_uuid,
+                "ineligible_path_regex": self._INELIGIBLE_PATH_REGEX,
+            },
         )
         if rows:
             return bool(rows[0].get("ineligible", False))

@@ -1,9 +1,16 @@
 """Memory namespace (silo) primitive.
 
-A menhir *namespace* is a tenant/isolation boundary for memory. It maps 1:1 onto graphiti's
-native ``group_id`` graph partition, which is the load-bearing isolation boundary at the engine
-layer (verified: graphiti scopes entity resolution and search to a node's group_id). Menhir
-additionally stamps the namespace onto nodes as defense-in-depth.
+A menhir *namespace* organizes memory by project or purpose and scopes recall to it. It maps 1:1
+onto graphiti's native ``group_id`` graph partition (graphiti scopes entity resolution and search
+to a node's group_id). Menhir additionally stamps the namespace onto nodes.
+
+**Namespace is not tenancy.** Owner decision 2026-11-15: namespaces are organization and
+relevance, not privacy. A recall scoped to one namespace should not surface another namespace's
+content, because that content is off-topic, not because the caller may not see it. Tenancy, an
+access boundary carried by the verified principal, is a separate concept that Menhir does not
+implement yet; until it does, run one instance per trust domain. Helpers here and elsewhere that
+say "tenant" (``tenant_scope_cypher``, ``canonical_tenant_cypher``, ``core/tenancy.py``) predate
+that decision and mean namespace scope. Do not build an access-control rule on them.
 
 Mapping rules (see Phase 0 evidence in
 ``.agent/plans/menhir-memory-namespace-isolation-plan.md``):
@@ -136,6 +143,8 @@ def tenant_scope_params(namespace: str | None) -> dict[str, list[str] | None]:
 
 def tenant_scope_cypher(variable: str = "n", *, scheme: TenancyScheme = TenancyScheme.MEMORY) -> str:
     """One Cypher predicate for "this row belongs to the caller's silo" (CF-127).
+
+    "Tenant" in the name means namespace scope, not an access boundary (see the module docstring).
 
     CF-127 counted 107 hand-written tenancy predicates across 23 files in seven parameter
     spellings, with no shared helper -- while the OTHER cross-cutting Cypher concern

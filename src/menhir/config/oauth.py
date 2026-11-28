@@ -140,6 +140,8 @@ def validate_permission_scope_config(
         "oauth_write_scopes": tuple(write_scopes),
         "oauth_admin_scopes": tuple(admin_scopes),
     }
+    if len(scopes_supported) != len(set(scopes_supported)):
+        raise ValueError("oauth_scopes_supported must not contain duplicate entries")
     protocol_only = {
         name: sorted(set(scopes) & {"offline_access"})
         for name, scopes in configured.items()

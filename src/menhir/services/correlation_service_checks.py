@@ -1,27 +1,138 @@
-"""Search-driven correlation checks for the correlation service (facade split).
+"""Search-driven correlation checks: the one scan-one-node loop and the enrichment entry point.
 
-The single-node and batch check methods moved verbatim from
-``correlation_service.py`` onto a mixin that ``CorrelationService`` inherits, so
-they remain bound methods with unchanged signatures. Routing, deterministic
-vetoes, and the judge-gated merge decision stay on the facade (SSOT-03).
+``scan_node`` is the only loop that walks one node's similarity hits through
+``CorrelationService.classify_pair``. Enrichment reaches it through ``check_correlation`` (a
+method of the mixin ``CorrelationService`` inherits) and consolidation through
+``LifecycleConsolidationMixin._check_contradictions_batch``. Routing, deterministic vetoes, and the
+judge-gated merge decision stay on the facade (SSOT-03).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from menhir.infrastructure.graph_operations_model import SagaWritesPausedError
+from menhir.infrastructure.observability import LlmUsageControlSignal
 from menhir.services.correlation_service_types import CorrelationBatchResult, CorrelationResult
 
+if TYPE_CHECKING:
+    from menhir.infrastructure.graphiti_client import GraphitiClient
+
 logger = logging.getLogger(__name__)
+
+#: ``classify_pair(source_uuid, target_uuid, rrf_score) -> (final_action, details)``.
+PairClassifier = Callable[[str, str, float], Awaitable[tuple[str, "dict[str, Any] | None"]]]
+#: Called with each conflict result; returns True to end the node's scan there.
+ConflictHandler = Callable[[CorrelationResult], Awaitable[bool]]
+
+
+async def scan_node(
+    classify: PairClassifier,
+    search_client: Any,
+    node_uuid: str,
+    query: str,
+    *,
+    group_ids: list[str] | None,
+    num_results: int,
+    stop_on_drop: bool,
+    exclude_uuids: set[str] | None = None,
+    on_conflict: ConflictHandler | None = None,
+    errors: list[str] | None = None,
+    contain_failures: bool = False,
+) -> CorrelationBatchResult:
+    """Search for ``node_uuid``'s neighbours and classify each hit in rank order (#871).
+
+    Namespace rule: ``group_ids`` is the search filter as given. The caller resolves it from the
+    node's namespace; ``None`` searches every group. Nothing here defaults or widens it.
+
+    Stop rules, in the order they apply to a hit:
+
+    - ``merged`` always ends the scan: ``classify_pair`` absorbs ``node_uuid`` into the hit, so the
+      scanned node no longer exists and any later hit would be classified for a deleted node.
+    - ``none`` with details is a drop (similarity floor, shared-episode veto, auto-merge off or
+      proposed). It ends the scan when ``stop_on_drop``, as a caller that stops at a match must.
+    - ``conflict`` ends the scan when ``on_conflict`` returns True. With no handler every conflict
+      is collected, so the caller can fall back to a later pair.
+    - ``related`` and plain ``none`` go on to the next hit.
+
+    Errors: a failed search is logged and returns ``skipped=1``. With ``contain_failures`` a failed
+    ``classify_pair`` ends the scan instead of raising, so the caller can leave the node for its
+    next pass (#938, #1008); otherwise it raises. ``errors`` is only an output: when given, the
+    uuid of a node whose search or ``classify_pair`` failed is appended. Usage-limit and saga-pause
+    signals always raise.
+    """
+    if not query.strip():
+        return CorrelationBatchResult(checked=1, skipped=1)
+
+    search_kwargs: dict[str, Any] = {"num_results": num_results}
+    if group_ids is not None:
+        search_kwargs["group_ids"] = group_ids
+    try:
+        similar = await search_client.search_scored(query, **search_kwargs)
+    except Exception:  # noqa: BLE001 -- the check is best-effort; the caller decides what a miss means
+        logger.warning("Correlation search failed for node=%s", node_uuid, exc_info=True)
+        if errors is not None:
+            errors.append(node_uuid)
+        return CorrelationBatchResult(checked=1, skipped=1)
+
+    exclude = (exclude_uuids or set()) | {node_uuid}
+    result = CorrelationBatchResult(checked=1)
+    for other_uuid, _other_name, score in similar:
+        if other_uuid in exclude:
+            continue
+
+        try:
+            final_action, details = await classify(node_uuid, other_uuid, score)
+        except (LlmUsageControlSignal, SagaWritesPausedError):
+            raise
+        except Exception as exc:
+            if not contain_failures:
+                raise
+            logger.warning(
+                "classify_pair failed for %s <-> %s (%s); candidate left for the next pass",
+                node_uuid, other_uuid, type(exc).__name__, exc_info=True,
+            )
+            if errors is not None:
+                errors.append(node_uuid)
+            break
+
+        if final_action == "none":
+            if details is not None and stop_on_drop:
+                break
+            continue
+
+        if final_action == "related":
+            if details and details.get("created"):
+                result.related += 1
+        elif final_action == "merged":
+            result.merged += 1
+        elif final_action == "conflict":
+            result.conflicts += 1
+
+        cr = CorrelationResult(
+            action=final_action,
+            source_uuid=node_uuid,
+            target_uuid=other_uuid,
+            similarity=score,
+            details=details,
+        )
+        if result.results is not None:
+            result.results.append(cr)
+
+        if final_action == "merged":
+            break
+        if final_action == "conflict" and on_conflict is not None and await on_conflict(cr):
+            break
+
+    return result
 
 
 class CorrelationChecksMixin:
     """Namespace-scoped correlation searches; mixed into ``CorrelationService``."""
 
-    # ------------------------------------------------------------------
-    # Single-node correlation check (used during enrichment)
-    # ------------------------------------------------------------------
+    _graphiti: "GraphitiClient"
+    classify_pair: PairClassifier
 
     async def check_correlation(
         self,
@@ -32,158 +143,24 @@ class CorrelationChecksMixin:
         num_results: int = 10,
         namespace: str | None = None,
     ) -> CorrelationBatchResult:
-        """Check a single node for correlation with existing entities.
+        """Check a single node for correlation with existing entities (enrichment).
 
-        Called during enrichment after new nodes are committed to Neo4j.
-        The ``query`` is typically the node's content or summary, used
-        for the similarity search.
+        Every conflict is collected (the caller queues the first that writes); a merge ends the
+        scan. ``namespace`` scopes the search; ``None`` or empty searches every group.
 
         Args:
             node_uuid: The UUID of the node being checked.
             query: The text to search for similar entities.
             exclude_uuids: Set of UUIDs to exclude from results.
             num_results: Maximum number of similar entities to return.
-            namespace: Optional namespace to scope the search (for deterministic consistency).
+            namespace: Optional namespace to scope the search.
         """
-        if not query.strip():
-            return CorrelationBatchResult(checked=1, skipped=1)
-
-        try:
-            # Namespace-scoped search (Part 1, deterministic veto: verify namespace-scoped)
-            search_kwargs = {"num_results": num_results}
-            if namespace:
-                from menhir.domain.namespace import namespace_to_group_ids
-                search_kwargs["group_ids"] = namespace_to_group_ids(namespace)
-
-            similar = await self._graphiti.search_scored(query, **search_kwargs)
-        except Exception:
-            logger.warning(
-                "Correlation search failed for node=%s", node_uuid, exc_info=True
-            )
-            return CorrelationBatchResult(checked=1, skipped=1)
-
-        exclude = (exclude_uuids or set()) | {node_uuid}
-        result = CorrelationBatchResult(checked=1)
-
-        for other_uuid, other_name, score in similar:
-            if other_uuid in exclude:
-                continue
-
-            final_action, details = await self.classify_pair(node_uuid, other_uuid, score)
-            if final_action == "none":
-                continue
-
-            if final_action == "related":
-                if details and details.get("created"):
-                    result.related += 1
-            elif final_action == "merged":
-                result.merged += 1
-            elif final_action == "conflict":
-                result.conflicts += 1
-
-            cr = CorrelationResult(
-                action=final_action,
-                source_uuid=node_uuid,
-                target_uuid=other_uuid,
-                similarity=score,
-                details=details,
-            )
-            if result.results is not None:
-                result.results.append(cr)
-
-        return result
-
-    # ------------------------------------------------------------------
-    # Batch correlation check (NO production caller -- see the docstring)
-    # ------------------------------------------------------------------
-
-    async def check_correlation_batch(
-        self,
-        candidates: list[dict[str, Any]],
-        *,
-        namespace: str | None = None,
-    ) -> CorrelationBatchResult:
-        """Check a batch of promotion candidates for correlations.
-
-        Returns results segmented by action so the caller can route
-        conflicts to the conflict pipeline and handle merges/edges
-        independently.
-
-        **This method has no production caller.** The banner and docstring previously said it was
-        "used during consolidation/promotion"; nothing in consolidation or promotion reaches it,
-        and the only callers in the corpus are in ``tests/test_correlation_service.py``. That
-        claim mattered because anyone wiring this up would reasonably have believed it had already
-        been exercised in that role -- with an UNSCOPED search behind it.
-
-        Args:
-            candidates: Promotion candidates. Each may carry its own ``namespace``.
-            namespace: Scopes the search for every candidate. A candidate's own ``namespace`` key
-                is used when this is not supplied, because a batch can span namespaces and pinning
-                the whole batch to one would be wrong.
-
-        Scoping matters here specifically: results feed ``classify_pair()`` and merge proposal
-        handling, so an unscoped hit is a cross-namespace merge, which is permanent.
-
-        Known residual, shared with ``check_correlation`` and NOT introduced here: when no
-        namespace can be resolved the search is global rather than refused. Making that path
-        fail closed is a change to both methods and to their existing tests, so it is deliberately
-        not made under this finding.
-        """
-        batch_result = CorrelationBatchResult(checked=len(candidates))
-
-        for node in candidates:
-            uuid = str(node["uuid"])
-            query = str(node.get("content") or node.get("name") or "")
-            if not query.strip():
-                batch_result.skipped += 1
-                continue
-
-            # Scoped the way `check_correlation` scopes it (see the search there). A batch can
-            # span namespaces, so resolve per candidate rather than once for the batch.
-            node_namespace = namespace or node.get("namespace")
-            search_kwargs: dict[str, Any] = {"num_results": 5}
-            if node_namespace:
-                from menhir.domain.namespace import namespace_to_group_ids
-                search_kwargs["group_ids"] = namespace_to_group_ids(str(node_namespace))
-
-            try:
-                similar = await self._graphiti.search_scored(query, **search_kwargs)
-            except Exception:
-                logger.warning(
-                    "Correlation search failed for node=%s", uuid, exc_info=True
-                )
-                batch_result.skipped += 1
-                continue
-
-            for other_uuid, other_name, score in similar:
-                if other_uuid == uuid:
-                    continue
-
-                final_action, details = await self.classify_pair(uuid, other_uuid, score)
-                if final_action == "none":
-                    if details is not None:
-                        break  # a dropped pair ends the node's scan, as a match would
-                    continue
-
-                if final_action == "related":
-                    if details and details.get("created"):
-                        batch_result.related += 1
-                elif final_action == "merged":
-                    batch_result.merged += 1
-                elif final_action == "conflict":
-                    batch_result.conflicts += 1
-
-                cr = CorrelationResult(
-                    action=final_action,
-                    source_uuid=uuid,
-                    target_uuid=other_uuid,
-                    similarity=score,
-                    details=details,
-                )
-                if batch_result.results is not None:
-                    batch_result.results.append(cr)
-
-                # Only process one match per node to avoid cascading effects
-                break
-
-        return batch_result
+        group_ids: list[str] | None = None
+        if namespace:
+            from menhir.domain.namespace import namespace_to_group_ids
+            group_ids = namespace_to_group_ids(namespace)
+        return await scan_node(
+            self.classify_pair, self._graphiti, node_uuid, query,
+            group_ids=group_ids, num_results=num_results, stop_on_drop=False,
+            exclude_uuids=exclude_uuids,
+        )

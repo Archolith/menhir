@@ -245,19 +245,31 @@ def _assert_index_only(queries: list[tuple[str, dict]]) -> None:
     )
     try:
         for query, params in queries:
-            operators = _operators(driver.execute_query("EXPLAIN " + query, params).summary.plan)
+            plan = driver.execute_query("EXPLAIN " + query, params).summary.plan
+            operators = _operators(plan)
             assert any(op.startswith("ProcedureCall") for op in operators), operators
-            assert not any("Scan" in op or "Seek" in op for op in operators), (query, operators)
+            # The erase-marker check (#662) is a per-candidate seek on the ErasureMarker index;
+            # any other scan or seek means the memory nodes are not read through the vector index.
+            other = [op for op, details in _operator_details(plan)
+                     if ("Scan" in op or "Seek" in op) and ":ErasureMarker(" not in details]
+            assert not other, (query, operators)
     finally:
         driver.close()
 
 
 def _operators(plan) -> list[str]:
-    ops = [plan["operatorType"]] if isinstance(plan, dict) else [plan.operator_type]
-    children = plan.get("children", []) if isinstance(plan, dict) else plan.children
+    return [op for op, _details in _operator_details(plan)]
+
+
+def _operator_details(plan) -> list[tuple[str, str]]:
+    if isinstance(plan, dict):
+        op, args, children = plan["operatorType"], plan.get("args", {}), plan.get("children", [])
+    else:
+        op, args, children = plan.operator_type, plan.arguments or {}, plan.children
+    out = [(op, str(args.get("Details") or ""))]
     for child in children:
-        ops.extend(_operators(child))
-    return ops
+        out.extend(_operator_details(child))
+    return out
 
 
 async def test_adapter_infers_dimensions_from_stored_embeddings(seeded) -> None:

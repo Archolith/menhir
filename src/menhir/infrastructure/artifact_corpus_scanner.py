@@ -99,7 +99,14 @@ def collect_git_evidence(repo: Path, *, from_commit: str | None = None) -> GitEv
         if _is_valid_commit_cursor(from_commit):
             diff = _run_git(
                 repo,
-                ["diff", "--name-status", "-M", "--end-of-options", f"{from_commit}..HEAD"],
+                [
+                    "diff",
+                    "--relative",
+                    "--name-status",
+                    "-M",
+                    "--end-of-options",
+                    f"{from_commit}..HEAD",
+                ],
             )
             if diff is not None:
                 rename_evidence_available = True

@@ -28,6 +28,10 @@ class TelemetryRetentionStatsMixin:
     #: which is the correct deletion axis for them.
     #: The same holds for graph_operations ENTITY_MERGE / ENTITY_UNMERGE snapshots: unmerge needs
     #: them, so they are exempt from age pruning (see prune_operation_snapshots).
+    #:
+    #: `conflict_resolutions` is also ABSENT: it is state, not telemetry. `is_pair_resolved` reads
+    #: it to keep resolved pairs suppressed; age pruning would silently re-open them. Only
+    #: `conflict_cooldown_days` decides whether a suppression still applies.
     _RETENTION_TIERS: dict[str, tuple[str, str]] = {
         # High-volume observability.
         "lifecycle_events": ("recorded_at", "observability"),
@@ -38,7 +42,6 @@ class TelemetryRetentionStatsMixin:
         "failure_events": ("recorded_at", "diagnostic"),
         "recall_receipts": ("created_at", "diagnostic"),
         "recall_query_log": ("created_at", "diagnostic"),
-        "conflict_resolutions": ("resolved_at", "diagnostic"),
         "recall_lab_runs": ("recorded_at", "diagnostic"),
         "extraction_lab_runs": ("recorded_at", "diagnostic"),
     }
@@ -105,7 +108,7 @@ class TelemetryRetentionStatsMixin:
         cursor = conn.execute(
             """
             UPDATE graph_operations SET before_snapshot_json = NULL
-            WHERE operation_kind IN ('ENTITY_DELETE', 'SESSION_TTL_DELETE')
+            WHERE operation_kind IN ('ENTITY_DELETE', 'SESSION_TTL_DELETE', 'DECAY_DELETE')
               AND state IN ('COMMITTED', 'FAILED', 'REVERSED')
               AND before_snapshot_json IS NOT NULL
               AND substr(replace(updated_at, 'T', ' '), 1, 19)
@@ -167,7 +170,7 @@ class TelemetryRetentionStatsMixin:
         for row in rows:
             result[row["action"]] = {
                 "count": int(row["cnt"]),
-                "avg_ms": round(float(row["avg_ms"])) if row["avg_ms"] else None,
+                "avg_ms": round(float(row["avg_ms"])) if row["avg_ms"] is not None else None,
                 "llm_count": int(row["llm_count"]),
             }
         result["revisions"] = int(revision_count["cnt"]) if revision_count else 0

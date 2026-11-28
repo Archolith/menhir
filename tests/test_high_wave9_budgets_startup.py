@@ -188,7 +188,7 @@ class _CountingNeo4j:
 
 
 def test_cf173_the_startup_sweep_is_paid_once_not_twice() -> None:
-    """Six unbounded scans, two of them over every relationship in the graph with no label to
+    """Seven unbounded scans, two of them over every relationship in the graph with no label to
     narrow them, run once from the `serve` guard and again from `core/runtime_preflight` -- moments
     apart, against a graph nothing has had a chance to change in between."""
     from menhir.infrastructure.embedding_dimensions import (
@@ -200,7 +200,7 @@ def test_cf173_the_startup_sweep_is_paid_once_not_twice() -> None:
     neo4j = _CountingNeo4j()
     embedding_dimension_health(neo4j, expected_dim=768, use_cache=True)
     first = neo4j.calls
-    assert first == 6
+    assert first == 7
 
     embedding_dimension_health(neo4j, expected_dim=768, use_cache=True)
     assert neo4j.calls == first, "the second startup caller re-ran the sweep"
@@ -218,7 +218,7 @@ def test_cf173_caching_is_opt_in_so_no_other_caller_changes_behaviour() -> None:
     neo4j = _CountingNeo4j()
     embedding_dimension_health(neo4j, expected_dim=768)
     embedding_dimension_health(neo4j, expected_dim=768)
-    assert neo4j.calls == 12
+    assert neo4j.calls == 14
 
 
 def test_cf173_a_different_embedder_is_a_different_question() -> None:
@@ -232,7 +232,7 @@ def test_cf173_a_different_embedder_is_a_different_question() -> None:
     neo4j = _CountingNeo4j()
     embedding_dimension_health(neo4j, expected_dim=768, use_cache=True)
     embedding_dimension_health(neo4j, expected_dim=1536, use_cache=True)
-    assert neo4j.calls == 12
+    assert neo4j.calls == 14
 
 
 def test_cf173_the_serve_guard_is_not_gated_on_an_inferable_dimension() -> None:

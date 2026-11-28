@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import partial
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from menhir.services.ingest_service import IngestService
+from typing import Any, NamedTuple
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
@@ -22,8 +18,7 @@ from menhir.domain.assertion_operations import (
 )
 from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.count_match import match_slot_row
-from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
-from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
@@ -32,6 +27,7 @@ from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mo
 from menhir.domain.recall_provenance import derive_recall_provenance
 from menhir.domain.scalar_view_freshness import ObservationTime, newer_unfolded_evidence
 from menhir.domain.recall import (
+    MAX_EXPLICIT_RECALL_RESULTS,
     CandidateData,
     QueryPreset,
     RecallHistoryResult,
@@ -43,38 +39,33 @@ from menhir.domain.recall import (
     ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
-    TemporalFact,
     parse_verifier_evidence,
 )
+from menhir.domain.oracles import OracleResult, QueryContext
 from menhir.domain.retrieval_tuning import (
-    SOURCE_PRIORS,
+    RANKER_ORACLE_COMBINED,
+    RANKER_ORACLE_ONLY,
     CandidateSource,
     RetrievalTuningConfig,
 )
 from menhir.domain.retrieval_trace_models import (
-    AssertionShadowRow,
-    AssertionShadowTrace,
-    FacetShadowRow,
     FacetShadowTrace,
     RetrievalTrace,
     ScoringTrace,
     ViewReachability,
 )
-from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.infrastructure.graphiti_client import _circuit_open_cause
 from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
-from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
+from menhir.services.cross_encoder_rerank import order_by_rerank
+from menhir.services.ranking_explain import build_ranking_rows
+from menhir.services.rerank_oracle import CrossEncoderRerankOracle, logits_of, rerank_candidate
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
-if TYPE_CHECKING:
-    from menhir.core.bootstrap import UnavailableGraphitiClient
-from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
-from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,  # noqa: F401  (re-export pinned by test_cf60_scoring_constants_owned_by_domain)
     MIN_SIMILARITY_THRESHOLD,
-    ScoringService,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,11 +91,8 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
-    _frontier_trace_enabled,
-    _oracle_similarity,
     _query_wants_history,
     _render_scalar_history_content,
     _scalar_history_evidence_days_ago,
@@ -133,6 +121,99 @@ def _valid_at_sort_key(raw: object) -> float:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.timestamp()
+
+
+_LANE_INJECTED_SOURCES = frozenset({CandidateSource.SCALAR_AUTHORITY, CandidateSource.OBSERVATION})
+
+
+def _lane_injected_first(candidates: list[Any], top_n: int) -> list[Any]:
+    """Up to half of the cross-encoder head (``top_n // 2``) goes to injected candidates,
+    authority first, then observation/history, so the head scores them instead of flooring them
+    behind ``rerank_top_n`` search hits. The rest keep their order (#922)."""
+    injected = sorted(
+        (c for c in candidates if c.source in _LANE_INJECTED_SOURCES),
+        key=lambda c: c.source != CandidateSource.SCALAR_AUTHORITY,
+    )[:max(0, top_n) // 2]
+    head = {id(c) for c in injected}
+    return injected + [c for c in candidates if id(c) not in head]
+
+
+class _LaneSnapshot(NamedTuple):
+    """What an injection lane mutates, so a failed lane can be undone. Dicts are copied: a View
+    that won search is upgraded in place."""
+
+    candidate_inputs: list[Any]
+    metadata_by_uuid: dict[str, Any]
+    authority_len: int
+
+    @classmethod
+    def take(
+        cls, candidate_inputs: list[Any], metadata_by_uuid: dict[str, Any], authority_layer: list[Any],
+    ) -> "_LaneSnapshot":
+        return cls([dict(c) for c in candidate_inputs], dict(metadata_by_uuid), len(authority_layer))
+
+    def restore(
+        self, candidate_inputs: list[Any], metadata_by_uuid: dict[str, Any], authority_layer: list[Any],
+    ) -> None:
+        candidate_inputs[:] = self.candidate_inputs
+        metadata_by_uuid.clear()
+        metadata_by_uuid.update(self.metadata_by_uuid)
+        del authority_layer[self.authority_len:]
+
+
+def _protected_leads(scored: list[Any], n: int) -> set[str]:
+    """Leading authority candidates the result cut must keep: at most ``max(1, n // 2)``, by
+    rank, so injected Views can never push out every search result (#922)."""
+    if n <= 0:
+        return set()
+    return set([m.uuid for m in scored if m.is_scalar_authority][:max(1, n // 2)])
+
+
+def _cut_keeping(scored: list[Any], n: int, keep: set[str]) -> list[Any]:
+    """``scored[:n]``, except ranked entries in ``keep`` past the cut displace the lowest-ranked
+    others. Rank order is preserved and the count is still ``n`` (#922)."""
+    must = [m.uuid for m in scored if m.uuid in keep][:max(0, n)]
+    rest = [m.uuid for m in scored if m.uuid not in keep][:max(0, n - len(must))]
+    chosen = set(must) | set(rest)
+    return [m for m in scored if m.uuid in chosen]
+
+
+# Cap on anchor rows per stale-label query; the memory_uuids filter already narrows it to the results.
+_STALE_ANCHOR_ROW_CAP = 200
+
+_ASOF_UUID_PREFIX = "scalar-asof:"
+_EXPIRY_UUID_PREFIX = "scalar-expiry:"
+
+
+def _slot_uuid_suffix(subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any) -> str:
+    return f":{subj}:{attr}:{scope}:{value_kind}:{unit}"
+
+
+def _asof_candidate_uuid(
+    namespace: str, as_of: str, subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any,
+) -> str:
+    return (f"{_ASOF_UUID_PREFIX}{namespace}:{as_of}"
+            f"{_slot_uuid_suffix(subj, attr, scope, value_kind, unit)}")
+
+
+def _expiry_candidate_uuid(
+    namespace: str, subj: Any, attr: Any, scope: Any, value_kind: Any, unit: Any,
+) -> str:
+    return (f"{_EXPIRY_UUID_PREFIX}{namespace}"
+            f"{_slot_uuid_suffix(subj, attr, scope, value_kind, unit)}")
+
+
+def _verdict_candidate_uuid(verdict: Any, candidate_uuids: set[str]) -> str | None:
+    """The ranked candidate a verdict stands for: its View, or for as-of / expiry verdicts (no
+    View) the synthetic ``scalar-asof:`` / ``scalar-expiry:`` candidate of the same slot."""
+    if verdict.view_uuid:
+        return verdict.view_uuid
+    prefix = {"as_of": _ASOF_UUID_PREFIX, "expired": _EXPIRY_UUID_PREFIX}.get(verdict.kind)
+    if prefix is None:
+        return None
+    suffix = _slot_uuid_suffix(
+        verdict.subject_uuid, verdict.attribute, verdict.scope, verdict.value_kind, verdict.unit)
+    return next((u for u in candidate_uuids if u.startswith(prefix) and u.endswith(suffix)), None)
 
 
 def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
@@ -198,7 +279,25 @@ def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
     return view.get("recall_eligible") is True
 
 
-def embed_breaker_note(graphiti_client: Any) -> str | None:
+def embed_refusal_note(graphiti_client: Any, exc: BaseException, consequence: str) -> str | None:
+    """The breaker note when ``exc`` is the embed breaker stopping a call, else None (#642).
+
+    Covers a refusal and the provider error that tripped the breaker; None while it is closed,
+    so an ordinary embed failure still raises.
+    """
+    classify = getattr(graphiti_client, "_embed_unavailable", None)
+    try:
+        stopped = classify(exc) if callable(classify) else None
+    except Exception:
+        stopped = None
+    if stopped is None and _circuit_open_cause(exc) is None:
+        return None
+    return embed_breaker_note(graphiti_client, consequence=consequence)
+
+
+def embed_breaker_note(
+    graphiti_client: Any, *, consequence: str = "results are keyword-only"
+) -> str | None:
     """Say why semantic matching is off when the embed breaker is not closed (#632).
 
     Reads the breaker snapshot once per recall; None when closed or unreadable.
@@ -222,7 +321,7 @@ def embed_breaker_note(graphiti_client: Any) -> str | None:
         when = "probe due now"
     else:
         when = f"next probe in {max(1, math.ceil(remaining / 60))}m"
-    return f"semantic search off: {cause} ({when}); results are keyword-only"
+    return f"semantic search off: {cause} ({when}); {consequence}"
 
 
 async def _build_source_memories(
@@ -328,9 +427,19 @@ async def _build_source_memories(
                 cosine=float(row.get("cosine") or 0.0),
                 source=row.get("source") or None,
             ))
+        # Rank by relevance before the chronological display sort, so consumers that must
+        # cut the section (build_context's budget) keep the best matches. The sort is stable,
+        # so equal cosines keep the lane's order (search order, or spread's pick order).
+        by_relevance = sorted(range(len(section)), key=lambda i: -section[i].cosine)
+        for rank, i in enumerate(by_relevance, start=1):
+            section[i] = replace(section[i], rank=rank)
         section.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
         return tuple(section), None, int((perf_counter() - started) * 1000)
     except Exception as exc:
+        if _circuit_open_cause(exc) is not None:
+            # Expected while the embed breaker refuses, and recall already carries its note.
+            logger.info("Source-memory lane skipped: embedding unavailable (%s)", exc)
+            return None, "Source-memory lane unavailable", int((perf_counter() - started) * 1000)
         logger.error(
             "Source-memory lane unavailable: %s: %s",
             exc.__class__.__name__,
@@ -373,6 +482,10 @@ def _memory_admitted(
     # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
     if meta.get("structure_role") is not None:
         return False
+    # A raw-capture copy of a failed episode (written before #662) duplicates the episode, which
+    # the source-memory lane now returns, and was never retired when the episode later succeeded.
+    if meta.get("raw_capture") is True:
+        return False
     scope = str(meta.get("scope") or NodeScope.SESSION)
     freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
     # CANDIDATE is the human-review tier: never recalled until approved
@@ -381,6 +494,9 @@ def _memory_admitted(
     if scope == NodeScope.CANDIDATE:
         return False
     if freshness == FreshnessState.GONE:
+        return False
+    # Operator-retired memory (retire_memory) is hidden from ranked recall; Views never carry it.
+    if not bool(meta.get("is_view")) and bool(meta.get("memory_retired")):
         return False
     if not service._session_scope_admitted(
         scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
@@ -472,12 +588,22 @@ async def run_recall_history(
     if not stripped:
         raise ValueError("recall_history requires a non-empty query")
     effective_limit = max(1, min(50, int(limit)))
-    query_vector = await service.graphiti_client.embed_query(stripped)
+    try:
+        query_vector = await service.graphiti_client.embed_query(stripped)
+    except Exception as exc:
+        note = embed_refusal_note(
+            service.graphiti_client, exc, "recall_history needs embeddings, so nothing was searched"
+        )
+        if note is None:
+            raise
+        return RecallHistoryResult(query=stripped, memories=(), note=note)
     rows = await asyncio.to_thread(
         service.graph_adapter.search_episode_embeddings,
         query_vector,
         limit=effective_limit,
         namespace=namespace,
+        # History is a historical surface: retired memories stay, labelled.
+        include_retired=True,
         **_embedding_model_kwargs(service),
     )
     memories: list[SourceMemory] = []
@@ -495,6 +621,7 @@ async def run_recall_history(
             reference_time=row.get("reference_time") or None,
             cosine=float(row.get("cosine") or 0.0),
             source=row.get("source") or None,
+            retired=bool(row.get("memory_retired")),
         ))
     memories.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
     return RecallHistoryResult(
@@ -525,6 +652,7 @@ async def _run_recall(
     *,
     preset: QueryPreset = QueryPreset.KNOWLEDGE,
     limit: int = 10,
+    limit_is_explicit: bool = False,
     candidate_k: int = 50,
     context_node_ids: list[str] | None = None,
     include_session: bool = False,
@@ -551,6 +679,10 @@ async def _run_recall(
     _t_total = perf_counter()
     _t_phases: dict[str, int] = {}
     tuning = tuning or RetrievalTuningConfig()
+    limit_note = None
+    if limit_is_explicit and limit > MAX_EXPLICIT_RECALL_RESULTS:
+        limit_note = f"Requested {limit} results. Recall allows up to {MAX_EXPLICIT_RECALL_RESULTS}."
+        limit = MAX_EXPLICIT_RECALL_RESULTS
     configured_guards = tuple(name for name, enabled in (
         ("scope", tuning.enable_warden_gate), ("oracle_admission", tuning.enable_warden_gate),
         ("contradiction", tuning.enable_contradiction_interrupt),
@@ -865,6 +997,8 @@ async def _run_recall(
         getattr(service, "counting_recall_authority_only", True)
         and getattr(service, "counting_enabled", False))
     _occurrence_obs_ids: set[str] = set()
+    observation_lane_note: str | None = None
+    history_lane_note: str | None = None
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -886,6 +1020,11 @@ async def _run_recall(
         from menhir.infrastructure.audit_trail import RECALL as _authority_audit
         if service.scalar_view_authority_enabled:
             _authority_audit.begin()
+        # #923: the lane commits in two atomic stages, observations then authority. A failure
+        # part-way restores the snapshot taken before the failing stage, so the caller never gets a
+        # partial authority set (dicts are copied: a View that won search is upgraded in place).
+        _lane_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
+        _obs_stage_done = False
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
             obs_hits = await asyncio.to_thread(
@@ -1020,6 +1159,8 @@ async def _run_recall(
                     )
             logger.debug("observation injection query=%r added=%d (k=10)", query[:60], obs_added)
             _obs_slots_for_history = obs_slots  # share with scalar_history lane below
+            _lane_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
+            _obs_stage_done = True
 
             # Phase 4a.4: for each SURFACED slot, DETERMINISTICALLY inject the current scalar_state
             # View by slot-keyed lookup (NOT embedding rank), so the authoritative CURRENT value
@@ -1230,8 +1371,8 @@ async def _run_recall(
                     # the answer to "as of <date>". Founds-gated like the current authority.
                     st = _asof_state_for(subj, (attr, scp, vk, un))
                     if st is not None:
-                        auuid = (f"scalar-asof:{stamped_namespace(namespace)}:{_as_of_str}:{subj}:"
-                                 f"{attr}:{scp}:{vk}:{un}")
+                        auuid = _asof_candidate_uuid(
+                            stamped_namespace(namespace), _as_of_str, subj, attr, scp, vk, un)
                         if auuid not in existing_uuids:
                             existing_uuids.add(auuid)
                             a_founded = False
@@ -1318,8 +1459,8 @@ async def _run_recall(
                     if _intent in (QueryIntent.CURRENT_STATE, QueryIntent.AMBIGUOUS):
                         exp = _expiry_for(subj, (attr, scp, vk, un))
                         if exp is not None:
-                            euuid = (f"scalar-expiry:{stamped_namespace(namespace)}:{subj}:{attr}:"
-                                     f"{scp}:{vk}:{un}")
+                            euuid = _expiry_candidate_uuid(
+                                stamped_namespace(namespace), subj, attr, scp, vk, un)
                             if euuid not in existing_uuids:
                                 existing_uuids.add(euuid)
                                 e_founded = False
@@ -1537,10 +1678,28 @@ async def _run_recall(
                     details={"observations_added": obs_added,
                              "authority_annotations": auth_added,
                              "intent": _intent.value, "query": query[:120]})
-        except Exception:
-            logger.exception(
-                "observation injection failed query=%r; leaving recall unchanged", query[:60]
-            )
+        except Exception as exc:
+            _lane_snapshot.restore(candidate_inputs, metadata_by_uuid, authority_layer)
+            if not _obs_stage_done:
+                _obs_slots_for_history = set()
+                _obs_slot_best_cosine.clear()
+                _occurrence_obs_ids.clear()
+            if _circuit_open_cause(exc) is not None:
+                # #642: expected while the embed breaker refuses; recall already carries its note.
+                logger.info("observation injection skipped: embedding unavailable (%s)", exc)
+            else:
+                logger.exception(
+                    "observation injection failed query=%r; leaving recall unchanged", query[:60]
+                )
+                observation_lane_note = (
+                    "Scalar authority lane failed; current-value verdicts were omitted."
+                    if _obs_stage_done else
+                    "Scalar observation lane failed; observation and authority results were omitted.")
+                if service.scalar_view_authority_enabled:
+                    _authority_audit.audit(
+                        "observation_lane", "rolled_back", namespace=stamped_namespace(namespace),
+                        details={"error": exc.__class__.__name__, "query": query[:120],
+                                 "stage": "authority" if _obs_stage_done else "observation"})
         _t_phases["observation_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Scalar history advisory lane (flag-gated) ---
@@ -1559,6 +1718,8 @@ async def _run_recall(
     #
     if service.scalar_history_enabled and namespace is not None and _obs_slots_for_history:
         _t = perf_counter()
+        # #923: atomic like the observation lane; a failure on any slot drops every addition.
+        _history_snapshot = _LaneSnapshot.take(candidate_inputs, metadata_by_uuid, authority_layer)
         try:
             from menhir.domain.scalar_view_authority import QueryIntent
             from menhir.domain.scalar_view_suppression import authority_query_intent
@@ -1679,11 +1840,14 @@ async def _run_recall(
                 _sh_added += 1
             logger.debug(
                 "scalar-history advisory lane query=%r added=%d", query[:60], _sh_added)
-        except Exception:
+        except Exception as exc:
+            _history_snapshot.restore(candidate_inputs, metadata_by_uuid, authority_layer)
             logger.exception(
                 "scalar-history advisory lane failed query=%r; leaving recall unchanged",
                 query[:60],
             )
+            if _circuit_open_cause(exc) is None:  # #642: the breaker note already says it
+                history_lane_note = "Scalar history lane failed; history verdicts were omitted."
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
 
     # --- Counted authority only (unit R, flag-gated): a counted slot's occurrences leave recall ---
@@ -1695,10 +1859,11 @@ async def _run_recall(
             logger.exception(
                 "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
-    # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
-    # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
-    # fact for an explicit current-state query, but only if all six authority gates pass. Failures
-    # never break recall (logged, recall proceeds unchanged). OFF by default -> no behavior change.
+    # --- Step 7: current-state View authority suppression (follows the scalar lane) ---
+    # When enabled (default on whenever the scalar state lane is enabled; #568), a current
+    # scalar_state View may suppress an older PROVENANCE-LINKED graph fact for an explicit
+    # current-state query, only if all six authority gates pass. Failures never break recall
+    # (logged, recall proceeds unchanged).
     if service.scalar_view_authority_enabled and namespace is not None and candidate_inputs:
         _t = perf_counter()
         try:
@@ -1716,8 +1881,10 @@ async def _run_recall(
     # --- Adjacency ---
     _t = perf_counter()
     eligible_uuids = [str(c["uuid"]) for c in candidate_inputs]
+    adjacency_notes: list[str] = []
     adjacency_map, edge_index = (
-        await service._compute_adjacency(eligible_uuids, context_node_ids, namespace)
+        await service._compute_adjacency(
+            eligible_uuids, context_node_ids, namespace, degradation_notes=adjacency_notes)
         if eligible_uuids else ({}, {})
     )
     _t_phases["adjacency"] = int((perf_counter() - _t) * 1000)
@@ -1778,13 +1945,12 @@ async def _run_recall(
     source_memories, source_memory_note, source_memory_ms = await source_memory_task
     if source_memory_ms:
         _t_phases["source_memories"] = source_memory_ms
-    # Read after every lane ran, so a refusal during this recall is reflected; rides on
-    # source_memory_note so all three return paths carry it.
+    # Read after every lane ran so refusals during this recall are reflected.
     breaker_note = embed_breaker_note(service.graphiti_client)
-    if breaker_note:
-        source_memory_note = (
-            f"{breaker_note} | {source_memory_note}" if source_memory_note else breaker_note
-        )
+    shared_note = " | ".join(n for n in (
+        limit_note, breaker_note, source_memory_note, observation_lane_note, history_lane_note,
+        *adjacency_notes,
+    ) if n) or None
 
     if not candidates:
         if visible_pending_rows:
@@ -1793,11 +1959,11 @@ async def _run_recall(
                 if search_error
                 else None
             )
-            if source_memory_note:
+            if shared_note:
                 pending_note = (
-                    f"{pending_note} | {source_memory_note}"
+                    f"{pending_note} | {shared_note}"
                     if pending_note
-                    else source_memory_note
+                    else shared_note
                 )
             pending_results = service._pending_fallback_results(
                 visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
@@ -1821,11 +1987,11 @@ async def _run_recall(
             if search_error
             else None
         )
-        if source_memory_note:
+        if shared_note:
             empty_note = (
-                f"{empty_note} | {source_memory_note}"
+                f"{empty_note} | {shared_note}"
                 if empty_note
-                else source_memory_note
+                else shared_note
             )
         return RecallResult(
             warden_status=warden_status if include_warden_status else None,
@@ -1842,12 +2008,19 @@ async def _run_recall(
         )
 
     # --- Frontier provenance: derive evidence_kinds + project for the oracle/warden path ---
-    # Only when a frontier portion will read it (active gate/ranking or the shadow pass),
+    # Only when a frontier portion will read it (active gate/ranking, oracle_combined, or shadow),
     # so the old path issues no extra query. Merged into metadata_by_uuid so both
     # _apply_frontier and the shadow see it.
+    will_rerank = (
+        tuning.ranking_strategy != RANKER_ORACLE_ONLY
+        and tuning.enable_cross_encoder_rerank
+        and bool(candidates)
+        and bool(getattr(service, "rerank_model_dir", ""))
+    )
     frontier_active = (
         tuning.enable_oracle_ranking
         or tuning.enable_warden_gate
+        or (tuning.ranking_strategy == RANKER_ORACLE_COMBINED and will_rerank)
         or (trace and tuning.enable_assertion_shadow)
     )
     # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
@@ -1857,19 +2030,52 @@ async def _run_recall(
         _t = perf_counter()
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
+        # Propagate :WorkArtifact-projected lifecycle fields (#579) onto CandidateData so
+        # ScoredMemory -> memory_lifecycle_note sees them in recall_memories / context / REST.
+        candidates = [
+            replace(
+                c,
+                artifact_status=c.artifact_status or (metadata_by_uuid.get(c.uuid) or {}).get("artifact_status"),
+                superseded_by=c.superseded_by or (metadata_by_uuid.get(c.uuid) or {}).get("superseded_by"),
+            )
+            for c in candidates
+        ]
 
-    # --- Cross-encoder rerank (default on): replaces the RRF floor when it runs ---
+    _fc_norm = (
+        await service._normalize_file_context_path(file_context, file_context_project) if file_context else ""
+    )
+    query_files: tuple[str, ...] = (_fc_norm,) if _fc_norm else ()
+
+    # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---
+    # Called once here: whether it succeeded decides the floor bypass and the result cap below,
+    # and oracle_combined hands the same results to the combiner (no second inference).
     rerank: dict[str, float] | None = None
+    rerank_results: dict[str, OracleResult] | None = None
     rerank_note: str | None = None
     # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).
-    if tuning.enable_cross_encoder_rerank and candidates and getattr(service, "rerank_model_dir", ""):
+    if will_rerank:
         _t = perf_counter()
-        rerank, rerank_note = await rerank_scores(
-            query, candidates, metadata_by_uuid, top_n=tuning.rerank_top_n,
+        rerank_oracle = CrossEncoderRerankOracle(
             model_dir=getattr(service, "rerank_model_dir", ""),
             device=getattr(service, "rerank_device", "auto"),
+            top_n=tuning.rerank_top_n,
         )
+        rerank_results, rerank_note = await rerank_oracle.score_batch(
+            QueryContext(text=query),
+            [
+                rerank_candidate(
+                    c.uuid, getattr(c, "name", None),
+                    (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
+                )
+                for c in _lane_injected_first(candidates, tuning.rerank_top_n)
+            ],
+        )
+        if rerank_results is not None:
+            rerank = logits_of(rerank_results)
         _t_phases["rerank"] = int((perf_counter() - _t) * 1000)
+    # The strategy that actually ordered this recall: without rerank logits every strategy
+    # runs as oracle_only (floor + residual blend), as it did before strategies existed.
+    effective_strategy = tuning.ranking_strategy if rerank is not None else RANKER_ORACLE_ONLY
 
     # --- Phase 2: score + rank ---
     _t = perf_counter()
@@ -1902,24 +2108,53 @@ async def _run_recall(
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
     # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
-    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate):
+    combined = effective_strategy == RANKER_ORACLE_COMBINED
+    ranking_explain: dict[str, Any] | None = {} if trace else None
+    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or combined):
         _t = perf_counter()
-        # A reranked order is final: wardens still gate it, the oracle blend does not reorder it.
+        # reranker_only: the reranked order is final; wardens gate it, the oracle blend does not
+        # reorder it. oracle_combined: the combiner orders it (no residual blend); wardens gate.
         frontier_tuning = replace(tuning, enable_oracle_ranking=False) if rerank is not None else tuning
+        frontier_kwargs: dict[str, Any] = {}
+        if combined:
+            frontier_kwargs["rerank_results"] = rerank_results
+        if ranking_explain is not None:
+            frontier_kwargs["explain"] = ranking_explain
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, frontier_tuning,
-            query_project=file_context_project, warden_status=guard_status,
+            query_project=file_context_project, query_files=query_files,
+            warden_status=guard_status, **frontier_kwargs,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
-    # A reranked list skips the floor and fills the limit; rerank_max_results caps it (offline
-    # sweep: top 7 keeps the rerank's top-5 recall at about production's context size).
-    result_limit = min(limit, tuning.rerank_max_results) if rerank is not None else limit
+    # Retain the default context budget for reranked calls with no explicit result limit.
+    result_limit = min(limit, tuning.rerank_max_results) if rerank is not None and not limit_is_explicit else limit
     pending_fallback = service._pending_fallback_results(
-        visible_pending_rows, preset, result_limit, include_session=include_session,
+        visible_pending_rows, preset, min(limit, result_limit + 1), include_session=include_session,
         session_id=session_id,
     )
-    top_results = pending_fallback + scored[:max(0, result_limit - len(pending_fallback))]
+    capped = result_limit < limit and len(pending_fallback) + len(scored) > result_limit
+    pending_fallback = pending_fallback[:result_limit]
+    scored_room = max(0, result_limit - len(pending_fallback))
+    if rerank is not None:
+        # #922: the cross-encoder must not cut a leading authority candidate; it displaces the
+        # lowest-ranked other result. Leads are capped so search results keep at least half.
+        # Advisory and history Views compete on rank.
+        kept = _cut_keeping(scored, scored_room, _protected_leads(scored, scored_room))
+        top_results = pending_fallback + kept
+        # A verdict whose ranked candidate the cut removed is dropped, not reported as returned.
+        # Consumers (context_builder, the packet query, API/MCP payloads) treat every verdict as
+        # present evidence, so a marker would need each of them to learn it. Verdicts with no
+        # ranked candidate (counted Views, unit R) are unaffected.
+        ranked_uuids = {m.uuid for m in scored}
+        cut_uuids = ranked_uuids - {m.uuid for m in kept}
+        if cut_uuids:
+            authority_layer[:] = [
+                v for v in authority_layer
+                if _verdict_candidate_uuid(v, ranked_uuids) not in cut_uuids
+            ]
+    else:
+        top_results = pending_fallback + scored[:scored_room]
     warden_status.unchecked_pending = len(pending_fallback)
 
     # Signal when all candidates were below the similarity floor
@@ -1932,13 +2167,16 @@ async def _run_recall(
         note = f"{note} | {frontier_note}" if note else frontier_note
     if rerank_note:
         note = f"{note} | {rerank_note}" if note else rerank_note
+    if capped:
+        cap_note = f"Reranking capped the default result limit at {result_limit}. Pass limit explicitly to request more."
+        note = f"{note} | {cap_note}" if note else cap_note
     if search_error:
         warning = "Recall search backend failed; fallback results may be incomplete."
         note = f"{note} | {warning}" if note else warning
     if facet_active_warning:
         note = f"{note} | {facet_active_warning}" if note else facet_active_warning
-    if source_memory_note:
-        note = f"{note} | {source_memory_note}" if note else source_memory_note
+    if shared_note:
+        note = f"{note} | {shared_note}" if note else shared_note
 
     # --- Temporal facts enrichment (POST-RANK) ---
     _t = perf_counter()
@@ -1949,7 +2187,8 @@ async def _run_recall(
         ]
         if result_uuids_for_facts:
             fact_rows = await asyncio.to_thread(
-                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts,
+                namespace=namespace,
             )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
@@ -2016,8 +2255,10 @@ async def _run_recall(
         stale_rows = await asyncio.to_thread(
             service.graph_adapter.stale_anchored_memories,
             project=file_context_project,
-            limit=200,
+            limit=_STALE_ANCHOR_ROW_CAP,
             namespace=namespace,
+            # #923: rows for the returned memories, not the 200 most recently dirtied anchors.
+            memory_uuids=[sm.uuid for sm in top_results],
         )
         stale_by_uuid: dict[str, dict[str, Any]] = {
             str(r["memory_uuid"]): r
@@ -2129,6 +2370,7 @@ async def _run_recall(
                 assertion_shadow = await service._run_assertion_shadow(
                     query, namespace, candidate_inputs, metadata_by_uuid,
                     query_project=file_context_project,
+                    query_files=query_files,
                     tuning=tuning,
                 )
                 record_mcp_event(
@@ -2248,6 +2490,10 @@ async def _run_recall(
             facet_shadow=facet_shadow,
             facet_active=facet_active_trace,
             rank_shadow_warning=rank_shadow_warning,
+            ranking=build_ranking_rows(
+                top_results, effective_strategy, rerank or {}, ranking_explain or {},
+                tuning.oracle_role_weights,
+            ),
         )
 
     return RecallResult(

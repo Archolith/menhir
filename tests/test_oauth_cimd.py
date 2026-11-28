@@ -87,7 +87,151 @@ def _install_resolver(monkeypatch, docs: dict[str, dict], calls: list[str] | Non
     return resolver
 
 
-def test_agent_smith_cimd_resolves_locally_without_public_hairpin(monkeypatch):
+def test_cimd_schema_failure_closes_connection_before_reraising(monkeypatch):
+    class FailingConnection:
+        closed = False
+
+        def execute(self, _sql):
+            raise RuntimeError("schema unavailable")
+
+        def close(self):
+            self.closed = True
+
+    connection = FailingConnection()
+    monkeypatch.setattr(
+        oauth_client_store,
+        "get_client_store",
+        lambda: SimpleNamespace(db_path="unused.db"),
+    )
+    monkeypatch.setattr(oauth_client_store.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+
+    with pytest.raises(RuntimeError, match="schema unavailable"):
+        oauth_client_store._connect_cimd_cache()
+
+    assert connection.closed
+
+
+def test_agent_smith_cimd_resolves_locally_without_public_hairpin(monkeypatch, tmp_path):
+    from tests.test_oauth_as_metadata import agent_smith_policy
+
+    calls: list[str] = []
+    _install_resolver(monkeypatch, {}, calls)
+    _, challenge = _pkce()
+    client_id = (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+
+    response = _client(policy=agent_smith_policy(tmp_path)).get(
+        "/oauth/authorize",
+        params=_get_params(
+            client_id,
+            challenge=challenge,
+            redirect_uri="http://127.0.0.1:43682/oauth/callback",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert calls == []
+    stored = get_client_store().get(client_id)
+    assert stored is not None
+    assert stored.client_name == "Agent Smith - Codex"
+    assert stored.redirect_uris[0] == "http://127.0.0.1:43682/oauth/callback"
+
+
+def _seed_old_table_row(client_id: str, port: int) -> None:
+    """Store an Agent Smith row the way the pre-policy code table produced it."""
+    from menhir.api.oauth_authorize_clients import _client_from_cimd_document
+    from menhir.api.oauth_client_store import upsert_cimd_client
+
+    old_document = {
+        "client_id": client_id,
+        "client_name": "Agent Smith - Codex",
+        "redirect_uris": [
+            f"http://127.0.0.1:{port}/oauth/callback",
+            f"http://localhost:{port}/oauth/callback",
+        ],
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scope": "menhir:read menhir:write menhir:admin",
+    }
+    upsert_cimd_client(
+        _client_from_cimd_document(client_id, old_document, _ENABLED), fetched_at=1.0
+    )
+
+
+def test_policy_registrations_reconcile_with_rows_from_the_old_table(tmp_path):
+    from menhir.api.oauth_client_store import reconcile_policy_clients
+    from tests.test_oauth_as_metadata import agent_smith_policy
+
+    client_id = (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+    _seed_old_table_row(client_id, 43682)
+
+    inserted = reconcile_policy_clients(
+        agent_smith_policy(tmp_path),
+        get_client_store(),
+        enabled_protocol_scopes=frozenset({"offline_access"}),
+    )
+
+    assert client_id not in inserted
+    assert get_client_store().get(client_id).redirect_uris == (
+        "http://127.0.0.1:43682/oauth/callback",
+        "http://localhost:43682/oauth/callback",
+    )
+
+
+def test_policy_registration_drift_from_stored_row_refuses_startup(tmp_path):
+    from menhir.api.oauth_client_store import reconcile_policy_clients
+    from tests.test_oauth_as_metadata import agent_smith_policy
+
+    client_id = (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+    _seed_old_table_row(client_id, 49999)
+
+    with pytest.raises(ValueError, match="drifted fields: redirect_uris"):
+        reconcile_policy_clients(
+            agent_smith_policy(tmp_path),
+            get_client_store(),
+            enabled_protocol_scopes=frozenset({"offline_access"}),
+        )
+
+
+def test_client_retired_from_policy_is_refused_despite_a_cached_row(monkeypatch, tmp_path):
+    from tests.test_oauth_as_metadata import agent_smith_policy
+
+    calls: list[str] = []
+    _install_resolver(monkeypatch, {}, calls)
+    _, challenge = _pkce()
+    client_id = (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=gemini"
+    )
+    _seed_old_table_row(client_id, 43683)
+    record_cimd_fetch(client_id)
+
+    def retire_gemini(payload):
+        del payload["clients"][client_id]
+        for product in payload["access_contract"]["products"].values():
+            if client_id in product.get("client_ids", []):
+                product["client_ids"].remove(client_id)
+
+    response = _client(policy=agent_smith_policy(tmp_path, edit=retire_gemini)).get(
+        "/oauth/authorize",
+        params=_get_params(
+            client_id,
+            challenge=challenge,
+            redirect_uri="http://127.0.0.1:43683/oauth/callback",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_agent_smith_id_is_not_resolved_locally_without_a_policy(monkeypatch):
     calls: list[str] = []
     _install_resolver(monkeypatch, {}, calls)
     _, challenge = _pkce()
@@ -104,12 +248,9 @@ def test_agent_smith_cimd_resolves_locally_without_public_hairpin(monkeypatch):
         ),
     )
 
-    assert response.status_code == 200
-    assert calls == []
-    stored = get_client_store().get(client_id)
-    assert stored is not None
-    assert stored.client_name == "Agent Smith - Codex"
-    assert stored.redirect_uris[0] == "http://127.0.0.1:43682/oauth/callback"
+    assert response.status_code == 400
+    assert calls == [client_id]
+    assert get_client_store().get(client_id) is None
 
 
 def _pkce() -> tuple[str, str]:
@@ -204,7 +345,16 @@ def test_cimd_selects_none_when_client_prefers_private_key_jwt(monkeypatch):
     assert get_client_store().get(_URL).token_endpoint_auth_method == "none"
 
 
+def test_cimd_normalizes_client_display_controls_and_preserves_international_text():
+    from menhir.api.oauth_authorize_clients import _client_from_cimd_document
 
+    client = _client_from_cimd_document(
+        _URL, _doc(client_name="  می\u200cتوان \u202b\u2069App  "), _ENABLED
+    )
+    assert client.client_name == "می\u200cتوان App"
+
+    null_client = _client_from_cimd_document(_URL, _doc(client_name=None), _ENABLED)
+    assert null_client.client_name == ""
 
 def test_cimd_rejects_private_key_jwt_when_none_is_not_offered(monkeypatch):
     _install_resolver(

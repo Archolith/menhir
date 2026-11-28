@@ -22,6 +22,7 @@ import logging
 from typing import Any, Callable
 
 from menhir.config import MemorySettings, redact_uri_credentials
+from menhir.infrastructure.circuit_breaker import CircuitBreaker
 from menhir.infrastructure.observability import (
     complete_llm_usage_call,
     fail_llm_usage_call,
@@ -35,13 +36,18 @@ logger = logging.getLogger(__name__)
 ViewEmbedder = Callable[[str], "list[float] | None"]
 
 
-def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
+def make_view_embedder(
+    settings: MemorySettings, *, breaker: CircuitBreaker | None = None
+) -> ViewEmbedder | None:
     """Build a sync ``embed(text) -> list[float] | None`` from the Graphiti embed provider.
 
     Returns ``None`` when the configured embed provider is not OpenAI-compatible or has no model —
     counters then carry only a BM25 surface. The returned callable resolves its OpenAI client on
     first use and swallows all provider errors (returning ``None``) so surfacing can degrade but a
-    counter write is never lost."""
+    counter write is never lost.
+
+    ``breaker`` is the embed breaker for the same provider (#639): while it refuses, embed returns
+    ``None`` without a provider call, and a billing refusal seen here hard-opens it."""
     provider = ProviderConfig.for_graphiti_embedder(settings)
     if not provider.supports_graphiti_openai_contract() or not provider.embed_model:
         logger.info(
@@ -78,6 +84,9 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
         return client
 
     def embed(text: str) -> list[float] | None:
+        if breaker is not None and breaker.refusal_snapshot() is not None:
+            logger.debug("View counter embed skipped: %s is open; writing BM25-only", breaker.name)
+            return None
         handle = None
         try:
             client = _resolve_client()
@@ -95,6 +104,8 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
         except Exception as exc:
             if handle is not None:
                 fail_llm_usage_call(handle, exc)
+            if breaker is not None:
+                breaker.report_quota_refusal_threadsafe(exc)
             logger.warning("View counter embed failed; writing BM25-only", exc_info=True)
             return None
 

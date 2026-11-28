@@ -16,6 +16,7 @@ from menhir.infrastructure.circuit_breaker import (
     CircuitState,
     should_trip_circuit,
 )
+from menhir.infrastructure.openai_rate_limit import ProviderQuotaExhaustedError
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +532,74 @@ async def test_cancel_on_error_path_lock_does_not_wedge_breaker():
     breaker._opened_at = monotonic() - breaker.cooldown_seconds - 1.0
     assert await breaker.call(_succeed) == "ok"
     assert breaker._state == CircuitState.CLOSED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "cancel-after-success", "non-trip-error"])
+async def test_probe_admitted_before_billing_hold_cannot_close_breaker(
+    outcome: str,
+) -> None:
+    breaker = CircuitBreaker(name="test", failure_threshold=3, cooldown_seconds=30.0)
+    await _open_the_breaker(breaker)
+
+    probe_started = asyncio.Event()
+    probe_may_return = asyncio.Event()
+    probe_returning = asyncio.Event()
+
+    async def stale_probe() -> str:
+        probe_started.set()
+        await probe_may_return.wait()
+        probe_returning.set()
+        if outcome == "non-trip-error":
+            raise ValueError("synthetic parse error")
+        return "stale_probe_ok"
+
+    task = asyncio.create_task(breaker.call(stale_probe))
+    await asyncio.wait_for(probe_started.wait(), timeout=2)
+    assert breaker._state == CircuitState.HALF_OPEN
+    assert breaker._probe_in_flight is True
+    assert breaker._hard_open_seq == 0
+
+    assert await breaker.record_quota_refusal(
+        ProviderQuotaExhaustedError("new billing hold")
+    ) is True
+    assert breaker._state == CircuitState.OPEN
+    assert breaker._hard_open_seq == 1
+    assert breaker._probe_in_flight is True
+    hold_started_at = breaker._opened_at
+    hold_failures = breaker._failures
+
+    cancel_after_success = outcome == "cancel-after-success"
+    if cancel_after_success:
+        await breaker._lock.acquire()
+    try:
+        probe_may_return.set()
+        if cancel_after_success:
+            await asyncio.wait_for(probe_returning.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif outcome == "non-trip-error":
+            with pytest.raises(ValueError, match="synthetic parse error"):
+                await task
+        else:
+            assert await task == "stale_probe_ok"
+    finally:
+        if cancel_after_success:
+            breaker._lock.release()
+
+    assert breaker._probe_in_flight is False
+    assert breaker._state == CircuitState.OPEN
+    assert breaker._hard_open_reason == "provider_quota_exhausted"
+    assert breaker._hard_open_seq == 1
+    assert breaker._opened_at == hold_started_at
+    assert breaker._failures == hold_failures
+
+    with pytest.raises(CircuitOpenError) as exc_info:
+        await breaker.call(_succeed)
+    assert exc_info.value.snapshot["reason"] == "provider_quota_exhausted"
+
+    breaker._opened_at = monotonic() - breaker._effective_cooldown() - 1.0
+    assert await breaker.call(_succeed) == "ok"
+    assert breaker._state == CircuitState.CLOSED
+    assert breaker._hard_open_reason is None

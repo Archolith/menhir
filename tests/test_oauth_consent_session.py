@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from menhir.api import auth_code_store, oauth_authorize, oauth_client_store
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.oauth_authorize import router as oauth_authorize_router
+from menhir.api.oauth_authorize_http import _redirect
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 
 pytestmark = pytest.mark.unit
@@ -93,6 +94,18 @@ def _params(cid: str, challenge: str, *, redirect_uri: str = _CB, state: str = "
 
 def _extract_hidden(html_text: str) -> dict[str, str]:
     return dict(re.findall(r'name="([^"]+)" value="([^"]*)"', html_text))
+
+
+def test_redirect_preserves_registered_query_encoding_and_fragment() -> None:
+    response = _redirect(
+        "https://app.example.com/cb?x=%20y&flag#fragment",
+        {"code": "abc", "state": ""},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == (
+        "https://app.example.com/cb?x=%20y&flag&code=abc#fragment"
+    )
 
 
 def _location_query(resp) -> dict[str, list[str]]:

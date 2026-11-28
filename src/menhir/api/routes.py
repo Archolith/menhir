@@ -8,8 +8,9 @@ from uuid import uuid4
 from typing import Any
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from menhir.clock import utc_now_iso
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.ingest import IdempotencyKeyConflict
@@ -20,6 +21,7 @@ from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
 
+from .route_tools import enforce_route_tool_allowlist
 from .scrub_route import ScrubbingAPIRoute
 from .routes_handlers import (
     backend_invoke_impl,
@@ -92,7 +94,11 @@ from .routes_support import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", route_class=ScrubbingAPIRoute)
+router = APIRouter(
+    prefix="/api",
+    route_class=ScrubbingAPIRoute,
+    dependencies=[Depends(enforce_route_tool_allowlist)],
+)
 _INTERNAL_BACKEND_PREFIX = "/internal/backend"
 
 
@@ -174,6 +180,8 @@ def _log_api_recall_query(body: Any, result: dict[str, Any], resolved_namespace:
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
     recall_kwargs: dict[str, object] = {}
+    if "limit" in body.model_fields_set:
+        recall_kwargs["limit_is_explicit"] = True
     if body.include_warden_status:
         recall_kwargs["include_warden_status"] = True
     if body.trace:
@@ -184,6 +192,10 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     if body.source_memory_sources is not None:
         recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
+    if body.file_context is not None:
+        recall_kwargs["file_context"] = body.file_context
+    if body.file_context_project is not None:
+        recall_kwargs["file_context_project"] = body.file_context_project
     resolved_namespace = _resolve_namespace(request, body.namespace)
     try:
         result = await backend.recall(
@@ -247,6 +259,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             for m in result.get("results", []) or []
         ],
         candidates_evaluated=int(result.get("candidates_evaluated") or 0),
+        note=result.get("note"),
         warden_status=result.get("warden_status") if body.include_warden_status else None,
         warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),
@@ -388,7 +401,12 @@ async def bootstrap_flagged(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, object]:
     """Read scoped pins and issue a reader-local bootstrap receipt."""
-    from menhir.mcp.formatters import _normalize_reader_id, _project_skipped_memory_rows
+    from menhir.mcp.formatters import (
+        _flagged_pin_counts,
+        _normalize_reader_id,
+        _project_skipped_memory_rows,
+        _workspace_pin_fields,
+    )
     from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 
     backend = _get_backend(request)
@@ -417,12 +435,16 @@ async def bootstrap_flagged(
     _remember_flagged_bootstrap_read(
         normalized_reader, version, workspace=workspace, namespace=resolved_namespace
     )
+    workspace_fields = await _workspace_pin_fields(
+        backend, selection_key, workspace=workspace, namespace=resolved_namespace
+    )
     return {
         "reader_id": normalized_reader,
         "bootstrap_selection": selection_key,
         "bootstrap_ready": True,
         "flagged_version": version,
-        "flagged_count": len(rows),
+        **_flagged_pin_counts(version, selection_key, len(rows)),
+        **workspace_fields,
         "items": rows,
     }
 
@@ -580,15 +602,18 @@ async def ingest_memory(
     except IdempotencyKeyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     status = str(result.get("status") or "")
-    error: str | None = None
+    error = result.get("error") if status == "failed" else None
+    warning = result.get("warning")
     retry: str | None = None
     timed_out = False
     entities_linked: int | None = None
-    if wait:
+    if wait and status != "failed":
         row = await runtime_ctx.built.ingest_service.wait_for_episode_processing(
             str(result.get("episode_id") or ""), timeout_s=60.0
         )
         status, error, retry, timed_out = _terminal_status_from_row(row, fallback=status)
+        if status not in {"queued", "pending"}:
+            warning = None
         if status == "ready":
             entities_linked = await _count_linked_entities(runtime_ctx, row, str(result.get("episode_id") or ""))
     return MemoryResponse(
@@ -598,6 +623,7 @@ async def ingest_memory(
         flagged=body.flagged,
         bootstrap_scope=body.bootstrap_scope,
         error=error,
+        warning=warning,
         retry=retry,
         timed_out=timed_out,
         entities_linked=entities_linked,
@@ -877,17 +903,26 @@ async def tool_events_dirty(request: Request, project: str | None = None) -> dic
     if adapter is None or not hasattr(adapter, "list_dirty_files"):
         raise HTTPException(status_code=503, detail="tool-event diagnostics unavailable")
     dirty = await asyncio.to_thread(adapter.list_dirty_files, project=project)
+    resolved_namespace = _resolve_namespace(request, None)
     stale = await asyncio.to_thread(
-        adapter.stale_anchored_memories, project=project,
-        namespace=_resolve_namespace(request, None),
+        adapter.stale_anchored_memories, project=project, namespace=resolved_namespace,
     )
+    if hasattr(adapter, "tool_event_dirty_stats"):
+        counts = await asyncio.to_thread(
+            adapter.tool_event_dirty_stats, project=project, namespace=resolved_namespace
+        )
+    else:
+        counts = {"dirty_files": len(dirty), "stale_anchors": len(stale)}
     return {"dirty_files": dirty, "stale_anchors": stale,
-            "counts": {"dirty_files": len(dirty), "stale_anchors": len(stale)}}
+            "counts": counts}
 
 
 @router.get("/tool-events/stale")
-async def tool_events_stale(request: Request, project: str | None = None,
-                            limit: int = 200) -> dict:
+async def tool_events_stale(
+    request: Request,
+    project: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 200,
+) -> dict:
     """Readonly: return stale anchored memories without the full dirty-file diagnostic."""
     _require_tier("readonly")
     runtime_ctx = _require_runtime_context(request)
@@ -912,8 +947,7 @@ async def record_stale_anchor_verification(request: Request,
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "record_stale_anchor_verification"):
         raise HTTPException(status_code=503, detail="stale-anchor verification unavailable")
-    from datetime import datetime, timezone
-    verified_at = body.verified_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    verified_at = body.verified_at or utc_now_iso().replace("+00:00", "Z")
     try:
         result = await asyncio.to_thread(
             adapter.record_stale_anchor_verification,
@@ -933,9 +967,11 @@ async def record_stale_anchor_verification(request: Request,
 
 @router.get("/tool-events/stale-verifications")
 async def list_stale_anchor_verifications(
-    request: Request, memory_uuid: str | None = None,
-    project: str | None = None, path: str | None = None,
-    limit: int = 50,
+    request: Request,
+    memory_uuid: str | None = None,
+    project: str | None = None,
+    path: str | None = None,
+    limit: Annotated[int, Query(ge=0, le=500)] = 50,
 ) -> dict:
     """Return stored stale-anchor verification receipts, optionally filtered."""
     _require_tier("readonly")
@@ -993,20 +1029,27 @@ async def delete_namespace(
 
 @router.post("/memory/{uuid}/flag", response_model=FlagResponse)
 async def flag_memory(
-    request: Request, uuid: str, bootstrap_scope: str | None = None
+    request: Request,
+    uuid: str,
+    bootstrap_scope: str | None = None,
+    pin_priority: int | None = Query(default=None, ge=0, le=100),
 ) -> FlagResponse:
     _require_tier("agent")
     backend = _get_backend(request)
-    if bootstrap_scope is None:
-        flagged = await backend.flag_memory(uuid)
-    else:
-        flagged = await backend.flag_memory(uuid, bootstrap_scope=bootstrap_scope)
+    kwargs: dict[str, Any] = {}
+    if bootstrap_scope is not None:
+        kwargs["bootstrap_scope"] = bootstrap_scope
+    if pin_priority is not None:
+        kwargs["pin_priority"] = pin_priority
+    flagged = await backend.flag_memory(uuid, **kwargs)
     fetch_by_uuid = getattr(backend, "fetch_memory_by_uuid", None)
     row = await fetch_by_uuid(uuid) if flagged and fetch_by_uuid is not None else None
     return FlagResponse(
         uuid=uuid,
         flagged=flagged,
         bootstrap_scope=(row or {}).get("bootstrap_scope"),
+        # The rank this call set; null means it left the stored rank unchanged.
+        pin_priority=pin_priority if flagged else None,
     )
 
 

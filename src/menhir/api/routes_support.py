@@ -12,7 +12,7 @@ from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
-from menhir.domain.recall import VerifierEvidence, normalize_source_memory_sources
+from menhir.domain.recall import MAX_EXPLICIT_RECALL_RESULTS, VerifierEvidence, normalize_source_memory_sources
 from menhir.tiers import TIER_RANK
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
@@ -190,8 +190,10 @@ def _resolve_namespace(request: Request, body_namespace: str | None) -> str | No
 class RecallRequest(BaseModel):
     query: str
     preset: str = "knowledge"
-    limit: int = Field(default=10, ge=1, le=50)
+    limit: int = Field(default=10, ge=1, le=MAX_EXPLICIT_RECALL_RESULTS)
     namespace: str | None = None
+    file_context: str | None = None
+    file_context_project: str | None = None
     # Whether to include SESSION-scoped (not-yet-promoted-to-PERSISTENT) memories.
     # True, matching every MCP recall tool. It was False here for historical reasons, which
     # made the most basic first-run check -- write one memory, read it back over REST --
@@ -323,6 +325,10 @@ class SourceMemoryResponse(BaseModel):
     reference_time: str | None = None
     cosine: float
     source: str | None = None
+    # Relevance position within the section (1 = best); the list itself is oldest first.
+    rank: int | None = None
+    # Set only on historical surfaces, for a memory retired via retire_memory.
+    retired: bool = False
 
 
 class RecallResponse(BaseModel):
@@ -330,6 +336,7 @@ class RecallResponse(BaseModel):
     preset: str
     results: list[RecallMemory]
     candidates_evaluated: int
+    note: str | None = None
     warden_status: dict[str, object] | None = None
     warden_notice: str | None = None
     trace: dict[str, object] | None = None
@@ -491,6 +498,8 @@ class MemoryResponse(BaseModel):
     #: Set when ``status`` is ``failed``: the error text and whether Menhir will retry it on its
     #: own (``retryable``), park it for an operator (``manual_review``), or never (``terminal``).
     error: str | None = None
+    #: Guidance for a saved memory awaiting queue recovery.
+    warning: str | None = None
     retry: str | None = None
     #: Set when ``wait`` elapsed before a terminal state.
     timed_out: bool = False
@@ -636,6 +645,7 @@ class FlagResponse(BaseModel):
     uuid: str
     flagged: bool
     bootstrap_scope: str | None = None
+    pin_priority: int | None = None
 
 
 class UnflagResponse(BaseModel):
@@ -777,9 +787,16 @@ def _require_phase3_adapter(request: Request):
 
 _BACKEND_METHODS = {
     "queue_episode",
+    "record_turn_evidence",
+    "fetch_namespace_build_counts",
+    "list_failed_evidence_projections",
+    "promote_namespace_scope",
+    "reset_namespace",
     "flag_memory",
     "unflag_memory",
     "promote_memory",
+    "retire_memory",
+    "restore_memory",
     "delete_memory",
     "erase_memory",
     "delete_namespace",
@@ -797,6 +814,7 @@ _BACKEND_METHODS = {
     "fetch_recent_memories",
     "fetch_flagged_memories",
     "fetch_flagged_memory_bootstrap_version",
+    "fetch_flagged_pin_counts",
     "fetch_memories_by_scope",
     "fetch_memories_by_type",
     "get_scan_fingerprint",
@@ -806,6 +824,7 @@ _BACKEND_METHODS = {
     "query_structure",
     "list_conflict_groups",
     "resolve_conflict_group",
+    "estimate_bridges_for_nodes",
     "requeue_conflicts_for_llm_review",
     "scan_for_conflicts",
     "confirm_pending_conflicts",
@@ -876,8 +895,13 @@ _BACKEND_METHODS = {
 # forbidden — memory-governance.md §4).
 _OP_TIER_OPERATOR = {
     "delete_memory", "erase_memory", "delete_namespace",
+    # Build ops (P4a): reset_namespace is phase3 reset (delete + evidence purge); promote rewrites
+    # every SESSION entity/edge scope in a silo.
+    "reset_namespace", "promote_namespace_scope",
     # Read-only, but previews every record in a silo: operator, like the deletes it feeds.
     "list_namespace_records",
+    # Read-only, but the dry run of resolve_conflict_group, which is operator: same audience.
+    "estimate_bridges_for_nodes",
     "resolve_conflict_group", "requeue_conflicts_for_llm_review", "scan_for_conflicts",
     "confirm_pending_conflicts", "record_conflict_resolution",
     "force_reset_failed_episode", "force_release_episode_lease",
@@ -885,6 +909,7 @@ _OP_TIER_OPERATOR = {
     "scheduler_force_takeover", "scheduler_pause", "scheduler_resume",
     "promote_candidate", "reject_candidate", "approve_candidate",
     "promote_memory",
+    "retire_memory", "restore_memory",
     "acknowledge_operator_warning",
     # CF-257 phase 0. Raised from agent tier. This op writes a structure payload the CALLER
     # produced, and judges it using a `root_path` the same caller supplied -- so the server
@@ -899,6 +924,8 @@ _OP_TIER_OPERATOR = {
 }
 _OP_TIER_AGENT = {
     "queue_episode", "flag_memory", "unflag_memory", "enqueue_pending_episode",
+    # Agent, matching POST /api/turn-evidence: it writes evidence, deletes nothing.
+    "record_turn_evidence",
     "ingest_document", "scan_and_write_project",
     "create_todo", "close_todo", "delete_todo", "close_stale_todos",
     # Todo lifecycle and lineage. Same standing as the artifact writes below: each moves a

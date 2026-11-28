@@ -6,10 +6,12 @@ Run with:  pytest --run-online tests/test_source_embedding_repair_live.py
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from menhir.core.backend_runtime_admin_ops import RuntimeProviderAdminOpsMixin
 from menhir.infrastructure.episode_repository import EpisodeRepository
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.source_embedding_repair import repair_source_embeddings
@@ -43,8 +45,11 @@ def test_listing_ready_only_selects_finished_unembedded_episodes(test_neo4j_repo
     repo = EpisodeRepository(graph)
     ready = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, ready_only=True)}
     every = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50)}
+    settled = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, settled_only=True)}
     assert ready == {"r-ready"}
-    assert every == {"r-ready", "r-pending", "r-enriching"}
+    # A FAILED episode is source-recallable (#662), so it is listed for embedding too.
+    assert settled == {"r-ready", "r-failed"}
+    assert every == {"r-ready", "r-pending", "r-enriching", "r-failed"}
 
 
 def test_write_is_refused_when_content_no_longer_matches(test_neo4j_repo: Any) -> None:
@@ -57,12 +62,35 @@ def test_write_is_refused_when_content_no_longer_matches(test_neo4j_repo: Any) -
     assert _stamp(graph, "c-1") == ([1.0], "m-1")
 
 
-def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_repo: Any) -> None:
+def test_repair_job_end_to_end_including_an_edit_during_the_embed(
+    test_neo4j_repo: Any, monkeypatch: Any,
+) -> None:
     graph = test_neo4j_repo
+    # The status compares against the size the configured embedder produces (the live query
+    # vector's size), resolved from settings; these vectors are 2-d.
+    monkeypatch.setattr(
+        "menhir.infrastructure.embedding_dimensions.expected_graphiti_embedding_dimension",
+        lambda settings: 2,
+    )
     adapter = MemoryGraphAdapter(graph)
     _episode(graph, "e-ready", "READY", content="ready text")
     _episode(graph, "e-edited", "READY", content="before edit")
     _episode(graph, "e-pending", "PENDING", content="pending text")
+
+    class StatusBackend(RuntimeProviderAdminOpsMixin):
+        built = SimpleNamespace(
+            graph_adapter=adapter,
+            settings=SimpleNamespace(),
+            graphiti_client=SimpleNamespace(embedder_ref=SimpleNamespace(
+                config=SimpleNamespace(embedding_model="m-1", embedding_dim=2),
+            )),
+        )
+        _off_loop = staticmethod(asyncio.to_thread)
+
+    backend = StatusBackend()
+    before = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert before["processing_state"] == "READY"
+    assert before["source_search_status"] == "PENDING"
 
     async def embed(text: str) -> list[float]:
         if text == "before edit":  # the episode changes while its vector is being computed
@@ -71,9 +99,49 @@ def test_repair_job_end_to_end_including_an_edit_during_the_embed(test_neo4j_rep
 
     result = asyncio.run(repair_source_embeddings(adapter, embed=embed, model_name=lambda: "m-1"))
     assert _stamp(graph, "e-ready") == ([10.0, 1.0], "m-1")
+    after = asyncio.run(backend.fetch_episode_processing("e-ready"))
+    assert after["processing_state"] == "READY"
+    assert after["source_search_status"] == "READY"
+    assert [row["uuid"] for row in adapter.search_episode_embeddings(
+        [10.0, 1.0], model="m-1", namespace="default",
+    )] == ["e-ready"]
     assert _stamp(graph, "e-edited") == (None, None)      # stale vector refused
     assert _stamp(graph, "e-pending") == (None, None)     # still owned by the ingest step
     assert result["written"] == 1 and result["skipped"] == 1
     # The edited episode is picked up with its new text on the next run.
     asyncio.run(repair_source_embeddings(adapter, embed=embed, model_name=lambda: "m-1"))
     assert _stamp(graph, "e-edited") == ([10.0, 1.0], "m-1")
+
+
+def test_listing_skips_repeat_failures_until_cooldown(test_neo4j_repo: Any) -> None:
+    """#921: an episode at the failure limit is skipped, and listed again after the cooldown."""
+    graph = test_neo4j_repo
+    for uuid in ("f-fresh", "f-recent", "f-old", "f-under"):
+        _episode(graph, uuid, "READY")
+    repo = EpisodeRepository(graph)
+    for _ in range(3):
+        repo.record_source_embedding_failures(["f-recent", "f-old"])
+    repo.record_source_embedding_failures(["f-under"])
+    graph.execute("MATCH (n:Episodic {uuid: 'f-old'}) "
+                  "SET n.source_embedding_last_failed_at = datetime() - duration('P8D')")
+    listed = {r["uuid"] for r in repo.list_episodes_missing_content_embedding(None, 50, max_failures=3)}
+    assert {"f-fresh", "f-old", "f-under"} <= listed
+    assert "f-recent" not in listed
+    repo.set_episode_content_embedding("f-recent", [1.0], "m-1")
+    row = graph.execute("MATCH (n:Episodic {uuid: 'f-recent'}) "
+                        "RETURN n.source_embedding_failures AS c", params={})[0]
+    assert row["c"] is None
+
+
+def test_record_failures_returns_episodes_at_or_past_the_limit(test_neo4j_repo: Any) -> None:
+    """#1009: the uuids that reached the limit come back, including a re-exclusion past it."""
+    graph = test_neo4j_repo
+    for uuid in ("x-a", "x-b", "x-under"):
+        _episode(graph, uuid, "READY")
+    repo = EpisodeRepository(graph)
+    crossed = [repo.record_source_embedding_failures(["x-a", "x-b"], 3) for _ in range(3)]
+    assert crossed[0] == {} and crossed[1] == {}
+    assert crossed[2] == {"x-a": 3, "x-b": 3}
+    assert repo.record_source_embedding_failures(["x-under"], 3) == {}
+    assert repo.record_source_embedding_failures(["x-a"], 3) == {"x-a": 4}  # after cooldown
+    assert repo.record_source_embedding_failures(["x-b"]) == {}  # no limit: nothing reported

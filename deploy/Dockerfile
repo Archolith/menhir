@@ -53,7 +53,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/tmp \
-    WORKSPACE_ROOT=/tmp/menhir \
+    MENHIR_STATE_DIR=/tmp/menhir \
     MENHIR_API_HOST=0.0.0.0 \
     MENHIR_API_PORT=8099 \
     MENHIR_STARTUP_SCOPE=production \
@@ -120,29 +120,17 @@ load_secret() {
     fi
 }
 load_required_secret() {
-    file="$secrets_dir/$1"
-    var="$2"
+    dir="$1"
+    label="$2"
+    file="$dir/$3"
+    var="$4"
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
-        echo "required secret file is missing or unreadable: $file" >&2
+        echo "required $label file is missing or unreadable: $file" >&2
         exit 78
     fi
     value="$(tr -d '\r\n' < "$file")"
     if [ -z "$value" ]; then
-        echo "required secret file is empty: $file" >&2
-        exit 78
-    fi
-    export "$var=$value"
-}
-load_required_oauth_secret() {
-    file="$oauth_secrets_dir/$1"
-    var="$2"
-    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
-        echo "required OAuth secret file is missing or unreadable: $file" >&2
-        exit 78
-    fi
-    value="$(tr -d '\r\n' < "$file")"
-    if [ -z "$value" ]; then
-        echo "required OAuth secret file is empty: $file" >&2
+        echo "required $label file is empty: $file" >&2
         exit 78
     fi
     export "$var=$value"
@@ -154,12 +142,12 @@ require_readable_file() {
         exit 78
     fi
 }
-load_required_secret neo4j-password NEO4J_PASSWORD
+load_required_secret "$secrets_dir" "secret" neo4j-password NEO4J_PASSWORD
 load_secret openai-api-key       OPENAI_API_KEY
 load_secret gemini-api-key       GEMINI_API_KEY
 load_secret local-llm-api-key    LOCAL_LLM_API_KEY
-load_required_secret operator-key MENHIR_OPERATOR_KEY
-load_required_oauth_secret oauth-consent-secret MENHIR_OAUTH_AS_CONSENT_SECRET
+load_required_secret "$secrets_dir" "secret" operator-key MENHIR_OPERATOR_KEY
+load_required_secret "$oauth_secrets_dir" "OAuth secret" oauth-consent-secret MENHIR_OAUTH_AS_CONSENT_SECRET
 load_secret api-key              MENHIR_API_KEY
 load_secret agent-key            MENHIR_AGENT_KEY
 load_secret readonly-key         MENHIR_READONLY_KEY
@@ -169,10 +157,10 @@ if [ "${MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S:-0}" != "0" ]; then
 fi
 require_readable_file "${MENHIR_CLIENT_POLICY_PATH:-/srv/menhir/production/policy/client-policy.json}"
 case "${LLM_CHAT_PROVIDER:-local},${GRAPHITI_LLM_PROVIDER:-local},${GRAPHITI_EMBED_PROVIDER:-}" in
-    *openai*) load_required_secret openai-api-key OPENAI_API_KEY ;;
+    *openai*) load_required_secret "$secrets_dir" "secret" openai-api-key OPENAI_API_KEY ;;
 esac
 case "${LLM_CHAT_PROVIDER:-local},${GRAPHITI_LLM_PROVIDER:-local},${GRAPHITI_EMBED_PROVIDER:-}" in
-    *gemini*) load_required_secret gemini-api-key GEMINI_API_KEY ;;
+    *gemini*) load_required_secret "$secrets_dir" "secret" gemini-api-key GEMINI_API_KEY ;;
 esac
 unset secrets_dir oauth_secrets_dir
 exec "$@"

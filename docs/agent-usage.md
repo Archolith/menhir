@@ -50,6 +50,13 @@ Each neighbor uses the lower of the regular content cap and
 `MENHIR_FRONTIER_SOURCE_MEMORY_NEIGHBOR_MAX_CHARS` (default `800`, range `100..4000`), before any
 compact-mode truncation.
 
+Source memories are listed oldest first, and each carries a `rank` (1 = closest match to the query); `rank`
+is null where no ranking was computed, such as `recall_history`. `build_context` (`POST /api/context`)
+packs the ranked memories first, then adds source memories best rank first while they fit the remaining
+`max_tokens` budget, skipping any that do not fit; the ones admitted are shown oldest first. With the
+default budget of 2000 tokens the ranked memories usually leave little room, so pass a larger `max_tokens`
+(up to 10000) when the raw sources matter.
+
 ## Write discipline
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.
@@ -58,6 +65,7 @@ compact-mode truncation.
 - For a recall-critical semantic write in the local-stdio MVP, choose `add_memory_and_track` as the
   original write. Plain `add_memory` is fire-and-forget and provides no immediate-recall guarantee.
 - `add_memory` returning `PENDING` means the write was accepted, not that it will certainly finish.
+  If the receipt says enrichment is pending queue recovery, the memory is already saved.
   Keep the returned episode ID. Never call `add_memory_and_track` afterward to wait on that write:
   it takes new text, not an existing episode ID, and would queue another write.
 - Use `TEMPORAL` with `valid_at` for time-bound reminders. Use workspace/namespace fields explicitly; a
@@ -217,7 +225,10 @@ after it republishes even though the scan fingerprint is unchanged.
   `provider_auth_failure` when it rejected the credentials. Neither changes `status` or the 200/503
   code: the server still answers recall from keyword search, and a restart does not fix billing. The
   billing breaker probes the provider again every 5 minutes and closes once a call succeeds, so adding
-  credit needs no restart.
+  credit needs no restart. The block reads the flags and breakers of the process that answers the
+  request. `menhir serve` runs one worker, and that worker also runs the ingest queue and the
+  maintenance scheduler, so the block reflects ingest and recall. A deployment that splits HTTP from
+  ingest across processes would see only the HTTP process's state there.
 - After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
   `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
   the server serves the instructions and tools this package expects. The script sends the token only over

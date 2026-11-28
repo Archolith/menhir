@@ -105,9 +105,9 @@ NEO4J_DIGEST="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["
 AGE_RECIPIENT="$(age-keygen -y "$AGE_IDENTITY")"
 case "$AGE_RECIPIENT" in age1*) ;; *) echo "invalid age recipient derived from identity" >&2; exit 1;; esac
 
+[ ! -L "$STATUS_DIR" ] && [ ! -L "${STATUS_DIR}/staging" ] && [ ! -L "$ARCHIVE_ROOT" ] && [ ! -L "$RECEIPT_ROOT" ] \
+    || { echo "status, staging, archive, and receipt roots must not be symlinks" >&2; exit 1; }
 mkdir -p "$STATUS_DIR" "$ARCHIVE_ROOT" "$RECEIPT_ROOT" "${STATUS_DIR}/staging"
-[ ! -L "$ARCHIVE_ROOT" ] && [ ! -L "$RECEIPT_ROOT" ] \
-    || { echo "archive and receipt roots must not be symlinks" >&2; exit 1; }
 chmod 0700 "$ARCHIVE_ROOT" "$RECEIPT_ROOT" "${STATUS_DIR}/staging"
 STAGING_DIR="$(mktemp -d "${STATUS_DIR}/staging/local.XXXXXXXXXX")"
 trap 'rm -rf "$STAGING_DIR"' EXIT
@@ -126,8 +126,6 @@ rm -f "$PLAINTEXT_ARCHIVE" "$ROUNDTRIP_ARCHIVE"
 nonce="$(date -u +%Y%m%dT%H%M%SZ)-$(python3 -c 'import secrets;print(secrets.token_hex(8))')"
 LOCAL_ARCHIVE_PATH="${ARCHIVE_ROOT}/${GENERATION}-${nonce}.tar.gz.age"
 install -m 0400 "$ENCRYPTED_ARCHIVE" "$LOCAL_ARCHIVE_PATH"
-ARCHIVE_SHA256="$(sha256sum "$LOCAL_ARCHIVE_PATH" | cut -d' ' -f1)"
-ARCHIVE_SIZE="$(stat -c '%s' "$LOCAL_ARCHIVE_PATH")"
 python3 - "$LOCAL_ARCHIVE_PATH" <<'PYEOF'
 import os, sys
 path = os.path.abspath(sys.argv[1])

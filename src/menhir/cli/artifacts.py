@@ -86,8 +86,19 @@ def validate(
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
 ) -> None:
     """Check the corpus against the authoring contract. No graph access, no writes."""
+    from menhir.services.artifact_reconciliation_service import (
+        CorpusRootUnavailableError,
+    )
+
     service = _offline_service()
-    report = service.validate(Path(path), repository=repository or None)
+    try:
+        report = service.validate(Path(path), repository=repository or None)
+    except CorpusRootUnavailableError as exc:
+        if as_json:
+            _emit({"error": "corpus_root_unavailable", "detail": str(exc)})
+        else:
+            print(f"validate unavailable: {exc}")
+        raise typer.Exit(EXIT_UNAVAILABLE) from exc
 
     if as_json:
         _emit(report.as_dict())

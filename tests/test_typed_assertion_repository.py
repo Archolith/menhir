@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 
+from menhir.domain.namespace import silo_key_cypher
 from menhir.domain.typed_assertion import (
     IDENTITY_VERSION,
     TypedAssertion,
@@ -55,7 +56,47 @@ def test_pending_projection_repairs_are_bounded_and_scoped() -> None:
     assert rows[0]["repair_key"] == "r1"
     query, params = fake.executed[0]
     assert "rr.status = 'pending'" in query
+    assert silo_key_cypher("rr") in query
+    assert "rr.operation_kind = 'TIME_ACTIVATION' AND rr.namespace IS NULL" in query
     assert params == {"limit": 7, "operation_id": "op1", "namespaces": ["tenant-a"]}
+
+
+@pytest.mark.unit
+def test_pending_projection_repairs_unscoped_keeps_raw_namespace_and_no_resolution() -> None:
+    fake = FakeNeo4j(default=[{
+        "repair_key": "r1", "operation_id": "op1", "operation_kind": "MEMORY_DELETE",
+        "subject_uuid": "ent-1", "namespace": "", "started_at": "2026-07-22T00:00:00Z",
+    }])
+
+    rows = TypedAssertionRepository(fake).pending_projection_repairs()
+
+    assert rows[0]["namespace"] == ""
+    query, params = fake.executed[0]
+    assert "rr.namespace AS namespace" in query
+    assert "OPTIONAL MATCH" not in query
+    assert "namespace_key" not in query
+    assert params == {"limit": 200}
+
+
+@pytest.mark.unit
+def test_pending_repairs_scoped_canonicalizes_blank_default_and_resolution_guard() -> None:
+    fake = FakeNeo4j(default=[{
+        "repair_key": "r2", "operation_id": "a2", "operation_kind": "TIME_ACTIVATION",
+        "subject_uuid": "ent-1", "namespace": "default", "started_at": "2026-07-22T00:00:00Z",
+    }])
+
+    rows = TypedAssertionRepository(fake).pending_projection_repairs(
+        namespaces=["", "default", "default"], limit=4)
+
+    assert rows[0]["namespace"] == "default"
+    query, params = fake.executed[0]
+    assert silo_key_cypher("rr") in query
+    assert silo_key_cypher("claim") in query
+    assert "namespace_key IN $namespaces" in query
+    assert "OPTIONAL MATCH (source:TypedAssertion {assertion_id: rr.operation_id})" in query
+    assert "size(claims) = 1" in query
+    assert "rr.operation_kind = 'TIME_ACTIVATION'" in query
+    assert params == {"limit": 4, "namespaces": ["default"]}
 
 
 @pytest.mark.unit
@@ -84,7 +125,27 @@ def test_due_activation_claim_is_bounded_scoped_and_crash_repairable() -> None:
     assert "a.valid_at <= datetime($as_of)" in query
     assert "a.activation_pending = false" in query
     assert "ScalarProjectionRepair" in query
+    assert f"{silo_key_cypher('a')} IN $namespaces" in query
+    assert f"rr.namespace = {silo_key_cypher('a')}" in " ".join(query.split())
     assert params["namespaces"] == ["tenant-a"] and params["limit"] == 9
+
+
+@pytest.mark.unit
+def test_due_activation_claim_normalizes_blank_default_allowlist() -> None:
+    fake = FakeNeo4j(default=[])
+
+    TypedAssertionRepository(fake).claim_due_scalar_activations(
+        as_of="2026-07-22T12:00:00+00:00",
+        namespaces=["", "default", " tenant-a "], limit=2)
+
+    query, params = fake.executed[0]
+    assert f"{silo_key_cypher('a')} IN $namespaces" in query
+    assert f"rr.namespace = {silo_key_cypher('a')}" in " ".join(query.split())
+    assert params == {
+        "as_of": "2026-07-22T12:00:00+00:00",
+        "namespaces": ["default", "tenant-a"],
+        "limit": 2,
+    }
 
 
 def _assertion(**over):

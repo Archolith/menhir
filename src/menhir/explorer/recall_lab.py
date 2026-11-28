@@ -13,14 +13,20 @@ import secrets
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from menhir.domain.models import MemoryType, NodeScope
 from menhir.domain.recall import QueryPreset
-from menhir.domain.retrieval_tuning import CandidateSource, RetrievalScoreKind, RetrievalTuningConfig
+from menhir.domain.retrieval_tuning import (
+    RANKING_STRATEGIES,
+    CandidateSource,
+    RetrievalScoreKind,
+    RetrievalTuningConfig,
+)
 from menhir.domain.truth.labels import WardenLabel
+from menhir.domain.warden import WardenDecision
 from menhir.domain.typed_assertion import ASSERTION_OPERATIONS, EVIDENCE_TIERS, VALUE_KINDS
 from menhir.privacy import MASK, redact_text
 
@@ -51,6 +57,13 @@ class RecallLabTuning(BaseModel):
     # Capped below the setting's 200: Lab runs many arms per request (SEC-05).
     rerank_top_n: int = Field(default=50, ge=1, le=100)
     rerank_max_results: int = Field(default=7, ge=1, le=200)
+    ranking_strategy: Literal["reranker_only", "oracle_only", "oracle_combined"] = "reranker_only"
+    oracle_weight_relevant: float = Field(default=1.0, ge=0.0, le=10.0)
+    oracle_weight_current: float = Field(default=1.0, ge=0.0, le=10.0)
+    oracle_weight_historical: float = Field(default=1.0, ge=0.0, le=10.0)
+    oracle_weight_conflict: float = Field(default=1.0, ge=0.0, le=10.0)
+    oracle_weight_blocked: float = Field(default=1.0, ge=0.0, le=10.0)
+    oracle_weight_rerank: float = Field(default=1.0, ge=0.0, le=10.0)
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
@@ -395,6 +408,25 @@ def _mapping(value: object | None) -> dict[str, Any] | None:
     return {key: _enum_value(item) for key, item in raw.items()}
 
 
+def _ranking_row(trace: object | None, uuid: str) -> dict[str, Any] | None:
+    for row in _value(trace, "ranking", None) or []:
+        if str(_value(row, "candidate_id", "")) == uuid:
+            return {
+                "strategy": _value(row, "strategy"),
+                "rerank_logit": _value(row, "rerank_logit"),
+                "ranking_score": _value(row, "ranking_score"),
+                "combiner_rank": _value(row, "combiner_rank"),
+                "decision": _value(row, "decision"),
+                "warden_label": _enum_value(_value(row, "label")),
+                "role_logits": dict(_value(row, "role_logits", {}) or {}),
+                "weights": dict(_value(row, "weights", {}) or {}),
+                "contributions": dict(_value(row, "contributions", {}) or {}),
+                "reason": _value(row, "reason", ""),
+                "rationale": list(_value(row, "rationale", []) or []),
+            }
+    return None
+
+
 def _trace_row(trace: object | None, uuid: str) -> object | None:
     for row in _value(trace, "candidates", []) or []:
         if str(_value(row, "uuid", "")) == uuid:
@@ -426,9 +458,15 @@ _NUMBER_KEYS: frozenset[str] = frozenset({
     "final_score", "retrieval_score", "similarity", "bm25_rank", "cosine_rank", "content_rank",
     "content_cosine", "cosine", "semantic_similarity", "adjacency_bonus", "recency_bonus",
     "prominence_bonus", "conflict_bonus", "type_boost", "alpha", "beta", "gamma", "delta",
+    # Ranking explain: scores and the per-role logits, weights and contributions under it.
+    "rerank_logit", "ranking_score", "combiner_rank",
+    "relevant", "current", "historical", "conflict", "blocked", "rerank",
 })
 # Children of these are walked by the same allowlist; a bare string under one is masked.
-_CONTAINER_KEYS: frozenset[str] = frozenset({"contributors", "temporal_facts", "score_parts"})
+_CONTAINER_KEYS: frozenset[str] = frozenset({
+    "contributors", "temporal_facts", "score_parts",
+    "ranking", "role_logits", "weights", "contributions",
+})
 _VOCAB: dict[str, frozenset[str]] = {
     "scope": frozenset({s.value for s in NodeScope} | {f"NodeScope.{s.name}" for s in NodeScope}),
     "kind": frozenset({"current", "expired", "as_of", "history"}),
@@ -448,6 +486,8 @@ _VOCAB: dict[str, frozenset[str]] = {
     "retrieval_score_kind": frozenset({k.value for k in RetrievalScoreKind}),
     "warden_label": frozenset({w.value for w in WardenLabel}),
     "preset": frozenset({p.value for p in QueryPreset}),
+    "strategy": frozenset(RANKING_STRATEGIES),
+    "decision": frozenset({d.value for d in WardenDecision}),
 }
 _REDACTION_SAFE_KEYS: frozenset[str] = (
     _ID_KEYS | _TIME_KEYS | _NUMBER_KEYS | _CONTAINER_KEYS | frozenset(_VOCAB)
@@ -719,6 +759,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
             # reasoning the answer prompt depends on this for was uniformly unavailable
             # across every Recall Lab arm regardless of tuning.
             "temporal_facts": [asdict(t) for t in _value(memory, "temporal_facts", ()) or ()],
+            "ranking": _ranking_row(trace, uuid),
         }
         memories.append(_redact_allowlist(row, reveal=reveal))
 
@@ -836,10 +877,11 @@ async def run_recall_lab(
                 for arm in arms
                 if arm not in healthy_arms
             ]
+            # No query text and no raw error text in logs (privacy.py: no memory content in a log line).
             logger.warning(
-                "Recall Lab judge skipped for query=%r: fewer than two healthy arms; failures=%s",
-                request.query,
-                failures,
+                "Recall Lab judge skipped (query_chars=%d): fewer than two healthy arms; failures=%s",
+                len(request.query),
+                [{**f, "error": _redact_error_text(f["error"])} for f in failures],
             )
             judgment = {
                 "ok": False,

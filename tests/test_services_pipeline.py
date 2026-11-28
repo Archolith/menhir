@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import logging
 import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -167,6 +167,71 @@ async def test_queue_episode_for_enrichment_returns_queued(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["worker", "queue_put"])
+async def test_saved_episode_survives_scheduling_failure(
+    stub_memory_graph_adapter,
+    stub_graphiti_client,
+    stub_llm_adapter,
+    monkeypatch,
+    failure_point,
+) -> None:
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    worker = AsyncMock()
+    monkeypatch.setattr(service, "_ensure_enrichment_worker", worker)
+    queue = service._queue()
+    if failure_point == "worker":
+        worker.side_effect = RuntimeError("worker unavailable")
+    else:
+        put = queue.put
+        monkeypatch.setattr(queue, "put", AsyncMock(side_effect=RuntimeError("queue unavailable")))
+
+    result = await service.queue_episode_for_enrichment("saved memory", new_session("user"), "unit-test")
+
+    assert result.status is IngestStatus.QUEUED
+    assert result.error is None
+    assert result.processing_state == "PENDING"
+    assert result.warning and "pending queue recovery" in result.warning
+    assert result.episode_id in adapter.pending_episode_rows
+    assert result.episode_id not in service._queued_episode_ids
+
+    if failure_point == "worker":
+        worker.side_effect = None
+    else:
+        monkeypatch.setattr(queue, "put", put)
+    assert await service.resume_pending_episodes() == 1
+    assert queue.get_nowait() == result.episode_id
+    assert queue.empty()
+    assert set(adapter.pending_episode_rows) == {result.episode_id}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_companion_scheduling_failure_preserves_main_receipt(monkeypatch, caplog) -> None:
+    from menhir.services.ingest_intake import IngestIntakeMixin
+
+    intake = IngestIntakeMixin()
+    monkeypatch.setattr(intake, "_enrichment_enabled", True, raising=False)
+    monkeypatch.setattr(intake, "_record_episode_for_enrichment", lambda *args: ("memory-id", "evidence-id"))
+    monkeypatch.setattr(intake, "_ensure_enrichment_worker", AsyncMock(), raising=False)
+    enqueue = AsyncMock(side_effect=[None, RuntimeError("queue unavailable")])
+    monkeypatch.setattr(intake, "_enqueue_pending_episode", enqueue, raising=False)
+
+    result = await intake.queue_episode_for_enrichment("saved memory", new_session("user"), "unit-test")
+
+    assert result.episode_id == "memory-id"
+    assert result.status is IngestStatus.QUEUED
+    assert result.warning is None
+    assert [call.args[0] for call in enqueue.await_args_list] == ["memory-id", "evidence-id"]
+    assert "Could not schedule evidence projection evidence-id for saved episode memory-id" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_resume_pending_episodes_resets_stale_enriching_leases(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
     stub_graphiti_client: "StubGraphitiClient",
@@ -200,9 +265,10 @@ async def test_resume_pending_episodes_resets_stale_enriching_leases(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -250,9 +316,10 @@ async def test_resume_pending_episodes_marks_exhausted_stale_rows_failed(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -303,9 +370,10 @@ async def test_resume_pending_episodes_resets_orphaned_enriching_rows(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -353,9 +421,10 @@ async def test_resume_pending_episodes_skips_exhausted_pending_rows(
     async def _noop_worker() -> None:
         return None
 
-    async def _record_enqueue(episode_uuid: str) -> None:
+    async def _record_enqueue(episode_uuid: str) -> bool:
         queued.append(episode_uuid)
         service._queued_episode_ids.add(episode_uuid)
+        return True
 
     monkeypatch.setattr(service, "_ensure_enrichment_worker", _noop_worker)
     monkeypatch.setattr(service, "_enqueue_pending_episode", _record_enqueue)
@@ -409,16 +478,29 @@ async def test_process_pending_episode_marks_ready_after_graphiti(
     assert len(adapter.stamp_calls) == 1
 
 
-def _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch) -> dict:
-    """Wrap the stub's add_episode to record peak simultaneous occupancy."""
+def _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch, hold_until: int | None = None) -> dict:
+    """Wrap the stub's add_episode to record peak simultaneous occupancy.
+
+    With ``hold_until``, each call waits (up to 5 s) until that many calls have been inside at
+    once, so a slow runner can't finish one call before the next starts (#748).
+    """
     state = {"inside": 0, "peak": 0}
     orig = stub_graphiti_client.add_episode
+    reached = asyncio.Event()
 
     async def tracking_add(**kwargs):
         state["inside"] += 1
         state["peak"] = max(state["peak"], state["inside"])
+        if hold_until is not None and state["inside"] >= hold_until:
+            reached.set()
         try:
-            await asyncio.sleep(0.02)
+            if hold_until is not None:
+                try:
+                    await asyncio.wait_for(reached.wait(), timeout=5)
+                except TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(0.02)
             return await orig(**kwargs)
         finally:
             state["inside"] -= 1
@@ -462,7 +544,7 @@ async def test_concurrent_enrichment_parallelizes_across_namespaces(
     adapter = stub_memory_graph_adapter
     service = IngestService(graphiti_client=stub_graphiti_client, graph_adapter=adapter, llm=stub_llm_adapter)
     service.configure(ingest_concurrency=3)
-    state = _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch)
+    state = _instrument_add_episode_concurrency(stub_graphiti_client, monkeypatch, hold_until=3)
 
     uuids = []
     for i in range(6):
@@ -1046,14 +1128,15 @@ async def test_process_pending_episode_cleans_up_after_setup_failure(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_process_pending_episode_warns_when_raw_capture_fails(
+async def test_oversized_episode_is_embedded_before_it_is_parked(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
     stub_graphiti_client: "StubGraphitiClient",
     stub_llm_adapter: object,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """#662: an oversized episode is rejected before Graphiti, but embedded first, so the
+    source-memory lane can still recall its text. No raw-capture copy is written."""
     adapter = stub_memory_graph_adapter
+    stub_graphiti_client.embed_query_result = [0.25, 0.5]
     service = IngestService(
         graphiti_client=stub_graphiti_client,
         graph_adapter=adapter,
@@ -1061,8 +1144,8 @@ async def test_process_pending_episode_warns_when_raw_capture_fails(
     )
     service._graphiti_episode_max_estimated_tokens = 8
     episode_uuid = adapter.create_pending_episode(
-        episode_uuid="pending-capture-fail",
-        name="episode-capture-fail",
+        episode_uuid="pending-oversize-embed",
+        name="episode-oversize-embed",
         content="x" * 128,
         session_id="session-1",
         user_id="user-1",
@@ -1070,32 +1153,24 @@ async def test_process_pending_episode_warns_when_raw_capture_fails(
         source_confidence=0.5,
     )
 
-    def fail_capture(**kwargs: object) -> None:
-        raise OSError("capture storage unavailable")
+    await service._process_pending_episode(episode_uuid)
 
-    monkeypatch.setattr(adapter, "create_raw_capture_entity", fail_capture)
-    with caplog.at_level(logging.WARNING, logger="menhir.services.enrichment_steps"):
-        await service._process_pending_episode(episode_uuid)
-
-    capture_errors = [record for record in caplog.records if "Failed to create raw-capture" in record.message]
-    assert len(capture_errors) == 1
-    assert capture_errors[0].levelno == logging.WARNING
-    assert episode_uuid in capture_errors[0].message
-    assert "capture storage unavailable" in capture_errors[0].message
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert adapter.pending_episode_rows[episode_uuid]["content"] == "x" * 128
+    assert adapter.episode_embeddings_written[episode_uuid][0] == [0.25, 0.5]
+    assert adapter.raw_capture_calls == []
     assert stub_graphiti_client.add_episode_calls == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_process_pending_episode_rejects_oversized_with_raw_capture(
+async def test_process_pending_episode_rejects_oversized_without_raw_capture(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
     stub_llm_adapter: object,
 ) -> None:
-    """An oversized episode is rejected in the worker BEFORE Graphiti is called, marked
-    FAILED, but its prose is preserved as a raw-capture entity (Part 2 substrate
-    guarantee: terminally-broken episodes stay recallable)."""
+    """An oversized episode is rejected in the worker BEFORE Graphiti is called and marked
+    FAILED. Its text stays recallable through the source-memory lane (#662), so no raw-capture
+    copy is written, even when the embedder is unavailable (the repair job embeds it later)."""
 
     class RecordingGraphitiClient:
         add_episode_calls: list[dict[str, object]] = []
@@ -1126,8 +1201,7 @@ async def test_process_pending_episode_rejects_oversized_with_raw_capture(
 
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert client.add_episode_calls == []            # rejected before Graphiti
-    assert len(adapter.raw_capture_calls) == 1       # prose preserved (Part 2)
-    assert adapter.raw_capture_calls[0]["episode_uuid"] == episode_uuid
+    assert adapter.raw_capture_calls == []           # no duplicate copy (#662)
 
 
 @pytest.mark.unit
@@ -2594,7 +2668,6 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
     assert requeued == ["retry-now"]
     assert job.last_result == {
         "candidates": 4,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 2,
         "waiting": 1,
@@ -2615,6 +2688,7 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
 ) -> None:
     stamped_calls: list[dict[str, object]] = []
     ready_calls: list[dict[str, object]] = []
+    requeued: list[str] = []
 
     class FakeStamp:
         nodes_touched = 2
@@ -2625,7 +2699,8 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             return 0, 0
 
         async def requeue_failed_episode(self, episode_uuid: str) -> bool:
-            raise AssertionError("requeue_failed_episode should not be called for reconciled episodes")
+            requeued.append(episode_uuid)
+            return True
 
         def get_queue_depth(self) -> int:
             return 0
@@ -2635,6 +2710,9 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
 
         def get_max_enrichment_attempts(self) -> int:
             return 3
+
+        def get_context_window_retry_attempts(self) -> int:
+            return 6
 
     class FakeGraphAdapter:
         def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
@@ -2725,29 +2803,14 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
     job = scheduler._jobs["retry_failed_enrichments"]
     await scheduler._run_retry_failed_enrichments(job)
 
-    assert stamped_calls == [
-        {
-            "node_uuids": ["episode-existing-1", "entity-1"],
-            "edge_uuids": ["edge-1"],
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "source": "unit-test",
-            "source_confidence": 0.5,
-        }
-    ]
-    assert ready_calls == [
-        {
-            "episode_uuid": "manual-review",
-            "required_state": "FAILED",
-            "resolved_episode_uuid": "episode-existing-1",
-            "nodes_touched": 2,
-            "edges_touched": 1,
-        }
-    ]
+    # #906: a silent completion is handed to the worker, whose claim returns the twin link and
+    # whose finalize-from-link runs every post-publish step; the scheduler writes nothing itself.
+    assert stamped_calls == []
+    assert ready_calls == []
+    assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 1,
-        "requeued": 0,
+        "requeued": 1,
         "terminal": 0,
         "waiting": 0,
         "exhausted": 0,
@@ -2807,7 +2870,6 @@ async def test_maintenance_scheduler_does_not_retry_context_window_mismatch_beyo
     assert requeued == []
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 0,
         "terminal": 0,
         "waiting": 0,
@@ -2960,29 +3022,14 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
     job = scheduler._jobs["retry_failed_enrichments"]
     await scheduler._run_retry_failed_enrichments(job)
 
-    assert stamped_calls == [
-        {
-            "node_uuids": ["episode-existing-1", "entity-1"],
-            "edge_uuids": ["edge-1"],
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "source": "unit-test",
-            "source_confidence": 0.5,
-        }
-    ]
-    assert ready_calls == [
-        {
-            "episode_uuid": "manual-review",
-            "required_state": "FAILED",
-            "resolved_episode_uuid": "episode-existing-1",
-            "nodes_touched": 2,
-            "edges_touched": 1,
-        }
-    ]
+    # #906: the scheduler no longer stamps or marks READY, so a row that is no longer FAILED is
+    # never finalized here. The FAILED re-check is requeue_failed_episode's state read and the
+    # claim's `processing_state IN ['PENDING', 'FAILED']` guard; the fake reports an enqueue.
+    assert stamped_calls == []
+    assert ready_calls == []
     assert requeued == ["manual-review"]
     assert job.last_result == {
         "candidates": 1,
-        "reconciled": 0,
         "requeued": 1,
         "terminal": 0,
         "waiting": 0,
@@ -3092,11 +3139,16 @@ def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() ->
         def list_conflict_groups(
             self, *, status: str | None, limit: int, namespace: str | None = None,
             created_before: object | None = None, oldest_first: bool = False,
+            include_all_members: bool = False,
         ) -> list[dict]:
             return [
                 {"group_id": "stale-group", "created_at": stale_created},
                 {"group_id": "fresh-group", "created_at": fresh_created},
             ]
+
+        def auto_resolve_settled_conflict_group(self, group_id: str) -> list[str]:
+            resolved_groups.append(group_id)
+            return ["a", "b"]
 
         def resolve_conflict_group(self, group_id: str, action: str, **kwargs: object) -> dict:
             resolved_groups.append(group_id)

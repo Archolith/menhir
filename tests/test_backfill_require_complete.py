@@ -25,10 +25,13 @@ def _load_script():
 class _Repo:
     """Rows with a processing state; honours the cursor, ``ready_only`` and ``model``."""
 
-    def __init__(self, rows: list[dict[str, Any]], refuse: set[str] = frozenset()) -> None:
+    def __init__(self, rows: list[dict[str, Any]], refuse: set[str] = frozenset(),
+                 stale: set[str] = frozenset()) -> None:
         self.rows = sorted(rows, key=lambda r: r["uuid"])
         self.refuse = refuse
+        self.stale = stale
         self.embedded: dict[str, str] = {}
+        self.expected_contents: dict[str, str | None] = {}
         self.ready_only_calls: list[tuple[bool, Any]] = []
 
     def list_episodes_missing_content_embedding(self, namespace, limit, *, after_uuid=None,
@@ -40,8 +43,12 @@ class _Repo:
                 and (not ready_only or r["state"] == "READY")
                 and (after_uuid is None or r["uuid"] > after_uuid)][:limit]
 
-    def set_episode_content_embedding(self, uuid, embedding, model):
-        if uuid in self.refuse:
+    def set_episode_content_embedding(self, uuid, embedding, model, *, expected_content=None):
+        self.expected_contents[uuid] = expected_content
+        if uuid in self.stale:
+            next(row for row in self.rows if row["uuid"] == uuid)["content"] = "changed after listing"
+        current = next(row for row in self.rows if row["uuid"] == uuid).get("content")
+        if uuid in self.refuse or current != expected_content:
             return False
         self.embedded[uuid] = model
         return True
@@ -56,6 +63,8 @@ def _run(monkeypatch, repo: _Repo, **args: Any) -> int:
     monkeypatch.setattr(script.ProviderConfig, "for_graphiti_embedder",
                         staticmethod(lambda settings: SimpleNamespace(embed_model="m1")))
     monkeypatch.setattr(script, "_resolve_embedder", lambda settings: (object(), "m1"))
+    # The fake embedder returns 1-dim vectors; the backfill refuses any other size (#969).
+    monkeypatch.setattr(script, "configured_embedding_dimension", lambda model: 1)
 
     async def fake_embed(client, *, model, text):
         return [0.5]
@@ -97,3 +106,56 @@ def test_dry_run_checks_without_writing(monkeypatch: pytest.MonkeyPatch) -> None
 def test_without_the_flag_gaps_do_not_change_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _Repo(_rows(2), refuse={"r00"})
     assert _run(monkeypatch, repo, require_complete=False) == 0
+
+
+def test_stale_listed_content_is_not_counted_as_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = _rows(2)
+    long_content = "long episode " * 1000
+    rows[0]["content"] = long_content
+    repo = _Repo(rows, stale={"r00"})
+
+    assert _run(monkeypatch, repo) == 3
+    assert set(repo.embedded) == {"r01"}
+    assert repo.expected_contents == {"r00": long_content, "r01": "text 1"}
+
+
+@pytest.mark.parametrize(("limit", "candidates", "previews"), [(3, 3, 3), (None, 7, 5)])
+def test_dry_run_pages_and_counts_only_nonblank_candidates(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    limit: int | None, candidates: int, previews: int,
+) -> None:
+    rows = _rows(8)
+    rows[1]["content"] = ""
+    repo = _Repo(rows)
+    script = _load_script()
+    monkeypatch.setattr(
+        script,
+        "_load_settings",
+        lambda: SimpleNamespace(
+            neo4j_uri="bolt://x", neo4j_database="neo4j", neo4j_user="u", neo4j_password="p"
+        ),
+    )
+    monkeypatch.setattr(script, "Neo4jRepository", lambda **kw: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(script, "EpisodeRepository", lambda neo4j: repo)
+    monkeypatch.setattr(
+        script.ProviderConfig,
+        "for_graphiti_embedder",
+        staticmethod(lambda settings: SimpleNamespace(embed_model="m1")),
+    )
+    monkeypatch.setattr(
+        script,
+        "_resolve_embedder",
+        lambda settings: pytest.fail("dry-run must not construct an embedder"),
+    )
+
+    result = asyncio.run(
+        script._run(
+            SimpleNamespace(namespace=None, batch=2, limit=limit, dry_run=True, require_complete=False)
+        )
+    )
+
+    assert result == 0
+    assert repo.embedded == {}
+    output = capsys.readouterr().out
+    assert f"{candidates} embedding candidate(s); skipped 1." in output
+    assert output.count("  r") == previews

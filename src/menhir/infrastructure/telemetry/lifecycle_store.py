@@ -201,6 +201,7 @@ class TelemetryLifecycleStoreMixin(TelemetryRetentionStatsMixin):
         llm_used: bool = False,
         duration_ms: int | None = None,
         notes: str | None = None,
+        recorded_at: str | None = None,
     ) -> None:
         """Persist a compress/rehydrate/gone/demote/delete lifecycle action."""
 
@@ -223,7 +224,7 @@ class TelemetryLifecycleStoreMixin(TelemetryRetentionStatsMixin):
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        _utc_now_iso(),
+                        recorded_at or _utc_now_iso(),
                         action,
                         node_uuid,
                         session_id,

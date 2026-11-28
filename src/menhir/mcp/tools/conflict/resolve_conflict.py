@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from itertools import combinations
+from typing import Any
 
 from menhir.mcp.formatters import _coerce_conflict_members, _count_unresolved_members
 from menhir.mcp.tools.base import BaseJsonTool
@@ -149,6 +151,7 @@ class ResolveConflictTool(BaseJsonTool):
                         "resolved": int(result.get("resolved") or 0),
                         "removed_uuids": result.get("removed_uuids") or [],
                         "bridged_edges": int(result.get("bridged_edges") or 0),
+                        "bridge_skipped_hubs": list(result.get("bridge_skipped_hubs") or []),
                         "group_cleared": refreshed is None,
                         "remaining_unresolved_in_group": _count_unresolved_members(refreshed),
                         "journal_op_id": None,
@@ -166,6 +169,24 @@ class ResolveConflictTool(BaseJsonTool):
 
             would_remove = [remove] if remove else sorted(uuid for uuid in member_uuids if uuid != keep)
             if dry_run:
+                # The real eligible-neighbour counts, with the same filters the bridge uses. A
+                # backend without the estimate reports "unavailable", never a made-up number.
+                estimator = getattr(backend, "estimate_bridges_for_nodes", None)
+                bridge_estimate: dict[str, Any] | None = None
+                if callable(estimator):
+                    # An older server (unknown operation) or an adapter without the estimate
+                    # raises; the preview then says "unavailable" instead of failing.
+                    try:
+                        pending = estimator(would_remove, **scope)
+                        bridge_estimate = await pending if inspect.isawaitable(pending) else pending
+                    except (PermissionError, ValueError):
+                        # A tier or namespace refusal is an answer, not a missing estimate.
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "resolve_conflict dry run: bridge estimate unavailable", exc_info=True
+                        )
+                        bridge_estimate = None
                 return self.render_json(
                     {
                         "dry_run": True,
@@ -175,7 +196,19 @@ class ResolveConflictTool(BaseJsonTool):
                         "nodes_resolved": max(0, len(member_uuids) - len(would_remove)),
                         "nodes_gone": len(would_remove),
                         "group_clear_count": 1,
-                        "bridge_count_estimate": len(would_remove),
+                        "bridge_count_estimate": (
+                            int(bridge_estimate.get("estimated_edges") or 0)
+                            if bridge_estimate is not None else None
+                        ),
+                        "bridge_over_cap_hubs": (
+                            list(bridge_estimate.get("over_cap") or [])
+                            if bridge_estimate is not None else []
+                        ),
+                        "bridge_neighbour_counts": (
+                            dict(bridge_estimate.get("neighbour_counts") or {})
+                            if bridge_estimate is not None else {}
+                        ),
+                        "bridge_estimate_available": bridge_estimate is not None,
                         "would_remove_uuids": would_remove,
                         "allow_promoted_removal": allow_promoted_removal,
                     }
@@ -216,6 +249,7 @@ class ResolveConflictTool(BaseJsonTool):
                 "resolved": int(result.get("resolved") or 0),
                 "removed_uuids": result.get("removed_uuids") or [],
                 "bridged_edges": int(result.get("bridged_edges") or 0),
+                "bridge_skipped_hubs": list(result.get("bridge_skipped_hubs") or []),
                 "group_cleared": refreshed is None,
                 "remaining_unresolved_in_group": _count_unresolved_members(refreshed),
                 "journal_op_id": None,
@@ -228,6 +262,12 @@ class ResolveConflictTool(BaseJsonTool):
         except McpToolRefusal:
             raise
         except ValueError as exc:
+            # A refused resolve carries its reason and changed nothing; it is never a success.
+            if str(exc).startswith("Conflict resolve refused"):
+                raise McpToolRefusal(
+                    str(exc), code="refused",
+                    hint="Nothing was changed; retry the resolve once the cause clears.",
+                ) from exc
             raise McpToolRefusal(str(exc), code="invalid_argument") from exc
 
 

@@ -21,6 +21,10 @@ Invariant 9 is the spine: an unmerge may restore only when the current graph mat
 merge's expected after-state. Newer or conflicting state is PRESERVED and routed to NEEDS_REVIEW --
 we never overwrite something a human or a later job changed. A missing peer is likewise a refusal,
 never a fabrication: the default is all-or-nothing.
+
+Exact means content, provenance and links. Retention is not reversed: a merge may have raised the
+survivor's scope and cleared its TTL, and the restore leaves both as they are (the survivor may have
+been promoted since). The restored node's ``ttl_expires`` is cleared, so retention only ever rises.
 """
 
 from __future__ import annotations
@@ -89,28 +93,9 @@ class UnmergeCoordinator:
 
     graph_adapter: Any
     journal: GraphOperationsJournal
-    #: optional post-COMMIT hook, injected only when ScalarState (Piece C) is on. Called after an
-    #: unmerge COMMITs (both first attempt and replay) to restore scalar assertions to the absorbed
-    #: entity. None (default) -> no scalar coupling, byte-identical to before. Best-effort: it must
-    #: never fail the unmerge (already committed; scalar reconciliation is repairable out of band).
-    on_unmerge_committed: Any = None
 
     def __post_init__(self) -> None:
         self.journal._ensure_ready()
-
-    def _fire_unmerge_hook(self, *, survivor_uuid: str, absorbed_uuid: str, merge_op_id: str,
-                           unmerge_op_id: str) -> None:
-        if self.on_unmerge_committed is None:
-            return
-        try:
-            self.on_unmerge_committed(
-                survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
-                merge_op_id=merge_op_id, unmerge_op_id=unmerge_op_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "scalar-state unmerge restore failed for %s <- %s (merge op=%s, unmerge op=%s): %s; "
-                "leaving for reconcile repair",
-                survivor_uuid, absorbed_uuid, merge_op_id, unmerge_op_id, exc)
 
     def _snapshot_was_erased(self, merge_op_id: str) -> bool:
         """Whether an erasure of any subject of this merge has purged content.
@@ -357,7 +342,7 @@ class UnmergeCoordinator:
         Returns (outcome, diagnostics): exactly the pre-mutation decision that live replay would
         make, so a dry-run can report it without touching the journal or the graph. This method is
         PURE -- it must never call mark_committed / mark_needs_review / _mark_merge_reversed /
-        _fire_unmerge_hook / record_attempt / restore_merge_snapshot.
+        record_attempt / restore_merge_snapshot.
         """
         op_id = str(request["op_id"])
         survivor_uuid = str(request["survivor_uuid"])
@@ -434,9 +419,6 @@ class UnmergeCoordinator:
                 observed=f"unmerge already applied observed_fp={observed_fp}",
             )
             self._mark_merge_reversed(str(request["merge_op_id"]), owner_token=owner_token)
-            self._fire_unmerge_hook(
-                survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
-                merge_op_id=str(request["merge_op_id"]), unmerge_op_id=op_id)
             done = {"restored": 1, "replayed": True, "op_id": op_id}
             if settled == COMPLETED_BY_OTHER_OWNER:
                 done["completed_by_other_owner"] = True
@@ -502,9 +484,6 @@ class UnmergeCoordinator:
             observed=f"unmerge restored and verified after_fp={after_fp}",
         )
         self._mark_merge_reversed(str(request["merge_op_id"]), owner_token=owner_token)
-        self._fire_unmerge_hook(
-            survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
-            merge_op_id=str(request["merge_op_id"]), unmerge_op_id=op_id)
         out = dict(result)
         out["op_id"] = op_id
         if settled == COMPLETED_BY_OTHER_OWNER:

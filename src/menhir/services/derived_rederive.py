@@ -12,17 +12,61 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any
 
+from menhir.infrastructure.circuit_breaker import provider_unavailable_reason, should_trip_circuit
 from menhir.infrastructure.observability import LlmUsageControlSignal
+from menhir.infrastructure.openai_rate_limit import (
+    await_with_backoff_aware_timeout,
+    find_provider_status_error,
+    rate_limit_category,
+)
+from menhir.infrastructure.telemetry import record_failure_event
+from menhir.services.scheduler_protocols import JOB_FAILED_KEY
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
+#: A 'failed' repair goes back to 'pending' (attempts reset) once its last attempt is this old.
+REQUEUE_COOLDOWN_DAYS = 7
+#: At most this many 'failed' repairs are requeued per run.
+REQUEUE_LIMIT = 5
+#: A repair requeued this many times stays 'failed'.
+MAX_REQUEUES = 3
+#: Item-specific re-embed failures before an 'embed_pending' repair becomes 'embed_failed'.
+MAX_EMBED_ATTEMPTS = 3
+
+_PROBE_TEXT = "derived rederive embedder probe"
+_PROBE_TIMEOUT_S = 30.0  # a hung embedder reads as down, not as a stalled job
 
 
 async def _call(fn: Any, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _is_provider_fault(exc: Exception) -> bool:
+    """True when a failed rederive call says nothing about the item: timeout, connection, 429/5xx,
+    open breaker, billing, rejected credentials, an unknown model, or an unimplemented backend."""
+    if isinstance(exc, NotImplementedError):
+        return True
+    if should_trip_circuit(exc) or rate_limit_category(exc) is not None:
+        return True
+    if provider_unavailable_reason(exc) is not None:
+        return True
+    status = getattr(find_provider_status_error(exc), "status_code", None)
+    return status in (401, 403, 404)
+
+
+async def _defer(graph_adapter: Any, repair_key: str) -> None:
+    """Best-effort: move a repair behind the queue (no attempt spent). Old adapters lack it."""
+    defer = getattr(graph_adapter, "defer_derived_rederive", None)
+    if defer is None:
+        return
+    try:
+        await _call(defer, repair_key)
+    except Exception:
+        logger.warning("derived_rederive repair=%s: could not defer", repair_key)
 
 
 async def _embed_or_none(embedder: Any, text: str) -> list[float] | None:
@@ -37,13 +81,159 @@ async def _embed_or_none(embedder: Any, text: str) -> list[float] | None:
         return None
 
 
+async def _embedder_is_up(embedder: Any) -> bool:
+    """One probe after a failed embed: up means the failure was the item's, not an outage.
+
+    The text is unique per call so an embedding cache cannot answer it during an outage.
+    """
+    try:
+        return bool(await await_with_backoff_aware_timeout(
+            embedder.embed_query(f"{_PROBE_TEXT} {uuid.uuid4().hex}"), timeout_s=_PROBE_TIMEOUT_S))
+    except Exception:
+        return False
+
+
+async def _spend_embed_attempt(
+    graph_adapter: Any, repair_key: str, error_class: str, counts: dict
+) -> None:
+    """Count an item-specific re-embed failure and defer the repair. At ``MAX_EMBED_ATTEMPTS`` it
+    becomes 'embed_failed' (rewritten text kept, no vector) with one failure event."""
+    counts["errors"] += 1
+    record = getattr(graph_adapter, "record_derived_rederive_embed_failure", None)
+    if record is None:
+        await _defer(graph_adapter, repair_key)
+        return
+    try:
+        status = await _call(record, repair_key, error_class, MAX_EMBED_ATTEMPTS)
+    except Exception:  # best-effort: the store may be what failed
+        logger.warning("derived_rederive repair=%s: could not record the re-embed failure", repair_key)
+        return
+    if status != "embed_failed":
+        return
+    counts["embed_failed"] += 1
+    logger.warning(
+        "derived_rederive repair=%s re-embed failed after %d attempts", repair_key, MAX_EMBED_ATTEMPTS
+    )
+    await _call(
+        record_failure_event,
+        operation="scheduler_derived_rederive",
+        failure_stage="reembed_attempts_exhausted",
+        classification="exhausted",
+        retryable=False,
+        processing_attempt=None,  # a fixed value would let the store dedup every later event
+        error_type=error_class,
+        error="derived rederive re-embed attempts exhausted",
+        details={
+            "item_kind": "fact", "decision": "embed_failed", "embed_attempts": MAX_EMBED_ATTEMPTS,
+        },
+    )
+
+
+async def _requeue_failed(graph_adapter: Any) -> int:
+    """Move 'failed' repairs past the cooldown back to 'pending', with a failure event each (#1005).
+
+    Best-effort: old adapters lack the method, and a store error only skips the requeue."""
+    requeue = getattr(graph_adapter, "requeue_failed_derived_rederive", None)
+    if requeue is None:
+        return 0
+    try:
+        rows = await _call(requeue, REQUEUE_COOLDOWN_DAYS, REQUEUE_LIMIT, MAX_REQUEUES)
+    except Exception as exc:
+        logger.warning("derived_rederive: could not requeue failed repairs: %s", type(exc).__name__)
+        return 0
+    for row in rows:
+        await _call(
+            record_failure_event,
+            operation="scheduler_derived_rederive",
+            failure_stage="rederive_requeued",
+            classification="requeued",
+            retryable=True,
+            processing_attempt=None,  # a fixed value would let the store dedup every later event
+            error_type=str(row.get("last_error") or "error"),
+            error="failed derived rederive repair requeued after cooldown",
+            details={
+                "item_kind": str(row.get("item_kind") or ""),
+                "decision": "requeued",
+                "requeue_count": int(row.get("requeue_count") or 0),
+            },
+        )
+    return len(rows)
+
+
+async def _reembed_pending(graph_adapter: Any, embedder: Any, limit: int, counts: dict) -> bool:
+    """Embed facts rewritten while the embedder failed ('embed_pending', #1005).
+
+    A failed embed or an error on one item probes the embedder once. Down: the pass stops there,
+    defers that repair, spends nothing, and returns False. Up: the fault is the item's, so it
+    spends an embed attempt, is deferred, and the pass continues. A gone or re-flagged fact is
+    'obsolete'.
+    """
+    lister = getattr(graph_adapter, "list_embed_pending_derived_rederive", None)
+    if embedder is None or lister is None:
+        return True
+    for repair in await _call(lister, limit):
+        repair_key = str(repair.get("repair_key") or "")
+        item_uuid = str(repair.get("item_uuid") or "")
+        if not repair_key or not item_uuid:
+            continue
+        try:
+            item = await _call(graph_adapter.load_derived_rederive_item, "fact", item_uuid)
+            if item is None or item.get("pending"):
+                # Gone, or re-flagged by a later erasure whose own repair rewrites it.
+                await _call(graph_adapter.mark_derived_rederive_status, repair_key, "obsolete")
+                counts["obsolete"] += 1
+                continue
+            text = str(item.get("text") or "")
+            if not text.strip():
+                await _call(graph_adapter.mark_derived_rederive_status, repair_key, "done")
+                continue
+            vector = await _embed_or_none(embedder, text)
+            if vector is not None:
+                applied = await _call(
+                    graph_adapter.apply_derived_rederive,
+                    repair_key=repair_key, item_kind="fact", item_uuid=item_uuid, flagged_at=None,
+                    episodes=[], new_text=text, embedding=vector, reembed=True,
+                )
+                if applied:
+                    counts["reembedded"] += 1
+                else:
+                    counts["cas_failed"] += 1
+                continue
+            fault = "embedding_failed"
+        except Exception as exc:  # class name only
+            fault = type(exc).__name__
+            logger.warning("derived_rederive repair=%s re-embed errored: %s", repair_key, fault)
+        if not await _embedder_is_up(embedder):
+            await _defer(graph_adapter, repair_key)
+            counts["stopped_embedding"] = "embedder_unavailable"
+            return False
+        await _spend_embed_attempt(graph_adapter, repair_key, fault, counts)
+    return True
+
+
 async def run_derived_rederive(
     graph_adapter: Any, llm: Any, *, limit: int = 25, embedder: Any = None
 ) -> dict:
     """Process up to ``limit`` pending DerivedRederiveRepair nodes, oldest first.
 
-    ``llm`` is the scheduler's LLM adapter (``lifecycle_service.llm``); ``None`` leaves everything
+    ``llm`` is the scheduler's LLM adapter (``lifecycle_service.llm``). ``None``, or an adapter
+    without a callable ``rederive_from_sources`` (e.g. ``UnavailableLLMAdapter``), leaves everything
     pending (flagged text stays hidden) and returns ``{"skipped": "no_llm"}``.
+
+    A provider fault (timeout, connection, 429/5xx, billing, open breaker, rejected credentials) or
+    an ``LlmUsageControlSignal`` stops the batch and leaves the item pending without spending an
+    attempt (``counts["stopped"]``). A repair that reaches ``MAX_ATTEMPTS`` becomes ``'failed'``
+    and records a failure event. A graph error on one item is counted in ``errors`` and the batch
+    continues.
+
+    #1005: each run first requeues up to ``REQUEUE_LIMIT`` 'failed' repairs older than
+    ``REQUEUE_COOLDOWN_DAYS`` (``requeued``), then re-embeds 'embed_pending' facts. A rewritten
+    fact whose embedding fails keeps its rewrite and becomes 'embed_pending' when an embedder is
+    configured (``embedding_missing`` counts every fact rewritten without a vector). An
+    'embed_pending' fact that fails while the embedder is up becomes 'embed_failed' after
+    ``MAX_EMBED_ATTEMPTS``; a repair requeued ``MAX_REQUEUES`` times stays 'failed'. The result
+    carries ``JOB_FAILED_KEY`` when the run stopped on an unavailable LLM or embedder, or
+    counted any ``errors``.
     """
     # UnavailableLLMAdapter (degraded startup) has no rederive method; skipping keeps repairs
     # pending instead of burning their attempts into 'failed'.
@@ -53,7 +243,11 @@ async def run_derived_rederive(
     counts = {
         "processed": 0, "rewritten": 0, "deleted": 0, "obsolete": 0,
         "cas_failed": 0, "errors": 0, "failed": 0,
+        "requeued": 0, "reembedded": 0, "embedding_missing": 0, "embed_failed": 0,
     }
+    counts["requeued"] = await _requeue_failed(graph_adapter)
+    # Once the embedder is down this run, later rewrites skip it and queue a re-embed.
+    embedder_down = not await _reembed_pending(graph_adapter, embedder, limit, counts)
     repairs = await _call(graph_adapter.list_pending_derived_rederive, limit)
     for repair in repairs:
         repair_key = str(repair.get("repair_key") or "")
@@ -62,90 +256,153 @@ async def run_derived_rederive(
         if not repair_key or kind not in ("fact", "entity") or not item_uuid:
             continue
         counts["processed"] += 1
+        missing_embedding = False
 
-        item = await _call(graph_adapter.load_derived_rederive_item, kind, item_uuid)
-        if item is None or not item.get("pending"):
-            # Item deleted, or already repaired/cleared by another path.
-            await _call(graph_adapter.mark_derived_rederive_status, repair_key, "obsolete")
-            counts["obsolete"] += 1
-            continue
-
-        sources = list(item.get("sources") or [])
-        cas = {
-            "repair_key": repair_key,
-            "item_kind": kind,
-            "item_uuid": item_uuid,
-            "flagged_at": item.get("flagged_at"),
-            # CAS compares the RAW stored list (facts); `episodes` is de-duplicated for sources.
-            "episodes": list(
-                item["episodes_raw"] if item.get("episodes_raw") is not None
-                else (item.get("episodes") or [])
-            ),
-        }
-
-        if not sources:
-            # Nothing remains to support the item. A fact edge is deleted; an entity keeps its
-            # node (deletion is the erasure's own fenced decision) with an empty summary.
-            if kind == "fact":
-                applied = await _call(
-                    graph_adapter.apply_derived_rederive, new_text=None, delete=True, **cas
-                )
-                outcome = "deleted"
-            else:
-                applied = await _call(
-                    graph_adapter.apply_derived_rederive, new_text="", **cas
-                )
-                outcome = "rewritten"
-        else:
-            try:
-                verdict = await llm.rederive_from_sources(
-                    kind=kind,
-                    name=str(item.get("name") or ""),
-                    current_text=str(item.get("text") or ""),
-                    sources=sources,
-                )
-                error_class = "no_verdict" if verdict is None else None
-            except LlmUsageControlSignal:
-                # A budget refusal is a decision, not a fault: stop, leave pending, no attempt.
-                counts["stopped"] = "llm_usage_control"
-                break
-            except Exception as exc:  # error class only; never the message (may echo content)
-                verdict = None
-                error_class = type(exc).__name__
-            if verdict is None:
-                status = await _call(
-                    graph_adapter.record_derived_rederive_failure,
-                    repair_key, error_class or "error", MAX_ATTEMPTS,
-                )
-                counts["errors"] += 1
-                if status == "failed":
-                    counts["failed"] += 1
-                    logger.warning(
-                        "derived_rederive repair=%s failed after %d attempts", repair_key, MAX_ATTEMPTS
-                    )
+        try:
+            item = await _call(graph_adapter.load_derived_rederive_item, kind, item_uuid)
+            if item is None or not item.get("pending"):
+                # Item deleted, or already repaired/cleared by another path.
+                await _call(graph_adapter.mark_derived_rederive_status, repair_key, "obsolete")
+                counts["obsolete"] += 1
                 continue
-            decision, text = verdict
-            if decision == "unsupported" and kind == "fact":
-                applied = await _call(
-                    graph_adapter.apply_derived_rederive, new_text=None, delete=True, **cas
-                )
-                outcome = "deleted"
-            else:
-                extra: dict[str, Any] = {}
+
+            sources = list(item.get("sources") or [])
+            cas = {
+                "repair_key": repair_key,
+                "item_kind": kind,
+                "item_uuid": item_uuid,
+                "flagged_at": item.get("flagged_at"),
+                # CAS compares the RAW stored list (facts); `episodes` is de-duplicated for sources.
+                "episodes": list(
+                    item["episodes_raw"] if item.get("episodes_raw") is not None
+                    else (item.get("episodes") or [])
+                ),
+            }
+
+            if not sources:
+                # Nothing remains to support the item. A fact edge is deleted; an entity keeps its
+                # node (deletion is the erasure's own fenced decision) with an empty summary.
                 if kind == "fact":
-                    vector = await _embed_or_none(embedder, text or "")
-                    if vector is not None:
-                        extra["embedding"] = vector
-                applied = await _call(
-                    graph_adapter.apply_derived_rederive, new_text=text or "", **extra, **cas
+                    applied = await _call(
+                        graph_adapter.apply_derived_rederive, new_text=None, delete=True, **cas
+                    )
+                    outcome = "deleted"
+                else:
+                    applied = await _call(
+                        graph_adapter.apply_derived_rederive, new_text="", **cas
+                    )
+                    outcome = "rewritten"
+            else:
+                try:
+                    verdict = await llm.rederive_from_sources(
+                        kind=kind,
+                        name=str(item.get("name") or ""),
+                        current_text=str(item.get("text") or ""),
+                        sources=sources,
+                    )
+                    error_class = "no_verdict" if verdict is None else None
+                except LlmUsageControlSignal:
+                    # A budget refusal is a decision, not a fault: stop, leave pending, no attempt.
+                    counts["stopped"] = "llm_usage_control"
+                    break
+                except Exception as exc:  # error class only; never the message (may echo content)
+                    if _is_provider_fault(exc):
+                        # Outage, throttling, billing or config: not the item's fault. Stop, leave
+                        # pending, no attempt (#874). Defer the item so a call that always times out
+                        # cannot stop every run at the head of the queue.
+                        await _defer(graph_adapter, repair_key)
+                        counts["stopped"] = "provider_unavailable"
+                        logger.warning(
+                            "derived_rederive stopped: provider unavailable (%s)", type(exc).__name__
+                        )
+                        break
+                    verdict = None
+                    error_class = type(exc).__name__
+                if verdict is None:
+                    status = await _call(
+                        graph_adapter.record_derived_rederive_failure,
+                        repair_key, error_class or "error", MAX_ATTEMPTS,
+                    )
+                    counts["errors"] += 1
+                    if status == "failed":
+                        counts["failed"] += 1
+                        logger.warning(
+                            "derived_rederive repair=%s failed after %d attempts", repair_key, MAX_ATTEMPTS
+                        )
+                        await _call(
+                            record_failure_event,
+                            operation="scheduler_derived_rederive",
+                            failure_stage="rederive_attempts_exhausted",
+                            classification="exhausted",
+                            retryable=False,
+                            processing_attempt=None,  # a fixed value lets the store dedup it
+                            error_type=error_class or "error",
+                            error="derived rederive attempts exhausted",
+                            details={
+                                "item_kind": kind, "decision": "failed", "attempts": MAX_ATTEMPTS,
+                            },
+                        )
+                    continue
+                decision, text = verdict
+                if decision == "unsupported" and kind == "fact":
+                    applied = await _call(
+                        graph_adapter.apply_derived_rederive, new_text=None, delete=True, **cas
+                    )
+                    outcome = "deleted"
+                else:
+                    extra: dict[str, Any] = {}
+                    if kind == "fact":
+                        vector = None if embedder_down else await _embed_or_none(
+                            embedder, text or ""
+                        )
+                        if vector is not None:
+                            extra["embedding"] = vector
+                        elif (text or "").strip():
+                            missing_embedding = True
+                            if embedder is not None:
+                                # #1005: keep the rewrite (recall shows it again) and queue the
+                                # fact for re-embedding instead of finishing it with no vector.
+                                extra["embedding_missing"] = True
+                                if not embedder_down and not await _embedder_is_up(embedder):
+                                    embedder_down = True
+                                    counts["stopped_embedding"] = "embedder_unavailable"
+                    applied = await _call(
+                        graph_adapter.apply_derived_rederive, new_text=text or "", **extra, **cas
+                    )
+                    outcome = "rewritten"
+
+            if applied:
+                counts[outcome] += 1
+                if missing_embedding:
+                    counts["embedding_missing"] += 1
+            else:
+                # Re-flagged or stripped meanwhile (or gone): stays pending; next run re-reads it.
+                counts["cas_failed"] += 1
+        except LlmUsageControlSignal:
+            counts["stopped"] = "llm_usage_control"
+            break
+        except Exception as exc:  # one item's graph fault must not end the batch; class name only
+            counts["errors"] += 1
+            logger.warning(
+                "derived_rederive repair=%s errored: %s", repair_key, type(exc).__name__
+            )
+            # Spend an attempt so an item that errors every run reaches 'failed' instead of
+            # holding a batch slot forever. Best-effort: the store may be what failed.
+            try:
+                await _call(
+                    graph_adapter.record_derived_rederive_failure,
+                    repair_key, type(exc).__name__, MAX_ATTEMPTS,
                 )
-                outcome = "rewritten"
+            except Exception:
+                logger.warning("derived_rederive repair=%s: could not record the failure", repair_key)
 
-        if applied:
-            counts[outcome] += 1
-        else:
-            # Re-flagged or stripped meanwhile (or gone): stays pending; next run re-reads it.
-            counts["cas_failed"] += 1
-
+    # #1005: an outage stop or any spent attempt makes the run unsuccessful in the scheduler's
+    # record. A budget refusal (llm_usage_control) is a decision, not a failure.
+    if (
+        counts.get("stopped") == "provider_unavailable"
+        or counts.get("stopped_embedding")
+        or counts["errors"]
+    ):
+        counts[JOB_FAILED_KEY] = True
     logger.info("derived_rederive: %s", counts)
     return counts

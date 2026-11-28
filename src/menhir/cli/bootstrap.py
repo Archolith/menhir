@@ -5,11 +5,15 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from menhir.config import MemorySettings
 from menhir.config.authority_gates import scalar_view_authority_effective
-from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
+
+if TYPE_CHECKING:
+    from menhir.extensions import RuntimeExtensions
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +32,17 @@ class HookServices:
     context_builder: object | None  # ContextBuilderService or None
 
 
-def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
+def build_hook_services(
+    settings: MemorySettings | None = None, *, extensions: RuntimeExtensions | None = None,
+) -> HookServices:
     """Build minimal services for the hook CLI.
 
     Fast path (always): Neo4j → MemoryGraphAdapter
     Full path (best-effort): + GraphitiClient → RecallService → ContextBuilderService
     """
+    from menhir.core.bootstrap import build_graph_adapter, resolve_graph_extensions
+
+    registry = resolve_graph_extensions(extensions)
     settings = settings or MemorySettings.from_env()
 
     neo4j = Neo4jRepository(
@@ -42,14 +51,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         user=settings.neo4j_user,
         password=settings.neo4j_password,
     )
-    counting_enabled = bool(
-        getattr(settings, "personal_memory_counting_enabled", False)
-        and getattr(settings, "personal_memory_scalar_state_enabled", False)
-    )
-    graph_adapter = MemoryGraphAdapter(
-        neo4j=neo4j,
-        counting_enabled=counting_enabled,
-    )
+    graph_adapter = build_graph_adapter(neo4j, settings, extensions=registry)
 
     # Attempt full path for context recall.
     # Always prefer the direct Graphiti path — the hook is designed to bypass HTTP.
@@ -75,7 +77,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             scalar_history_enabled=bool(getattr(settings, "personal_memory_scalar_history_enabled", False)),
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
-            counting_enabled=counting_enabled,
+            counting_enabled=graph_adapter.counting_enabled,
             # No preload or download: a hook uses the explicit or already cached model, else
             # keeps the floor.
             rerank_model_dir=cached_model_dir_for_settings(settings),

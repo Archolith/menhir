@@ -1,4 +1,9 @@
-"""The tenant boundary, resolved and enforced below transport-specific code.
+"""The client namespace pin, resolved and enforced below transport-specific code.
+
+**Naming.** This module predates the owner decision of 2026-11-15 that namespace is not tenancy.
+What it enforces is the namespace a client is pinned to (``MENHIR_CLIENT_NAMESPACES``), not a
+tenant: Menhir has no tenant model yet (parked; see ``menhir.domain.namespace``). "Tenant" below
+means "the caller's pinned namespace".
 
 The invariant this module exists to hold:
 

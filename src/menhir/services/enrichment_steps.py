@@ -35,7 +35,7 @@ from menhir.infrastructure.self_binding import (
     resolve_bind_mode,
     resolve_inferred_mode,
 )
-from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
+from menhir.domain.secret_scrub import embed_input_text, non_refusing_policy, prepare_memory_text
 from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
@@ -43,7 +43,12 @@ from menhir.infrastructure.evidence_publication_intents import (
     EvidencePublicationIntentRepository,
     PublicationDispatchSuppressed,
 )
+from menhir.infrastructure.episode_lifecycle import twin_link_completed
 from menhir.infrastructure.publish_fence import (
+    LINK_OUTCOME_COLLAPSED,
+    LINK_OUTCOME_EMPTY,
+    LINK_OUTCOME_EXTRACTED,
+    LINK_OUTCOME_POLICY_EMPTY,
     ClaimFence,
     FenceLost,
     GateFence,
@@ -76,7 +81,7 @@ from menhir.services.enrichment_failures import (
     persisted_failure_text,
 )
 from menhir.services.ingest_gate import IngestGate
-from menhir.services.ingest_limits import MAX_DIFF_CHARS
+from menhir.services.ingest_limits import CHARS_PER_ESTIMATED_TOKEN, MAX_DIFF_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +183,14 @@ def _executor_kw(executor: Any) -> dict[str, Any]:
     return {} if executor is None else {"executor": executor}
 
 
-def compose_episode_body(claimed: dict[str, object]) -> str:
-    """Build the episode body sent to Graphiti, appending any attached diff."""
+def compose_episode_body(claimed: dict[str, object], max_estimated_tokens: int | None = None) -> str:
+    """Build the episode body sent to Graphiti, appending any attached diff.
+
+    With ``max_estimated_tokens`` the diff is truncated (or dropped) so the composed body fits the
+    preflight budget, so an episode intake accepted is never parked only because of its diff.
+    Production callers must pass the budget; test_every_production_compose_call_passes_the_preflight_budget
+    enforces it.
+    """
 
     content = str(claimed.get("content") or "")
     diff = claimed.get("diff")
@@ -188,9 +199,20 @@ def compose_episode_body(claimed: dict[str, object]) -> str:
     diff_text = str(diff).strip()
     if not diff_text:
         return prepare_memory_text(content, policy=non_refusing_policy())
-    if len(diff_text) > MAX_DIFF_CHARS:
-        diff_text = diff_text[:MAX_DIFF_CHARS] + "\n... [diff truncated]"
-    return prepare_memory_text(f"{content}\n\n--- git diff ---\n{diff_text}", policy=non_refusing_policy())
+    header = f"{content}\n\n--- git diff ---\n"
+    marker = "\n... [diff truncated]"
+    keep = MAX_DIFF_CHARS
+    if max_estimated_tokens is not None and max_estimated_tokens > 0:
+        keep = min(keep, CHARS_PER_ESTIMATED_TOKEN * max_estimated_tokens - len(header) - len(marker))
+        if keep <= 0:
+            return prepare_memory_text(content, policy=non_refusing_policy())
+    if len(diff_text) > keep:
+        diff_text = diff_text[:keep] + marker
+    return prepare_memory_text(f"{header}{diff_text}", policy=non_refusing_policy())
+
+
+def _compose_ctx_episode_body(ctx: EnrichmentContext) -> str:
+    return compose_episode_body(ctx.claimed, ctx.graphiti_episode_max_estimated_tokens)
 
 
 def coerce_reference_time(value: object | None) -> datetime:
@@ -229,7 +251,7 @@ def estimate_episode_tokens(episode_body: str) -> int:
     rendered = str(episode_body or "")
     if not rendered:
         return 0
-    return max(1, (len(rendered) + 3) // 4)
+    return max(1, (len(rendered) + CHARS_PER_ESTIMATED_TOKEN - 1) // CHARS_PER_ESTIMATED_TOKEN)
 
 
 def build_episode_preflight_rejection(
@@ -281,6 +303,47 @@ def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) ->
         )
 
 
+def _receipt_self_bound(receipt: Any) -> bool:
+    """Whether this extraction's receipt bound a self tier (explicit or inferred)."""
+    return bool(
+        receipt is not None
+        and (
+            getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+            or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+        )
+    )
+
+
+def _receipt_raw_nonempty(receipt: Any, episode_key: str) -> bool:
+    """Whether the receipt is for this episode and the LLM returned raw entities or edges."""
+    return bool(
+        receipt is not None
+        and receipt.episode_key == episode_key
+        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
+    )
+
+
+def link_extraction_outcome(
+    receipt: Any, episode_key: str, *, persisted: bool
+) -> dict[str, Any]:
+    """The outcome a publish records with its twin link (#905), decided like ``stamp_and_finalize``.
+
+    ``persisted``: the publish wrote entity nodes or edges. Otherwise a receipt for this episode
+    with raw content is policy-empty or a collapse; anything else is a plain empty extraction.
+    ``self_bound`` records that this extraction bound a self tier, for finalize-from-link.
+    """
+    self_bound = _receipt_self_bound(receipt)
+    reason = None
+    if persisted:
+        outcome = LINK_OUTCOME_EXTRACTED
+    elif _receipt_raw_nonempty(receipt, episode_key):
+        reason = policy_empty_reason(receipt)
+        outcome = LINK_OUTCOME_POLICY_EMPTY if reason is not None else LINK_OUTCOME_COLLAPSED
+    else:
+        outcome = LINK_OUTCOME_EMPTY
+    return {"outcome": outcome, "policy_empty_reason": reason, "self_bound": self_bound}
+
+
 # ---------------------------------------------------------------------------
 # Pipeline step 1 — finalize-from-link (replaces the by-name reconcile)
 # ---------------------------------------------------------------------------
@@ -292,6 +355,10 @@ async def finalize_from_link(ctx: EnrichmentContext) -> bool:
     ``resolved_episode_uuid`` skips preflight, extraction and ``add_episode`` and only needs the
     post-publish steps. The artifact set is read back from the linked twin; when the read returns
     nothing (queue node marked, or twin gone) the job stops without writing anything.
+
+    #905: a link that is not a completion (empty twin, collapsed or unrecorded outcome) is cleared
+    with its empty twin under the claim fence, and False is returned so this claim re-extracts.
+    #906: the steps run on the names, contents and facts stored on the linked artifact.
     """
 
     if not ctx.claimed.get("resolved_episode_uuid"):
@@ -305,21 +372,66 @@ async def finalize_from_link(ctx: EnrichmentContext) -> bool:
             ctx.episode_uuid,
         )
         return True
+    if not twin_link_completed(artifact):
+        resolved = str(artifact["resolved_episode_uuid"])
+        clear_ctx = ctx
+        if ctx.claim_fence is not None:
+            # The twin delete runs gated: an erase in flight (erasing_ops) or one that completed
+            # since this read moves the epoch, and the fence refuses the delete with FenceLost.
+            gate = await asyncio.to_thread(
+                read_gate_fence, ctx.graph_adapter.neo4j, ctx.claim_fence.namespace_key
+            )
+            clear_ctx = replace(ctx, gate_fence=gate)
+        cleared = await _fenced_write_off_loop(
+            clear_ctx,
+            lambda ex: ctx.graph_adapter.clear_uncompleted_twin_link(
+                ctx.episode_uuid, resolved, **_executor_kw(ex)
+            ),
+        )
+        logger.info(
+            "Finalize-from-link refused an uncompleted link episode_id=%s twin=%s outcome=%s "
+            "cleared=%s",
+            ctx.episode_uuid,
+            resolved,
+            artifact.get("extraction_outcome"),
+            cleared,
+        )
+        # Not cleared: the link changed under us; stop without writes like a missing twin.
+        return not cleared
     from menhir.domain.namespace import namespace_to_group_id
 
     namespace = str(ctx.claimed.get("namespace") or "default")
     group_id = namespace_to_group_id(namespace if namespace != "default" else None)
+    entity_details = artifact.get("entity_details") or {}
+    edge_details = artifact.get("edge_details") or {}
+
+    def _text(details: dict[str, Any], uuid: str, key: str) -> str:
+        return str((details.get(uuid) or {}).get(key) or "")
+
     result = SimpleNamespace(
         episode=SimpleNamespace(uuid=str(artifact["resolved_episode_uuid"])),
         nodes=[
-            SimpleNamespace(uuid=str(u), name="", content="")
+            SimpleNamespace(
+                uuid=str(u),
+                name=_text(entity_details, str(u), "name"),
+                content=_text(entity_details, str(u), "content"),
+            )
             for u in (artifact.get("entity_uuids") or [])
         ],
         edges=[
-            SimpleNamespace(uuid=str(u), fact="", name="")
+            SimpleNamespace(
+                uuid=str(u),
+                fact=_text(edge_details, str(u), "fact"),
+                name=_text(edge_details, str(u), "name"),
+                fact_source=(edge_details.get(str(u)) or {}).get("fact_source"),
+                source_node_uuid=_text(edge_details, str(u), "source_node_uuid"),
+                target_node_uuid=_text(edge_details, str(u), "target_node_uuid"),
+            )
             for u in (artifact.get("edge_uuids") or [])
         ],
         episodic_edges=[],
+        self_bound=bool(artifact.get("self_bound")),
+        policy_empty_reason=artifact.get("policy_empty_reason"),
     )
     async with ctx.ingest_gate.acquire(group_id):
         if ctx.claim_fence is not None:
@@ -339,33 +451,14 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
     """Reject oversized episodes before Graphiti. Returns True if rejected."""
 
     preflight_rejection = build_episode_preflight_rejection(
-        compose_episode_body(ctx.claimed),
+        _compose_ctx_episode_body(ctx),
         ctx.graphiti_episode_max_estimated_tokens,
     )
     if preflight_rejection is not None:
-        # PART 2: Create raw-capture for terminal breakage (preflight oversize rejection).
-        # This is best-effort — capture failure must not break the failure handling itself.
-        try:
-            episode_content = compose_episode_body(ctx.claimed)
-            if episode_content.strip():
-                # Short name: first ~60 chars of content
-                capture_name = episode_content[:60].replace("\n", " ").strip()
-                await asyncio.to_thread(
-                    ctx.graph_adapter.create_raw_capture_entity,
-                    episode_uuid=ctx.episode_uuid,
-                    name=capture_name,
-                    content=episode_content,
-                    namespace=str(ctx.claimed.get("namespace") or "default"),
-                    session_id=str(ctx.claimed.get("session_id") or ""),
-                    user_id=str(ctx.claimed.get("user_id") or ""),
-                    source=str(ctx.claimed.get("source") or "claude-code"),
-                )
-        except Exception as e:
-            logger.warning(
-                "Failed to create raw-capture for oversized episode %s: %s",
-                ctx.episode_uuid,
-                e,
-            )
+        # An oversized episode is parked before the main path embeds it. Embed it here (the
+        # embed truncates and never raises), so the source-memory lane can still recall its
+        # text (#662). No raw-capture copy: it was never retired if the episode later succeeded.
+        await embed_episode_content(ctx)
 
         failed = ctx.graph_adapter.mark_episode_failed(
             ctx.episode_uuid,
@@ -632,7 +725,7 @@ async def run_graphiti_extraction(
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
-                episode_body=compose_episode_body(ctx.claimed),
+                episode_body=_compose_ctx_episode_body(ctx),
                 source_description=source_description,
                 reference_time=reference_time,
                 episode_uuid=ctx.episode_uuid,
@@ -715,11 +808,6 @@ async def run_graphiti_extraction(
 # Source-memory lane: episode content embedding (best-effort, never fatal)
 # ---------------------------------------------------------------------------
 
-#: Episode content is truncated before embedding so a pathological payload cannot
-#: blow the embedder's window; 8,000 chars is far beyond any real turn.
-_SOURCE_MEMORY_EMBED_MAX_CHARS = 8000
-
-
 def _episode_embedder_model_name(graphiti_client: Any) -> str:
     """Best-effort embedder model name; 'unknown' when it cannot be resolved."""
     return embedder_model_name(graphiti_client)
@@ -735,9 +823,9 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
     Runs unless the context turns ``source_memories_enabled`` off. Skips evidence
     projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
     and episodes that already carry an embedding, so the step is idempotent across
-    retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
-    ANY exception or timeout is logged at WARNING and swallowed: this lane must never
-    fail, delay-retry, or requeue enrichment.
+    retries. Each embedder attempt uses the 10s backoff-aware deadline. Retry one
+    timeout locally so a transient stall does not leave a READY receipt unsearchable.
+    Final failures are logged and swallowed without requeuing graph enrichment.
     """
     if not getattr(ctx, "source_memories_enabled", True):
         return
@@ -754,13 +842,20 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         )
         if has_embedding:
             return
-        content = prepare_memory_text(str(claimed.get("content") or ""), policy=non_refusing_policy())[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
+        content = embed_input_text(str(claimed.get("content") or ""))
         if not content.strip():
             return
-        embedding = await await_with_backoff_aware_timeout(
-            ctx.graphiti_client.embed_query(content),
-            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
-        )
+        try:
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.info("Retrying timed-out source-memory embedding episode_id=%s", ctx.episode_uuid)
+            embedding = await await_with_backoff_aware_timeout(
+                ctx.graphiti_client.embed_query(content),
+                timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            )
         if not embedding:
             return
         model = _episode_embedder_model_name(ctx.graphiti_client)
@@ -794,7 +889,7 @@ async def _repair_synthetic_edge_facts(
     calls the LLM to produce a proper fact, and writes the result back
     to Neo4j with provenance tracking.
     """
-    if ctx.llm is None or not extracted_edges:
+    if not extracted_edges:
         return
 
     synthetic_edges: list[tuple[int, Any]] = []
@@ -813,6 +908,8 @@ async def _repair_synthetic_edge_facts(
                 updates.append({"uuid": uuid, "fact": fact, "fact_source": "original"})
         if updates:
             ctx.graph_adapter.update_edge_facts(updates)
+        return
+    if ctx.llm is None:
         return
 
     # Build stubs for LLM repair
@@ -866,13 +963,15 @@ async def _repair_synthetic_edge_facts(
     if updates:
         ctx.graph_adapter.update_edge_facts(updates)
 
-    repaired_count = sum(1 for j, _ in enumerate(synthetic_edges) if j < len(repaired) and repaired[j])
+    # #878: count what was written, so a rejected model answer counts as a fallback.
+    repaired_count = sum(1 for u in updates if u["fact_source"] == "llm_repaired")
+    fallback_count = sum(1 for u in updates if u["fact_source"] == "synthetic_fallback")
     logger.info(
         "Edge fact repair episode_id=%s: %d synthetic, %d repaired, %d fallback",
         ctx.episode_uuid,
         len(synthetic_edges),
         repaired_count,
-        len(synthetic_edges) - repaired_count,
+        fallback_count,
     )
 
 
@@ -932,8 +1031,10 @@ def _anchor_to_structural_entities(
     get weight 1.0; diff-only files get weight 0.3.
     """
     from menhir.infrastructure.structural_anchoring import (
+        MAX_ANCHOR_EDGES_PER_EPISODE,
+        extract_diff_file_paths,
         extract_file_paths,
-        normalize_to_repo_relative,
+        resolve_file_reference,
         split_narrative_and_diff,
     )
 
@@ -945,25 +1046,50 @@ def _anchor_to_structural_entities(
     try:
         narrative, diff = split_narrative_and_diff(episode_body)
 
-        narrative_paths = extract_file_paths(narrative)
-        diff_paths = extract_file_paths(diff)
-        # Remove paths already in narrative (avoid double-linking)
-        narrative_set = set(narrative_paths)
-        diff_only_paths = [p for p in diff_paths if p not in narrative_set]
+        sources = (
+            ("narrative", extract_file_paths(narrative), 1.0),
+            ("diff", extract_diff_file_paths(diff), 0.3),
+        )
+        if not any(paths for _, paths, _ in sources):
+            return counts
+        projects = ctx.graph_adapter.list_structure_projects()
+        # Only live projects: entities left behind by a deleted project must not make a file ambiguous.
+        live = sorted({str(entry["name"]) for entry in projects if entry.get("name")})
+        resolved = [
+            (source, weight, [ref for ref in (resolve_file_reference(p, projects) for p in paths) if ref])
+            for source, paths, weight in sources
+        ]
+        # Episodes carry no project, so absolute paths under an indexed root are the only evidence
+        # of one; relative and bare references in the same episode are resolved within those projects.
+        mentioned = sorted({project for _, _, refs in resolved for project, _ in refs if project})
+        default_scope = tuple(mentioned or live)
 
-        if narrative_paths:
-            normalized = [normalize_to_repo_relative(p) for p in narrative_paths]
-            counts["narrative"] = ctx.graph_adapter.anchor_semantic_to_structural(
-                extracted_node_uuids, normalized,
-                anchor_source="narrative_path", weight=1.0,
-            )
+        remaining = MAX_ANCHOR_EDGES_PER_EPISODE
+        seen: set[tuple[tuple[str, ...], str]] = set()
+        for source, weight, refs in resolved:
+            by_scope: dict[tuple[str, ...], list[str]] = {}
+            for project, relative in refs:
+                scope = (project,) if project else default_scope
+                if not scope or (scope, relative) in seen:
+                    continue
+                seen.add((scope, relative))
+                by_scope.setdefault(scope, []).append(relative)
 
-        if diff_only_paths:
-            normalized = [normalize_to_repo_relative(p) for p in diff_only_paths]
-            counts["diff"] = ctx.graph_adapter.anchor_semantic_to_structural(
-                extracted_node_uuids, normalized,
-                anchor_source="diff_path", weight=0.3,
-            )
+            for scope, relative_paths in by_scope.items():
+                if remaining <= 0:
+                    break
+                linked = ctx.graph_adapter.anchor_semantic_to_structural(
+                    extracted_node_uuids,
+                    relative_paths,
+                    anchor_source=f"{source}_path",
+                    weight=weight,
+                    project_filter=list(scope),
+                    max_edges=remaining,
+                )
+                remaining -= linked
+                counts[source] += linked
+        if remaining <= 0:
+            logger.info("Structural anchor budget exhausted for episode=%s", ctx.episode_uuid)
 
         total = counts["narrative"] + counts["diff"]
         if total > 0:
@@ -1082,21 +1208,20 @@ async def stamp_and_finalize(
     # then dropped. Read + clear here regardless of which branch we take below.
     receipt = get_extraction_receipt()
     clear_extraction_receipt()
-    raw_extraction_nonempty = (
-        receipt is not None
-        and receipt.episode_key == ctx.episode_uuid
-        and (receipt.raw_entity_count > 0 or receipt.raw_edge_count > 0)
-    )
+    raw_extraction_nonempty = _receipt_raw_nonempty(receipt, ctx.episode_uuid)
 
     # Replaces the old ownership read: owner, claim instant, ENRICHING, no marker, epoch unmoved.
     _fence_check(ctx)
 
-    if receipt is not None and resolve_inferred_mode(
+    # #906: from-link has no receipt; the publish recorded whether this extraction bound a self.
+    self_bound = (
+        bool(getattr(graphiti_result, "self_bound", False))
+        if from_link
+        else _receipt_self_bound(receipt)
+    )
+    if self_bound and resolve_inferred_mode(
         getattr(ctx, "inferred_self_mode", None)
-    ) is not SelfBindMode.OFF and (
-        getattr(getattr(receipt, "self_bind_result", None), "bound", False)
-        or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
-    ):
+    ) is not SelfBindMode.OFF:
         # Best-effort two-tier self link; never fails the episode.
         link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
         if link_self_tiers is not None:
@@ -1114,7 +1239,16 @@ async def stamp_and_finalize(
 
     if not extracted_nodes and not extracted_edges:
         empty_reason = policy_empty_reason(receipt) if raw_extraction_nonempty else None
-        if empty_reason is not None:
+        if from_link:
+            # The policy label the publish recorded with the link (#905).
+            empty_reason = getattr(graphiti_result, "policy_empty_reason", None) or None
+        if empty_reason is not None and receipt is None:
+            logger.info(
+                "Policy-empty enrichment (success, from link) episode_id=%s reason=%s",
+                ctx.episode_uuid,
+                empty_reason,
+            )
+        elif empty_reason is not None:
             # Policy-empty: the extraction produced entities but no persistable content.
             # Cases: (a) assistant turn with only self-label and no relationship, (b) every
             # usable edge was user->X echo suppressed by design, (c) any-source turn where
@@ -1285,30 +1419,39 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
-    # Best-effort LLM repair of synthetic edge facts
+    # Best-effort LLM repair of synthetic edge facts. #878: its writes are provenance only, so a
+    # write error is logged, not an enrichment failure. #906: an edge that already carries a
+    # fact_source was handled by an earlier attempt; from-link must not relabel it.
     _fence_check(ctx)
-    await _repair_synthetic_edge_facts(
-        ctx, extracted_edges, compose_episode_body(ctx.claimed),
-    )
+    try:
+        await _repair_synthetic_edge_facts(
+            ctx,
+            [e for e in extracted_edges if not getattr(e, "fact_source", None)],
+            _compose_ctx_episode_body(ctx),
+        )
+    except Exception:
+        logger.warning(
+            "Edge fact repair failed (best-effort) episode_id=%s", ctx.episode_uuid, exc_info=True
+        )
     # Best-effort structural anchoring
     _fence_check(ctx)
     _anchor_to_structural_entities(
-        ctx, [node.uuid for node in extracted_nodes], compose_episode_body(ctx.claimed),
+        ctx, [node.uuid for node in extracted_nodes], _compose_ctx_episode_body(ctx),
     )
     # Best-effort semantic correlation check (Step 8)
     # After nodes are committed, check if they correlate with existing entities.
     # Correlations create RELATES_TO edges (0.7–0.85 sim) or trigger merge (>0.95 sim).
-    # Conflict-range pairs (0.85–0.95) are returned for the lifecycle service to flag.
-    correlation_conflicts = 0
+    # Conflict-range pairs (0.85–0.95) are queued for LLM review below (#655).
+    conflict_pairs: list[tuple[str, str]] = []
     _fence_check(ctx)
     try:
         from menhir.services.correlation_service import CorrelationService
         correlation_service = CorrelationService(
-            correlation_repo=ctx.graph_adapter._correlation,
+            correlation_repo=ctx.graph_adapter,
             graphiti_client=ctx.graphiti_client,
             llm=ctx.llm,  # Part 2: Pass LLM for judge-gated merge
         )
-        episode_body = compose_episode_body(ctx.claimed)
+        episode_body = _compose_ctx_episode_body(ctx)
         # Part 1: namespace-scoped correlation search (deterministic veto gate)
         namespace = str(ctx.claimed.get("namespace") or "default")
         for node in extracted_nodes:
@@ -1322,7 +1465,17 @@ async def stamp_and_finalize(
             corr_result = await correlation_service.check_correlation(
                 node.uuid, node_query, namespace=namespace,
             )
-            correlation_conflicts += corr_result.conflicts
+            # One conflict per node is queued; later pairs are fallbacks for a pair that is
+            # suppressed or cannot be written.
+            # A node absorbed by a merge is gone; its conflict pairs are moot. The scan stops at
+            # the merge, so only conflicts found on earlier hits can be in the results.
+            results = corr_result.results or []
+            if not any(r.action == "merged" for r in results):
+                conflict_pairs.extend(
+                    (str(r.source_uuid), str(r.target_uuid))
+                    for r in results
+                    if r.action == "conflict" and r.target_uuid and r.target_uuid != node.uuid
+                )
             if corr_result.related > 0 or corr_result.merged > 0:
                 logger.info(
                     "Correlation check: node=%s related=%d merged=%d conflicts=%d",
@@ -1330,11 +1483,35 @@ async def stamp_and_finalize(
                 )
     except Exception:
         logger.warning("Correlation check failed (best-effort)", exc_info=True)
+    # #655: persist conflicts found at write time instead of waiting for consolidation.
+    # The fence check sits outside the try, like the steps above, so FenceLost still
+    # reaches the worker.
+    if conflict_pairs and ctx.lifecycle_service is not None:
+        flagged: set[str] = set()
+        for source_uuid, target_uuid in conflict_pairs:
+            if source_uuid in flagged:
+                continue
+            _fence_check(ctx)
+            try:
+                recorded = await ctx.lifecycle_service.record_conflict_pair(source_uuid, target_uuid)
+            except Exception:
+                logger.warning(
+                    "Conflict queue write failed for %s <-> %s (best-effort)",
+                    source_uuid, target_uuid, exc_info=True,
+                )
+                continue
+            # updated == 0: one side is gone or protected, so nothing was written.
+            if recorded is not None and recorded[1] > 0:
+                flagged.add(source_uuid)
+                logger.info(
+                    "Enrichment conflict queued: %s <-> %s (group=%s)",
+                    source_uuid, target_uuid, recorded[0],
+                )
     if ctx.lifecycle_service is not None:
         _fence_check(ctx)
         entity_uuids = [node.uuid for node in extracted_nodes]
         freshness_map = ctx.graph_adapter.fetch_node_freshness(entity_uuids)
-        episode_content = compose_episode_body(ctx.claimed)
+        episode_content = _compose_ctx_episode_body(ctx)
         stamped_ok = ctx.graph_adapter.update_episode_processing(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
@@ -1668,12 +1845,17 @@ async def add_episode_with_timeout(
     if claim_fence is not None:
         # Built here so the repair-turn provider closes over the live receipt: the extraction
         # fills ``receipt.repair_turn_ids`` and the fence reads it in ``after_write``.
+        # #905: the extraction outcome is decided from the same receipt and stored with the link.
+        outcome_key = claim_fence.q_uuid
         fence_kwargs = {
             "new_episode_uuid": claim_fence.reserved_twin_uuid,
             "publish_fence": MenhirPublishFence(
                 claim_fence,
                 gate_fence if gate_fence is not None else GateFence(epoch=0),
                 repair_turn_ids_provider=lambda: receipt.repair_turn_ids,
+                extraction_outcome_provider=lambda nodes, edges: link_extraction_outcome(
+                    receipt, outcome_key, persisted=bool(nodes or edges)
+                ),
             ),
         }
     try:

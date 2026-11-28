@@ -70,9 +70,25 @@ def expected_graphiti_embedding_dimension(settings: MemorySettings) -> int | Non
     return infer_embedding_dimension_for_model(provider.embed_model)
 
 
+def configured_embedding_dimension(embed_model: str) -> int:
+    """The dimension the service's Graphiti embedder yields: the table value, else Graphiti's default."""
+    known = infer_embedding_dimension_for_model(embed_model)
+    if known is not None:
+        return known
+    from graphiti_core.embedder.client import EMBEDDING_DIM
+
+    return int(EMBEDDING_DIM)
+
+
+def fit_embedding_dimension(vector: Any, dim: int) -> list[float] | None:
+    """Truncate like Graphiti's embedder (``embedding[:embedding_dim]``); None if still not ``dim``."""
+    fitted = [float(v) for v in list(vector)[:dim]]
+    return fitted if len(fitted) == dim else None
+
+
 #: Process-lifetime memo for the startup sweep (CF-173).
 #:
-#: `embedding_dimension_health` runs six unbounded scans, two of them over EVERY relationship in
+#: `embedding_dimension_health` runs seven unbounded scans, two of them over EVERY relationship in
 #: the graph with no label to narrow them, and startup calls it twice: once from the `serve`
 #: guard in `cli/__init__.py` and once from `core/runtime_preflight`. Two full sweeps, moments
 #: apart, over a graph nothing has had a chance to change in between. This makes the second one
@@ -142,6 +158,24 @@ def embedding_dimension_health(
         RETURN size(r.fact_embedding) AS dim, count(r) AS count
         ORDER BY count DESC
         """
+    )
+
+    # REPORTING ONLY (#1006): TypedAssertion.name_embedding is backfilled in bounded batches, so a
+    # partly-filled graph is normal. These keys stay out of `ok`, `mixed` and every wrong/zero
+    # count that feeds `blocking`. Alias is `t`, not `n`, so it is a distinct query text.
+    assertion_rows = neo4j.execute(
+        """
+        MATCH (t:TypedAssertion)
+        WHERE t.name_embedding IS NOT NULL
+        RETURN size(t.name_embedding) AS dim, count(t) AS count
+        ORDER BY count DESC
+        """
+    )
+    assertion_dims = {int(row.get("dim") or 0): int(row.get("count") or 0) for row in assertion_rows}
+    wrong_assertion_count = (
+        sum(c for d, c in assertion_dims.items() if d != expected_dim)
+        if expected_dim is not None
+        else assertion_dims.get(0, 0)
     )
 
     # Missing (NULL) embeddings on SEMANTIC nodes are as broken as wrong-dimension
@@ -236,6 +270,8 @@ def embedding_dimension_health(
         "entity_dims": entity_dims,
         "community_dims": community_dims,
         "edge_dims": edge_dims,
+        "assertion_dims": assertion_dims,
+        "wrong_assertion_count": wrong_assertion_count,
     }
     if use_cache:
         _HEALTH_CACHE[cache_key] = dict(result)

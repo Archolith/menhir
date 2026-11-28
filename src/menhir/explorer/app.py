@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import menhir
 from menhir.config import MemorySettings
 from menhir.config.settings import is_loopback_host
+from menhir.extensions import RuntimeExtensions
 from menhir.explorer.feature_taxonomy import classify, parent_order
 from menhir.explorer.recall_lab import (
     DEFAULT_ARMS,
@@ -31,7 +32,11 @@ from menhir.explorer.recall_packet_prototype import (
     QUERY_FILTERED_PACKET_VERSION,
     build_query_filtered_recall_packet,
 )
-from menhir.explorer.extraction_lab import ExtractionLabRequest, run_extraction_lab
+from menhir.explorer.extraction_lab import (
+    ExtractionLabRequest,
+    redact_extraction_lab_history_row,
+    run_extraction_lab,
+)
 from menhir.explorer.bench_runs import BenchRunCatalog, BenchRunTaskReader, CONTRACT_VERSION, _outcome_counts, _filtered_task_ids, _nav_neighbors, _normalize_outcome, _outcome_from_primary
 from menhir.domain.verbatim_skip_status import (
     effective_processing_row,
@@ -742,9 +747,13 @@ def _require_explorer_readonly() -> None:
     `_require_tier` so the two surfaces cannot drift apart in how they rank tiers or shape the
     403.
     """
+    from menhir.api.route_tools import refuse_restricted_client
     from menhir.api.routes_support import _require_tier
 
     _require_tier("readonly")
+    # Explorer routes map to no single tool, so a client with a tool allowlist is refused
+    # the whole explorer (fail closed, as for unmapped /api routes).
+    refuse_restricted_client("explorer")
 
 
 def _require_explorer_agent() -> None:
@@ -907,14 +916,15 @@ def create_explorer_router() -> Any:
             _extraction_lab_store(request).fetch_extraction_lab_runs,
             limit=limit,
         )
-        return JSONResponse({"runs": rows})
+        reveal = _reveal(request)
+        return JSONResponse({"runs": [redact_extraction_lab_history_row(r, reveal=reveal) for r in rows]})
 
     @router.get("/explorer/api/extraction-lab/history/{run_id}", response_class=JSONResponse)
     async def extraction_lab_history_detail(request: Request, run_id: int) -> JSONResponse:
         row = await asyncio.to_thread(_extraction_lab_store(request).fetch_extraction_lab_run, run_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Extraction Lab run not found")
-        return JSONResponse(row)
+        return JSONResponse(redact_extraction_lab_history_row(row, reveal=_reveal(request)))
 
     @router.get("/explorer/api/features", response_class=JSONResponse)
     async def feature_dashboard_api(
@@ -1342,11 +1352,15 @@ def create_app(
     recall_lab_store: object | None = None,
     extraction_lab_store: object | None = None,
     bench_run_catalog: BenchRunCatalog | None = None,
+    extensions: RuntimeExtensions | None = None,
 ) -> FastAPI:
     settings = settings or _settings_from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from menhir.core.bootstrap import build_graph_adapter, resolve_graph_extensions
+
+        registry = resolve_graph_extensions(extensions)
         owned_repo = repo is None
         app.state.settings = settings
         app.state.repo = repo or _repo_from_settings(settings)
@@ -1364,17 +1378,10 @@ def create_app(
         # CandidateService both already treat it as best-effort), so approval still
         # gets the same promotion/consistency guarantees even without live search.
         from menhir.core.bootstrap import UnavailableGraphitiClient
-        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
         from menhir.services.candidate_service import CandidateService
         from menhir.services.lifecycle_service import LifecycleService
 
-        graph_adapter = MemoryGraphAdapter(
-            neo4j=app.state.repo,
-            counting_enabled=bool(
-                getattr(settings, "personal_memory_counting_enabled", False)
-                and getattr(settings, "personal_memory_scalar_state_enabled", False)
-            ),
-        )
+        graph_adapter = build_graph_adapter(app.state.repo, settings, extensions=registry)
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=UnavailableGraphitiClient("explorer: no live Graphiti client"),

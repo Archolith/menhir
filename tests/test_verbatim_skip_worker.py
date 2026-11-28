@@ -106,8 +106,9 @@ class _Svc(IngestWorkerMixin, IngestQueueMixin):
         if mode != "__missing__":
             self._inferred_self_mode = mode
 
-    async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
+    async def _enqueue_pending_episode(self, episode_uuid: str) -> bool:
         self.enqueued.append(episode_uuid)
+        return True
 
     async def _processing_heartbeat_loop(self, episode_uuid, stop_event, claim_started_at=None):
         await stop_event.wait()

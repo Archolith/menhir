@@ -204,6 +204,7 @@ def test_reconcile_ready_write_passes_the_claim_instant() -> None:
     adapter = _adapter()
     adapter.linked_twin_artifact.return_value = {
         "resolved_episode_uuid": "resolved", "entity_uuids": [], "edge_uuids": [],
+        "extraction_outcome": "empty", "completed": True,
     }
     ctx = _ctx(
         adapter,

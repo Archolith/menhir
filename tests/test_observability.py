@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import httpx
@@ -388,6 +389,26 @@ class _Upstream:
         texts = [texts] if isinstance(texts, str) else texts
         items = [_Item(i, _CF191_VECTORS[t]) for i, t in enumerate(texts)]
         return _resp(self._order(items))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_embeddings_with_explicit_dimensions_bypass_the_default_cache():
+    from menhir.infrastructure.embedding_cache import EmbeddingCache
+
+    cache = EmbeddingCache()
+    cache.set("alpha", [1.0, 2.0, 3.0], model="m")
+    upstream = _resp([_Item(0, [4.0, 5.0]), _Item(1, [6.0, 7.0])])
+    inner = AsyncMock()
+    inner.create.return_value = upstream
+    endpoint = observability._CachingEmbeddingsEndpoint(inner, cache)
+
+    result = await endpoint.create(input=["alpha", "beta"], model="m", dimensions=2)
+
+    assert result is upstream
+    inner.create.assert_awaited_once_with(input=["alpha", "beta"], model="m", dimensions=2)
+    assert cache.get("alpha", model="m") == [1.0, 2.0, 3.0]
+    assert cache.get("beta", model="m") is None
 
 
 @pytest.mark.unit

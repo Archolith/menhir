@@ -76,11 +76,11 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
-- `archolith-graphiti-core==0.31.2.post3` (Archolith soft fork of `getzep/graphiti`,
+- `archolith-graphiti-core==0.32.1.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
-  hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post3` at
-  `420bebec736ad562633a66504210d3c3b651e476`; the locked PyPI wheel SHA-256 is
-  `a468f66bb63c673f9fece7cfddf082df1a533950ee7629b06c2707767d5be515`.
+  hooks without runtime monkeypatching. Published from fork tag `v0.32.1.post2` at
+  `bcae80b8c19648a1fbb8cb206f1ddcec1bb6bfb7`; the locked PyPI wheel SHA-256 is
+  `e66afdd7a6d692c7c9bbd5f9b6911f00028eae1c19402c6e9002216ad36ac88f`.
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
@@ -239,7 +239,8 @@ src/menhir/
 |   |- recall_service.py  Public RecallService dataclass and API facade (conditional event-history authority layer)
 |   |- recall_policies.py  Pure retrieval, temporal, and authority policy helpers
 |   |- recall_support.py  Rehydration, facet/frontier, adjacency, and post-recall operations
-|   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly
+|   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly (source memories ranked by cosine, returned oldest first)
+|   |- context_builder.py  build_context: ranked memories first, then source memories admitted one at a time by rank within max_tokens
 |   |- ingest_service.py  Public IngestService dataclass and composition facade
 |   |- ingest_queue.py / ingest_worker.py / ingest_intake.py  Queue lifecycle, enrichment workers, and intake operations
 |   |- ingest_limits.py  Shared memory text and diff size bounds at write entry points

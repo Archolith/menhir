@@ -106,8 +106,9 @@ jobs:
           fi
           echo "Tagged commit: $SHA"
           for attempt in $(seq 1 60); do
-            pending=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json status --jq '[.[] | select(.status != "completed")] | length')
-            total=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json status --jq 'length')
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json status,conclusion)
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<< "$runs")
+            total=$(jq 'length' <<< "$runs")
             if [ "$total" -eq 0 ]; then
               echo "::error::No tests.yml run exists for commit $SHA. The tag must point at a commit whose tests workflow has run and passed."
               exit 1
@@ -117,7 +118,7 @@ jobs:
               sleep 30
               continue
             fi
-            failed=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json conclusion --jq '[.[] | select(.conclusion != "success")] | length')
+            failed=$(jq '[.[] | select(.conclusion != "success")] | length' <<< "$runs")
             if [ "$failed" -gt 0 ]; then
               echo "::error::tests.yml is not green on $SHA ($failed of $total run(s) failed). Refusing to publish."
               gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests
@@ -140,7 +141,8 @@ jobs:
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -242,6 +244,7 @@ jobs:
     needs: build
     if: ${{ needs.build.outputs.already_published == 'false' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     environment:
       name: pypi
       url: https://pypi.org/project/archolith-menhir/
@@ -380,6 +383,7 @@ jobs:
     needs: [resolve, build, publish, image-tag, served-metadata]
     if: ${{ !cancelled() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.build.outputs.already_published == 'true') && (needs.image-tag.result == 'success' || needs.resolve.outputs.existing_image_digest != '') && needs.served-metadata.result == 'success' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

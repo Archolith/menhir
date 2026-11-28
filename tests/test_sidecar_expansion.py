@@ -420,6 +420,22 @@ def test_fetch_lifecycle_actions_summary_counts(store: McpTelemetryStore) -> Non
     assert summary["revisions"] == 1
 
 
+def test_fetch_lifecycle_actions_summary_distinguishes_zero_avg_from_null(
+    store: McpTelemetryStore,
+) -> None:
+    store.record_lifecycle_action(
+        action="compress", node_uuid="node-zero", trigger="scheduler", duration_ms=0,
+    )
+    store.record_lifecycle_action(
+        action="rehydrate", node_uuid="node-null", trigger="manual", duration_ms=None,
+    )
+
+    summary = store.fetch_lifecycle_actions_summary(since_hours=24)
+
+    assert summary["compress"]["avg_ms"] == 0
+    assert summary["rehydrate"]["avg_ms"] is None
+
+
 def test_fetch_lifecycle_actions_summary_empty(store: McpTelemetryStore) -> None:
     summary = store.fetch_lifecycle_actions_summary(since_hours=24)
     assert summary == {"revisions": 0}

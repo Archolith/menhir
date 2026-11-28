@@ -149,6 +149,11 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append(f"  Flagged:     {overview.get('flagged_count', '?'):>6}")
         lines.append(f"  Persistent:  {overview.get('persistent_count', '?'):>6}")
         lines.append(f"  Session:     {overview.get('session_count', '?'):>6}")
+        pending_conflicts = int(overview.get("pending_conflict_groups") or 0)
+        lines.append(f"  Pending conflicts: {pending_conflicts:>6}  (groups awaiting LLM review)")
+        oldest_pending = overview.get("oldest_pending_conflict_at")
+        if pending_conflicts and oldest_pending:
+            lines.append(f"  Oldest pending conflict: {oldest_pending}")
         lines.append("")
 
         # ── Enrichment Pipeline ──
@@ -165,13 +170,13 @@ class GetMemoryStatsTool(BaseTextTool):
             lines.append(f"  Failed:      {failed_enrichment:>6}  (in window)")
         # Standing FAILED count comes from the GRAPH, not the telemetry window: a backlog
         # older than since_hours is invisible in the line above. These episodes keep their
-        # content but have no entities, and recall searches entities -- so they are
-        # unrecallable despite add_memory having reported success. Most are never retried
+        # content but have no entities or facts; only the source-memory lane recalls their text
+        # (#662), despite add_memory having reported success. Most are never retried
         # automatically (terminal/manual_review); the scheduler's queue-health job logs the
         # classification breakdown.
         standing_failed = int(overview.get("failed_count") or 0)
         if standing_failed > 0:
-            lines.append(f"  STUCK:       {standing_failed:>6}  <- unrecallable, mostly not auto-retried")
+            lines.append(f"  STUCK:       {standing_failed:>6}  <- no entities/facts, mostly not auto-retried")
         lines.append(f"  Pending now: {queue_depth:>6}")
         enriching = overview.get("enriching_count", 0)
         if enriching:

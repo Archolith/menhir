@@ -32,5 +32,6 @@ __all__ = [
 class ProjectionLifecycleRepository(_ProjectionLifecycleWritesMixin, _ProjectionLifecycleReadsMixin):
     """Neo4j-backed lifecycle sidecar for generic projection definitions."""
 
-    def __init__(self, neo4j: Any) -> None:
+    def __init__(self, neo4j: Any, *, commit_timeout_s: float | None = None) -> None:
         self._neo4j = neo4j
+        self._commit_timeout_s = commit_timeout_s

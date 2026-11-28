@@ -17,9 +17,14 @@ Hard vetoes:
   - same uuid (a node cannot absorb itself)
   - ineligible role: structural, path-shaped, View/instrumentation, or canonical-self node
   - namespace mismatch (never merge identities across silos)
+  - previously unmerged: either node's ``restored_from_merge`` names the other, or a node in the
+    other's ``merged_from`` lineage (an operator split them; the journal half of this veto is
+    checked by MergeCoordinator, which owns the journal, and is pair-exact)
   - COMPRESSED or GONE freshness (must be rehydrated through the lifecycle path first)
   - PROMOTED scope (operator-curated ground truth is merge-immune)
+  - any scope other than SESSION or PERSISTENT (CANDIDATE, null, blank, unknown)
   - user_flagged (user-protected)
+  - memory_retired (frozen by retire_memory until restored)
   - a protected conflict state (pending_llm_review / unresolved)
 """
 
@@ -29,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from menhir.domain.namespace import normalize_namespace
+from menhir.domain.recall_visibility import memory_retired_cypher
 from menhir.domain.retention import source_retention_protected_cypher
 
 
@@ -41,9 +47,12 @@ INELIGIBLE_ROLE = "INELIGIBLE_ROLE"
 NAMESPACE_MISMATCH = "NAMESPACE_MISMATCH"
 NON_ACTIVE_FRESHNESS = "NON_ACTIVE_FRESHNESS"
 PROMOTED_SCOPE = "PROMOTED_SCOPE"
+UNMERGEABLE_SCOPE = "UNMERGEABLE_SCOPE"
 USER_FLAGGED = "USER_FLAGGED"
 SOURCE_RETENTION_PROTECTED = "SOURCE_RETENTION_PROTECTED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
+MEMORY_RETIRED = "MEMORY_RETIRED"
+PREVIOUSLY_UNMERGED = "PREVIOUSLY_UNMERGED"
 
 #: Freshness values that hard-veto a merge. Retained because the reason code and its telemetry
 #: are named for them, and because the veto message reports which value offended.
@@ -55,6 +64,9 @@ _VETOED_FRESHNESS = frozenset({"COMPRESSED", "GONE"})
 #: closed. Today the two forms describe the same set: `FreshnessState` is exactly
 #: {ACTIVE, COMPRESSED, GONE}.
 _MERGEABLE_FRESHNESS = frozenset({"ACTIVE", ""})
+#: The only scopes a merge may touch (trim/upper-normalized). Anything else -- CANDIDATE, null,
+#: blank, unknown -- is refused, so the merge's "higher scope wins" rank only ever sees these two.
+_MERGEABLE_SCOPES = frozenset({"SESSION", "PERSISTENT"})
 #: conflict_status values that mark a node as under active review (see domain.models.ConflictStatus).
 _PROTECTED_CONFLICT_STATES = frozenset({"pending_llm_review", "unresolved"})
 
@@ -62,6 +74,7 @@ _PROTECTED_CONFLICT_STATES = frozenset({"pending_llm_review", "unresolved"})
 #: Parameter names the emitted mutation predicate binds. The repository must supply these.
 MUTABLE_PREDICATE_PARAMS: dict[str, Any] = {
     "mergeable_freshness": sorted(_MERGEABLE_FRESHNESS),
+    "mergeable_scopes": sorted(_MERGEABLE_SCOPES),
     "protected_conflict_states": sorted(_PROTECTED_CONFLICT_STATES),
 }
 
@@ -115,7 +128,9 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
             f"{var}.self_tier IS NULL",
             f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
+            f"toUpper(trim(coalesce({var}.scope, ''))) IN $mergeable_scopes",
             f"coalesce({var}.user_flagged, false) = false",
+            f"NOT {memory_retired_cypher(var, protection_checked_by_caller=True)}",
             f"NOT {source_retention_protected_cypher(var)}",
             f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
         ])
@@ -143,6 +158,11 @@ class NodeSignals:
     user_flagged: bool
     conflict_status: str | None
     source_retention_protected: bool = False
+    memory_retired: bool = False
+    #: Survivor uuid stamped by an unmerge restore (``restore_merge_snapshot``); None if never restored.
+    restored_from_merge: str | None = None
+    #: Every uuid this node has absorbed, transitively (a merge appends the absorbed node's own lineage).
+    merged_from: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -186,6 +206,18 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
             absorbed_namespace=normalize_namespace(absorbed.namespace),
         )
 
+    # 4b. An operator unmerge split this pair (#939). The restore stamps the restored node with
+    #     the survivor it came out of; re-merging the pair would undo the operator's decision. The
+    #     other node's merged_from lineage counts too: once that survivor has itself been absorbed,
+    #     its content lives in the node that absorbed it.
+    unmerged_from = [
+        n.uuid for n, other in ((survivor, absorbed), (absorbed, survivor))
+        if n.restored_from_merge
+        and str(n.restored_from_merge) in (other.uuid, *other.merged_from)
+    ]
+    if unmerged_from:
+        return _veto(PREVIOUSLY_UNMERGED, restored=unmerged_from, source="node")
+
     # 5. Only ACTIVE or unstamped may merge (Option A). COMPRESSED/GONE must be rehydrated first.
     #    An allowlist, not a veto list: the comment here used to say "null/ACTIVE allowed" while
     #    the code allowed everything except two values, and the mutation allowed only ACTIVE --
@@ -213,6 +245,11 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     if flagged:
         return _veto(USER_FLAGGED, flagged=flagged)
 
+    # 7b. A retired memory is frozen: it neither survives nor is absorbed until restored.
+    retired = [n.uuid for n in (survivor, absorbed) if n.memory_retired]
+    if retired:
+        return _veto(MEMORY_RETIRED, retired=retired)
+
     # 8. A currently flagged source episode protects every entity it produced.
     source_protected = [
         n.uuid for n in (survivor, absorbed) if n.source_retention_protected
@@ -227,5 +264,14 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     ]
     if conflicted:
         return _veto(PROTECTED_CONFLICT, conflicted=conflicted)
+
+    # 10. Only SESSION or PERSISTENT may merge: the survivor takes the higher of the two, which is
+    #     undefined for CANDIDATE, null, blank or unknown scope. Same normalization as the Cypher.
+    bad_scope = [
+        (n.uuid, n.scope) for n in (survivor, absorbed)
+        if str(n.scope or "").strip().upper() not in _MERGEABLE_SCOPES
+    ]
+    if bad_scope:
+        return _veto(UNMERGEABLE_SCOPE, offenders=bad_scope)
 
     return MergeEligibility(allowed=True, reason_code=ELIGIBLE)

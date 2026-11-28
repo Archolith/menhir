@@ -98,7 +98,10 @@ def test_decay_bridge_and_session_delete_paths_apply_live_fact_retention_guard()
         min_days_since_accessed=30,
         max_edge_count=2,
     )
-    repo.bridge_and_delete("evidence-1")
+    repo.bridge_and_delete(
+        "evidence-1", min_days=30, max_edge_count=2, max_sharpness=0.1, read_type="SEMANTIC",
+        read_edge_count=0, read_sharpness=0.05, read_recency="2024-01-01T00:00:00Z",
+        requires_target_date=False, read_rel_count=0, read_rel_signatures=[])
     repo.delete_session_nodes(["evidence-1"])
     repo.delete_entities_returning_uuids(["evidence-1"], require_scope="SESSION")
     repo.fetch_ttl_expired_session_uuids("session-1")
@@ -113,8 +116,8 @@ def test_other_automatic_lifecycle_mutations_apply_live_fact_retention_guard() -
     neo4j = _CaptureNeo4j()
     repo = ConsolidationRepository(neo4j)
 
-    repo.compress_node("evidence-1", "summary")
-    repo.complete_rehydration("evidence-1", "full content")
+    repo.compress_node("evidence-1", "summary", read_content="body", min_days_since_accessed=7.0)
+    repo.complete_rehydration("evidence-1", "full content", read_summary="s", read_base=None)
     repo.update_sharpness("evidence-1", 0.2)
     repo.fetch_session_entities("session-1")
     repo.promote_to_persistent(["evidence-1"])
@@ -136,26 +139,31 @@ def test_conflict_candidate_and_status_mutations_apply_live_fact_retention_guard
     repo.requeue_conflicts_for_llm_review()
     repo.list_conflict_groups()
 
-    set_conflict_query = neo4j.calls[0][0]
+    # set_conflict locks a, b and both groups' members before its mutation (#890).
+    set_conflict_query = next(query for query, _ in neo4j.calls if "canonical_group_id" in query)
     for variable in ("a", "b", "orphan"):
         _assert_live_fact_retention_guard(set_conflict_query, variable)
-    _assert_live_fact_retention_guard(neo4j.calls[1][0])
-    _assert_live_fact_retention_guard(neo4j.calls[2][0])
-    _assert_live_fact_retention_guard(neo4j.calls[2][0], "m")
-    _assert_live_fact_retention_guard(neo4j.calls[3][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-3][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-2][0])
+    _assert_live_fact_retention_guard(neo4j.calls[-2][0], "m")
+    _assert_live_fact_retention_guard(neo4j.calls[-1][0])
 
 
 @pytest.mark.unit
 def test_conflict_gone_and_bridge_mutations_apply_live_fact_retention_guard() -> None:
     neo4j = _CaptureNeo4j(
         responses=[
-            [{"uuid": "keep-1"}, {"uuid": "remove-1"}],
+            # Early read, then (in the fenced transaction, #890) the member lock and the locked read.
             [
                 {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep"},
                 {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove"},
             ],
-            [{"content": "keep", "original_content": None}],
-            [{"content": ""}],
+            [{"locked": 2}],
+            [
+                {"uuid": "keep-1", "scope": "PERSISTENT", "name": "Keep",
+                 "content": "keep", "original_content": None},
+                {"uuid": "remove-1", "scope": "PERSISTENT", "name": "Remove", "content": ""},
+            ],
             [{"removed_uuids": ["remove-1"]}],
             [{"resolved": 1}],
             [{"total_edges_bridged": 0}],

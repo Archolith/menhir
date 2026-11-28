@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
+import types
 import urllib.error
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -316,6 +319,42 @@ def test_no_secrets_in_output(monkeypatch, capsys):
     out = capsys.readouterr().out
     for sentinel in ("super-secret-oauth-token", "super-secret-client-secret", "Bearer ey"):
         assert sentinel not in out, f"secret sentinel leaked: {sentinel}"
+
+
+def test_main_respects_explicit_empty_argv(monkeypatch, capsys):
+    smoke = _load_smoke()
+    monkeypatch.setattr(smoke, "_CHECKS", [])
+    monkeypatch.setattr(smoke, "_resolve_base_url", lambda: "http://stub:8100")
+    monkeypatch.setattr(sys, "argv", ["oauth_local_smoke.py", "--json"])
+
+    assert smoke.main([]) == 0
+    assert capsys.readouterr().out.startswith("OAuth local smoke - ")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--base-url", "", "--json", "--unrelated"],
+        ["--url", "", "--json", "--unrelated"],
+        ["--base-url=", "--json", "--unrelated"],
+        ["--url=", "--json", "--unrelated"],
+        ["--url=", "--json", "--unrelated", "--", "--url", "operand"],
+    ],
+)
+def test_cli_strips_target_operands_but_preserves_other_args(monkeypatch, argv):
+    smoke = _load_smoke()
+    captured: list[list[str]] = []
+
+    @contextmanager
+    def fake_smoke_server(*_args, **_kwargs):
+        yield "http://stub:8100"
+
+    monkeypatch.setitem(sys.modules, "_server", types.SimpleNamespace(smoke_server=fake_smoke_server))
+    monkeypatch.setattr(smoke, "main", lambda forwarded: captured.append(forwarded) or 0)
+
+    assert smoke._cli(argv) == 0
+    tail = argv[argv.index("--"):] if "--" in argv else []
+    assert captured == [["--base-url", "http://stub:8100", "--json", "--unrelated", *tail]]
 
 
 def test_json_output_contains_checks(monkeypatch, capsys):

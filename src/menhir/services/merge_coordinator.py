@@ -35,6 +35,7 @@ from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
+from menhir.services import auto_mutation_policy as amp
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_writer_outcomes import (
     COMPLETED_BY_OTHER_OWNER,
@@ -154,12 +155,25 @@ class MergeCoordinator:
 
         Abstains (``merged=0`` + ``reason``) when the pair is ineligible, when the snapshot cannot be
         built, or when PREPARE fails (e.g. the pair is fenced by an unresolved operation).
+
+        Automatic merging is gated by MENHIR_AUTO_MERGE_MODE: unless "on", an eligible pair is not
+        merged and nothing is snapshotted or journaled; "propose" records a pending proposal.
         """
         # (1) Fail-closed eligibility on CURRENT state. Discovery is not authorization.
         eligibility = self.graph_adapter.evaluate_merge_eligibility(survivor_uuid, absorbed_uuid)
         if not eligibility.allowed:
             return {"merged": 0, "reason": eligibility.reason_code,
                     "diagnostics": eligibility.diagnostics}
+        # (1b) The journal half of the PREVIOUSLY_UNMERGED veto (#939); the node stamp half is in
+        # the eligibility policy. An operator unmerge of this pair is never undone automatically.
+        unmerge_ops = self.journal.pair_unmerge_op_ids(pair_key(survivor_uuid, absorbed_uuid))
+        if unmerge_ops:
+            return {"merged": 0, "reason": me.PREVIOUSLY_UNMERGED,
+                    "diagnostics": {"source": "journal", "op_ids": list(unmerge_ops)}}
+
+        mode = amp.auto_merge_mode()
+        if mode != "on":
+            return self._declined(mode, survivor_uuid, absorbed_uuid, similarity)
 
         op_id = uuidlib.uuid4().hex
 
@@ -232,6 +246,21 @@ class MergeCoordinator:
             return {"merged": 0, "reason": "PREPARE_FAILED", "diagnostics": {"error": str(exc)}}
 
         return self._apply(request, owner_token=token)
+
+    @staticmethod
+    def _declined(
+        mode: str, survivor_uuid: str, absorbed_uuid: str, similarity: float
+    ) -> dict[str, Any]:
+        """Result for a merge the automatic-merge switch did not allow. Mutates nothing."""
+        if mode == "propose":
+            amp.record_proposals(amp.MERGE_PROPOSAL, [(
+                absorbed_uuid, survivor_uuid,
+                amp.proposal_context(
+                    amp.AUTO_MERGE_PROPOSED, "merge", similarity=float(similarity)
+                ),
+            )])
+            return {"merged": 0, "reason": amp.AUTO_MERGE_PROPOSED}
+        return {"merged": 0, "reason": amp.AUTO_MERGE_OFF}
 
     # ------------------------------------------------------------------ the saga body
     def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -372,6 +401,21 @@ class MergeCoordinator:
                 f"{diag['observed_error']}; NOT mutating"
             )
 
+        # The switch is re-read here, immediately before the mutation, so a flip after PREPARE (or a
+        # crash replay under a stricter mode) cannot merge. The graph is still at expected_before,
+        # so close the op unapplied: FAILED is terminal and releases the pair fence.
+        mode = amp.auto_merge_mode()
+        if mode != "on":
+            declined = self._declined(
+                mode, survivor_uuid, absorbed_uuid, float(request["similarity"])
+            )
+            self.journal.mark_failed(
+                op_id, reason=f"automatic merge not enabled: {declined['reason']}",
+                owner_token=owner_token,
+            )
+            declined["op_id"] = op_id
+            return declined
+
         # Expected before-state -> mutate. merge_entity re-checks eligibility itself and repeats the
         # material predicates inside the mutation, so a change in this window still fails closed.
         expected_facts = request.get("expected_fact_uuids")
@@ -462,6 +506,7 @@ class MergeCoordinator:
             self.journal, op_id, owner_token=owner_token, after_graph_work=True,
             observed=f"merge verified after-state={actual}",
         )
+        amp.complete_proposals(amp.MERGE_PROPOSAL, [absorbed_uuid])
         out = dict(result)
         out["op_id"] = op_id
         if settled == COMPLETED_BY_OTHER_OWNER:

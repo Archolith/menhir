@@ -376,6 +376,7 @@ class StubRecallService:
         query,
         preset,
         limit,
+        limit_is_explicit=False,
         include_session=False,
         session_id=None,
         wait_for_pending=False,
@@ -771,6 +772,32 @@ def test_add_memory_queues_episode_for_background_enrichment(stubbed_mcp_state):
     ]
 
 
+@pytest.mark.parametrize("track", [False, True])
+def test_memory_tools_return_saved_id_when_scheduling_is_deferred(stubbed_mcp_state, monkeypatch, track):
+    built, _, _ = stubbed_mcp_state
+
+    async def deferred(*args, **kwargs):
+        return {
+            "episode_id": "saved-id",
+            "status": "queued",
+            "nodes_touched": 1,
+            "warning": "Memory saved. Enrichment is pending queue recovery. Do not resubmit.",
+        }
+
+    monkeypatch.setattr(built.ingest_service, "queue_episode_for_enrichment", deferred)
+
+    if track:
+        result = asyncio.run(add_memory_and_track(
+            "remember this", source="claude-code", timeout_s=0.01, poll_interval_s=0.01,
+        ))
+        assert "episode_id: saved-id" in result
+    else:
+        result = asyncio.run(add_memory("remember this", source="claude-code"))
+        assert "episode_id=saved-id, state=PENDING" in result
+
+    assert result.startswith("Memory saved. Enrichment is pending queue recovery. Do not resubmit.")
+
+
 def test_recall_context_requires_flagged_bootstrap(stubbed_mcp_state):
     result = asyncio.run(
         recall_context_memories(
@@ -838,6 +865,109 @@ def test_read_flagged_then_recall_context_flow(stubbed_mcp_state):
     assert context_payload["recent_count"] == 1
     assert context_payload["recent"][0]["tag"] == "recent"
     assert context_payload["recent"][0]["name"] == "Daily focus"
+
+
+def test_recall_context_zero_recent_limit_skips_backend_fetch(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    calls: list[int] = []
+
+    def _recent_with_available_row(limit: int = 10):
+        calls.append(limit)
+        return [
+            {
+                "uuid": "123e4567-e89b-12d3-a456-426614174310",
+                "name": "Available row",
+                "content": "A row exists but must not be fetched at zero.",
+                "source": "claude-code",
+                "user_flagged": False,
+            }
+        ]
+
+    graph_adapter.fetch_recent_memories = _recent_with_available_row  # type: ignore[method-assign]
+
+    payload = _parse_json_text(
+        asyncio.run(
+            recall_context_memories(
+                reader_id="bot-a",
+                query="",
+                recent_limit=0,
+            )
+        )
+    )
+
+    assert calls == []
+    assert payload["bootstrap_verified"] is True
+    assert payload["recent_count"] == 0
+    assert payload["recent"] == []
+
+
+def test_recall_context_rejects_negative_recent_limit(stubbed_mcp_state):
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    result = asyncio.run(
+        recall_context_memories(reader_id="bot-a", recent_limit=-1)
+    )
+
+    error = error_of(result, code="invalid_argument")
+    assert "recent_limit" in error["message"]
+
+
+def test_recall_context_default_recent_limit_returns_five_rows(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+
+    calls: list[int] = []
+
+    def _recent_rows(limit: int = 10):
+        calls.append(limit)
+        return [
+            {
+                "uuid": f"123e4567-e89b-12d3-a456-4266141744{idx:02d}",
+                "name": f"Recent {idx}",
+                "content": f"Recent row {idx}",
+                "source": "claude-code",
+                "user_flagged": False,
+            }
+            for idx in range(8)
+        ]
+
+    graph_adapter.fetch_recent_memories = _recent_rows  # type: ignore[method-assign]
+
+    payload = _parse_json_text(
+        asyncio.run(recall_context_memories(reader_id="bot-a"))
+    )
+
+    assert calls == [15]
+    assert payload["recent_count"] == 5
+    assert len(payload["recent"]) == 5
+
+
+def test_read_flagged_reports_omissions_and_keeps_pin_text(stubbed_mcp_state, monkeypatch):
+    _, adapter, _ = stubbed_mcp_state
+    rule = ("Apply this project rule first.\n" + "x" * 400)[:400]
+    long_rule = "b" * 1_500
+    pins = [{"uuid": f"pin-{idx}", "content": f"Rule {idx}"} for idx in range(12)]
+    pins[0].update(content=rule, summary="Short summary that omits the rule")
+    pins[1].update(content="", summary=long_rule)
+    monkeypatch.setattr(adapter, "fetch_flagged_memories", lambda limit: pins[:limit])
+    adapter.flagged_version = "general:12:stubflagged"
+
+    limited = _parse_json_text(asyncio.run(read_flagged_memories(limit=10)))
+    assert limited["flagged_count"] == 10
+    assert limited["flagged_total"] == 12
+    assert limited["truncated"] is True
+    assert limited["bootstrap_ready"] is True
+    assert limited["flagged_version"] == adapter.flagged_version
+    assert limited["items"][0]["summary"] == rule
+    assert "summary_truncated" not in limited["items"][0]
+    assert limited["items"][1]["summary"] == long_rule[:999] + "…"
+    assert limited["items"][1]["summary_truncated"] is True
+
+    complete = _parse_json_text(asyncio.run(read_flagged_memories(limit=12)))
+    assert complete["flagged_count"] == complete["flagged_total"] == 12
+    assert complete["truncated"] is False
 
 
 def test_recall_context_includes_similarity_for_relevant_hits(stubbed_mcp_state):
@@ -962,6 +1092,7 @@ def test_get_enrichment_status_returns_episode_snapshot(stubbed_mcp_state):
 
     assert "episode_id: 123e4567-e89b-12d3-a456-426614174999" in result
     assert "status: READY" in result
+    assert "source_search_status: UNKNOWN" in result
     assert "substage: complete" in result
     assert "attempts: 1" in result
     assert "llm_tasks_attempt: 4" in result

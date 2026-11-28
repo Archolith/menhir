@@ -50,7 +50,7 @@ def test_fetch_temporal_facts_sends_only_the_uuids():
     MemoryQueryRepository(neo).fetch_temporal_facts(["a"])
     query, params = neo.calls[-1]
     assert "fact_similarity" not in query
-    assert params == {"uuids": ["a"]}
+    assert params == {"uuids": ["a"], "tenant_namespaces": None}
 
 
 def _fact_rows():
@@ -81,7 +81,7 @@ async def test_pipeline_fetches_temporal_facts_with_only_the_uuids(
 
     stub_memory_graph_adapter.fetch_temporal_facts = fake
     res = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall("q")
-    assert kwargs_seen and all(k == {} for k in kwargs_seen)
+    assert kwargs_seen and all(k == {"namespace": None} for k in kwargs_seen)
     facts = {f.fact for r in res.results if r.uuid == "entity-1" for f in r.temporal_facts}
     assert "fact-0" not in facts
 

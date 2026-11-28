@@ -14,6 +14,8 @@ from menhir.infrastructure.openai_rate_limit import (
 _MANUAL_REVIEW_TYPE_NAMES = {
     "jsondecodeerror",
     "validationerror",
+    # graphiti_extraction_policy.CombinedExtractionShapeError: JSON that is not an object (#483).
+    "combinedextractionshapeerror",
 }
 _MANUAL_REVIEW_MARKERS = (
     "jsondecodeerror",
@@ -241,6 +243,10 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         return "retryable"
 
     if _normalize_error_type(error, error_type) in _RETRYABLE_TYPE_NAMES:
+        return "retryable"
+
+    # A blank message carries no signal: retry, but only after the type-based grades above.
+    if not error_text:
         return "retryable"
 
     return "manual_review"

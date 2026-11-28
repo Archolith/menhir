@@ -1,14 +1,24 @@
 """list_committed_merges — the read-only merge-lineage source for the ScalarStateView C.4.4 repair
-passes (offline, real SQLite journal in a tmp file)."""
+passes (offline, real SQLite journal in a tmp file). Also covers the unmerge CLI's --list path
+finding a reversible merge beyond the old 100k-row horizon."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sqlite3
+from pathlib import Path
 
 import pytest
 
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+
+_UNMERGE_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "unmerge.py"
+_UNMERGE_SPEC = importlib.util.spec_from_file_location("unmerge_under_test", _UNMERGE_SCRIPT)
+assert _UNMERGE_SPEC and _UNMERGE_SPEC.loader
+_UNMERGE = importlib.util.module_from_spec(_UNMERGE_SPEC)
+_UNMERGE_SPEC.loader.exec_module(_UNMERGE)
 
 
 def _prep_commit(journal, *, absorbed, survivor, kind="ENTITY_MERGE", commit=True):
@@ -98,3 +108,74 @@ def test_list_committed_unmerges_carries_merge_op_id_from_reverses(tmp_path):
     journal.mark_committed(un, owner_token=oo.process_owner_token())
     out = journal.list_committed_unmerges()
     assert out == [{"op_id": un, "absorbed_uuid": "A", "survivor_uuid": "B", "merge_op_id": merge}]
+
+
+@pytest.mark.unit
+def test_unmerge_list_reaches_qualifying_merge_past_old_100k_cap(tmp_path, capsys):
+    journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
+    journal._ensure_ready()
+    old = "2000-01-01T00:00:00+00:00"
+    with sqlite3.connect(journal.db_path) as conn:
+        conn.executemany(
+            "INSERT INTO graph_operations "
+            "(op_id, operation_kind, request_json, state, created_at, updated_at) "
+            "VALUES (?, 'ENTITY_DELETE', '{}', 'COMMITTED', ?, ?)",
+            [(f"filler-{i:06d}", old, old) for i in range(100_000)],
+        )
+
+    op_id = journal.prepare(
+        operation_kind="ENTITY_MERGE",
+        request_json=json.dumps({"absorbed_uuid": "A", "survivor_uuid": "B", "similarity": 0.87}),
+        before_snapshot_json="{}",
+    )
+    journal.mark_committed(op_id, owner_token=oo.process_owner_token())
+
+    no_snapshot = journal.prepare(
+        operation_kind="ENTITY_MERGE",
+        request_json=json.dumps({"absorbed_uuid": "X", "survivor_uuid": "Y"}),
+    )
+    journal.mark_committed(no_snapshot, owner_token=oo.process_owner_token())
+    not_a_merge = journal.prepare(
+        operation_kind="ENTITY_DELETE",
+        request_json=json.dumps({"target_uuid": "P"}),
+        before_snapshot_json="{}",
+    )
+    journal.mark_committed(not_a_merge, owner_token=oo.process_owner_token())
+
+    row = journal.get(op_id)
+    assert row is not None
+    assert _UNMERGE._list_reversible(journal) == 0
+    assert capsys.readouterr().out == (
+        "1 journaled merge(s) reversible EXACTLY:\n\n"
+        f"  op={op_id}  B  <-  A\n"
+        f"      committed_at={row['committed_at']}  similarity=0.87\n"
+        "\n"
+        "Reverse one with:  python scripts/unmerge.py --op <OP_ID> [--execute]\n"
+    )
+
+
+@pytest.mark.unit
+def test_unmerge_main_loads_env_file_without_overriding_shell(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("NEO4J_URI=bolt://from-file:7687\n", encoding="utf-8")
+    captured = []
+
+    monkeypatch.setenv("ENV_FILE", str(env_file))
+    monkeypatch.delenv("NEO4J_URI", raising=False)
+
+    def fake_build(settings):
+        captured.append(settings)
+        return None, None, object(), object()
+
+    monkeypatch.setattr(_UNMERGE, "_build", fake_build)
+    monkeypatch.setattr(_UNMERGE, "_list_reversible", lambda _journal: 0)
+
+    monkeypatch.setattr("sys.argv", ["unmerge.py", "--list"])
+    assert _UNMERGE.main() == 0
+    assert captured[-1].neo4j_uri == "bolt://from-file:7687"
+
+    monkeypatch.setenv("NEO4J_URI", "bolt://from-shell:7687")
+    assert _UNMERGE.main() == 0
+    assert captured[-1].neo4j_uri == "bolt://from-shell:7687"
