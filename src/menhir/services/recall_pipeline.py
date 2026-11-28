@@ -358,7 +358,7 @@ async def _build_source_memories(
         query_vector = await service.graphiti_client.embed_query(query)
         spread = tuning.source_memory_spread
         if spread:
-            from menhir.domain.source_memory_spread import pool_size, spread_by_session
+            from menhir.domain.source_memory_spread import pool_size, session_key, spread_by_session
         rows = await asyncio.to_thread(
             service.graph_adapter.search_episode_embeddings,
             query_vector,
@@ -370,6 +370,43 @@ async def _build_source_memories(
         if spread:
             rows = spread_by_session(
                 [row for row in rows if str(row.get("uuid") or "").strip()], effective_limit)
+        session_window = max(0, int(tuning.source_memory_session_window))
+        # A repeated session key means spread used at least one slot for same-session backfill.
+        if (
+            session_window > 0
+            and spread
+            and len(rows) == effective_limit
+            and len({session_key(row) for row in rows}) == effective_limit
+            and hasattr(service.graph_adapter, "get_session_episode_neighbors")
+        ):
+            top = rows[0]
+            top_sid = str(top.get("session_id") or "").strip()
+            top_uuid = str(top.get("uuid") or "").strip()
+            if top_sid and top_uuid:
+                try:
+                    neighbors = await asyncio.to_thread(
+                        service.graph_adapter.get_session_episode_neighbors,
+                        top_sid,
+                        top_uuid,
+                        window=session_window,
+                        namespace=namespace,
+                        sources=sources,
+                    )
+                except Exception as exc:
+                    logger.warning("Source-memory session-window expansion skipped: %s", exc)
+                    neighbors = []
+                seen_uuids = {str(r.get("uuid") or "").strip() for r in rows}
+                seen_texts = {
+                    " ".join(str(r.get("content") or "").split()).casefold() for r in rows
+                }
+                for nb in neighbors:
+                    nu = str(nb.get("uuid") or "").strip()
+                    nt = " ".join(str(nb.get("content") or "").split()).casefold()
+                    if nu and nu not in seen_uuids and (not nt or nt not in seen_texts):
+                        rows.append({**nb, "_is_neighbor": True})
+                        seen_uuids.add(nu)
+                        if nt:
+                            seen_texts.add(nt)
         section: list[SourceMemory] = []
         for row in rows:
             uuid = str(row.get("uuid") or "").strip()
@@ -377,7 +414,10 @@ async def _build_source_memories(
                 continue
             raw_content = str(row.get("content") or "")
             text = " ".join(raw_content.split())
-            max_chars = max(0, tuning.source_memory_max_chars)
+            if row.get("_is_neighbor"):
+                max_chars = max(0, min(tuning.source_memory_max_chars, tuning.source_memory_neighbor_max_chars))
+            else:
+                max_chars = max(0, tuning.source_memory_max_chars)
             if len(text) > max_chars:
                 text = text[:max_chars] + "…"
             section.append(SourceMemory(

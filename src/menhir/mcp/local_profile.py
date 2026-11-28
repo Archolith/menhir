@@ -30,6 +30,23 @@ DEFAULT_PROFILES: tuple[str, ...] = (CORE, CURATE)
 #: (or MENHIR_LOOPBACK_PROFILE=operator) action; and with both tools, the agent that stages a
 #: claim could approve it itself. Whether to allow either is an open decision.
 DEFAULT_DENY: tuple[str, ...] = ("add_candidate", "review_candidate")
+#: Compact 10-tool coding-agent subset for MENHIR_LOOPBACK_PROFILE=lean.
+#: Cuts MCP tool-schema prompt overhead vs. default (49 tools) or operator (68 tools)
+#: while keeping recall, memory capture, structural impact, provenance, and TODO CRUD.
+LEAN_TOOLS: frozenset[str] = frozenset(
+    {
+        "recall_memories",
+        "recall_context_memories",
+        "read_flagged_memories",
+        "add_memory",
+        "query_structure",
+        "get_provenance",
+        "list_todos",
+        "get_todo",
+        "add_todo",
+        "close_todo",
+    }
+)
 
 
 def loopback_tool_allowlist(
@@ -38,13 +55,17 @@ def loopback_tool_allowlist(
     tool_tiers: dict[str, str] | None = None,
 ) -> frozenset[str] | None:
     """Tools a keyless local agent may see and call, or None for every tool."""
-    if normalize_loopback_profile(loopback_profile) == "operator":
+    normalized = normalize_loopback_profile(loopback_profile)
+    if normalized == "operator":
         return None
+    tiers = tool_tiers if tool_tiers is not None else production_tool_tiers()
+    if normalized == "lean":
+        return LEAN_TOOLS & frozenset(tiers)
     resolved = resolve(
         profiles=DEFAULT_PROFILES,
         deny=DEFAULT_DENY,
         maximum_tier="operator",
-        tool_tiers=tool_tiers if tool_tiers is not None else production_tool_tiers(),
+        tool_tiers=tiers,
         policy_catalog=CATALOG_VERSION,
     )
     return resolved.allowed
@@ -53,6 +74,7 @@ def loopback_tool_allowlist(
 __all__ = [
     "DEFAULT_DENY",
     "DEFAULT_PROFILES",
+    "LEAN_TOOLS",
     "LOOPBACK_PROFILES",
     "loopback_tool_allowlist",
     "normalize_loopback_profile",

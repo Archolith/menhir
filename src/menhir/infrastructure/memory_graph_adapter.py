@@ -1060,6 +1060,24 @@ class MemoryGraphAdapter:
         """Fetch scoring-relevant fields for candidate nodes."""
         return self._memory_queries.fetch_candidate_metadata(node_uuids)
 
+    def get_session_episode_neighbors(
+        self,
+        session_id: str,
+        anchor_uuid: str,
+        *,
+        window: int = 2,
+        namespace: str | None = None,
+        sources: Sequence[str] | None = None,
+    ) -> list[dict[str, object]]:
+        """Cypher-bounded +-window adjacent queue :Episodic turns in ``session_id`` (#1057)."""
+        return self._memory_queries.get_session_episode_neighbors(
+            session_id,
+            anchor_uuid,
+            window=window,
+            namespace=namespace,
+            sources=sources,
+        )
+
     def search_episode_embeddings(
         self,
         query_vector: list[float],

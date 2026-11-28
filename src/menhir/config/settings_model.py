@@ -33,7 +33,7 @@ ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_appl
 
 
 #: MENHIR_LOOPBACK_PROFILE values (#439); menhir.mcp.local_profile gives them meaning.
-LOOPBACK_PROFILES: tuple[str, ...] = ("default", "operator")
+LOOPBACK_PROFILES: tuple[str, ...] = ("default", "lean", "operator")
 
 
 def _normalize_loopback_profile(raw: str | None) -> str:
@@ -435,6 +435,8 @@ class MemorySettings:
     # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
+    frontier_source_memory_session_window: int = 0  # +-N adjacent turns around top-1 hit (#1057; 0..5)
+    frontier_source_memory_neighbor_max_chars: int = 800  # per-neighbor content cap (100..4000)
     # Cross-encoder recall rerank (default on). It orders the first recall_rerank_top_n candidates
     # in place of the RRF rank floor. The model comes from recall_rerank_model_dir or, when that is
     # unset, a pinned download into the Hugging Face cache (recall_rerank_auto_download).
@@ -481,7 +483,9 @@ class MemorySettings:
     client_tools: dict[str, frozenset[str]] = field(default_factory=dict)
 
     # MENHIR_LOOPBACK_PROFILE -- the MCP tools an unauthenticated local agent gets (#439):
-    # "default" is the core and curate profiles without add_candidate; "operator" is every tool.
+    # "default" is the core and curate profiles without add_candidate;
+    # "lean" is the 10-tool coding-agent subset (cuts tool-schema token overhead);
+    # "operator" is every tool.
     loopback_profile: str = "default"
 
     # MENHIR_KNOWN_CLIENTS -- comma-separated client names that are RECOGNIZED but carry no
@@ -784,6 +788,8 @@ class MemorySettings:
             enable_assertion_shadow=self.frontier_shadow,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
+            source_memory_session_window=self.frontier_source_memory_session_window,
+            source_memory_neighbor_max_chars=self.frontier_source_memory_neighbor_max_chars,
             enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_cross_encoder_rerank=self.recall_rerank_enabled,
@@ -995,6 +1001,24 @@ class MemorySettings:
             frontier_source_memory_max_chars=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", default=str(cls.frontier_source_memory_max_chars)),
                 env_var="MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS",
+                minimum=100,
+                maximum=4000,
+            ),
+            frontier_source_memory_session_window=_parse_int(
+                _getenv(
+                    "MENHIR_FRONTIER_SOURCE_MEMORY_SESSION_WINDOW",
+                    default=str(cls.frontier_source_memory_session_window),
+                ),
+                env_var="MENHIR_FRONTIER_SOURCE_MEMORY_SESSION_WINDOW",
+                minimum=0,
+                maximum=5,
+            ),
+            frontier_source_memory_neighbor_max_chars=_parse_int(
+                _getenv(
+                    "MENHIR_FRONTIER_SOURCE_MEMORY_NEIGHBOR_MAX_CHARS",
+                    default=str(cls.frontier_source_memory_neighbor_max_chars),
+                ),
+                env_var="MENHIR_FRONTIER_SOURCE_MEMORY_NEIGHBOR_MAX_CHARS",
                 minimum=100,
                 maximum=4000,
             ),

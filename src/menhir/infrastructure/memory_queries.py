@@ -834,6 +834,93 @@ class MemoryQueryRepository:
             params=params,
         )
 
+    def get_session_episode_neighbors(
+        self,
+        session_id: str,
+        anchor_uuid: str,
+        *,
+        window: int = 2,
+        namespace: str | None = None,
+        sources: Sequence[str] | None = None,
+    ) -> list[dict[str, object]]:
+        """Fetch up to ``+-window`` adjacent queue :Episodic turns in ``session_id`` (#1057).
+
+        Cypher-bounded via ``LIMIT $window`` on both sides of the anchor so long coding-agent
+        sessions (hundreds of turns) never transfer the entire session over Bolt. Applies the
+        same structural, visibility, and tenancy predicates as ``search_episode_embeddings``.
+        """
+        safe_window = max(0, min(int(window), 5))
+        if not session_id or not anchor_uuid or safe_window <= 0:
+            return []
+
+        where = [
+            "n.session_id = $session_id",
+            menhir_queue_episode_cypher("n"),
+            "n.processing_state IS NOT NULL",
+            "n.processing_state <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {
+            "session_id": session_id,
+            "anchor_uuid": anchor_uuid,
+            "window": safe_window,
+            **tenant_scope_params(namespace),
+        }
+        if sources is not None:
+            where.append("n.source IN $sources")
+            params["sources"] = list(sources)
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        base_where = " AND ".join(where)
+
+        anchor_where = [
+            "anchor.uuid = $anchor_uuid",
+            "anchor.session_id = $session_id",
+            tenant_scope_cypher("anchor"),
+        ]
+        if namespace_spellings(namespace) is not None:
+            anchor_where.insert(0, tenant_scope_prefilter_cypher("anchor"))
+
+        query = f"""
+        MATCH (anchor:Episodic)
+        WHERE {" AND ".join(anchor_where)}
+        WITH anchor, coalesce(anchor.created_at, anchor.reference_time) AS anchor_ts
+        CALL (anchor, anchor_ts) {{
+            MATCH (n:Episodic)
+            WHERE {base_where}
+              AND (
+                  coalesce(n.created_at, n.reference_time) < anchor_ts
+                  OR (coalesce(n.created_at, n.reference_time) = anchor_ts AND n.uuid < anchor.uuid)
+              )
+            WITH n
+            ORDER BY coalesce(n.created_at, n.reference_time) DESC, n.uuid DESC
+            LIMIT $window
+            RETURN collect(n) AS before_nodes
+        }}
+        CALL (anchor, anchor_ts) {{
+            MATCH (n:Episodic)
+            WHERE {base_where}
+              AND (
+                  coalesce(n.created_at, n.reference_time) > anchor_ts
+                  OR (coalesce(n.created_at, n.reference_time) = anchor_ts AND n.uuid > anchor.uuid)
+              )
+            WITH n
+            ORDER BY coalesce(n.created_at, n.reference_time) ASC, n.uuid ASC
+            LIMIT $window
+            RETURN collect(n) AS after_nodes
+        }}
+        WITH before_nodes + after_nodes AS neighbors
+        UNWIND neighbors AS n
+        RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
+               n.session_id AS session_id,
+               toString(coalesce(n.reference_time, n.created_at)) AS reference_time,
+               0.0 AS cosine
+        ORDER BY coalesce(n.created_at, n.reference_time) ASC, n.uuid ASC
+        """
+        return self.neo4j.execute(query, params=params)
+
     def _index_backed(
         self,
         spec: VectorIndexSpec,

@@ -1,3 +1,11 @@
+## 2026-11-27 - Opt-in source-memory session window (#1057)
+
+- With session spreading enabled, recall can add bounded same-session neighbors to the top source
+  hit when the selected slots leave no room for same-session backfill. Anchors at either end can
+  expand toward the populated side.
+- The operator guide and environment example describe the disabled-by-default setting, additive
+  result count, and separate neighbor snippet cap.
+
 ## 2026-11-27 - Wave 1 fixes (#1041-#1047)
 
 - Enrichment preflight (#876): the episode body is cut to the preflight token budget, so
