@@ -51,3 +51,27 @@ permission notice are reproduced below in full, as that license requires:
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
+
+----------------------------------------------------------------------
+THIRD-PARTY SOFTWARE & PATTERNS: Polyglot Tree-sitter Scanner (#1077)
+----------------------------------------------------------------------
+
+Menhir's polyglot structural scanner (`src/menhir/infrastructure/polyglot_treesitter.py`)
+uses and adapts multi-language Tree-sitter extraction patterns from the following
+MIT-licensed projects:
+
+1. codebase-memory-mcp
+   https://github.com/DeusData/codebase-memory-mcp
+   Copyright (c) DeusData contributors
+   Licensed under the MIT License (multi-language Tree-sitter AST structural
+   extraction design for imports, symbols, and call edges).
+
+2. tree-sitter
+   https://github.com/tree-sitter/tree-sitter
+   Copyright (c) 2018-2024 Max Brunsfeld
+   Licensed under the MIT License.
+
+3. tree-sitter-language-pack
+   https://github.com/Goldziher/tree-sitter-language-pack
+   Copyright (c) Na'aman Hirschfeld and contributors
+   Licensed under the MIT License.

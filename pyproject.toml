@@ -47,6 +47,9 @@ dependencies = [
     "onnxruntime>=1.20,<2",
     "tokenizers>=0.20,<1",
     "huggingface-hub>=0.26,<3",
+    # polyglot Tree-sitter structural scanner (#1077): TS/JS, Kotlin/Java, Go, Rust
+    "tree-sitter>=0.24,<1",
+    "tree-sitter-language-pack>=0.7,<1",
 ]
 
 [project.urls]
