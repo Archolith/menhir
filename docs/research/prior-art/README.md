@@ -31,10 +31,6 @@ Use the table to find the system closest to your question. Check each comparison
 | `atlaso-comparison.md` | [Atlaso](https://www.atlaso.ai/) and its public connectors | Dated closed-system comparison | Direct product comparison and source of operational and interface lessons; core memory engine is not public. |
 | `tencentdb-agent-memory-comparison.md` | [`TencentCloud/TencentDB-Agent-Memory`](https://github.com/TencentCloud/TencentDB-Agent-Memory) | Revision-pinned external comparison | Strong prior art for hierarchical agent-memory composition and model-driven memory maintenance. |
 
-**Staleness risk:** Anthropic Scion is a dated, proprietary design account without public source code; recheck release and licensing before proposing adoption.  Athena-Public, M3 Memory, TencentDB Agent Memory, and Utopia pin the exact
-public revision analyzed, while the FluxMem paper link pins v1. Memtrace and Repowise capture
-only Menhir's review date, and Atlaso is a dated product snapshot whose public connectors
-expose only part of the system. Re-verify any unpinned or closed-system claims before using
-them in a roadmap or positioning decision.
+**Staleness risk:** Anthropic Scion is a dated, proprietary design account without public source code; recheck release and licensing before proposing adoption. Athena-Public, M3 Memory, TencentDB Agent Memory, Utopia, Honcho, GitNexus, codebase-memory-mcp, Hindsight, Letta, and Repowise (`v0.62.0`, re-pinned `2026-11-25`) pin the exact public revision analyzed, while the FluxMem paper link pins v1. Memtrace (`v1.2.22+`, re-pinned `2026-11-25`), OMEGA, Supermemory, Mem0, GitHub Copilot Memory, Claude Code Auto Memory, and Atlaso include closed-source components or product-contract snapshots. Re-verify any unpinned or closed-system claims before using them in a roadmap or positioning decision.
 
 Master index: [`../README.md`](../README.md).

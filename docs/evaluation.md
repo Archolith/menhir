@@ -19,6 +19,16 @@ recall-only answers scored by an LLM judge. Results are in
 full-haystack LME-S protocol, so it does not support a general claim that Menhir outperforms
 vector retrieval.
 
+A 30-item stratified `LongMemEval-S` pilot (`5 × 6` question types, `1,497` sessions, `15,018`
+turns) was subsequently ingested at `d89a0d48` and preserved under ADR 0011
+([tracker #469](https://github.com/Archolith/menhir/issues/469#issuecomment-7219756798)). That
+pilot surfaced one scale-induced retrieval gap (`spread_by_session` starving same-session context
+at 50+ sessions), addressed via opt-in top-1 session-window expansion in
+[#1057](https://github.com/Archolith/menhir/issues/1057) /
+[PR #1061](https://github.com/Archolith/menhir/pull/1061). Because it is a 30-item pilot rather
+than a full 500-item `LME-S` run, it is recorded as diagnostic/regression evidence, not a public
+headline claim.
+
 LongMemEval also cannot establish Menhir-specific structural properties by itself. It
 does not test repository coverage, blast-radius completeness, Git-to-graph time joins,
 artifact governance, or whether a stale code anchor is handled correctly. Those require
