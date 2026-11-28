@@ -300,3 +300,58 @@ def test_ts_and_go_scans_drive_affected_tests_blast_radius(tmp_path: Path) -> No
     go_res = StructureGraphWriter(_MiniGraph(go_scan)).query_affected_tests("go-app", ["pkg/calc.go"])
     assert go_res["test_files"] == ["pkg/calc_test.go"]
     assert "go test ./pkg" in go_res["test_command"]
+
+
+def test_c_kernel_style_repo_extracts_headers_symbols_and_cross_file_calls(tmp_path: Path):
+    """C / Linux-kernel style repo: #include headers, structs, functions, and sibling .c call edges."""
+    (tmp_path / "fs" / "ext4").mkdir(parents=True)
+    (tmp_path / "Makefile").write_text("obj-y += fs/ext4/\n", encoding="utf-8")
+    (tmp_path / "fs" / "ext4" / "ext4_jbd2.h").write_text(
+        """
+struct ext4_handle {
+    int credits;
+};
+
+int ext4_journal_start(struct ext4_handle *h, int nblocks);
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "fs" / "ext4" / "ext4_jbd2.c").write_text(
+        """
+#include "ext4_jbd2.h"
+
+int ext4_journal_start(struct ext4_handle *h, int nblocks) {
+    h->credits = nblocks;
+    return nblocks;
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "fs" / "ext4" / "inode.c").write_text(
+        """
+#include "ext4_jbd2.h"
+
+static int ext4_write_inode(struct ext4_handle *h) {
+    return ext4_journal_start(h, 4);
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = ProjectScanner().scan(tmp_path, name="linux-ext4-demo")
+
+    import_pairs = {(e.source_path, e.target_path) for e in result.imports}
+    assert ("fs/ext4/inode.c", "fs/ext4/ext4_jbd2.h") in import_pairs
+    assert ("fs/ext4/inode.c", "fs/ext4/ext4_jbd2.c") in import_pairs
+
+    sym_names = {(s.file_path, s.name, s.kind) for s in result.symbols}
+    assert ("fs/ext4/ext4_jbd2.h", "ext4_handle", "class") in sym_names
+    assert ("fs/ext4/ext4_jbd2.c", "ext4_journal_start", "function") in sym_names
+    assert ("fs/ext4/inode.c", "ext4_write_inode", "function") in sym_names
+
+    call_pairs = {(c.caller_path, c.callee_path) for c in result.call_edges}
+    assert ("fs/ext4/inode.c::ext4_write_inode", "fs/ext4/ext4_jbd2.c::ext4_journal_start") in call_pairs
+

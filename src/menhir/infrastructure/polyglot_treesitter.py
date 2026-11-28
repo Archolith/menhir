@@ -8,6 +8,7 @@ and intra-project CALLS edges for Tier-1 non-Python languages using MIT-licensed
   - Kotlin / Java
   - Go
   - Rust
+  - C / C++
 
 Attribution:
   Polyglot Tree-sitter structural-extraction architecture and multi-language AST node
@@ -50,10 +51,19 @@ EXT_TO_LANG: dict[str, str] = {
     ".java": "java",
     ".go": "go",
     ".rs": "rust",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".hxx": "cpp",
 }
 
 _TS_JS_LANGS = frozenset({"typescript", "tsx", "javascript"})
 _JVM_LANGS = frozenset({"kotlin", "java"})
+_C_CPP_LANGS = frozenset({"c", "cpp"})
 
 _PARSERS: dict[str, Any] = {}
 _TS_AVAILABLE: bool | None = None
@@ -259,11 +269,64 @@ def extract_polyglot_symbols(
                 add_sym(name, "method" if class_ctx else "function", node, parent=class_ctx)
                 return
 
+        elif lang in _C_CPP_LANGS:
+            if nt in ("struct_specifier", "union_specifier", "enum_specifier", "class_specifier"):
+                if node.child_by_field_name("body") is not None:
+                    name = _child_text_by_field(node, "name", data)
+                    if add_sym(name, "class", node, parent=class_ctx):
+                        if lang == "cpp":
+                            for ch in node.children:
+                                walk(ch, class_ctx=name or class_ctx)
+                    return
+            if nt == "function_definition":
+                decl = node.child_by_field_name("declarator")
+                fn_name, qual_cls = _extract_c_declarator_name(decl, data)
+                parent = qual_cls or class_ctx
+                add_sym(fn_name, "method" if parent else "function", node, parent=parent)
+                return
+
         for ch in node.children:
             walk(ch, class_ctx=class_ctx)
 
     walk(tree.root_node)
     return symbols, truncated
+
+
+def _extract_c_declarator_name(decl_node: Any, data: bytes) -> tuple[str, str]:
+    """Unwrap nested C/C++ declarators to return ``(func_name, qualifier_class)``."""
+    cur = decl_node
+    for _ in range(12):
+        if cur is None:
+            return "", ""
+        ct = cur.type
+        if ct in ("identifier", "field_identifier"):
+            return _node_text(cur, data).strip(), ""
+        if ct == "qualified_identifier":
+            raw = _node_text(cur, data).strip()
+            if "::" in raw:
+                cls_part, fn_part = raw.rsplit("::", 1)
+                return fn_part.strip(), cls_part.rsplit("::", 1)[-1].strip()
+            return raw, ""
+        inner = cur.child_by_field_name("declarator")
+        if inner is not None:
+            cur = inner
+            continue
+        found = _first_child_of_types(
+            cur,
+            (
+                "function_declarator",
+                "pointer_declarator",
+                "reference_declarator",
+                "parenthesized_declarator",
+                "qualified_identifier",
+                "field_identifier",
+                "identifier",
+            ),
+        )
+        if found is None or found is cur:
+            break
+        cur = found
+    return "", ""
 
 
 def _extract_go_receiver_type(recv_node: Any, data: bytes) -> str:
@@ -554,7 +617,62 @@ def extract_polyglot_imports(
             for use_expr in _extract_rust_uses(tree, data):
                 _resolve_rust_use(rel_path, use_expr, file_set, add_edge)
 
+        elif lang in _C_CPP_LANGS:
+            for inc_path in _extract_c_includes(tree, data):
+                tgt = _resolve_c_include(rel_path, inc_path, file_set)
+                if tgt:
+                    add_edge(rel_path, tgt)
+                    # Link companion .c/.cpp implementation file when a header is included
+                    # (common in C/Linux kernel subsystems where declarations live in .h and
+                    # definitions live in sibling .c).
+                    stem, ext = os.path.splitext(tgt)
+                    if ext in (".h", ".hpp", ".hh", ".hxx"):
+                        for impl_ext in (".c", ".cpp", ".cc", ".cxx"):
+                            companion = stem + impl_ext
+                            if companion in file_set and companion != rel_path:
+                                add_edge(rel_path, companion)
+                                break
+
     return edges, import_name_map
+
+
+def _extract_c_includes(tree: Any, data: bytes) -> list[str]:
+    includes: list[str] = []
+
+    def walk(node: Any) -> None:
+        if node.type == "preproc_include":
+            p_node = node.child_by_field_name("path")
+            if p_node is not None:
+                raw = _node_text(p_node, data).strip()
+                if len(raw) >= 2 and (
+                    (raw[0] == '"' and raw[-1] == '"')
+                    or (raw[0] == "<" and raw[-1] == ">")
+                ):
+                    inc = raw[1:-1].strip()
+                    if inc:
+                        includes.append(inc)
+            return
+        for ch in node.children:
+            walk(ch)
+
+    walk(tree.root_node)
+    return includes
+
+
+def _resolve_c_include(importer: str, inc_path: str, file_set: set[str]) -> str | None:
+    inc_norm = inc_path.replace("\\", "/").lstrip("/")
+    base_dir = os.path.dirname(importer)
+    rel_joined = os.path.normpath(os.path.join(base_dir, inc_norm)).replace("\\", "/")
+    if rel_joined.startswith("./"):
+        rel_joined = rel_joined[2:]
+    for cand in (rel_joined, inc_norm, f"include/{inc_norm}", f"include/uapi/{inc_norm}"):
+        if cand in file_set and cand != importer:
+            return cand
+    suffix = "/" + inc_norm
+    matches = [p for p in file_set if p.endswith(suffix) and p != importer]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _resolve_rust_use(
@@ -675,6 +793,9 @@ def extract_polyglot_call_edges(
         if "::" in raw:
             parts = raw.rsplit("::", 1)
             return parts[1].strip(), parts[0].rsplit("::", 1)[-1].strip()
+        if "->" in raw:
+            parts = raw.rsplit("->", 1)
+            return parts[1].strip(), parts[0].rsplit("->", 1)[-1].strip()
         if "." in raw:
             parts = raw.rsplit(".", 1)
             return parts[1].strip(), parts[0].rsplit(".", 1)[-1].strip()
@@ -717,6 +838,13 @@ def extract_polyglot_call_edges(
                 next_class = _extract_go_receiver_type(recv, data) if recv is not None else ""
         elif lang == "rust" and nt == "function_item":
             fn_name = _child_text_by_field(node, "name", data)
+        elif lang in _C_CPP_LANGS and nt == "class_specifier":
+            next_class = _child_text_by_field(node, "name", data) or class_ctx
+        elif lang in _C_CPP_LANGS and nt == "function_definition":
+            decl = node.child_by_field_name("declarator")
+            fn_name, qual_cls = _extract_c_declarator_name(decl, data)
+            if qual_cls:
+                next_class = qual_cls
 
         if fn_name:
             if next_class and (rel_path, next_class, fn_name) in method_lookup:
