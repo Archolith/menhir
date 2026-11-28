@@ -689,6 +689,8 @@ def _classify_file_role(rel_path: str) -> str:
         return "test"
     if re.match(r".*\.spec\.(ts|tsx|js|jsx)$", name):
         return "test"
+    if re.match(r".*[-_]test\.(c|cc|cpp|cxx|rs)$", name) or re.match(r".*_kunit\.c$", name):
+        return "test"
 
     return "file"
 
