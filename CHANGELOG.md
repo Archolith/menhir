@@ -1,3 +1,7 @@
+## 2026-11-28 - v0.3.21: Lean coding-agent loopback profile (MENHIR_LOOPBACK_PROFILE=lean), opt-in source-memory session window, and the Wave 1 fixes
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.21. No dependency changes in this commit.
+
 ## 2026-11-27 - Opt-in source-memory session window (#1057)
 
 - With session spreading enabled, recall can add bounded same-session neighbors to the top source
